@@ -1,0 +1,146 @@
+// Package clickhouse is a minimal ClickHouse HTTP client for the ELT load path.
+// DDL and scalar queries go in the request body; bulk inserts stream an
+// io.Reader as the body while the INSERT … FROM input(…) statement rides in the
+// query parameter, so raw TSV is never buffered in memory.
+package clickhouse
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+type Client struct {
+	baseURL  string
+	database string
+	http     *http.Client
+}
+
+func New(baseURL, database string) *Client {
+	return &Client{
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		database: database,
+		http:     &http.Client{Timeout: time.Hour},
+	}
+}
+
+func (c *Client) Database() string { return c.database }
+
+// Execute runs a statement/query against the client's database and returns the
+// text response. Used for DDL and small scalar reads.
+func (c *Client) Execute(sql string) (string, error) {
+	return c.post(url.Values{"database": {c.database}}, strings.NewReader(sql))
+}
+
+// ExecuteServerwide runs a statement without selecting a database (for CREATE
+// DATABASE, which must not assume the target exists).
+func (c *Client) ExecuteServerwide(sql string) (string, error) {
+	return c.post(nil, strings.NewReader(sql))
+}
+
+// InsertStream streams body as the payload of an INSERT. insertSQL must end with
+// the input format, e.g. `… FROM input('a String') FORMAT TabSeparatedRaw`.
+func (c *Client) InsertStream(insertSQL string, body io.Reader) error {
+	q := url.Values{
+		"database":                                  {c.database},
+		"query":                                     {insertSQL},
+		"input_format_tsv_allow_variable_number_of_columns": {"1"},
+	}
+	_, err := c.post(q, body)
+	return err
+}
+
+func (c *Client) post(query url.Values, body io.Reader) (string, error) {
+	u := c.baseURL
+	if len(query) > 0 {
+		u += "/?" + query.Encode()
+	}
+	req, err := http.NewRequest(http.MethodPost, u, body)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("clickhouse transport: %w", err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		head := insertSQLHead(query.Get("query"))
+		return "", fmt.Errorf("clickhouse HTTP %d %s: %s", resp.StatusCode, head, string(out))
+	}
+	return string(out), nil
+}
+
+func insertSQLHead(q string) string {
+	if len(q) > 120 {
+		return q[:120] + "…"
+	}
+	return q
+}
+
+// DeleteWhere runs a synchronous ALTER … DELETE (mutations_sync=1) so the rows
+// are gone before any subsequent count, making re-ingest idempotent.
+func (c *Client) DeleteWhere(table, where string) {
+	c.Execute(fmt.Sprintf(
+		"ALTER TABLE `%s`.`%s` DELETE WHERE %s SETTINGS mutations_sync = 1",
+		c.database, table, where))
+}
+
+func (c *Client) CreateDatabase() error {
+	_, err := c.ExecuteServerwide(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", c.database))
+	return err
+}
+
+// TableColumns returns the set of column names on a table (empty if absent).
+func (c *Client) TableColumns(table string) (map[string]bool, error) {
+	sql := fmt.Sprintf(
+		"SELECT name FROM system.columns WHERE database = '%s' AND table = '%s' FORMAT TabSeparated",
+		c.database, table)
+	text, err := c.Execute(sql)
+	if err != nil {
+		return nil, err
+	}
+	cols := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if line != "" {
+			cols[line] = true
+		}
+	}
+	return cols, nil
+}
+
+// TableExists reports whether a table exists in the client's database.
+func (c *Client) TableExists(table string) (bool, error) {
+	sql := fmt.Sprintf(
+		"SELECT count() FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated",
+		c.database, table)
+	text, err := c.Execute(sql)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(text) != "0", nil
+}
+
+// CountForFile returns the rows loaded for a specific study + source file.
+func (c *Client) CountForFile(table, studyID, sourceFile string) (uint64, error) {
+	sql := fmt.Sprintf(
+		"SELECT count() FROM `%s`.`%s` WHERE study_id = '%s' AND source_file = '%s' FORMAT TabSeparated",
+		c.database, table, SQLLit(studyID), SQLLit(sourceFile))
+	text, err := c.Execute(sql)
+	if err != nil {
+		return 0, err
+	}
+	var n uint64
+	fmt.Sscan(strings.TrimSpace(text), &n)
+	return n, nil
+}
+
+// SQLLit escapes a value for a single-quoted ClickHouse string literal.
+func SQLLit(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return strings.ReplaceAll(s, `'`, `\'`)
+}

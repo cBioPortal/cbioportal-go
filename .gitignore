@@ -1,0 +1,12 @@
+# Build output
+/bin/
+*.test
+*.out
+
+# Local secrets / env (never commit)
+*.env
+.secrets/
+*secret*
+
+# Editor / OS
+.DS_Store
