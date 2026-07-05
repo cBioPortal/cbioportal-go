@@ -18,6 +18,7 @@ type mpRow struct {
 	Name                    string `json:"name"`
 	Description             string `json:"description"`
 	ShowFlag                int    `json:"showFlag"`
+	GenericAssayType        string `json:"genericAssayType"`
 }
 
 type MolecularProfile struct {
@@ -29,11 +30,12 @@ type MolecularProfile struct {
 	Description               string `json:"description"`
 	ShowProfileInAnalysisTab  bool   `json:"showProfileInAnalysisTab"`
 	PatientLevel              bool   `json:"patientLevel"`
+	GenericAssayType          string `json:"genericAssayType,omitempty"`
 }
 
 const mpSelect = "SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, " +
 	"molecular_alteration_type AS molecularAlterationType, datatype, name, description, " +
-	"toUInt8(show_profile_in_analysis_tab) AS showFlag FROM molecular_profile"
+	"toUInt8(show_profile_in_analysis_tab) AS showFlag, generic_assay_type AS genericAssayType FROM molecular_profile"
 
 func toMP(r mpRow) MolecularProfile {
 	// DISCRETE_LONG is our internal file-layout marker (routes to cna_discrete_long);
@@ -47,6 +49,7 @@ func toMP(r mpRow) MolecularProfile {
 	return MolecularProfile{
 		MolecularProfileID: r.MolecularProfileID, StudyID: r.StudyID, MolecularAlterationType: r.MolecularAlterationType,
 		Datatype: datatype, Name: r.Name, Description: r.Description, ShowProfileInAnalysisTab: r.ShowFlag != 0,
+		GenericAssayType: r.GenericAssayType,
 	}
 }
 

@@ -53,7 +53,7 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 func ingestProfiles(c *ch.Client, s *parser.Study) error {
 	table := "genetic_profile"
 	cols := []string{"molecular_profile_id", "study_id", "profile_stable_id",
-		"alteration_type", "datatype", "name", "description", "show_in_analysis"}
+		"alteration_type", "datatype", "name", "description", "show_in_analysis", "generic_assay_type"}
 	existing, err := c.TableColumns(table)
 	if err != nil {
 		return err
@@ -68,6 +68,16 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 			c.Database(), table, strings.Join(defs, ", "))); err != nil {
 			return err
 		}
+	} else {
+		// Schema evolution: add columns absent from an older table.
+		for _, col := range cols {
+			if !existing[col] {
+				if _, err := c.Execute(fmt.Sprintf(
+					"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS `%s` String", c.Database(), table, col)); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
 
@@ -77,7 +87,7 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 			continue
 		}
 		mpid := s.StudyID + "_" + f.StableID
-		values := []string{mpid, s.StudyID, f.StableID, f.AlterationType, f.Datatype, f.ProfileName, f.ProfileDescription, f.ShowInAnalysis}
+		values := []string{mpid, s.StudyID, f.StableID, f.AlterationType, f.Datatype, f.ProfileName, f.ProfileDescription, f.ShowInAnalysis, f.GenericAssayType}
 		quoted := make([]string, len(values))
 		for j, v := range values {
 			quoted[j] = "'" + ch.SQLLit(v) + "'"

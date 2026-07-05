@@ -57,7 +57,7 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	}
 	if exists("genetic_profile") {
 		if err := make("molecular_profile", fmt.Sprintf(
-			"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id FROM `%s`.genetic_profile", rawDB)); err != nil {
+			"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type FROM `%s`.genetic_profile", rawDB)); err != nil {
 			return nil, err
 		}
 	}
