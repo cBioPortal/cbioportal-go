@@ -11,8 +11,9 @@ import (
 // studyViewFilter is the subset of cBioPortal's StudyViewFilter we act on: the
 // study/sample scope. Richer sub-filters are accepted but not yet applied.
 type studyViewFilter struct {
-	StudyIDs          []string     `json:"studyIds"`
-	SampleIdentifiers []identifier `json:"sampleIdentifiers"`
+	StudyIDs          []string          `json:"studyIds"`
+	SampleIdentifiers []identifier       `json:"sampleIdentifiers"`
+	AlterationFilter  *alterationFilter `json:"alterationFilter"`
 }
 
 func (f studyViewFilter) sampleScope() string {
@@ -166,7 +167,7 @@ type AlterationCountByGene struct {
 func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	scope := f.sampleScope()
+	scope := andClause(f.sampleScope(), f.AlterationFilter.mutationFilterClause())
 	profiled := s.scopeSampleCount(f)
 	rows, err := ch.Query[geneCountRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, "+
