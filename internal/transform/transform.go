@@ -223,11 +223,19 @@ func cnaSQL(c *ch.Client, rawDB string, fromMatrix, fromLong bool) string {
 			entrez = "entrez_gene_id"
 		}
 		parts = append(parts, fmt.Sprintf(
-			"SELECT study_id, sample_id, hugo_symbol, %s AS entrez_gene_id, value AS alteration, profile_stable_id FROM `%s`.cna_matrix WHERE datatype = 'DISCRETE' AND value IN ('-2', '-1', '1', '2')", entrez, rawDB))
+			"SELECT study_id, sample_id, hugo_symbol, %s AS entrez_gene_id, value AS alteration, profile_stable_id, '' AS cbp_driver, '' AS cbp_driver_tiers FROM `%s`.cna_matrix WHERE datatype = 'DISCRETE' AND value IN ('-2', '-1', '1', '2')", entrez, rawDB))
 	}
 	if fromLong {
+		lcols, _ := c.TableColumns("cna_discrete_long")
+		driver, tiers := "''", "''"
+		if lcols["cbp_driver"] {
+			driver = "ifNull(nullIf(nullIf(cbp_driver, 'NA'), 'Unknown'), '')"
+		}
+		if lcols["cbp_driver_tiers"] {
+			tiers = "ifNull(nullIf(cbp_driver_tiers, 'NA'), '')"
+		}
 		parts = append(parts, fmt.Sprintf(
-			"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id, value AS alteration, profile_stable_id FROM `%s`.cna_discrete_long WHERE value IN ('-2', '-1', '1', '2')", rawDB))
+			"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id, value AS alteration, profile_stable_id, %s AS cbp_driver, %s AS cbp_driver_tiers FROM `%s`.cna_discrete_long WHERE value IN ('-2', '-1', '1', '2')", driver, tiers, rawDB))
 	}
 	return strings.Join(parts, " UNION ALL ")
 }

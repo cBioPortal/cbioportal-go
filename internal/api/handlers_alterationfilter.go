@@ -48,38 +48,64 @@ func (af *alterationFilter) mutationFilterClause() string {
 		clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
 	}
 
-	// Oncogenicity: a mutation is a DRIVER when the custom binary annotation says
-	// so or its custom tier is enabled; UNKNOWN when no annotation has an opinion;
-	// VUS otherwise (annotated non-driver).
-	if !(inc(af.IncludeDriver) && inc(af.IncludeVUS) && inc(af.IncludeUnknownOncogenicity)) {
-		var tiers []string
-		for t, on := range af.TiersBooleanMap {
-			if on {
-				tiers = append(tiers, t)
-			}
-		}
-		driverExpr := "cbp_driver = 'Putative_Driver'"
-		if len(tiers) > 0 {
-			driverExpr = "(" + driverExpr + " OR cbp_driver_tiers IN (" + inList(tiers) + "))"
-		}
-		unknownExpr := "(cbp_driver IN ('', 'NA', 'Unknown') AND cbp_driver_tiers IN ('', 'NA'))"
-		var ors []string
-		if inc(af.IncludeDriver) {
-			ors = append(ors, driverExpr)
-		}
-		if inc(af.IncludeVUS) {
-			ors = append(ors, "(NOT "+driverExpr+" AND NOT "+unknownExpr+")")
-		}
-		if inc(af.IncludeUnknownOncogenicity) {
-			ors = append(ors, "(NOT "+driverExpr+" AND "+unknownExpr+")")
-		}
-		if len(ors) == 0 {
-			return "1 = 0"
-		}
-		clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
+	// Oncogenicity (driver / VUS / unknown), shared with CNA.
+	if onc := af.oncogenicityClause(); onc == falseClause {
+		return falseClause
+	} else if onc != "" {
+		clauses = append(clauses, onc)
 	}
 
 	return strings.Join(clauses, " AND ")
+}
+
+const falseClause = "1 = 0"
+
+// oncogenicityClause builds the driver/VUS/unknown predicate over cbp_driver /
+// cbp_driver_tiers, shared by the mutation and CNA gene-count filters. A
+// mutation/CNA is a DRIVER when the custom binary annotation says so or its
+// custom tier is enabled; UNKNOWN when no annotation has an opinion; VUS
+// otherwise. Returns "" when all three are included.
+func (af *alterationFilter) oncogenicityClause() string {
+	if af == nil || (inc(af.IncludeDriver) && inc(af.IncludeVUS) && inc(af.IncludeUnknownOncogenicity)) {
+		return ""
+	}
+	var tiers []string
+	for t, on := range af.TiersBooleanMap {
+		if on {
+			tiers = append(tiers, t)
+		}
+	}
+	driverExpr := "cbp_driver = 'Putative_Driver'"
+	if len(tiers) > 0 {
+		driverExpr = "(" + driverExpr + " OR cbp_driver_tiers IN (" + inList(tiers) + "))"
+	}
+	unknownExpr := "(cbp_driver IN ('', 'NA', 'Unknown') AND cbp_driver_tiers IN ('', 'NA'))"
+	var ors []string
+	if inc(af.IncludeDriver) {
+		ors = append(ors, driverExpr)
+	}
+	if inc(af.IncludeVUS) {
+		ors = append(ors, "(NOT "+driverExpr+" AND NOT "+unknownExpr+")")
+	}
+	if inc(af.IncludeUnknownOncogenicity) {
+		ors = append(ors, "(NOT "+driverExpr+" AND "+unknownExpr+")")
+	}
+	if len(ors) == 0 {
+		return falseClause
+	}
+	return "(" + strings.Join(ors, " OR ") + ")"
+}
+
+// cnaFilterClause is the alteration filter for CNA gene counts: oncogenicity
+// only (CNA has no somatic/germline status).
+func (af *alterationFilter) cnaFilterClause() string {
+	if af == nil {
+		return ""
+	}
+	if onc := af.oncogenicityClause(); onc != falseClause {
+		return onc
+	}
+	return falseClause
 }
 
 // and joins a base scope with an optional extra predicate.

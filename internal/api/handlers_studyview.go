@@ -183,7 +183,7 @@ func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	scope := f.sampleScope()
+	scope := andClause(f.sampleScope(), f.AlterationFilter.cnaFilterClause())
 	profiled := s.scopeSampleCount(f)
 	rows, err := ch.Query[geneCountRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, "+
