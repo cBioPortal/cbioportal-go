@@ -270,7 +270,7 @@ type AlterationCountByStructuralVariant struct {
 func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	scope := f.sampleScope()
+	scope := andClause(f.sampleScope(), f.AlterationFilter.svFilterClause())
 	profiled := s.scopeSampleCount(f)
 	rows, _ := ch.Query[svRow](s.CH, fmt.Sprintf(
 		"SELECT site1_hugo_symbol AS gene1, site1_entrez_gene_id AS gene1Entrez, site2_hugo_symbol AS gene2, "+

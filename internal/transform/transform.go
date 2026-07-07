@@ -109,8 +109,20 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		}
 	}
 	if exists("structural_variant") {
+		svc, _ := c.TableColumns("structural_variant")
+		svStatus, svDriver, svTiers := "''", "''", "''"
+		if svc["sv_status"] {
+			svStatus = "sv_status"
+		}
+		if svc["cbp_driver"] {
+			svDriver = "ifNull(nullIf(nullIf(cbp_driver, 'NA'), 'Unknown'), '')"
+		}
+		if svc["cbp_driver_tiers"] {
+			svTiers = "ifNull(nullIf(cbp_driver_tiers, 'NA'), '')"
+		}
 		if err := make("structural_variant", fmt.Sprintf(
-			"SELECT study_id, sample_id, site1_hugo_symbol, toInt64OrNull(site1_entrez_gene_id) AS site1_entrez_gene_id, site2_hugo_symbol, toInt64OrNull(site2_entrez_gene_id) AS site2_entrez_gene_id FROM `%s`.structural_variant", rawDB)); err != nil {
+			"SELECT study_id, sample_id, site1_hugo_symbol, toInt64OrNull(site1_entrez_gene_id) AS site1_entrez_gene_id, site2_hugo_symbol, toInt64OrNull(site2_entrez_gene_id) AS site2_entrez_gene_id, "+
+				"%s AS sv_status, %s AS cbp_driver, %s AS cbp_driver_tiers FROM `%s`.structural_variant", svStatus, svDriver, svTiers, rawDB)); err != nil {
 			return nil, err
 		}
 	}
