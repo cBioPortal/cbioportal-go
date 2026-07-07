@@ -183,7 +183,9 @@ func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	scope := andClause(f.sampleScope(), f.AlterationFilter.cnaFilterClause())
+	// The study-view CNA genes table shows only deep events: AMP (2) and
+	// HOMDEL (-2), not shallow GAIN (1) / HETLOSS (-1).
+	scope := andClause(f.sampleScope(), f.AlterationFilter.cnaFilterClause()) + " AND alteration IN ('-2', '2')"
 	profiled := s.scopeSampleCount(f)
 	rows, err := ch.Query[geneCountRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, "+
