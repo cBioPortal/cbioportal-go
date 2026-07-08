@@ -48,34 +48,23 @@ func (af *alterationFilter) statusClause(col string) string {
 	return "(" + strings.Join(ors, " OR ") + ")"
 }
 
-// oncogenicityClause builds the driver/VUS/unknown predicate over cbp_driver /
-// cbp_driver_tiers, shared by mutation, CNA and SV filters. DRIVER when the
-// custom binary annotation says so or a custom tier is enabled; UNKNOWN when no
-// annotation has an opinion; VUS otherwise. "" when all three included.
+// oncogenicityClause is the BINARY custom-driver dimension over cbp_driver only:
+// DRIVER = Putative_Driver, VUS = Putative_Passenger, UNKNOWN = neither. It is
+// independent of the tier dimension (the "Putative drivers" checkbox toggles
+// only this, not tier-annotated events). "" when all three are included.
 func (af *alterationFilter) oncogenicityClause() string {
 	if af == nil || (inc(af.IncludeDriver) && inc(af.IncludeVUS) && inc(af.IncludeUnknownOncogenicity)) {
 		return ""
 	}
-	var tiers []string
-	for t, on := range af.TiersBooleanMap {
-		if on {
-			tiers = append(tiers, t)
-		}
-	}
-	driverExpr := "cbp_driver = 'Putative_Driver'"
-	if len(tiers) > 0 {
-		driverExpr = "(" + driverExpr + " OR cbp_driver_tiers IN (" + inList(tiers) + "))"
-	}
-	unknownExpr := "(cbp_driver IN ('', 'NA', 'Unknown') AND cbp_driver_tiers IN ('', 'NA'))"
 	var ors []string
 	if inc(af.IncludeDriver) {
-		ors = append(ors, driverExpr)
+		ors = append(ors, "cbp_driver = 'Putative_Driver'")
 	}
 	if inc(af.IncludeVUS) {
-		ors = append(ors, "(NOT "+driverExpr+" AND NOT "+unknownExpr+")")
+		ors = append(ors, "cbp_driver = 'Putative_Passenger'")
 	}
 	if inc(af.IncludeUnknownOncogenicity) {
-		ors = append(ors, "(NOT "+driverExpr+" AND "+unknownExpr+")")
+		ors = append(ors, "cbp_driver NOT IN ('Putative_Driver', 'Putative_Passenger')")
 	}
 	if len(ors) == 0 {
 		return falseClause
@@ -83,14 +72,46 @@ func (af *alterationFilter) oncogenicityClause() string {
 	return "(" + strings.Join(ors, " OR ") + ")"
 }
 
-// combine ANDs the status (over statusCol) and oncogenicity predicates; returns
-// "" for no filter or falseClause if either excludes everything.
+// tierClause is the custom-driver TIER dimension over cbp_driver_tiers, toggled
+// independently via tiersBooleanMap (per-tier) + includeUnknownTier (no tier).
+// "" when every present tier is enabled and unknown-tier is included.
+func (af *alterationFilter) tierClause() string {
+	if af == nil || len(af.TiersBooleanMap) == 0 {
+		return ""
+	}
+	var enabled, disabled []string
+	for t, on := range af.TiersBooleanMap {
+		if on {
+			enabled = append(enabled, t)
+		} else {
+			disabled = append(disabled, t)
+		}
+	}
+	// Fast path: all tiers enabled + unknown included → no filter.
+	if len(disabled) == 0 && inc(af.IncludeUnknownTier) {
+		return ""
+	}
+	var ors []string
+	if len(enabled) > 0 {
+		ors = append(ors, "cbp_driver_tiers IN ("+inList(enabled)+")")
+	}
+	if inc(af.IncludeUnknownTier) {
+		ors = append(ors, "cbp_driver_tiers IN ('', 'NA')")
+	}
+	if len(ors) == 0 {
+		return falseClause
+	}
+	return "(" + strings.Join(ors, " OR ") + ")"
+}
+
+// combine ANDs status (over statusCol) + binary oncogenicity + tier predicates.
+// "" for no filter, falseClause if any dimension excludes everything.
 func (af *alterationFilter) combine(statusCol string) string {
 	if af == nil {
 		return ""
 	}
 	var clauses []string
-	for _, c := range []string{af.statusClause(statusCol), af.oncogenicityClause()} {
+	for _, c := range []string{af.statusClause(statusCol), af.oncogenicityClause(), af.tierClause()} {
 		if c == falseClause {
 			return falseClause
 		}
@@ -107,15 +128,22 @@ func (af *alterationFilter) mutationFilterClause() string { return af.combine("m
 // svFilterClause filters SV gene counts (sv_status + oncogenicity).
 func (af *alterationFilter) svFilterClause() string { return af.combine("sv_status") }
 
-// cnaFilterClause filters CNA gene counts (oncogenicity only; CNA has no status).
+// cnaFilterClause filters CNA gene counts by oncogenicity + tier (CNA has no
+// somatic/germline status).
 func (af *alterationFilter) cnaFilterClause() string {
 	if af == nil {
 		return ""
 	}
-	if onc := af.oncogenicityClause(); onc != falseClause {
-		return onc
+	var clauses []string
+	for _, c := range []string{af.oncogenicityClause(), af.tierClause()} {
+		if c == falseClause {
+			return falseClause
+		}
+		if c != "" {
+			clauses = append(clauses, c)
+		}
 	}
-	return falseClause
+	return strings.Join(clauses, " AND ")
 }
 
 // andClause joins a base scope with an optional extra predicate.
