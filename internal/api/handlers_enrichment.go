@@ -83,6 +83,23 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	profiled := make([]int, len(body.Groups))
 	geneSet := map[geneKey]bool{}
 
+	// Count only the alteration type(s) matching the groups' molecular profiles:
+	// a mutations-profile enrichment must not fold in CNA genes (and vice versa).
+	useMut, useCna := false, false
+	for _, g := range body.Groups {
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			switch {
+			case strings.HasSuffix(c.MolecularProfileID, "_mutations"):
+				useMut = true
+			case strings.HasSuffix(c.MolecularProfileID, "_gistic"), strings.HasSuffix(c.MolecularProfileID, "_cna"):
+				useCna = true
+			}
+		}
+	}
+	if !useMut && !useCna {
+		useMut, useCna = true, true
+	}
+
 	for gi, g := range body.Groups {
 		altered[gi] = map[geneKey]int{}
 		pairs := g.pairs()
@@ -91,13 +108,18 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			continue
 		}
 		scope := fmt.Sprintf("(study_id, sample_id) IN (%s)", tupleIn(pairs))
-		mutScope := andClause(scope, body.AlterationEventTypes.mutationFilterClause())
-		cnaScope := andClause(scope, body.AlterationEventTypes.cnaFilterClause())
+		var parts []string
+		if useMut {
+			parts = append(parts, "SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM mutation WHERE "+
+				andClause(scope, body.AlterationEventTypes.mutationFilterClause()))
+		}
+		if useCna {
+			parts = append(parts, "SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM cna WHERE "+
+				andClause(scope, body.AlterationEventTypes.cnaFilterClause()))
+		}
 		rows, err := ch.Query[geneAlteredRow](s.CH, fmt.Sprintf(
-			"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS altered FROM ("+
-				"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM mutation WHERE %s "+
-				"UNION ALL SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM cna WHERE %s"+
-				") GROUP BY hugo_symbol, entrez_gene_id", mutScope, cnaScope))
+			"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS altered FROM (%s) GROUP BY hugo_symbol, entrez_gene_id",
+			strings.Join(parts, " UNION ALL ")))
 		if err != nil {
 			fail(w, err)
 			return
