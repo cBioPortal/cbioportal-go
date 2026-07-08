@@ -66,7 +66,8 @@ type AlterationEnrichment struct {
 // two-group case.
 func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Groups []casesGroup `json:"molecularProfileCasesGroupFilter"`
+		Groups               []casesGroup      `json:"molecularProfileCasesGroupFilter"`
+		AlterationEventTypes *alterationFilter `json:"alterationEventTypes"`
 	}
 	readBody(r, &body)
 	if len(body.Groups) < 2 {
@@ -90,11 +91,13 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			continue
 		}
 		scope := fmt.Sprintf("(study_id, sample_id) IN (%s)", tupleIn(pairs))
+		mutScope := andClause(scope, body.AlterationEventTypes.mutationFilterClause())
+		cnaScope := andClause(scope, body.AlterationEventTypes.cnaFilterClause())
 		rows, err := ch.Query[geneAlteredRow](s.CH, fmt.Sprintf(
 			"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS altered FROM ("+
 				"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM mutation WHERE %s "+
 				"UNION ALL SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM cna WHERE %s"+
-				") GROUP BY hugo_symbol, entrez_gene_id", scope, scope))
+				") GROUP BY hugo_symbol, entrez_gene_id", mutScope, cnaScope))
 		if err != nil {
 			fail(w, err)
 			return
