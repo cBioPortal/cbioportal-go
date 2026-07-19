@@ -33,5 +33,5 @@ CBIOPORTAL_URL=http://localhost:3000 LOCALDEV=0 PW_LOCAL=1 HEADLESS_CHROME=true 
 rc=$?
 
 echo "======================================================================"
-python3 "$GO/test/e2e_report.py" --by-spec 2>/dev/null || echo "(no report.json — run may have crashed/OOMed)"
+/home/ino/go-local/go/bin/go run "$GO/cmd/e2ereport" --by-spec 2>/dev/null || echo "(no report.json — run may have crashed/OOMed)"
 exit $rc
