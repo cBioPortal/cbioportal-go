@@ -184,6 +184,32 @@ func TestContractMutationsFetchByProfileIds(t *testing.T) {
 	}
 }
 
+func TestContractMutationNamespaceColumns(t *testing.T) {
+	requireAPI(t)
+	var d []struct {
+		NamespaceColumns map[string]map[string]any `json:"namespaceColumns"`
+	}
+	post(t, "/api/mutations/fetch?projection=DETAILED",
+		map[string]any{"molecularProfileIds": []string{"study_es_0_mutations"}}, &d)
+	found := false
+	for _, m := range d {
+		z, ok := m.NamespaceColumns["Zygosity"]
+		if !ok {
+			continue
+		}
+		found = true
+		if _, ok := z["name"]; !ok {
+			t.Errorf("Zygosity missing 'name' subkey: %v", z)
+		}
+		if _, ok := z["code"]; !ok {
+			t.Errorf("Zygosity missing 'code' subkey: %v", z)
+		}
+	}
+	if !found {
+		t.Error("no mutation carried a Zygosity namespaceColumns object")
+	}
+}
+
 func TestContractGzipRequestBody(t *testing.T) {
 	requireAPI(t)
 	key := base64.RawStdEncoding.EncodeToString([]byte("study_es_0:TCGA-A1-A0SB"))

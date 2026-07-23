@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -113,7 +114,7 @@ const mutationSelect = "SELECT study_id AS studyId, sample_id AS sampleId, hugo_
 	"toInt64OrNull(end_position) AS endPosition, reference_allele AS referenceAllele, tumor_seq_allele2 AS variantAllele, " +
 	"protein_change AS proteinChange, variant_classification AS mutationType, toInt64OrNull(t_alt_count) AS tumorAltCount, " +
 	"toInt64OrNull(t_ref_count) AS tumorRefCount, cbp_driver AS driverFilter, cbp_driver_annotation AS driverFilterAnnotation, " +
-	"cbp_driver_tiers AS driverTiersFilter, cbp_driver_tiers_annotation AS driverTiersFilterAnnotation FROM mutation"
+	"cbp_driver_tiers AS driverTiersFilter, cbp_driver_tiers_annotation AS driverTiersFilterAnnotation, namespace_columns AS namespaceColumns FROM mutation"
 
 type mutationRow struct {
 	StudyID         string `json:"studyId"`
@@ -134,6 +135,7 @@ type mutationRow struct {
 	DriverFilterAnnotation      string `json:"driverFilterAnnotation"`
 	DriverTiersFilter           string `json:"driverTiersFilter"`
 	DriverTiersFilterAnnotation string `json:"driverTiersFilterAnnotation"`
+	NamespaceColumns            string `json:"namespaceColumns"`
 }
 
 type Gene struct {
@@ -158,10 +160,11 @@ type Mutation struct {
 	TumorRefCount      *int64 `json:"tumorRefCount"`
 	UniqueSampleKey    string `json:"uniqueSampleKey"`
 
-	DriverFilter                string `json:"driverFilter"`
-	DriverFilterAnnotation      string `json:"driverFilterAnnotation"`
-	DriverTiersFilter           string `json:"driverTiersFilter"`
-	DriverTiersFilterAnnotation string `json:"driverTiersFilterAnnotation"`
+	DriverFilter                string          `json:"driverFilter"`
+	DriverFilterAnnotation      string          `json:"driverFilterAnnotation"`
+	DriverTiersFilter           string          `json:"driverTiersFilter"`
+	DriverTiersFilterAnnotation string          `json:"driverTiersFilterAnnotation"`
+	NamespaceColumns            json.RawMessage `json:"namespaceColumns"`
 }
 
 func profileStudy(mpid string) string { return strings.TrimSuffix(mpid, "_mutations") }
@@ -175,7 +178,16 @@ func toMutation(r mutationRow) Mutation {
 		TumorAltCount: r.TumorAltCount, TumorRefCount: r.TumorRefCount, UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID),
 		DriverFilter: r.DriverFilter, DriverFilterAnnotation: r.DriverFilterAnnotation,
 		DriverTiersFilter: r.DriverTiersFilter, DriverTiersFilterAnnotation: r.DriverTiersFilterAnnotation,
+		NamespaceColumns: rawJSONOrEmpty(r.NamespaceColumns),
 	}
+}
+
+// rawJSONOrEmpty returns s as raw JSON when it is valid, else the empty object.
+func rawJSONOrEmpty(s string) json.RawMessage {
+	if s != "" && json.Valid([]byte(s)) {
+		return json.RawMessage(s)
+	}
+	return json.RawMessage("{}")
 }
 
 func (s *State) mutationsWhere(w http.ResponseWriter, where, order string, limit int) {

@@ -45,6 +45,7 @@ type DataFile struct {
 	ProfileDescription string
 	ShowInAnalysis     string
 	GenericAssayType   string
+	Namespaces         string
 	Layout             Layout
 	StageSlug          string
 }
@@ -157,6 +158,7 @@ func Scan(dir string) (*Study, error) {
 			ProfileDescription: meta.Get("profile_description"),
 			ShowInAnalysis:     meta.Get("show_profile_in_analysis_tab"),
 			GenericAssayType:   meta.Get("generic_assay_type"),
+			Namespaces:         meta.Get("namespaces"),
 			Layout:             layout,
 			StageSlug:          slug,
 		})

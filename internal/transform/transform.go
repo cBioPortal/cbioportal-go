@@ -187,6 +187,69 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	return counts, nil
 }
 
+// namespaceColumnsExpr builds a ClickHouse expression that assembles the nested
+// `namespaceColumns` JSON object ({"<Namespace>":{"<sub>":<value>}}) the mutation
+// tables read. Namespace names come from the `namespaces` meta field (stored on
+// genetic_profile); for each, the matching staging columns are `<lower(name)>_<sub>`.
+// Each namespace object is emitted per-row only when at least one of its columns
+// is non-empty, so an empty namespace declared by one study does not leak an
+// empty column onto another study's rows. tablePrefix is the table alias (e.g.
+// "m."). Returns "'{}'" when no namespace columns are present.
+func namespaceColumnsExpr(c *ch.Client, rawDB string, has map[string]bool, tablePrefix string) string {
+	names := distinctNamespaces(c, rawDB)
+	var frags []string
+	for _, name := range names {
+		prefix := strings.ToLower(name) + "_"
+		var subCols, nonEmpty []string
+		for col := range has {
+			if strings.HasPrefix(col, prefix) && len(col) > len(prefix) {
+				sub := col[len(prefix):]
+				subCols = append(subCols, fmt.Sprintf(`'"%s":', toJSONString(%s%s)`, sub, tablePrefix, col))
+				nonEmpty = append(nonEmpty, fmt.Sprintf("%s%s != ''", tablePrefix, col))
+			}
+		}
+		if len(subCols) == 0 {
+			continue
+		}
+		// concat('"Name":{', '"sub":', toJSONString(col), ',', ..., '}')
+		inner := strings.Join(subCols, ", ',', ")
+		obj := fmt.Sprintf(`concat('"%s":{', %s, '}')`, name, inner)
+		frags = append(frags, fmt.Sprintf("if(%s, %s, '')", strings.Join(nonEmpty, " OR "), obj))
+	}
+	if len(frags) == 0 {
+		return "'{}'"
+	}
+	return fmt.Sprintf("concat('{', arrayStringConcat(arrayFilter(x -> x != '', [%s]), ','), '}')",
+		strings.Join(frags, ", "))
+}
+
+// distinctNamespaces returns the distinct namespace names declared across all
+// molecular profiles (the comma-separated `namespaces` meta field).
+func distinctNamespaces(c *ch.Client, rawDB string) []string {
+	if !hasColumn(c, rawDB, "genetic_profile", "namespaces") {
+		return nil
+	}
+	text, _ := c.Execute(fmt.Sprintf(
+		"SELECT DISTINCT arrayJoin(splitByChar(',', namespaces)) AS n FROM `%s`.genetic_profile WHERE namespaces != '' ORDER BY n FORMAT TabSeparated", rawDB))
+	seen := map[string]bool{}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		n := strings.TrimSpace(line)
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// hasColumn reports whether a staging table has a column (schema evolution safe).
+func hasColumn(c *ch.Client, rawDB, table, col string) bool {
+	text, _ := c.Execute(fmt.Sprintf(
+		"SELECT count() FROM system.columns WHERE database = '%s' AND table = '%s' AND name = '%s' FORMAT TabSeparated", rawDB, table, col))
+	return strings.TrimSpace(text) == "1"
+}
+
 func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 	entrez, join := "m.entrez_gene_id", ""
 	if hasRef {
@@ -210,6 +273,7 @@ func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 	}
 	drivers := driverCol("cbp_driver") + ", " + driverCol("cbp_driver_annotation") + ", " +
 		driverCol("cbp_driver_tiers") + ", " + driverCol("cbp_driver_tiers_annotation")
+	nsCol := namespaceColumnsExpr(c, rawDB, has, "m.")
 	return fmt.Sprintf(
 		"SELECT m.study_id AS study_id, m.tumor_sample_barcode AS sample_id, m.hugo_symbol AS hugo_symbol, "+
 			"%s AS entrez_gene_id, m.chromosome AS chromosome, m.start_position AS start_position, "+
@@ -217,7 +281,7 @@ func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
 			"m.validation_status AS validation_status, "+
 			"if(startsWith(m.hgvsp_short, 'p.'), substring(m.hgvsp_short, 3), m.hgvsp_short) AS protein_change, "+
-			"m.t_alt_count AS t_alt_count, m.t_ref_count AS t_ref_count, "+drivers+" "+
+			"m.t_alt_count AS t_alt_count, m.t_ref_count AS t_ref_count, "+drivers+", "+nsCol+" AS namespace_columns "+
 			"FROM `%s`.mutation_extended m%s "+
 			"WHERE NOT startsWith(lower(m.mutation_status), 'none') AND NOT startsWith(lower(m.mutation_status), 'loh') "+
 			"AND NOT startsWith(lower(m.mutation_status), 'wildtype') AND NOT startsWith(lower(m.validation_status), 'redacted') "+
