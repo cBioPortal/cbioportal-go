@@ -210,6 +210,23 @@ func TestContractMutationNamespaceColumns(t *testing.T) {
 	}
 }
 
+func TestContractCnaNamespaceColumns(t *testing.T) {
+	requireAPI(t)
+	var d []struct {
+		HugoGeneSymbol   string                    `json:"hugoGeneSymbol"`
+		NamespaceColumns map[string]map[string]any `json:"namespaceColumns"`
+	}
+	post(t, "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=ALL",
+		map[string]any{"sampleIds": []string{"TCGA-A2-A04U-01"}, "entrezGeneIds": []int{116983}}, &d)
+	if len(d) == 0 {
+		t.Fatal("no ACAP3 CNA row")
+	}
+	ns := d[0].NamespaceColumns
+	wantEq(t, ns["MyNamespace"]["column1"], "value1b")
+	wantEq(t, ns["MyNamespace"]["column2"], "value2b")
+	wantEq(t, ns["MyNamespace2"]["blarp"], "bluirp2")
+}
+
 func TestContractGzipRequestBody(t *testing.T) {
 	requireAPI(t)
 	key := base64.RawStdEncoding.EncodeToString([]byte("study_es_0:TCGA-A1-A0SB"))

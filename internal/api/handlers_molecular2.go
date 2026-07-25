@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -63,21 +64,22 @@ type DiscreteCopyNumberData struct {
 	DriverTiersFilterAnnotation string   `json:"driverTiersFilterAnnotation"`
 	EntrezGeneID                int64    `json:"entrezGeneId"`
 	Gene                        Gene     `json:"gene"`
-	MolecularProfileID          string   `json:"molecularProfileId"`
-	NamespaceColumns            struct{} `json:"namespaceColumns"`
-	PatientID                   string   `json:"patientId"`
-	SampleID                    string   `json:"sampleId"`
-	StudyID                     string   `json:"studyId"`
-	UniquePatientKey            string   `json:"uniquePatientKey"`
-	UniqueSampleKey             string   `json:"uniqueSampleKey"`
+	MolecularProfileID          string          `json:"molecularProfileId"`
+	NamespaceColumns            json.RawMessage `json:"namespaceColumns"`
+	PatientID                   string          `json:"patientId"`
+	SampleID                    string          `json:"sampleId"`
+	StudyID                     string          `json:"studyId"`
+	UniquePatientKey            string          `json:"uniquePatientKey"`
+	UniqueSampleKey             string          `json:"uniqueSampleKey"`
 }
 
 type discreteCnaRow struct {
-	SampleID       string `json:"sampleId"`
-	PatientID      string `json:"patientId"`
-	EntrezGeneID   *int64 `json:"entrezGeneId"`
-	HugoGeneSymbol string `json:"hugoGeneSymbol"`
-	Alteration     *int64 `json:"alteration"`
+	SampleID         string `json:"sampleId"`
+	PatientID        string `json:"patientId"`
+	EntrezGeneID     *int64 `json:"entrezGeneId"`
+	HugoGeneSymbol   string `json:"hugoGeneSymbol"`
+	Alteration       *int64 `json:"alteration"`
+	NamespaceColumns string `json:"namespaceColumns"`
 }
 
 func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +119,7 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 	rows, err := ch.Query[discreteCnaRow](s.CH, fmt.Sprintf(
 		"SELECT c.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"toInt64OrNull(c.entrez_gene_id) AS entrezGeneId, c.hugo_symbol AS hugoGeneSymbol, "+
-			"toInt64OrNull(c.alteration) AS alteration "+
+			"toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns "+
 			"FROM cbioportal.cna c LEFT JOIN cbioportal.sample sm "+
 			"ON c.study_id = sm.study_id AND c.sample_id = sm.sample_id "+
 			"WHERE %s ORDER BY c.sample_id, c.hugo_symbol", where))
@@ -137,6 +139,7 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			StudyID:            meta.StudyID,
 			UniquePatientKey:   uniqueKey(meta.StudyID, r.PatientID),
 			UniqueSampleKey:    uniqueKey(meta.StudyID, r.SampleID),
+			NamespaceColumns:   rawJSONOrEmpty(r.NamespaceColumns),
 		}
 	}
 	writeJSON(w, out)
