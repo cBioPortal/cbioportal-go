@@ -16,11 +16,11 @@ import (
 // integers are emitted as numbers, not quoted strings.
 func (c *Client) QueryJSONLines(sql string) ([][]byte, error) {
 	q := url.Values{
-		"database":                              {c.database},
+		"database": {c.database},
 		"output_format_json_quote_64bit_integers": {"0"},
 	}
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/?"+q.Encode(),
-		strings.NewReader(sql+" FORMAT JSONEachRow"))
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+"/?"+withSessionSettings(q).Encode(),
+		strings.NewReader(c.rewrite(sql)+" FORMAT JSONEachRow"))
 	if err != nil {
 		return nil, err
 	}

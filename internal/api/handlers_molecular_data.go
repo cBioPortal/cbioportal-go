@@ -37,7 +37,7 @@ type profileMeta struct {
 }
 
 func (s *State) profileMeta(mpid string) (profileMeta, bool) {
-	rows, _ := ch.Query[profileMeta](s.CH, fmt.Sprintf(
+	rows, _ := cachedQuery[profileMeta](s, fmt.Sprintf(
 		"SELECT study_id AS studyId, molecular_alteration_type AS alterationType, datatype, profile_stable_id AS stableId "+
 			"FROM molecular_profile WHERE molecular_profile_id = '%s' LIMIT 1", sqlLit(mpid)))
 	if len(rows) == 0 {
@@ -119,7 +119,9 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 		return []MolecularData{}, nil
 	}
 	table := meta.dataTable()
-	if table == "" {
+	// Gene-keyed data only: geneset scores and generic assays have their own
+	// endpoints.
+	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
 		return []MolecularData{}, nil
 	}
 	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))

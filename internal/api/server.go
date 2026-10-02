@@ -24,6 +24,7 @@ type State struct {
 	CH           *ch.Client
 	sessions     *sessionStore
 	sessionsOnce sync.Once
+	meta         metaCache
 	// frontend serves every non-API path — a built frontend (FRONTEND_DIR) or a
 	// proxied dev server (FRONTEND_URL) — so the portal UI and the API share one
 	// origin as in a cBioPortal deployment.
@@ -46,7 +47,7 @@ func NewState(c *ch.Client) *State {
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return cors(gunzipBody(auth(loadAuthConfig(), pageList(metaProjection(mux)))))
+	return cors(gzipResponse(gunzipBody(auth(loadAuthConfig(), s.extraEndpoints(pageList(metaProjection(mux)))))))
 }
 
 // gunzipBody transparently decompresses gzip-encoded request bodies. The
@@ -220,9 +221,49 @@ func withFrontendConfig(page []byte, host string) []byte {
 		"basePath":                "",
 		"frontendUrl":             "//" + host + "/",
 	})
-	script := []byte("<script>window.frontendConfig = Object.assign(window.frontendConfig || {}, " + string(cfg) + ");</script>")
+	script := []byte("<script>window.frontendConfig = Object.assign(window.frontendConfig || {}, " + string(cfg) + ");</script>" + devModeScript)
 	if i := bytes.Index(page, []byte("</head>")); i >= 0 {
-		return append(append(append([]byte{}, page[:i]...), script...), page[i:]...)
+		page = append(append(append([]byte{}, page[:i]...), script...), page[i:]...)
+	} else {
+		page = append(script, page...)
 	}
-	return append(script, page...)
+	// An element after #reactRoot keeps it from being the body's last child:
+	// otherwise every node the frontend appends to the body to measure text
+	// flips :last-child matching and restyles the whole app.
+	if i := bytes.Index(page, []byte("</body>")); i >= 0 {
+		page = append(append(append([]byte{}, page[:i]...), "<script></script>"...), page[i:]...)
+	}
+	return page
 }
+
+// devModeScript mirrors the Java portal page (index.html + load-frontend.js):
+// ?localdev=true / ?localdist=true are remembered in localStorage and, as in
+// dev mode there, a dismissible "dev mode" banner is added to the body. The
+// bundle is always served from this origin.
+const devModeScript = `<script>
+if (/localdev=true/.test(window.location.href)) { localStorage.setItem("localdev", "true"); }
+if (/localdist=true/.test(window.location.href)) { localStorage.setItem("localdist", "true"); }
+window.localdev = localStorage.localdev === "true";
+window.localdist = localStorage.localdist === "true";
+window.netlify = localStorage.netlify;
+if (window.localdev || window.localdist || window.netlify) {
+  localStorage.setItem("e2etest", "true");
+  window.clearDevState = function () {
+    localStorage.removeItem("localdev");
+    localStorage.removeItem("localdist");
+    localStorage.removeItem("netlify");
+    window.location.reload();
+  };
+  document.addEventListener("DOMContentLoaded", function () {
+    var d = document.createElement("div");
+    d.setAttribute("class", "local-dev-banner");
+    d.setAttribute("style", "position: fixed; z-index:100; top: 0; left: 0; width: 100%");
+    document.body.appendChild(d);
+    d.innerHTML = '<div style=""><div class="alert alert-warning">' +
+      '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
+      'cbioportal-frontend dev mode, using ' + window.frontendConfig.frontendUrl +
+      '&nbsp;<a href="" onclick="javascript:clearDevState();window.location.reload()">clear</a></div></div>';
+    d.onclick = function () { document.body.removeChild(this); };
+  });
+}
+</script>`

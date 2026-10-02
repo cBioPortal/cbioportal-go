@@ -100,18 +100,19 @@ func TestContractMutationsBySampleList(t *testing.T) {
 
 func TestContractCopyNumberSegmentsBareList(t *testing.T) {
 	requireAPI(t)
-	body := []map[string]string{{"studyId": "msk_impact_2017", "sampleId": "P-0004034-T01-IM5"}}
-	var all, chr7 []map[string]any
+	body := []map[string]string{{"studyId": "study_es_0", "sampleId": "TCGA-A2-A04P-01"}}
+	var all, chr1, chr2 []map[string]any
 	post(t, "/api/copy-number-segments/fetch", body, &all)
-	post(t, "/api/copy-number-segments/fetch?chromosome=7", body, &chr7)
-	if len(all) == 0 || len(chr7) == 0 || len(chr7) >= len(all) {
-		t.Fatalf("segments: all %d, chr7 %d", len(all), len(chr7))
+	post(t, "/api/copy-number-segments/fetch?chromosome=1", body, &chr1)
+	post(t, "/api/copy-number-segments/fetch?chromosome=2", body, &chr2)
+	if len(all) == 0 || len(chr1) != len(all) || len(chr2) != 0 {
+		t.Fatalf("segments: all %d, chr1 %d, chr2 %d", len(all), len(chr1), len(chr2))
 	}
 	var one []map[string]any
-	get(t, "/api/studies/msk_impact_2017/samples/P-0004034-T01-IM5/copy-number-segments?chromosome=7", &one)
-	wantEq(t, len(one), len(chr7))
+	get(t, "/api/studies/study_es_0/samples/TCGA-A2-A04P-01/copy-number-segments?chromosome=1", &one)
+	wantEq(t, len(one), len(chr1))
 	for _, s := range one {
-		wantEq(t, s["chromosome"], "7")
+		wantEq(t, s["chromosome"], "1")
 	}
 }
 
@@ -204,8 +205,8 @@ func TestContractTreatmentsDisplay(t *testing.T) {
 
 func TestContractDensityPlotLogScale(t *testing.T) {
 	requireAPI(t)
-	path := "/api/clinical-data-density-plot/fetch?xAxisAttributeId=MUTATION_COUNT&yAxisAttributeId=FRACTION_GENOME_ALTERED&xAxisBinCount=5&yAxisBinCount=5"
-	body := map[string]any{"studyIds": []string{"msk_impact_2017"}}
+	path := "/api/clinical-data-density-plot/fetch?xAxisAttributeId=MUTATION_COUNT&yAxisAttributeId=MUTATION_COUNT&xAxisBinCount=5&yAxisBinCount=5"
+	body := map[string]any{"studyIds": []string{"lgg_ucsf_2014_test_generic_assay"}}
 	var lin, lg struct {
 		Bins []struct {
 			BinX float64 `json:"binX"`

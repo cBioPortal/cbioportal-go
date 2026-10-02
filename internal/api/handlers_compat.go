@@ -5,21 +5,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 )
 
 // routeCompat registers endpoints that are thin views over others: the GET
-// molecular-data form, mRNA percentiles, and the /api/legacy/* aliases of the
-// study-view endpoints.
+// molecular-data form and mRNA percentiles.
 func (s *State) routeCompat(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/molecular-profiles/{id}/molecular-data", s.molecularDataGet)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/mrna-percentile/fetch", s.mrnaPercentileFetch)
-	mux.HandleFunc("/api/legacy/", func(w http.ResponseWriter, r *http.Request) {
-		r2 := r.Clone(r.Context())
-		r2.URL.Path = "/api/" + strings.TrimPrefix(r.URL.Path, "/api/legacy/")
-		r2.URL.RawPath = ""
-		mux.ServeHTTP(w, r2)
-	})
 }
 
 type MrnaPercentile struct {

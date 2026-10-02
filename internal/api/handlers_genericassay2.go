@@ -20,7 +20,7 @@ func (s *State) routeGenericAssay2(mux *http.ServeMux) {
 	// Single-entity data + metadata GETs.
 	mux.HandleFunc("GET /api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", s.genericAssayDataInProfileGet)
 	mux.HandleFunc("GET /api/generic-assay-meta/generic-assay/{genericAssayStableId}", s.genericAssayMetaByStableIdGet)
-	mux.HandleFunc("GET /api/generic-assay-meta/{genericAssayStableId}", s.genericAssayMetaByIDGet)
+	mux.HandleFunc("GET /api/generic-assay-meta/{molecularProfileId}", s.genericAssayMetaByIDGet)
 }
 
 // ---------- Generic assay data counts (study view, categorical) ----------
@@ -229,7 +229,7 @@ func (s *State) genericAssayMetaByStableIdGet(w http.ResponseWriter, r *http.Req
 // in a profile, or an entity stable id otherwise; both are resolved. Returns an
 // array of GenericAssayMeta.
 func (s *State) genericAssayMetaByIDGet(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("genericAssayStableId")
+	id := r.PathValue("molecularProfileId")
 	if m, ok := s.profileMeta(id); ok && strings.EqualFold(m.AlterationType, "GENERIC_ASSAY") {
 		out, err := s.genericAssayMetasWhere(fmt.Sprintf(
 			"study_id = '%s' AND profile_stable_id = '%s'", sqlLit(m.StudyID), sqlLit(m.StableID)))

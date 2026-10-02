@@ -90,7 +90,8 @@ LEFT JOIN %[6]s.sample_profile sp ON c.study_id = sp.study_id AND c.sample_id = 
 WHERE c.value IN ('-2', '2')`,
 		rawDB, refDB, entrez("c.entrez_gene_id"), drv("c.cbp_driver"), drv("c.cbp_driver_tiers"), "`"+targetDB+"`")
 
-	// Structural variant rows keyed on site1. sv_event_info carries event_info;
+	// Structural variant rows keyed on site1 (breakpoints without a gene are
+	// skipped, as prod's inner join to gene does). sv_event_info carries event_info;
 	// mutation_status reuses sv_status as prod does.
 	sv := fmt.Sprintf(`SELECT
   concat(v.study_id, '_', v.sample_id) AS sample_unique_id,
@@ -138,5 +139,5 @@ LEFT JOIN %[6]s.sample_profile sp ON v.study_id = sp.study_id AND v.sample_id = 
 	).Replace(strings.Replace(sv, entrez("v.site1_entrez_gene_id"), entrez("v.site2_entrez_gene_id"), 1)) +
 		"\nWHERE v.site2_hugo_symbol != '' AND upper(v.site2_hugo_symbol) != upper(v.site1_hugo_symbol)"
 
-	return mutation + "\nUNION ALL\n" + cna + "\nUNION ALL\n" + cnaWide + "\nUNION ALL\n" + sv + "\nUNION ALL\n" + sv2
+	return mutation + "\nUNION ALL\n" + cna + "\nUNION ALL\n" + cnaWide + "\nUNION ALL\n" + sv + "\nWHERE v.site1_hugo_symbol != ''" + "\nUNION ALL\n" + sv2
 }

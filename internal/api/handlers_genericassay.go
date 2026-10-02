@@ -172,23 +172,32 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	if len(conds) > 0 {
 		where = strings.Join(conds, " AND ")
 	}
-	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
-		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
-			"FROM cbioportal_raw.generic_assay_matrix WHERE %s GROUP BY entity_stable_id", where))
+	props, err := s.genericAssayMetaProperties(where)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	out := make([]GenericAssayMeta, len(rows))
-	for i, r := range rows {
-		out[i] = GenericAssayMeta{
-			EntityType: "GENERIC_ASSAY", StableID: r.StableID,
-			GenericEntityMetaProperties: map[string]string{
-				"NAME": r.Name, "DESCRIPTION": r.Description, "URL": r.URL,
-			},
-		}
+	out := make([]GenericAssayMeta, 0, len(props))
+	for _, stable := range sortedKeys(props) {
+		out = append(out, GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: stable, GenericEntityMetaProperties: props[stable]})
 	}
 	writeJSON(w, out)
+}
+
+// genericAssayMetaProperties returns the NAME/DESCRIPTION/URL properties of
+// the generic assay entities matching where, keyed by entity stable id.
+func (s *State) genericAssayMetaProperties(where string) (map[string]map[string]string, error) {
+	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
+		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
+			"FROM cbioportal_raw.generic_assay_matrix WHERE %s GROUP BY entity_stable_id", where))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.StableID] = map[string]string{"NAME": r.Name, "DESCRIPTION": r.Description, "URL": r.URL}
+	}
+	return out, nil
 }
 
 // ---------- Genesets ----------

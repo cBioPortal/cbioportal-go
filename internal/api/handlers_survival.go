@@ -100,28 +100,62 @@ func (t timelineSpan) at(position string) int64 {
 	return t.StopDate
 }
 
-// timelineSpans collapses each patient's events matching reqs (all events when
-// reqs is empty) into a span, keyed by studyId+"\x00"+patientId.
-func (s *State) timelineSpans(pairs [][2]string, reqs []clinicalEventRequest) (map[string]timelineSpan, []string, error) {
-	out := map[string]timelineSpan{}
+// survivalSpans collapses, in one ClickHouse pass, each patient's events
+// matching the start, end and censoring requests (all events when a kind has
+// no requests) into one span per kind: the earliest start and the latest
+// start/stop day. Only patients with a start span are returned, keyed by
+// studyId+"\x00"+patientId; order lists them by study and patient id.
+func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs []clinicalEventRequest) (
+	starts, ends, censors map[string]timelineSpan, order []string, err error) {
+	starts, ends, censors = map[string]timelineSpan{}, map[string]timelineSpan{}, map[string]timelineSpan{}
 	if len(pairs) == 0 {
-		return out, nil, nil
+		return starts, ends, censors, nil, nil
 	}
-	rows, err := ch.Query[timelineSpan](s.CH, fmt.Sprintf(
+	cond := func(reqs []clinicalEventRequest) string {
+		if c := eventRequestsSQL(reqs, true); c != "" {
+			return strings.TrimPrefix(c, " AND ")
+		}
+		return "1"
+	}
+	span := func(prefix, c string) string {
+		return fmt.Sprintf("countIf(%[2]s) AS %[1]sN, toInt64(minIf(start_date, %[2]s)) AS %[1]sStart, "+
+			"toInt64(greatest(maxIf(start_date, %[2]s), maxIf(stop_date, %[2]s))) AS %[1]sStop", prefix, c)
+	}
+	type row struct {
+		StudyID     string `json:"studyId"`
+		PatientID   string `json:"patientId"`
+		StartN      uint64 `json:"startN"`
+		StartStart  int64  `json:"startStart"`
+		StartStop   int64  `json:"startStop"`
+		EndN        uint64 `json:"endN"`
+		EndStart    int64  `json:"endStart"`
+		EndStop     int64  `json:"endStop"`
+		CensorN     uint64 `json:"censorN"`
+		CensorStart int64  `json:"censorStart"`
+		CensorStop  int64  `json:"censorStop"`
+	}
+	sc, ec, cc := cond(startReqs), cond(endReqs), cond(censorReqs)
+	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
 		"SELECT cancer_study_identifier AS studyId, substring(patient_unique_id, length(cancer_study_identifier) + 2) AS patientId, "+
-			"toInt64(min(start_date)) AS startDate, toInt64(greatest(max(start_date), max(stop_date))) AS stopDate "+
-			"FROM clinical_event_data_derived WHERE %s%s GROUP BY cancer_study_identifier, patient_unique_id "+
-			"ORDER BY studyId, patientId",
-		patientEventScope(pairs), eventRequestsSQL(reqs, true)))
+			"%s, %s, %s FROM clinical_event_data_derived WHERE %s AND ((%s) OR (%s) OR (%s)) "+
+			"GROUP BY cancer_study_identifier, patient_unique_id HAVING startN > 0 ORDER BY studyId, patientId",
+		span("start", sc), span("end", ec), span("censor", cc), patientEventScope(pairs), sc, ec, cc))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	order := make([]string, len(rows))
+	order = make([]string, len(rows))
 	for i, r := range rows {
-		order[i] = r.StudyID + "\x00" + r.PatientID
-		out[order[i]] = r
+		k := r.StudyID + "\x00" + r.PatientID
+		order[i] = k
+		starts[k] = timelineSpan{StudyID: r.StudyID, PatientID: r.PatientID, StartDate: r.StartStart, StopDate: r.StartStop}
+		if r.EndN > 0 {
+			ends[k] = timelineSpan{StudyID: r.StudyID, PatientID: r.PatientID, StartDate: r.EndStart, StopDate: r.EndStop}
+		}
+		if r.CensorN > 0 {
+			censors[k] = timelineSpan{StudyID: r.StudyID, PatientID: r.PatientID, StartDate: r.CensorStart, StopDate: r.CensorStop}
+		}
 	}
-	return out, order, nil
+	return starts, ends, censors, order, nil
 }
 
 // javaDouble formats v like Java's String.valueOf(double) for the magnitudes
@@ -161,20 +195,8 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 	if censored == nil {
 		censored = &clinicalEventRequestIdentifier{Position: "LAST"}
 	}
-	spansOf := func(keys []string, spans map[string]timelineSpan, reqs []clinicalEventRequest) (map[string]timelineSpan, error) {
-		pairs := make([][2]string, len(keys))
-		for i, k := range keys {
-			pairs[i] = [2]string{spans[k].StudyID, spans[k].PatientID}
-		}
-		m, _, err := s.timelineSpans(pairs, reqs)
-		return m, err
-	}
-	starts, order, err := s.timelineSpans(patientIdentifierPairs(req.PatientIdentifiers), start.ClinicalEventRequests)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	ends, err := spansOf(order, starts, end.ClinicalEventRequests)
+	starts, ends, censors, order, err := s.survivalSpans(patientIdentifierPairs(req.PatientIdentifiers),
+		start.ClinicalEventRequests, end.ClinicalEventRequests, censored.ClinicalEventRequests)
 	if err != nil {
 		fail(w, err)
 		return
@@ -184,11 +206,6 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 		if e, ok := ends[k]; !ok || starts[k].at(start.Position) < e.at(end.Position) {
 			kept = append(kept, k)
 		}
-	}
-	censors, err := spansOf(kept, starts, censored.ClinicalEventRequests)
-	if err != nil {
-		fail(w, err)
-		return
 	}
 	for _, k := range kept {
 		ev := starts[k]

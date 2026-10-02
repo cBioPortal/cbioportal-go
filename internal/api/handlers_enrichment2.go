@@ -76,13 +76,6 @@ type GenericAssayCategoricalEnrichment struct {
 // Continuous enrichment core (expression + generic assay)
 // ---------------------------------------------------------------------------
 
-// contRow is one gene/entity's collected numeric values for a single group.
-type contRow struct {
-	Symbol string    `json:"symbol"`
-	Entrez *int64    `json:"entrez"`
-	Vals   []float64 `json:"vals"`
-}
-
 // contResult is a per-gene/entity accumulated result: the per-group mean/stddev
 // statistics (already computed) plus the group-comparison p-value.
 type contResult struct {
@@ -91,19 +84,6 @@ type contResult struct {
 	stable           string
 	groupsStatistics []GroupStatistics
 	pValue           float64
-}
-
-// contMWRow is one gene/entity's ClickHouse-side statistics for the 2-group
-// Mann-Whitney path. mean/stddev are nullable (nan -> JSON null for empty or
-// singleton groups); pval is null only when a group is empty (treated as 1.0).
-type contMWRow struct {
-	Symbol string   `json:"symbol"`
-	Entrez *int64   `json:"entrez"`
-	Mean0  *float64 `json:"mean0"`
-	Sd0    *float64 `json:"sd0"`
-	Mean1  *float64 `json:"mean1"`
-	Sd1    *float64 `json:"sd1"`
-	Pval   *float64 `json:"pval"`
 }
 
 // resolveGroupTriples turns a group's case identifiers into
@@ -142,198 +122,124 @@ func tripleIn(triples [][3]string) string {
 	return strings.Join(q, ", ")
 }
 
+// contStatRow is one gene/entity's count, mean and sample variance of the
+// numeric values within one group.
+type contStatRow struct {
+	Symbol string   `json:"symbol"`
+	Entrez *int64   `json:"entrez"`
+	Grp    uint32   `json:"grp"`
+	N      uint64   `json:"n"`
+	Mean   *float64 `json:"mean"`
+	Var    *float64 `json:"var"`
+}
+
 // computeContinuous returns, per gene/entity, the per-group mean/stddev
-// statistics and a group-comparison p-value, sorted ascending by p-value. keyCol
-// is the matrix column that identifies a row (hugo_symbol for expression,
-// entity_stable_id for generic assay); withGene selects whether hugo/entrez are
-// projected.
-//
-// For the common 2-group case the whole statistic is pushed into ClickHouse via
-// the native mannWhitneyUTest aggregate (Kruskal-Wallis with two groups is the
-// Mann-Whitney / Wilcoxon rank-sum test, giving the equivalent p-value), so only
-// a few thousand small per-gene result rows return to Go instead of every gene's
-// raw values across every sample. For the rare >2-group case (ClickHouse has no
-// Kruskal-Wallis aggregate) it falls back to pulling values and running
-// Kruskal-Wallis in Go.
+// statistics and a group-comparison p-value, sorted ascending by p-value, as
+// cbioportal's ExpressionEnrichmentUtil computes them: values of rna_seq
+// profiles are log2(x+1) transformed (negatives clamped to 0), groups with
+// fewer than two values are left out, and entities need two remaining groups.
+// The p-value is Welch's t-test for two groups and a one-way ANOVA otherwise;
+// entities with an undefined p-value are skipped. Only per-group summary
+// statistics leave ClickHouse. keyCol is the matrix column that identifies a
+// row (entity_stable_id for generic assay); withGene keys rows on hugo/entrez.
 func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene bool) ([]contResult, error) {
-	if len(groups) == 2 {
-		return s.computeContinuousMW(groups, keyCol, withGene)
-	}
-	return s.computeContinuousKW(groups, keyCol, withGene)
-}
-
-// computeContinuousMW computes, per gene/entity, the two group means/stddevs and
-// a Mann-Whitney p-value entirely inside ClickHouse. Each sample's value is
-// tagged with its group index (0 or 1); avgIf/stddevSampIf give the per-group
-// statistics and mannWhitneyUTest(value, group) gives (u, p) — only per-gene
-// result rows cross the wire. Genes present in only one group can't be tested
-// (the aggregate errors on an empty group), so the p-value is guarded to 1.0.
-func (s *State) computeContinuousMW(groups []casesGroup, keyCol string, withGene bool) ([]contResult, error) {
-	metaCache := map[string]profileMeta{}
-	g0, table0 := s.resolveGroupTriples(groups[0], metaCache)
-	g1, table1 := s.resolveGroupTriples(groups[1], metaCache)
-	table := table0
-	if table == "" {
-		table = table1
-	}
-	if table == "" || len(g0) == 0 || len(g1) == 0 {
-		return []contResult{}, nil
-	}
-	all := append(append([][3]string{}, g0...), g1...)
-
-	var innerCols, midKey, groupBy string
+	key := keyCol + " AS symbol, CAST(NULL AS Nullable(Int64)) AS entrez"
 	if withGene {
-		innerCols = "hugo_symbol, entrez_gene_id"
-		midKey = "hugo_symbol AS symbol, toInt64OrNull(entrez_gene_id) AS entrez"
-		groupBy = "hugo_symbol, entrez_gene_id"
-	} else {
-		innerCols = keyCol
-		midKey = keyCol + " AS symbol, CAST(NULL AS Nullable(Int64)) AS entrez"
-		groupBy = keyCol
+		key = "hugo_symbol AS symbol, toInt64OrNull(entrez_gene_id) AS entrez"
 	}
-
-	sql := fmt.Sprintf(
-		"SELECT symbol, entrez, mean0, sd0, mean1, sd1, "+
-			"if(n0 > 0 AND n1 > 0, "+
-			"arrayReduce('mannWhitneyUTest', arrayConcat(a0, a1), "+
-			"arrayConcat(arrayResize(CAST([], 'Array(UInt8)'), n0, toUInt8(0)), "+
-			"arrayResize(CAST([], 'Array(UInt8)'), n1, toUInt8(1)))).2, 1.0) AS pval "+
-			"FROM ("+
-			"SELECT %s, "+
-			"groupArrayIf(v, grp = 0) AS a0, groupArrayIf(v, grp = 1) AS a1, "+
-			"length(a0) AS n0, length(a1) AS n1, "+
-			"avgIf(v, grp = 0) AS mean0, stddevSampIf(v, grp = 0) AS sd0, "+
-			"avgIf(v, grp = 1) AS mean1, stddevSampIf(v, grp = 1) AS sd1 "+
-			"FROM ("+
-			"SELECT %s, toFloat64OrNull(value) AS v, "+
-			"if((study_id, profile_stable_id, sample_id) IN (%s), 0, 1) AS grp "+
-			"FROM cbioportal_raw.%s "+
-			"WHERE (study_id, profile_stable_id, sample_id) IN (%s) "+
-			"AND toFloat64OrNull(value) IS NOT NULL"+
-			") GROUP BY %s"+
-			")",
-		midKey, innerCols, tripleIn(g0), table, tripleIn(all), groupBy)
-
-	rows, err := ch.Query[contMWRow](s.CH, sql)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]contResult, 0, len(rows))
-	for _, row := range rows {
-		var e int64
-		if row.Entrez != nil {
-			e = *row.Entrez
-		}
-		p := 1.0
-		if row.Pval != nil && !math.IsNaN(*row.Pval) {
-			p = *row.Pval
-		}
-		gs := []GroupStatistics{
-			{MeanExpression: derefFloat(row.Mean0), Name: groups[0].Name, StandardDeviation: derefFloat(row.Sd0)},
-			{MeanExpression: derefFloat(row.Mean1), Name: groups[1].Name, StandardDeviation: derefFloat(row.Sd1)},
-		}
-		out = append(out, contResult{
-			hugo:             row.Symbol,
-			entrez:           e,
-			stable:           row.Symbol,
-			groupsStatistics: gs,
-			pValue:           p,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].pValue < out[j].pValue })
-	return out, nil
-}
-
-// derefFloat returns *p, or 0 for a nil / nan / inf value.
-func derefFloat(p *float64) float64 {
-	if p == nil {
-		return 0
-	}
-	return safeFloat(*p)
-}
-
-// computeContinuousKW gathers, per gene/entity and per group, the numeric values
-// across the group's samples, then computes a Kruskal-Wallis p-value in Go. Used
-// only for the rare >2-group case that ClickHouse cannot aggregate directly.
-func (s *State) computeContinuousKW(groups []casesGroup, keyCol string, withGene bool) ([]contResult, error) {
-	n := len(groups)
 	metaCache := map[string]profileMeta{}
-
-	type acc struct {
-		hugo   string
-		entrez int64
-		stable string
-		vals   [][]float64
-	}
-	m := map[string]*acc{}
-
+	var parts []string
 	for gi, g := range groups {
 		triples, table := s.resolveGroupTriples(g, metaCache)
 		if table == "" || len(triples) == 0 {
 			continue
 		}
-		var sel, grp string
-		if withGene {
-			sel = "hugo_symbol AS symbol, toInt64OrNull(entrez_gene_id) AS entrez, groupArray(toFloat64OrNull(value)) AS vals"
-			grp = "hugo_symbol, entrez_gene_id"
-		} else {
-			sel = keyCol + " AS symbol, groupArray(toFloat64OrNull(value)) AS vals"
-			grp = keyCol
+		parts = append(parts, fmt.Sprintf(
+			"SELECT %s, toUInt32(%d) AS grp, "+
+				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v "+
+				"FROM (SELECT *, toFloat64OrNull(value) AS x FROM cbioportal_raw.%s "+
+				"WHERE (study_id, profile_stable_id, sample_id) IN (%s)) WHERE isFinite(x)",
+			key, gi, table, tripleIn(triples)))
+	}
+	if len(parts) < 2 {
+		return []contResult{}, nil
+	}
+	rows, err := ch.Query[contStatRow](s.CH, fmt.Sprintf(
+		"SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSamp(v) AS var FROM (%s) "+
+			"GROUP BY symbol, entrez, grp",
+		strings.Join(parts, " UNION ALL ")))
+	if err != nil {
+		return nil, err
+	}
+
+	// Groups are reported in the iteration order of Java's HashMap keyed on
+	// group name.
+	names := make([]string, len(groups))
+	for i, g := range groups {
+		names[i] = g.Name
+	}
+	rank := map[string]int{}
+	for i, n := range javaHashMapOrder(names) {
+		rank[n] = i
+	}
+	type acc struct {
+		row   contStatRow
+		stats []*contStatRow
+	}
+	bySymbol := map[string]*acc{}
+	var order []string
+	for i := range rows {
+		r := &rows[i]
+		a := bySymbol[r.Symbol]
+		if a == nil {
+			a = &acc{row: *r, stats: make([]*contStatRow, len(groups))}
+			bySymbol[r.Symbol] = a
+			order = append(order, r.Symbol)
 		}
-		rows, err := ch.Query[contRow](s.CH, fmt.Sprintf(
-			"SELECT %s FROM cbioportal_raw.%s WHERE (study_id, profile_stable_id, sample_id) IN (%s) "+
-				"AND toFloat64OrNull(value) IS NOT NULL GROUP BY %s",
-			sel, table, tripleIn(triples), grp))
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			a := m[row.Symbol]
-			if a == nil {
-				a = &acc{stable: row.Symbol, hugo: row.Symbol, vals: make([][]float64, n)}
-				if row.Entrez != nil {
-					a.entrez = *row.Entrez
-				}
-				m[row.Symbol] = a
+		a.stats[r.Grp] = r
+	}
+
+	out := make([]contResult, 0, len(order))
+	for _, sym := range order {
+		a := bySymbol[sym]
+		idx := make([]int, 0, len(groups))
+		for gi, st := range a.stats {
+			if st == nil || st.N < 2 || st.Mean == nil || st.Var == nil ||
+				math.IsNaN(*st.Mean) || math.IsNaN(*st.Var) {
+				continue
 			}
-			a.vals[gi] = row.Vals
+			idx = append(idx, gi)
 		}
+		if len(idx) < 2 {
+			continue
+		}
+		sort.SliceStable(idx, func(i, j int) bool { return rank[groups[idx[i]].Name] < rank[groups[idx[j]].Name] })
+		ns := make([]int, len(idx))
+		means := make([]float64, len(idx))
+		vars := make([]float64, len(idx))
+		gs := make([]GroupStatistics, len(idx))
+		for k, gi := range idx {
+			st := a.stats[gi]
+			ns[k], means[k], vars[k] = int(st.N), *st.Mean, *st.Var
+			gs[k] = GroupStatistics{MeanExpression: means[k], Name: groups[gi].Name, StandardDeviation: math.Sqrt(vars[k])}
+		}
+		var p float64
+		if len(idx) == 2 {
+			p = stats.WelchTTest(ns[0], means[0], vars[0], ns[1], means[1], vars[1])
+		} else {
+			p = stats.OneWayAnovaP(ns, means, vars)
+		}
+		if math.IsNaN(p) {
+			continue
+		}
+		var e int64
+		if a.row.Entrez != nil {
+			e = *a.row.Entrez
+		}
+		out = append(out, contResult{hugo: sym, entrez: e, stable: sym, groupsStatistics: gs, pValue: p})
 	}
-
-	out := make([]contResult, 0, len(m))
-	for _, a := range m {
-		out = append(out, contResult{
-			hugo:             a.hugo,
-			entrez:           a.entrez,
-			stable:           a.stable,
-			groupsStatistics: groupStatistics(groups, a.vals),
-			pValue:           stats.KruskalWallisTest(a.vals),
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].pValue < out[j].pValue })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].pValue < out[j].pValue })
 	return out, nil
-}
-
-// meanStddev returns the mean and sample (n-1) standard deviation of v.
-func meanStddev(v []float64) (float64, float64) {
-	n := len(v)
-	if n == 0 {
-		return 0, 0
-	}
-	sum := 0.0
-	for _, x := range v {
-		sum += x
-	}
-	mean := sum / float64(n)
-	if n < 2 {
-		return mean, 0
-	}
-	var ss float64
-	for _, x := range v {
-		d := x - mean
-		ss += d * d
-	}
-	return mean, math.Sqrt(ss / float64(n-1))
 }
 
 // benjaminiHochberg returns BH-adjusted q-values for p-values sorted ascending.
@@ -353,19 +259,6 @@ func benjaminiHochberg(sortedP []float64) []float64 {
 		prev = v
 	}
 	return q
-}
-
-func groupStatistics(groups []casesGroup, groupVals [][]float64) []GroupStatistics {
-	gs := make([]GroupStatistics, len(groups))
-	for gi, g := range groups {
-		var vals []float64
-		if gi < len(groupVals) {
-			vals = groupVals[gi]
-		}
-		mean, sd := meanStddev(vals)
-		gs[gi] = GroupStatistics{MeanExpression: mean, Name: g.Name, StandardDeviation: sd}
-	}
-	return gs
 }
 
 // ---------------------------------------------------------------------------
@@ -429,10 +322,18 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		ps[i] = res.pValue
 	}
 	qs := benjaminiHochberg(ps)
+	props := map[string]map[string]string{}
+	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
+		props, _ = s.genericAssayMetaProperties(fmt.Sprintf("(study_id, profile_stable_id) IN (%s)", tupleIn(pairs)))
+	}
 	out := make([]GenericAssayEnrichment, len(results))
 	for i, res := range results {
+		meta := props[res.stable]
+		if meta == nil {
+			meta = map[string]string{}
+		}
 		out[i] = GenericAssayEnrichment{
-			GenericEntityMetaProperties: map[string]string{},
+			GenericEntityMetaProperties: meta,
 			GroupsStatistics:            res.groupsStatistics,
 			Name:                        res.stable,
 			PValue:                      res.pValue,
@@ -441,6 +342,25 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	writeJSON(w, out)
+}
+
+// groupProfilePairs lists the (study, profile stable id) of every molecular
+// profile the groups reference.
+func (s *State) groupProfilePairs(groups []casesGroup) [][2]string {
+	seen := map[string]bool{}
+	var pairs [][2]string
+	for _, g := range groups {
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			if seen[c.MolecularProfileID] {
+				continue
+			}
+			seen[c.MolecularProfileID] = true
+			if m, ok := s.profileMeta(c.MolecularProfileID); ok {
+				pairs = append(pairs, [2]string{m.StudyID, m.StableID})
+			}
+		}
+	}
+	return pairs
 }
 
 // patientCasesToSamples rewrites groups whose case ids are patient ids

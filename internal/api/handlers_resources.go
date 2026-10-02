@@ -119,9 +119,9 @@ func queryView[T any](c *ch.Client, sql string) ([]T, error) {
 
 // existsIn reports whether a SELECT count() query returns a non-zero count.
 func (s *State) existsIn(sql string) (bool, error) {
-	rows, err := ch.Query[struct {
+	rows, err := cachedQuery[struct {
 		N uint64 `json:"n"`
-	}](s.CH, sql)
+	}](s, sql)
 	if err != nil {
 		return false, err
 	}

@@ -16,7 +16,7 @@ func almostEqual(a, b, tol float64) bool {
 func TestFisherExactTest_KnownTables(t *testing.T) {
 	tests := []struct {
 		name           string
-		a, b, c, d    int
+		a, b, c, d     int
 		expectedPValue float64
 		tolerance      float64
 	}{
@@ -158,24 +158,24 @@ func TestKruskalWallisTest(t *testing.T) {
 		wantHigh float64
 	}{
 		{
-			name:     "clearly different groups",
-			groups:   [][]float64{{1, 2, 3, 4, 5}, {10, 11, 12, 13, 14}},
-			wantLow:  0.0, wantHigh: 0.01,
+			name:    "clearly different groups",
+			groups:  [][]float64{{1, 2, 3, 4, 5}, {10, 11, 12, 13, 14}},
+			wantLow: 0.0, wantHigh: 0.01,
 		},
 		{
-			name:     "identical groups",
-			groups:   [][]float64{{5, 5, 5}, {5, 5, 5}},
-			wantLow:  0.99, wantHigh: 1.01,
+			name:    "identical groups",
+			groups:  [][]float64{{5, 5, 5}, {5, 5, 5}},
+			wantLow: 0.99, wantHigh: 1.01,
 		},
 		{
-			name:     "three groups with difference",
-			groups:   [][]float64{{1, 2, 3}, {10, 11, 12}, {20, 21, 22}},
-			wantLow:  0.0, wantHigh: 0.05,
+			name:    "three groups with difference",
+			groups:  [][]float64{{1, 2, 3}, {10, 11, 12}, {20, 21, 22}},
+			wantLow: 0.0, wantHigh: 0.05,
 		},
 		{
-			name:     "single group",
-			groups:   [][]float64{{1, 2, 3}},
-			wantLow:  0.99, wantHigh: 1.01,
+			name:    "single group",
+			groups:  [][]float64{{1, 2, 3}},
+			wantLow: 0.99, wantHigh: 1.01,
 		},
 	}
 
@@ -218,5 +218,59 @@ func TestChiSquareContingency(t *testing.T) {
 func TestNormalCDF(t *testing.T) {
 	if !almostEqual(NormalCDF(0), 0.5, 1e-10) {
 		t.Errorf("NormalCDF(0) = %f, want 0.5", NormalCDF(0))
+	}
+}
+
+func sampleStats(v []float64) (int, float64, float64) {
+	n := len(v)
+	var s float64
+	for _, x := range v {
+		s += x
+	}
+	m := s / float64(n)
+	var ss float64
+	for _, x := range v {
+		ss += (x - m) * (x - m)
+	}
+	return n, m, ss / float64(n-1)
+}
+
+// Expected values come from cbioportal's ExpressionEnrichmentServiceImplTest.
+func TestWelchTTest(t *testing.T) {
+	cases := []struct {
+		a, b []float64
+		want float64
+	}{
+		{[]float64{2, 3}, []float64{2.1, 3}, 0.9475795430163914},
+		{[]float64{1.1, 5}, []float64{2.3, 3}, 0.8716148250471419},
+	}
+	for _, c := range cases {
+		n1, m1, v1 := sampleStats(c.a)
+		n2, m2, v2 := sampleStats(c.b)
+		if got := WelchTTest(n1, m1, v1, n2, m2, v2); !almostEqual(got, c.want, 1e-12) {
+			t.Errorf("WelchTTest(%v, %v) = %.16g, want %.16g", c.a, c.b, got, c.want)
+		}
+	}
+	if p := WelchTTest(2, 1, 0, 2, 1, 0); !math.IsNaN(p) {
+		t.Errorf("zero variance: got %v, want NaN", p)
+	}
+}
+
+func TestOneWayAnovaP(t *testing.T) {
+	// With two groups the F-test equals the pooled-variance t-test.
+	a, b := []float64{1, 2, 3, 4}, []float64{2, 4, 6, 8, 10}
+	n1, m1, v1 := sampleStats(a)
+	n2, m2, v2 := sampleStats(b)
+	df := float64(n1 + n2 - 2)
+	sp := ((float64(n1-1))*v1 + float64(n2-1)*v2) / df
+	tstat := (m1 - m2) / math.Sqrt(sp*(1/float64(n1)+1/float64(n2)))
+	want := 2 * TDistCDF(-math.Abs(tstat), df)
+	if got := OneWayAnovaP([]int{n1, n2}, []float64{m1, m2}, []float64{v1, v2}); !almostEqual(got, want, 1e-10) {
+		t.Errorf("two-group ANOVA = %v, want pooled t-test %v", got, want)
+	}
+	// Three groups: F = 3.6 on (2, 9) degrees of freedom.
+	got := OneWayAnovaP([]int{4, 4, 4}, []float64{1, 2, 3}, []float64{1, 1, 4.0 / 3})
+	if got <= 0.05 || got >= 0.1 {
+		t.Errorf("three-group ANOVA p = %v, want in (0.05, 0.1)", got)
 	}
 }

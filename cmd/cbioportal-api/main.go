@@ -17,7 +17,9 @@ func main() {
 	db := env("CBIOPORTAL_DB", "cbioportal")
 	port := env("PORT", "8080")
 
-	state := api.NewState(ch.New(url, db))
+	client := ch.New(url, db)
+	client.SetDatabaseAliases(os.Getenv("CBIOPORTAL_RAW_DB"), os.Getenv("CBIOPORTAL_REF_DB"))
+	state := api.NewState(client)
 	handler := api.NewRouter(state)
 	addr := "0.0.0.0:" + port
 	log.Printf("cbioportal-api on http://macbook-server-1337:%s (clickhouse %s, db %s)", port, url, db)

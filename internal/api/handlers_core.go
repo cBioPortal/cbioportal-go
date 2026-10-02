@@ -157,7 +157,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 			order += " DESC"
 		}
 	}
-	rows, err := ch.Query[studyRow](s.CH, fmt.Sprintf("%s WHERE %s ORDER BY %s", studySelect, where, order))
+	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", studySelect, where, order))
 	if err != nil {
 		fail(w, err)
 		return
@@ -188,7 +188,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) study(w http.ResponseWriter, r *http.Request) {
 	sql := fmt.Sprintf("%s WHERE c.study_id = '%s'", studySelect, sqlLit(r.PathValue("studyId")))
-	rows, err := ch.Query[studyRow](s.CH, sql)
+	rows, err := cachedQuery[studyRow](s, sql)
 	if err != nil {
 		fail(w, err)
 		return
@@ -208,7 +208,7 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sql := fmt.Sprintf("%s WHERE c.study_id IN (%s) ORDER BY c.study_id", studySelect, inList(ids))
-	rows, err := ch.Query[studyRow](s.CH, sql)
+	rows, err := cachedQuery[studyRow](s, sql)
 	if err != nil {
 		fail(w, err)
 		return
@@ -237,15 +237,6 @@ type Sample struct {
 	CopyNumberSegmentPresent bool   `json:"copyNumberSegmentPresent"`
 	UniqueSampleKey          string `json:"uniqueSampleKey"`
 	UniquePatientKey         string `json:"uniquePatientKey"`
-}
-
-func (s *State) idSet(sql string) map[string]bool {
-	rows, _ := ch.Query[idRow](s.CH, sql)
-	set := map[string]bool{}
-	for _, r := range rows {
-		set[r.SampleID] = true
-	}
-	return set
 }
 
 func (s *State) samples(w http.ResponseWriter, r *http.Request) {
@@ -416,7 +407,7 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 	for i, st := range studies {
 		ids[i] = st.StudyID
 	}
-	rows, err := ch.Query[ResourceCount](s.CH, fmt.Sprintf(
+	rows, err := cachedQuery[ResourceCount](s, fmt.Sprintf(
 		"SELECT rd.resource_id AS resourceId, any(rd.display_name) AS displayName, any(rd.description) AS description, "+
 			"any(rd.resource_type) AS resourceType, toString(any(rd.priority)) AS priority, toBool(any(rd.open_by_default) = 1) AS openByDefault, "+
 			"rd.study_id AS cancerStudyIdentifier, ifNull(any(rd.custom_metadata), '') AS customMetaData, "+

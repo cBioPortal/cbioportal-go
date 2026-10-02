@@ -17,22 +17,56 @@ type Client struct {
 	baseURL  string
 	database string
 	http     *http.Client
+	// aliases rewrites references to the default staging and reference
+	// databases (cbioportal_raw., 'cbioportal_raw', ...) in SQL text.
+	aliases *strings.Replacer
+}
+
+// SetDatabaseAliases points SQL that names the default staging/reference
+// databases at other ones (empty keeps the default).
+func (c *Client) SetDatabaseAliases(rawDB, refDB string) {
+	var pairs []string
+	if rawDB != "" && rawDB != "cbioportal_raw" {
+		pairs = append(pairs, "cbioportal_raw.", rawDB+".", "'cbioportal_raw'", "'"+rawDB+"'")
+	}
+	if refDB != "" && refDB != "cbioportal_ref" {
+		pairs = append(pairs, "cbioportal_ref.", refDB+".", "'cbioportal_ref'", "'"+refDB+"'")
+	}
+	if len(pairs) > 0 {
+		c.aliases = strings.NewReplacer(pairs...)
+	}
+}
+
+func (c *Client) rewrite(sql string) string {
+	if c.aliases == nil {
+		return sql
+	}
+	return c.aliases.Replace(sql)
 }
 
 func New(baseURL, database string) *Client {
 	return &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		database: database,
-		http:     &http.Client{Timeout: time.Hour},
+		http:     &http.Client{Timeout: time.Hour, Transport: transport},
 	}
 }
+
+// transport keeps enough idle connections for a page's burst of parallel API
+// requests, each issuing several queries, to reuse them.
+var transport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 256
+	t.MaxIdleConnsPerHost = 256
+	return t
+}()
 
 func (c *Client) Database() string { return c.database }
 
 // Execute runs a statement/query against the client's database and returns the
 // text response. Used for DDL and small scalar reads.
 func (c *Client) Execute(sql string) (string, error) {
-	return c.post(url.Values{"database": {c.database}}, strings.NewReader(sql))
+	return c.post(url.Values{"database": {c.database}}, strings.NewReader(c.rewrite(sql)))
 }
 
 // ExecuteServerwide runs a statement without selecting a database (for CREATE
@@ -45,8 +79,8 @@ func (c *Client) ExecuteServerwide(sql string) (string, error) {
 // the input format, e.g. `… FROM input('a String') FORMAT TabSeparatedRaw`.
 func (c *Client) InsertStream(insertSQL string, body io.Reader) error {
 	q := url.Values{
-		"database":                                  {c.database},
-		"query":                                     {insertSQL},
+		"database": {c.database},
+		"query":    {insertSQL},
 		"input_format_tsv_allow_variable_number_of_columns": {"1"},
 	}
 	_, err := c.post(q, body)
@@ -54,10 +88,7 @@ func (c *Client) InsertStream(insertSQL string, body io.Reader) error {
 }
 
 func (c *Client) post(query url.Values, body io.Reader) (string, error) {
-	u := c.baseURL
-	if len(query) > 0 {
-		u += "/?" + query.Encode()
-	}
+	u := c.baseURL + "/?" + withSessionSettings(query).Encode()
 	req, err := http.NewRequest(http.MethodPost, u, body)
 	if err != nil {
 		return "", err
@@ -73,6 +104,19 @@ func (c *Client) post(query url.Values, body io.Reader) (string, error) {
 		return "", fmt.Errorf("clickhouse HTTP %d %s: %s", resp.StatusCode, head, string(out))
 	}
 	return string(out), nil
+}
+
+// withSessionSettings adds the settings every request runs with. Queries can
+// embed id lists for a whole study (tens of thousands of samples), well past
+// ClickHouse's default 256 KiB max_query_size.
+func withSessionSettings(query url.Values) url.Values {
+	if query == nil {
+		query = url.Values{}
+	}
+	if query.Get("max_query_size") == "" {
+		query.Set("max_query_size", "268435456")
+	}
+	return query
 }
 
 func insertSQLHead(q string) string {

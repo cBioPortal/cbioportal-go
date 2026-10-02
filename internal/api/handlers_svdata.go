@@ -267,7 +267,7 @@ func (s *State) resolvePanelProfiles(ids []string) map[string]panelProfile {
 	if len(ids) == 0 {
 		return out
 	}
-	rows, _ := ch.Query[panelProfile](s.CH, fmt.Sprintf(
+	rows, _ := cachedQuery[panelProfile](s, fmt.Sprintf(
 		"SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, profile_stable_id AS stableId "+
 			"FROM molecular_profile WHERE molecular_profile_id IN (%s)", inList(ids)))
 	for _, r := range rows {
@@ -347,7 +347,7 @@ func (s *State) studySampleIDs(study string) []string {
 	type sr struct {
 		SampleID string `json:"sampleId"`
 	}
-	rows, _ := ch.Query[sr](s.CH, fmt.Sprintf(
+	rows, _ := cachedQuery[sr](s, fmt.Sprintf(
 		"SELECT sample_id AS sampleId FROM sample WHERE study_id = '%s' ORDER BY sample_id", sqlLit(study)))
 	out := make([]string, len(rows))
 	for i, r := range rows {

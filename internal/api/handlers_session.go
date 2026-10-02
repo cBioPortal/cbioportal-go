@@ -802,7 +802,7 @@ func (s *State) studyExists(id string) (bool, error) {
 	type countRow struct {
 		N uint64 `json:"n"`
 	}
-	rows, err := ch.Query[countRow](s.CH, fmt.Sprintf(
+	rows, err := cachedQuery[countRow](s, fmt.Sprintf(
 		"SELECT count() AS n FROM cancer_study WHERE study_id = '%s'", sqlLit(id)))
 	if err != nil {
 		return false, err

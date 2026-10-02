@@ -211,136 +211,72 @@ func coexpSampleFilter(f coExpressionFilter) string {
 
 // ---------- clinical value resolution (shared by density + violin) ----------
 
-// scopedSample is one sample in the study-view scope.
-type scopedSample struct {
-	StudyID   string `json:"studyId"`
-	SampleID  string `json:"sampleId"`
-	PatientID string `json:"patientId"`
+// scopedAttrRow is one scoped sample with the raw sample- and patient-level
+// values (nil when absent) of two clinical attributes A and B.
+type scopedAttrRow struct {
+	StudyID  string  `json:"studyId"`
+	SampleID string  `json:"sampleId"`
+	SampleA  *string `json:"sa"`
+	PatientA *string `json:"pa"`
+	SampleB  *string `json:"sb"`
+	PatientB *string `json:"pb"`
 }
 
-func (s *State) scopedSamples(f studyViewFilter) []scopedSample {
-	rows, _ := ch.Query[scopedSample](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE %s",
-		s.sampleScope(f)))
+// scopedAttrPairs joins, inside ClickHouse, every sample in the study-view
+// scope to its sample- and patient-level values of attributes A and B, and
+// returns only the samples that have some value for both, ordered by study and
+// sample id. Precedence between the two levels is resolved by the caller.
+func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scopedAttrRow {
+	if attrA == "" || attrB == "" {
+		return nil
+	}
+	studyClause := ""
+	if studies := f.studyIDs(); len(studies) > 0 {
+		studyClause = fmt.Sprintf(" AND study_id IN (%s)", inList(studies))
+	}
+	attr := func(view, keyCol, attrID string) string {
+		return fmt.Sprintf("(SELECT study_id, %s, toNullable(attr_value) AS v FROM %s WHERE attr_id = '%s'%s)",
+			keyCol, view, sqlLit(attrID), studyClause)
+	}
+	rows, _ := ch.Query[scopedAttrRow](s.CH, fmt.Sprintf(
+		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, sa.v AS sa, pa.v AS pa, sb.v AS sb, pb.v AS pb "+
+			"FROM (SELECT study_id, sample_id, patient_id FROM sample WHERE %s) AS s "+
+			"LEFT JOIN %s AS sa ON sa.study_id = s.study_id AND sa.sample_id = s.sample_id "+
+			"LEFT JOIN %s AS pa ON pa.study_id = s.study_id AND pa.patient_id = s.patient_id "+
+			"LEFT JOIN %s AS sb ON sb.study_id = s.study_id AND sb.sample_id = s.sample_id "+
+			"LEFT JOIN %s AS pb ON pb.study_id = s.study_id AND pb.patient_id = s.patient_id "+
+			"WHERE (sa IS NOT NULL OR pa IS NOT NULL) AND (sb IS NOT NULL OR pb IS NOT NULL) "+
+			"ORDER BY studyId, sampleId",
+		s.sampleScope(f),
+		attr("clinical_sample", "sample_id", attrA), attr("clinical_patient", "patient_id", attrA),
+		attr("clinical_sample", "sample_id", attrB), attr("clinical_patient", "patient_id", attrB)))
 	return rows
 }
 
-// attrValuesBySample resolves a clinical attribute to a per-sample numeric value
-// over the scoped samples, checking both sample- and patient-level clinical data.
-// Keys are studyId+"\x00"+sampleId.
-func (s *State) attrValuesBySample(samples []scopedSample, attrID string) map[string]float64 {
-	out := map[string]float64{}
-	if attrID == "" || len(samples) == 0 {
-		return out
-	}
-	sampleKeys := map[string]bool{}
-	studySet := map[string]bool{}
-	patientToSamples := map[string][]scopedSample{}
-	for _, sm := range samples {
-		sampleKeys[sm.StudyID+"\x00"+sm.SampleID] = true
-		studySet[sm.StudyID] = true
-		pk := sm.StudyID + "\x00" + sm.PatientID
-		patientToSamples[pk] = append(patientToSamples[pk], sm)
-	}
-	studies := make([]string, 0, len(studySet))
-	for st := range studySet {
-		studies = append(studies, st)
-	}
-
-	type sampleRow struct {
-		StudyID  string `json:"studyId"`
-		SampleID string `json:"sampleId"`
-		Value    string `json:"attr_value"`
-	}
-	sRows, _ := ch.Query[sampleRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS sampleId, attr_value FROM clinical_sample "+
-			"WHERE study_id IN (%s) AND attr_id = '%s'", inList(studies), sqlLit(attrID)))
-	for _, r := range sRows {
-		key := r.StudyID + "\x00" + r.SampleID
-		if !sampleKeys[key] {
+// clinicalNumber resolves a sample's numeric attribute value: the sample-level
+// value when it parses as a number, else the patient-level one.
+func clinicalNumber(sampleVal, patientVal *string) (float64, bool) {
+	for _, v := range []*string{sampleVal, patientVal} {
+		if v == nil {
 			continue
 		}
-		if v, e := strconv.ParseFloat(r.Value, 64); e == nil {
-			out[key] = v
+		if f, err := strconv.ParseFloat(*v, 64); err == nil {
+			return f, true
 		}
 	}
-
-	type patientRow struct {
-		StudyID   string `json:"studyId"`
-		PatientID string `json:"patientId"`
-		Value     string `json:"attr_value"`
-	}
-	pRows, _ := ch.Query[patientRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS patientId, attr_value FROM clinical_patient "+
-			"WHERE study_id IN (%s) AND attr_id = '%s'", inList(studies), sqlLit(attrID)))
-	for _, r := range pRows {
-		v, e := strconv.ParseFloat(r.Value, 64)
-		if e != nil {
-			continue
-		}
-		for _, sm := range patientToSamples[r.StudyID+"\x00"+r.PatientID] {
-			key := sm.StudyID + "\x00" + sm.SampleID
-			if _, seen := out[key]; !seen { // sample-level takes precedence
-				out[key] = v
-			}
-		}
-	}
-	return out
+	return 0, false
 }
 
-// attrCategoriesBySample resolves a clinical attribute to a per-sample string
-// category over the scoped samples (sample- and patient-level).
-func (s *State) attrCategoriesBySample(samples []scopedSample, attrID string) map[string]string {
-	out := map[string]string{}
-	if attrID == "" || len(samples) == 0 {
-		return out
+// clinicalCategory resolves a sample's categorical attribute value: the
+// sample-level value when present, else the patient-level one.
+func clinicalCategory(sampleVal, patientVal *string) (string, bool) {
+	if sampleVal != nil {
+		return *sampleVal, true
 	}
-	sampleKeys := map[string]bool{}
-	studySet := map[string]bool{}
-	patientToSamples := map[string][]scopedSample{}
-	for _, sm := range samples {
-		sampleKeys[sm.StudyID+"\x00"+sm.SampleID] = true
-		studySet[sm.StudyID] = true
-		pk := sm.StudyID + "\x00" + sm.PatientID
-		patientToSamples[pk] = append(patientToSamples[pk], sm)
+	if patientVal != nil {
+		return *patientVal, true
 	}
-	studies := make([]string, 0, len(studySet))
-	for st := range studySet {
-		studies = append(studies, st)
-	}
-
-	type sampleRow struct {
-		StudyID  string `json:"studyId"`
-		SampleID string `json:"sampleId"`
-		Value    string `json:"attr_value"`
-	}
-	sRows, _ := ch.Query[sampleRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS sampleId, attr_value FROM clinical_sample "+
-			"WHERE study_id IN (%s) AND attr_id = '%s'", inList(studies), sqlLit(attrID)))
-	for _, r := range sRows {
-		key := r.StudyID + "\x00" + r.SampleID
-		if sampleKeys[key] {
-			out[key] = r.Value
-		}
-	}
-
-	type patientRow struct {
-		StudyID   string `json:"studyId"`
-		PatientID string `json:"patientId"`
-		Value     string `json:"attr_value"`
-	}
-	pRows, _ := ch.Query[patientRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS patientId, attr_value FROM clinical_patient "+
-			"WHERE study_id IN (%s) AND attr_id = '%s'", inList(studies), sqlLit(attrID)))
-	for _, r := range pRows {
-		for _, sm := range patientToSamples[r.StudyID+"\x00"+r.PatientID] {
-			key := sm.StudyID + "\x00" + sm.SampleID
-			if _, seen := out[key]; !seen {
-				out[key] = r.Value
-			}
-		}
-	}
-	return out
+	return "", false
 }
 
 // ---------- 2. clinical data density plot ----------
@@ -370,16 +306,15 @@ func queryFloat(r *http.Request, name string) (float64, bool) {
 	return 0, false
 }
 
-// logScaleValues maps every value to ln(1 + v) when the boolean query param
-// is true and the attribute is MUTATION_COUNT, the only attribute the Java
-// backend log-scales in density and violin plots.
-func logScaleValues(r *http.Request, param, attrID string, vals map[string]float64) {
+// logScale returns the value mapping of a plot axis: ln(1 + v) when the
+// boolean query param is true and the attribute is MUTATION_COUNT, the only
+// attribute the Java backend log-scales in density and violin plots, else the
+// identity.
+func logScale(r *http.Request, param, attrID string) func(float64) float64 {
 	if !strings.EqualFold(r.URL.Query().Get(param), "true") || attrID != "MUTATION_COUNT" {
-		return
+		return func(v float64) float64 { return v }
 	}
-	for k, v := range vals {
-		vals[k] = math.Log(1 + v)
-	}
+	return func(v float64) float64 { return math.Log(1 + v) }
 }
 
 func queryIntDefault(r *http.Request, name string, def int) int {
@@ -402,17 +337,15 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 
 	result := DensityPlotData{Bins: []DensityPlotBin{}}
 
-	samples := s.scopedSamples(f)
-	xVals := s.attrValuesBySample(samples, xAttr)
-	yVals := s.attrValuesBySample(samples, yAttr)
-	logScaleValues(r, "xAxisLogScale", xAttr, xVals)
-	logScaleValues(r, "yAxisLogScale", yAttr, yVals)
-
+	xScale := logScale(r, "xAxisLogScale", xAttr)
+	yScale := logScale(r, "yAxisLogScale", yAttr)
 	var xs, ys []float64
-	for key, xv := range xVals {
-		if yv, ok := yVals[key]; ok {
-			xs = append(xs, xv)
-			ys = append(ys, yv)
+	for _, row := range s.scopedAttrPairs(f, xAttr, yAttr) {
+		xv, okX := clinicalNumber(row.SampleA, row.PatientA)
+		yv, okY := clinicalNumber(row.SampleB, row.PatientB)
+		if okX && okY {
+			xs = append(xs, xScale(xv))
+			ys = append(ys, yScale(yv))
 		}
 	}
 	if len(xs) == 0 {
@@ -544,27 +477,18 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 
 	result := ClinicalViolinPlotData{Rows: []ClinicalViolinPlotRowData{}}
 
-	samples := s.scopedSamples(f)
-	numVals := s.attrValuesBySample(samples, numAttr)
-	logScaleValues(r, "logScale", numAttr, numVals)
-	catVals := s.attrCategoriesBySample(samples, catAttr)
-
-	sampleByKey := map[string]scopedSample{}
-	for _, sm := range samples {
-		sampleByKey[sm.StudyID+"\x00"+sm.SampleID] = sm
-	}
-
+	scale := logScale(r, "logScale", numAttr)
 	type point struct {
-		sm  scopedSample
-		val float64
+		studyID, sampleID string
+		val               float64
 	}
 	byCategory := map[string][]point{}
-	for key, v := range numVals {
-		cat, ok := catVals[key]
-		if !ok {
-			continue
+	for _, row := range s.scopedAttrPairs(f, numAttr, catAttr) {
+		v, okV := clinicalNumber(row.SampleA, row.PatientA)
+		cat, okC := clinicalCategory(row.SampleB, row.PatientB)
+		if okV && okC {
+			byCategory[cat] = append(byCategory[cat], point{studyID: row.StudyID, sampleID: row.SampleID, val: scale(v)})
 		}
-		byCategory[cat] = append(byCategory[cat], point{sm: sampleByKey[key], val: v})
 	}
 	if len(byCategory) == 0 {
 		writeJSON(w, result)
@@ -684,7 +608,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		}
 		for _, d := range pointsToRender {
 			row.IndividualPoints = append(row.IndividualPoints, ClinicalViolinPlotIndividualPoint{
-				SampleID: d.sm.SampleID, StudyID: d.sm.StudyID, Value: d.val,
+				SampleID: d.sampleID, StudyID: d.studyID, Value: d.val,
 			})
 		}
 		result.Rows = append(result.Rows, row)

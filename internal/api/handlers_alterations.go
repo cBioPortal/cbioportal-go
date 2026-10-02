@@ -258,10 +258,11 @@ func (s *State) populateProfiled(f studyViewFilter, filtered, alterationType str
 		N    uint64 `json:"n"`
 	}
 	panelCounts, _ := ch.Query[geneCount](s.CH, fmt.Sprintf(
-		"SELECT gptg.gene AS gene, count() AS n FROM sample_to_gene_panel_derived stgp "+
-			"INNER JOIN gene_panel_to_gene_derived gptg ON stgp.gene_panel_id = gptg.gene_panel_id "+
-			"WHERE stgp.alteration_type = '%s' AND stgp.gene_panel_id != 'WES' AND stgp.genetic_profile_id IN (%s) "+
-			"AND stgp.sample_unique_id IN (%s) GROUP BY gptg.gene",
+		"SELECT gptg.gene AS gene, sum(p.n) AS n FROM ("+
+			"SELECT gene_panel_id, count() AS n FROM sample_to_gene_panel_derived "+
+			"WHERE alteration_type = '%s' AND gene_panel_id != 'WES' AND genetic_profile_id IN (%s) "+
+			"AND sample_unique_id IN (%s) GROUP BY gene_panel_id) p "+
+			"INNER JOIN gene_panel_to_gene_derived gptg ON p.gene_panel_id = gptg.gene_panel_id GROUP BY gptg.gene",
 		alterationType, orEmpty(profileIDs), filtered))
 	profiled := map[string]uint64{}
 	for _, c := range panelCounts {

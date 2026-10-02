@@ -29,6 +29,19 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	hasRef := strings.TrimSpace(hasRefText) != "0" && strings.TrimSpace(hasRefText) != ""
 
 	var created []string
+	engineOf := func(name string) string {
+		engine, _ := c.Execute(fmt.Sprintf(
+			"SELECT engine FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated", targetDB, name))
+		return strings.TrimSpace(engine)
+	}
+	// Snapshots from a previous run are dropped so the views can be rebuilt.
+	for _, m := range snapshotted {
+		if e := engineOf(m.name); e != "" && e != "View" {
+			if _, err := c.Execute(fmt.Sprintf("DROP TABLE `%s`.`%s`", targetDB, m.name)); err != nil {
+				return nil, err
+			}
+		}
+	}
 	make := func(name, sel string) error {
 		if _, err := c.Execute(fmt.Sprintf("CREATE OR REPLACE VIEW `%s`.`%s` AS %s", targetDB, name, sel)); err != nil {
 			return fmt.Errorf("creating view %s: %w", name, err)
@@ -40,9 +53,7 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	// materialize builds a table (atomically replaced) instead of a view, for
 	// the derived tables the API reads on every request — as prod does.
 	materialize := func(name, sel string) error {
-		engine, _ := c.Execute(fmt.Sprintf(
-			"SELECT engine FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated", targetDB, name))
-		if strings.TrimSpace(engine) == "View" {
+		if engineOf(name) == "View" {
 			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, name)); err != nil {
 				return err
 			}
@@ -261,6 +272,18 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		}
 	}
 
+	// The base views the API filters per request are snapshotted into tables
+	// once every view and derived table reading them has been built; views
+	// keep resolving them by name.
+	for _, m := range snapshotted {
+		if engineOf(m.name) != "View" {
+			continue
+		}
+		if err := snapshotView(c, targetDB, m.name, m.key); err != nil {
+			return nil, err
+		}
+	}
+
 	var counts []ViewCount
 	for _, v := range created {
 		text, _ := c.Execute(fmt.Sprintf("SELECT count() FROM `%s`.`%s` FORMAT TabSeparated", targetDB, v))
@@ -269,6 +292,32 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		counts = append(counts, ViewCount{Name: v, Rows: n})
 	}
 	return counts, nil
+}
+
+// snapshotted lists the views Apply turns into tables, with their sort keys.
+var snapshotted = []struct{ name, key string }{
+	{"clinical_attribute_meta", "(study_id, clinical_attribute_id)"},
+	{"clinical_sample", "(study_id, sample_id, attr_id)"},
+	{"clinical_patient", "(study_id, patient_id, attr_id)"},
+	{"mutation", "(study_id, molecular_profile_id, sample_id)"},
+	{"cna", "(study_id, profile_stable_id, sample_id)"},
+	{"structural_variant", "(study_id, profile_stable_id, sample_id)"},
+}
+
+// snapshotView replaces a view with a MergeTree table holding its rows.
+func snapshotView(c *ch.Client, db, name, orderBy string) error {
+	tmp := "__snapshot_" + name
+	stmts := []string{
+		fmt.Sprintf("CREATE OR REPLACE TABLE `%[1]s`.`%[2]s` ENGINE = MergeTree ORDER BY %[3]s AS SELECT * FROM `%[1]s`.`%[4]s`", db, tmp, orderBy, name),
+		fmt.Sprintf("DROP VIEW `%s`.`%s`", db, name),
+		fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, tmp, name),
+	}
+	for _, q := range stmts {
+		if _, err := c.Execute(q); err != nil {
+			return fmt.Errorf("materializing %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 // namespaceColumnsExpr builds a ClickHouse expression that assembles the nested

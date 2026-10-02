@@ -75,41 +75,27 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Resolve each group's samples (with patient ids) and collect study scope.
-	type groupScope struct {
-		samplePairs  [][2]string
-		patientPairs [][2]string
-	}
-	groups := make([]groupScope, len(f.Groups))
-	studySet := map[string]bool{}
+	// Each group's samples as a predicate over the sample view. Every query
+	// below spells each group's sample list once (as the group_samples CTE) and
+	// resolves the groups' samples and patients inside ClickHouse.
+	var groupSelects []string
 	for gi, g := range f.Groups {
-		samples := s.scopedSamples(studyViewFilter{SampleIdentifiers: g.SampleIdentifiers})
-		seenPatient := map[string]bool{}
-		for _, sm := range samples {
-			studySet[sm.StudyID] = true
-			groups[gi].samplePairs = append(groups[gi].samplePairs, [2]string{sm.StudyID, sm.SampleID})
-			pk := sm.StudyID + "\x00" + sm.PatientID
-			if !seenPatient[pk] {
-				seenPatient[pk] = true
-				groups[gi].patientPairs = append(groups[gi].patientPairs, [2]string{sm.StudyID, sm.PatientID})
-			}
-		}
+		groupSelects = append(groupSelects, fmt.Sprintf(
+			"SELECT toUInt32(%d) AS grp, study_id, sample_id, patient_id FROM sample WHERE %s",
+			gi, compactSampleScope(g.SampleIdentifiers)))
 	}
-
-	studyIDs := make([]string, 0, len(studySet))
-	for id := range studySet {
-		studyIDs = append(studyIDs, id)
-	}
-	if len(studyIDs) == 0 {
-		writeJSON(w, out)
-		return
-	}
+	withGroups := "WITH group_samples AS (" + strings.Join(groupSelects, " UNION ALL ") + ") "
 
 	// Load attribute metadata for the involved studies (dedup by attribute id).
-	attrRows, _ := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
-			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN (%s)",
-		inList(studyIDs)))
+	attrRows, err := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
+		"%sSELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
+			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta "+
+			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples)",
+		withGroups))
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	attrs := map[string]enrichAttr{}
 	var attrOrder []string
 	for _, a := range attrRows {
@@ -134,6 +120,10 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			patient: a.PatientFlag != 0,
 		}
 	}
+	if len(attrOrder) == 0 {
+		writeJSON(w, out)
+		return
+	}
 	sort.Strings(attrOrder)
 
 	var numSample, numPatient, catSample, catPatient []string
@@ -151,85 +141,98 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	// Per-group aggregation, pushed into ClickHouse.
-	type numRow struct {
-		AttrID string    `json:"attr_id"`
-		Vals   []float64 `json:"vals"`
+	// groupValues selects (attr_id, grp, v) for the given sample- and
+	// patient-level attributes over every group's samples, counting a
+	// patient-level value once per patient and group. valueOf renders the value
+	// (and cond the row filter) for an attr_value column. It reads the
+	// group_samples CTE once, so ClickHouse builds the groups' sample sets once.
+	groupValues := func(valueOf, cond func(col string) string, sampleIDs, patientIDs []string) string {
+		var parts []string
+		if len(sampleIDs) > 0 {
+			parts = append(parts, fmt.Sprintf(
+				"SELECT study_id, sample_id, attr_id, %s AS v, sample_id AS k FROM clinical_sample WHERE attr_id IN (%s) AND %s",
+				valueOf("attr_value"), inList(sampleIDs), cond("attr_value")))
+		}
+		if len(patientIDs) > 0 {
+			parts = append(parts, fmt.Sprintf(
+				"SELECT s.study_id, s.sample_id, c.attr_id, %s, c.patient_id FROM clinical_patient c "+
+					"INNER JOIN sample s ON s.study_id = c.study_id AND s.patient_id = c.patient_id WHERE c.attr_id IN (%s) AND %s",
+				valueOf("c.attr_value"), inList(patientIDs), cond("c.attr_value")))
+		}
+		return fmt.Sprintf(
+			"SELECT attr_id, grp, v FROM (SELECT c.attr_id AS attr_id, g.grp AS grp, c.v AS v, c.study_id AS st, c.k AS k "+
+				"FROM group_samples g INNER JOIN (%s) c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
+				"LIMIT 1 BY grp, attr_id, st, k)", strings.Join(parts, " UNION ALL "))
 	}
+
+	// Numeric attributes: per attribute and group, the number of values and the
+	// sum of their tie-averaged ranks among all groups' values, plus the number
+	// of distinct values, computed in ClickHouse.
+	numRanks := map[string][]groupRankRow{}
+	if len(numSample)+len(numPatient) > 0 {
+		rows, err := ch.Query[groupRankRow](s.CH, fmt.Sprintf(
+			"%sSELECT attr_id, grp, count() AS n, sum(r) AS rs, any(nd) AS nd FROM ("+
+				"SELECT attr_id, grp, rank() OVER (PARTITION BY attr_id ORDER BY v) + (count() OVER (PARTITION BY attr_id, v) - 1) / 2 AS r, "+
+				"uniqExact(v) OVER (PARTITION BY attr_id) AS nd FROM (%s)"+
+				") GROUP BY attr_id, grp ORDER BY attr_id, grp",
+			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
+				func(col string) string { return "toFloat64OrNull(" + col + ") IS NOT NULL" }, numSample, numPatient)))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		for _, rw := range rows {
+			numRanks[rw.AttrID] = append(numRanks[rw.AttrID], rw)
+		}
+	}
+
+	// Categorical attributes: per attribute, group and value, the case count.
 	type catRow struct {
 		AttrID string `json:"attr_id"`
+		Grp    uint32 `json:"grp"`
 		Value  string `json:"value"`
 		C      uint64 `json:"c"`
 	}
-	numericData := make([]map[string][]float64, len(f.Groups))     // group -> attr -> values
 	catData := make([]map[string]map[string]uint64, len(f.Groups)) // group -> attr -> value -> count
 	for gi := range f.Groups {
-		numericData[gi] = map[string][]float64{}
 		catData[gi] = map[string]map[string]uint64{}
-
-		fetchNum := func(view, keyCol string, pairs [][2]string, ids []string) {
-			if len(ids) == 0 || len(pairs) == 0 {
-				return
-			}
-			rows, _ := ch.Query[numRow](s.CH, fmt.Sprintf(
-				"SELECT attr_id, groupArray(toFloat64(attr_value)) AS vals FROM %s "+
-					"WHERE (study_id, %s) IN (%s) AND attr_id IN (%s) AND toFloat64OrNull(attr_value) IS NOT NULL "+
-					"GROUP BY attr_id", view, keyCol, tupleIn(pairs), inList(ids)))
-			for _, rw := range rows {
-				numericData[gi][rw.AttrID] = rw.Vals
-			}
+	}
+	if len(catSample)+len(catPatient) > 0 {
+		rows, err := ch.Query[catRow](s.CH, fmt.Sprintf(
+			"%sSELECT attr_id, grp, v AS value, count() AS c FROM (%s) GROUP BY attr_id, grp, v",
+			withGroups, groupValues(func(col string) string { return col }, naFilter, catSample, catPatient)))
+		if err != nil {
+			fail(w, err)
+			return
 		}
-		fetchCat := func(view, keyCol string, pairs [][2]string, ids []string) {
-			if len(ids) == 0 || len(pairs) == 0 {
-				return
+		for _, rw := range rows {
+			m := catData[rw.Grp]
+			if m[rw.AttrID] == nil {
+				m[rw.AttrID] = map[string]uint64{}
 			}
-			rows, _ := ch.Query[catRow](s.CH, fmt.Sprintf(
-				"SELECT attr_id, attr_value AS value, count() AS c FROM %s "+
-					"WHERE (study_id, %s) IN (%s) AND attr_id IN (%s) AND %s "+
-					"GROUP BY attr_id, attr_value", view, keyCol, tupleIn(pairs), inList(ids), naFilter("attr_value")))
-			for _, rw := range rows {
-				if catData[gi][rw.AttrID] == nil {
-					catData[gi][rw.AttrID] = map[string]uint64{}
-				}
-				catData[gi][rw.AttrID][rw.Value] = rw.C
-			}
+			m[rw.AttrID][rw.Value] = rw.C
 		}
-
-		fetchNum("clinical_sample", "sample_id", groups[gi].samplePairs, numSample)
-		fetchNum("clinical_patient", "patient_id", groups[gi].patientPairs, numPatient)
-		fetchCat("clinical_sample", "sample_id", groups[gi].samplePairs, catSample)
-		fetchCat("clinical_patient", "patient_id", groups[gi].patientPairs, catPatient)
 	}
 
 	// Numeric attributes: Kruskal-Wallis (Wilcoxon for exactly 2 groups with data).
 	for _, id := range append(append([]string{}, numSample...), numPatient...) {
-		var perGroup [][]float64
-		distinct := map[float64]bool{}
-		for gi := range f.Groups {
-			vals := numericData[gi][id]
-			if len(vals) > 0 {
-				perGroup = append(perGroup, vals)
-				for _, v := range vals {
-					distinct[v] = true
-				}
-			}
-		}
-		if len(perGroup) < 2 || len(distinct) < 2 {
+		groupRanks := numRanks[id]
+		if len(groupRanks) < 2 || groupRanks[0].Distinct < 2 {
 			continue
 		}
-		p := stats.KruskalWallisTest(perGroup)
+		p := kruskalWallisFromRanks(groupRanks)
 		if math.IsNaN(p) {
 			continue
 		}
 		method := "Kruskal Wallis Test"
-		if len(perGroup) == 2 {
+		if len(groupRanks) == 2 {
 			method = "Wilcoxon Test"
 		}
 		out = append(out, ClinicalDataEnrichment{
 			ClinicalAttribute: attrs[id].attr,
 			Method:            method,
 			PValue:            p,
-			Score:             invChiSquare(p, len(perGroup)-1),
+			Score:             invChiSquare(p, len(groupRanks)-1),
 		})
 	}
 
@@ -296,6 +299,72 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, out)
+}
+
+// compactSampleScope is a predicate over the sample view selecting the given
+// samples, written per study as sample_id IN (...) to keep large groups well
+// under ClickHouse's max_query_size.
+func compactSampleScope(ids []identifier) string {
+	byStudy := map[string][]string{}
+	for _, id := range ids {
+		byStudy[id.StudyID] = append(byStudy[id.StudyID], id.id())
+	}
+	if len(byStudy) == 0 {
+		return falseClause
+	}
+	var ors []string
+	for _, st := range sortedKeys(byStudy) {
+		ors = append(ors, fmt.Sprintf("(study_id = '%s' AND sample_id IN (%s))", sqlLit(st), inList(byStudy[st])))
+	}
+	return strings.Join(ors, " OR ")
+}
+
+// groupRankRow is one numeric attribute's values within one group: their
+// count, the sum of their tie-averaged ranks among all groups' values, and the
+// number of distinct values across all groups.
+type groupRankRow struct {
+	AttrID   string  `json:"attr_id"`
+	Grp      uint32  `json:"grp"`
+	N        uint64  `json:"n"`
+	RankSum  float64 `json:"rs"`
+	Distinct uint64  `json:"nd"`
+}
+
+// kruskalWallisFromRanks is stats.KruskalWallisTest computed from the
+// non-empty groups' value counts and rank sums, in group order:
+// H = 12/(N(N+1)) * sum(R_i^2/n_i) - 3(N+1), tested against chi-square with
+// k-1 degrees of freedom. Rank sums of tie-averaged ranks are exact in float64,
+// so the result is bit-identical to ranking the raw values.
+func kruskalWallisFromRanks(groups []groupRankRow) float64 {
+	k := len(groups)
+	if k < 2 {
+		return 1.0
+	}
+	var n uint64
+	for _, g := range groups {
+		n += g.N
+	}
+	if n < 2 {
+		return 1.0
+	}
+	N := float64(n)
+	h := 0.0
+	for _, g := range groups {
+		ni := float64(g.N)
+		if ni == 0 {
+			continue
+		}
+		h += (g.RankSum * g.RankSum) / ni
+	}
+	h = (12.0/(N*(N+1)))*h - 3.0*(N+1)
+	if math.IsNaN(h) || h < 0 {
+		return 1.0
+	}
+	pValue := 1.0 - stats.ChiSquareCDF(h, float64(k-1))
+	if math.IsNaN(pValue) {
+		return 1.0
+	}
+	return pValue
 }
 
 // invChiSquare returns the chi-square statistic whose upper-tail probability
