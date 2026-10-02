@@ -51,24 +51,41 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	filtered := s.filterSQL(svf)
 	out := []GenomicDataCountItem{}
 	if summary {
+		if len(f.GenomicDataFilters) == 0 {
+			writeJSON(w, out)
+			return
+		}
 		total := s.scopeSampleCount(svf)
+		genes := make([]string, len(f.GenomicDataFilters))
+		for i, g := range f.GenomicDataFilters {
+			genes[i] = g.HugoGeneSymbol
+		}
 		type countsRow struct {
+			Gene     string `json:"gene"`
 			Mutated  uint64 `json:"mutated"`
 			Profiled uint64 `json:"profiled"`
 		}
+		rows, err := ch.Query[countsRow](s.CH, fmt.Sprintf(
+			"WITH scope AS (%[1]s) SELECT gene, sum(m) AS mutated, sum(p) AS profiled FROM ("+
+				"SELECT hugo_gene_symbol AS gene, uniqExact(sample_unique_id) AS m, toUInt64(0) AS p FROM genomic_event_derived "+
+				"WHERE sample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN (%[2]s) "+
+				"AND variant_type = 'mutation' GROUP BY gene "+
+				"UNION ALL SELECT gpg.gene AS gene, toUInt64(0) AS m, uniqExact(sgp.sample_unique_id) AS p FROM sample_to_gene_panel_derived sgp "+
+				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
+				"WHERE sgp.sample_unique_id IN (SELECT sample_unique_id FROM scope) AND gpg.gene IN (%[2]s) "+
+				"AND sgp.alteration_type = 'MUTATION_EXTENDED' GROUP BY gene"+
+				") GROUP BY gene",
+			filtered, inList(genes)))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		byGene := make(map[string]countsRow, len(rows))
+		for _, r := range rows {
+			byGene[r.Gene] = r
+		}
 		for _, g := range f.GenomicDataFilters {
-			gene := sqlLit(g.HugoGeneSymbol)
-			rows, err := ch.Query[countsRow](s.CH, fmt.Sprintf(
-				"SELECT (SELECT uniqExact(sample_unique_id) FROM genomic_event_derived WHERE sample_unique_id IN (%[1]s) "+
-					"AND hugo_gene_symbol = '%[2]s' AND variant_type = 'mutation') AS mutated, "+
-					"(SELECT uniqExact(sgp.sample_unique_id) FROM sample_to_gene_panel_derived sgp "+
-					"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
-					"WHERE sgp.sample_unique_id IN (%[1]s) AND gpg.gene = '%[2]s' AND sgp.alteration_type = 'MUTATION_EXTENDED') AS profiled",
-				filtered, gene))
-			if err != nil || len(rows) == 0 {
-				continue
-			}
-			mutated, profiled := rows[0].Mutated, rows[0].Profiled
+			mutated, profiled := byGene[g.HugoGeneSymbol].Mutated, byGene[g.HugoGeneSymbol].Profiled
 			item := GenomicDataCountItem{HugoGeneSymbol: g.HugoGeneSymbol, ProfileType: "mutations", Counts: []GenomicDataCount{}}
 			add := func(label, value string, n uint64) {
 				if n > 0 {

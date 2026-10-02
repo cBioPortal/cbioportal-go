@@ -148,25 +148,70 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, out)
 }
 
-// valueCountsWithNA groups the values selected by sql (which must yield a
-// `value` column over the given unit) and adds the unit total minus the
-// counted cases as NA.
-func (s *State) valueCountsWithNA(sql string, total uint64) []databin.Value {
+// scopedValueCounts counts, for each (entity, profile type) key, the non-NA
+// values of table over two study-view scopes in one query, and adds each
+// scope's remaining samples as NA.
+// keyCol names the entity column and valueCol the value column; naSQL is the
+// predicate that marks a value as NA.
+func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL string, keys [][2]string,
+	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value) {
+	unfiltered, filtered = map[[2]string][]databin.Value{}, map[[2]string][]databin.Value{}
+	if len(keys) == 0 {
+		return
+	}
+	scopes := fmt.Sprintf("WITH unfiltered AS (%s), filtered AS (%s) ",
+		s.filterSQL(unfilteredScope), s.filterSQL(filteredScope))
+	type totalRow struct {
+		U uint64 `json:"u"`
+		F uint64 `json:"f"`
+	}
+	totals, _ := ch.Query[totalRow](s.CH, scopes+
+		"SELECT (SELECT count() FROM unfiltered) AS u, (SELECT count() FROM filtered) AS f")
+	var totalU, totalF uint64
+	if len(totals) > 0 {
+		totalU, totalF = totals[0].U, totals[0].F
+	}
 	type row struct {
-		Value string `json:"value"`
-		C     uint64 `json:"c"`
+		Key         string `json:"key"`
+		ProfileType string `json:"profileType"`
+		Value       string `json:"value"`
+		U           uint64 `json:"u"`
+		F           uint64 `json:"f"`
 	}
-	rows, _ := ch.Query[row](s.CH, sql)
-	out := make([]databin.Value, 0, len(rows)+1)
-	var sum uint64
+	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(scopes+
+		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
+		"countIf(sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
+		"countIf(sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
+		"FROM %[3]s WHERE (%[1]s, profile_type) IN (%[4]s) AND NOT %[5]s "+
+		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
+		"GROUP BY key, profileType, value",
+		keyCol, valueCol, table, tupleIn(keys), naSQL))
+	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
-		out = append(out, databin.Value{Value: r.Value, Count: int(r.C)})
-		sum += r.C
+		k := [2]string{r.Key, r.ProfileType}
+		if r.U > 0 {
+			unfiltered[k] = append(unfiltered[k], databin.Value{Value: r.Value, Count: int(r.U)})
+			sumU[k] += r.U
+		}
+		if r.F > 0 {
+			filtered[k] = append(filtered[k], databin.Value{Value: r.Value, Count: int(r.F)})
+			sumF[k] += r.F
+		}
 	}
-	if total > sum {
-		out = append(out, databin.Value{Value: "NA", Count: int(total - sum)})
+	seen := map[[2]string]bool{}
+	for _, k := range keys {
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		if totalU > sumU[k] {
+			unfiltered[k] = append(unfiltered[k], databin.Value{Value: "NA", Count: int(totalU - sumU[k])})
+		}
+		if totalF > sumF[k] {
+			filtered[k] = append(filtered[k], databin.Value{Value: "NA", Count: int(totalF - sumF[k])})
+		}
 	}
-	return out
+	return
 }
 
 type GenomicDataBin struct {
@@ -193,18 +238,16 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 		g := f.GenomicDataBinFilters[0]
 		svf = svf.withoutGenomic(g.HugoGeneSymbol, g.ProfileType)
 	}
-	values := func(scope studyViewFilter, gene, profileType string) []databin.Value {
-		return s.valueCountsWithNA(fmt.Sprintf(
-			"SELECT alteration_value AS value, count() AS c FROM genetic_alteration_derived "+
-				"WHERE profile_type = '%s' AND hugo_gene_symbol = '%s' AND NOT %s AND sample_unique_id IN (%s) GROUP BY alteration_value",
-			sqlLit(profileType), sqlLit(gene), isNASQL("assumeNotNull(alteration_value)"), s.filterSQL(scope)),
-			s.scopeSampleCount(scope))
+	keys := make([][2]string, len(f.GenomicDataBinFilters))
+	for i, g := range f.GenomicDataBinFilters {
+		keys[i] = [2]string{g.HugoGeneSymbol, g.ProfileType}
 	}
+	unfiltered, filtered := s.scopedValueCounts("genetic_alteration_derived", "hugo_gene_symbol", "alteration_value",
+		isNASQL("assumeNotNull(alteration_value)"), keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenomicDataBin{}
 	for i, g := range f.GenomicDataBinFilters {
-		bins, err := databin.Calculate(g.HugoGeneSymbol+g.ProfileType,
-			values(svf.partial(), g.HugoGeneSymbol, g.ProfileType), values(svf, g.HugoGeneSymbol, g.ProfileType),
+		bins, err := databin.Calculate(g.HugoGeneSymbol+g.ProfileType, unfiltered[keys[i]], filtered[keys[i]],
 			g.binFilterOpts.options(method, true, methods[i]))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -241,18 +284,16 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 	if len(f.GenericAssayDataBinFilters) == 1 {
 		svf = svf.withoutGenericAssay(f.GenericAssayDataBinFilters[0].StableID)
 	}
-	values := func(scope studyViewFilter, stableID, profileType string) []databin.Value {
-		return s.valueCountsWithNA(fmt.Sprintf(
-			"SELECT value, count() AS c FROM generic_assay_data_derived "+
-				"WHERE profile_type = '%s' AND entity_stable_id = '%s' AND NOT %s AND sample_unique_id IN (%s) GROUP BY value",
-			sqlLit(profileType), sqlLit(stableID), isNASQL("value"), s.filterSQL(scope)),
-			s.scopeSampleCount(scope))
+	keys := make([][2]string, len(f.GenericAssayDataBinFilters))
+	for i, g := range f.GenericAssayDataBinFilters {
+		keys[i] = [2]string{g.StableID, g.ProfileType}
 	}
+	unfiltered, filtered := s.scopedValueCounts("generic_assay_data_derived", "entity_stable_id", "value",
+		isNASQL("value"), keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenericAssayDataBin{}
 	for i, g := range f.GenericAssayDataBinFilters {
-		bins, err := databin.Calculate(g.StableID+g.ProfileType,
-			values(svf.partial(), g.StableID, g.ProfileType), values(svf, g.StableID, g.ProfileType),
+		bins, err := databin.Calculate(g.StableID+g.ProfileType, unfiltered[keys[i]], filtered[keys[i]],
 			g.binFilterOpts.options(method, true, methods[i]))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
