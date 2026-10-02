@@ -2,9 +2,19 @@
 
 [![CI](https://github.com/inodb/cbioportal-go/actions/workflows/ci.yml/badge.svg)](https://github.com/inodb/cbioportal-go/actions/workflows/ci.yml)
 
+> [!WARNING]
+> **Experimental.** This is an experiment to reimplement
+> [cBioPortal](https://www.cbioportal.org) in Go. It is not an official
+> cBioPortal release, results may differ from www.cbioportal.org, and nothing
+> here should be used for research or clinical decisions. For the real portal
+> go to <https://www.cbioportal.org>.
+
 A Go reimplementation of the cBioPortal backend: the study importer and the
 REST API, backed by ClickHouse. The unmodified cBioPortal web frontend runs on
 top of it. Built on the Go standard library (see [Dependencies](#dependencies)).
+
+**Preview server:** <https://go.cbioportal.org> — a subset of public
+[datahub](https://github.com/cBioPortal/datahub) studies, re-imported daily.
 
 ## How it fits together
 
