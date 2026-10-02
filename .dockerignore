@@ -1,0 +1,17 @@
+# Build context: Go sources, the frontend submodule sources and deploy/.
+**/node_modules
+**/.turbo
+bin/
+test-results/
+**/test-results/
+**/playwright-report/
+*.log
+.sessions*.json
+.secrets/
+*.env
+.git
+frontend/.git
+frontend/dist
+frontend/packages/*/dist
+frontend/end-to-end-test/remote/screenshots
+frontend/end-to-end-test/local/screenshots
