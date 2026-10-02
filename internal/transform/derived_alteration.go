@@ -36,14 +36,14 @@ func geneticAlterationDerivedSQL(rawDB, refDB string) string {
 // generic_assay_matrix staging table. profile_stable_id is the FULL molecular
 // profile id (`<study>_<suffix>`, from genetic_profile.molecular_profile_id) while
 // profile_type is the bare suffix, matching prod. patient_unique_id resolves via
-// the transform `cbioportal.sample` view (LEFT JOIN keeps rows whose sample id is
+// the target-DB `sample` view (LEFT JOIN keeps rows whose sample id is
 // not in clinical data; prod's INNER JOIN would drop them). genetic_entity_id is
 // synthesized deterministically from entity_stable_id since we have no genetic
 // entity table. generic_assay_type and patient_level are not captured by ingest,
 // so they default to empty string and 0 respectively.
-func genericAssayDataDerivedSQL(rawDB, refDB string) string {
+func genericAssayDataDerivedSQL(rawDB, refDB, targetDB string) string {
 	_ = refDB
-	return fmt.Sprintf(
+	return inTarget(targetDB, fmt.Sprintf(
 		"SELECT concat(gam.study_id, '_', gam.sample_id) AS sample_unique_id, "+
 			"concat(gam.study_id, '_', s.patient_id) AS patient_unique_id, "+
 			"toString(cityHash64(gam.entity_stable_id)) AS genetic_entity_id, "+
@@ -57,8 +57,8 @@ func genericAssayDataDerivedSQL(rawDB, refDB string) string {
 			"FROM `%s`.generic_assay_matrix gam "+
 			"LEFT JOIN `%s`.genetic_profile gp "+
 			"ON gp.study_id = gam.study_id AND gp.profile_stable_id = gam.profile_stable_id "+
-			"LEFT JOIN cbioportal.sample s "+
+			"LEFT JOIN {{target}}.sample s "+
 			"ON s.study_id = gam.study_id AND s.sample_id = gam.sample_id "+
 			"WHERE gam.sample_id != ''",
-		rawDB, rawDB)
+		rawDB, rawDB))
 }

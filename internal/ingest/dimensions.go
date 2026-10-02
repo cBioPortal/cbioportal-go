@@ -53,7 +53,8 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 func ingestProfiles(c *ch.Client, s *parser.Study) error {
 	table := "genetic_profile"
 	cols := []string{"molecular_profile_id", "study_id", "profile_stable_id",
-		"alteration_type", "datatype", "name", "description", "show_in_analysis", "generic_assay_type", "namespaces"}
+		"alteration_type", "datatype", "name", "description", "show_in_analysis", "generic_assay_type", "namespaces",
+		"gene_panel", "patient_level"}
 	existing, err := c.TableColumns(table)
 	if err != nil {
 		return err
@@ -87,7 +88,8 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 			continue
 		}
 		mpid := s.StudyID + "_" + f.StableID
-		values := []string{mpid, s.StudyID, f.StableID, f.AlterationType, f.Datatype, f.ProfileName, f.ProfileDescription, f.ShowInAnalysis, f.GenericAssayType, f.Namespaces}
+		values := []string{mpid, s.StudyID, f.StableID, f.AlterationType, f.Datatype, f.ProfileName, f.ProfileDescription, f.ShowInAnalysis, f.GenericAssayType, f.Namespaces,
+			f.GenePanel, f.PatientLevel}
 		quoted := make([]string, len(values))
 		for j, v := range values {
 			quoted[j] = "'" + ch.SQLLit(v) + "'"
@@ -98,6 +100,61 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 		}
 	}
 	return nil
+}
+
+// ingestProfileSamples records, per molecular profile data file, the case ids
+// the file declares independently of its data cells: every sample (or, for
+// patient-level generic assay, patient) column of a matrix header, and the ids
+// on a MAF's `#sequenced_samples:` header lines. The transform's sample_profile
+// view unions these with the ids present in the record tables to reproduce
+// cbioportal-core's sample_profile membership. kind is "header" or
+// "sequenced_samples".
+func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
+	table := "profile_sample"
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, profile_stable_id String, kind String, sample_id String) ENGINE = MergeTree ORDER BY (study_id, profile_stable_id)",
+		c.Database(), table)); err != nil {
+		return err
+	}
+	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+
+	var b strings.Builder
+	for i := range s.Files {
+		f := &s.Files[i]
+		if !f.IsMolecularProfile() {
+			continue
+		}
+		var kind string
+		var ids []string
+		switch {
+		case f.Layout == parser.Matrix:
+			h, err := parser.ReadHeader(f.DataPath)
+			if err != nil {
+				return err
+			}
+			kind, ids = "header", parser.Shape(h.Columns).SampleColumns
+		case f.StageSlug == "mutation_extended" || f.StageSlug == "mutation_uncalled":
+			seq, err := parser.ReadSequencedSamples(f.DataPath)
+			if err != nil {
+				return err
+			}
+			kind, ids = "sequenced_samples", seq
+		default:
+			continue
+		}
+		for _, id := range ids {
+			if id == "" || strings.ContainsAny(id, "\t\n\r") {
+				continue
+			}
+			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\n", s.StudyID, fileName(f.DataPath), f.StableID, kind, id)
+		}
+	}
+	if b.Len() == 0 {
+		return nil
+	}
+	return c.InsertStream(
+		fmt.Sprintf("INSERT INTO `%s`.`%s` FORMAT TabSeparatedRaw", c.Database(), table),
+		strings.NewReader(b.String()))
 }
 
 func ensureGenePanelTable(c *ch.Client) error {

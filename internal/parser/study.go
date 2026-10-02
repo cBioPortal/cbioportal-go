@@ -46,6 +46,8 @@ type DataFile struct {
 	ShowInAnalysis     string
 	GenericAssayType   string
 	Namespaces         string
+	GenePanel          string
+	PatientLevel       string
 	Layout             Layout
 	StageSlug          string
 }
@@ -57,7 +59,7 @@ func (d *DataFile) IsMolecularProfile() bool {
 		return false
 	}
 	switch strings.ToUpper(d.AlterationType) {
-	case "CLINICAL", "CANCER_TYPE", "GENE_PANEL_MATRIX":
+	case "CLINICAL", "CANCER_TYPE", "GENE_PANEL_MATRIX", "GISTIC_GENES_AMP", "GISTIC_GENES_DEL", "MUTSIG", "RESOURCE":
 		return false
 	}
 	return true
@@ -99,6 +101,12 @@ func classify(at, dt string) (Layout, string) {
 		return Record, "timeline"
 	case up == "GENE_PANEL_MATRIX":
 		return Record, "gene_panel_matrix"
+	case up == "GISTIC_GENES_AMP" || up == "GISTIC_GENES_DEL":
+		return Record, "gistic"
+	case up == "MUTSIG":
+		// Header names collide case-insensitively (N vs n), so MutSig is
+		// staged by a dedicated reader rather than schema-on-read.
+		return Other, "mutsig"
 	}
 	switch up {
 	case "MRNA_EXPRESSION", "MICRO_RNA_EXPRESSION", "METHYLATION", "PROTEIN_LEVEL",
@@ -140,6 +148,18 @@ func Scan(dir string) (*Study, error) {
 			s.Meta = meta.Fields
 		}
 		at, dt, dataName := meta.Get("genetic_alteration_type"), meta.Get("datatype"), meta.Get("data_filename")
+		if rt := meta.Get("resource_type"); at == "" && rt != "" && dataName != "" {
+			// Resource files (meta_resource_*) carry resource_type instead of
+			// genetic_alteration_type/datatype.
+			dataPath := filepath.Join(dir, dataName)
+			if _, err := os.Stat(dataPath); err == nil {
+				s.Files = append(s.Files, DataFile{
+					MetaPath: mp, DataPath: dataPath, AlterationType: "RESOURCE", Datatype: strings.ToUpper(rt),
+					Layout: Record, StageSlug: "resource_" + strings.ToLower(rt),
+				})
+			}
+			continue
+		}
 		if at == "" || dt == "" || dataName == "" {
 			continue
 		}
@@ -159,6 +179,8 @@ func Scan(dir string) (*Study, error) {
 			ShowInAnalysis:     meta.Get("show_profile_in_analysis_tab"),
 			GenericAssayType:   meta.Get("generic_assay_type"),
 			Namespaces:         meta.Get("namespaces"),
+			GenePanel:          meta.Get("gene_panel"),
+			PatientLevel:       meta.Get("patient_level"),
 			Layout:             layout,
 			StageSlug:          slug,
 		})

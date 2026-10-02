@@ -1,5 +1,6 @@
 // Package transform builds the normalized cBioPortal model as ClickHouse views
-// over the raw staging tables. Nothing is copied — the transform runs on read.
+// over the raw staging tables. Nothing is copied — the transform runs on read —
+// except the small sample_profile membership table, materialized per run.
 // The headline view is `mutation`: cBioPortal's default MutationFilter as a
 // WHERE clause, with Hugo→Entrez resolution against the reference DB.
 package transform
@@ -13,8 +14,8 @@ import (
 )
 
 type ViewCount struct {
-	Name  string
-	Rows  uint64
+	Name string
+	Rows uint64
 }
 
 // Apply builds every applicable view in targetDB reading from rawDB, resolving
@@ -36,6 +37,23 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		return nil
 	}
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
+	// materialize builds a table (atomically replaced) instead of a view, for
+	// the derived tables the API reads on every request — as prod does.
+	materialize := func(name, sel string) error {
+		engine, _ := c.Execute(fmt.Sprintf(
+			"SELECT engine FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated", targetDB, name))
+		if strings.TrimSpace(engine) == "View" {
+			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, name)); err != nil {
+				return err
+			}
+		}
+		if _, err := c.Execute(fmt.Sprintf(
+			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY tuple() AS %s", targetDB, name, sel)); err != nil {
+			return fmt.Errorf("creating table %s: %w", name, err)
+		}
+		created = append(created, name)
+		return nil
+	}
 
 	if exists("cancer_study") {
 		if err := make("cancer_study", fmt.Sprintf(
@@ -43,11 +61,19 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			return nil, err
 		}
 	}
+	// type_of_cancer holds the study-supplied cancer types (cbioportal-core
+	// ImportTypesOfCancers: id and parent lower-cased, short name = the id as
+	// given). It always exists so the API can union it with the reference
+	// cancer types.
+	tocSQL := "SELECT '' AS type_of_cancer_id, '' AS name, '' AS dedicated_color, '' AS short_name, '' AS parent WHERE 0"
 	if exists("type_of_cancer") {
-		if err := make("type_of_cancer", fmt.Sprintf(
-			"SELECT DISTINCT type_of_cancer AS type_of_cancer_id, name, dedicated_color, parent FROM `%s`.type_of_cancer", rawDB)); err != nil {
-			return nil, err
-		}
+		tocSQL = fmt.Sprintf(
+			"SELECT lower(trimBoth(type_of_cancer)) AS type_of_cancer_id, trimBoth(name) AS name, trimBoth(dedicated_color) AS dedicated_color, "+
+				"trimBoth(type_of_cancer) AS short_name, lower(trimBoth(parent)) AS parent FROM `%s`.type_of_cancer "+
+				"WHERE type_of_cancer_id != '' ORDER BY study_id LIMIT 1 BY type_of_cancer_id", rawDB)
+	}
+	if err := make("type_of_cancer", tocSQL); err != nil {
+		return nil, err
 	}
 	if exists("clinical_attribute_meta") {
 		if err := make("clinical_attribute_meta", fmt.Sprintf(
@@ -115,20 +141,45 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			svStatus = "sv_status"
 		}
 		if svc["cbp_driver"] {
-			svDriver = "ifNull(nullIf(nullIf(cbp_driver, 'NA'), 'Unknown'), '')"
+			svDriver = driverValue("cbp_driver")
 		}
 		if svc["cbp_driver_tiers"] {
-			svTiers = "ifNull(nullIf(cbp_driver_tiers, 'NA'), '')"
+			svTiers = driverValue("cbp_driver_tiers")
+		}
+		// Missing entrez ids are resolved from the gene symbol, as the importer does.
+		entrez := func(site string) string {
+			if !hasRef {
+				return fmt.Sprintf("toInt64OrNull(v.%s_entrez_gene_id)", site)
+			}
+			return fmt.Sprintf("if(toInt64OrNull(v.%[1]s_entrez_gene_id) > 0, toInt64OrNull(v.%[1]s_entrez_gene_id), "+
+				"nullIf(toInt64(%[1]s_g.entrez_gene_id), 0))", site)
+		}
+		joins := ""
+		if hasRef {
+			joins = fmt.Sprintf(
+				" LEFT JOIN `%[1]s`.gene site1_g ON v.site1_hugo_symbol != '' AND upper(v.site1_hugo_symbol) = upper(site1_g.hugo_gene_symbol)"+
+					" LEFT JOIN `%[1]s`.gene site2_g ON v.site2_hugo_symbol != '' AND upper(v.site2_hugo_symbol) = upper(site2_g.hugo_gene_symbol)", refDB)
 		}
 		if err := make("structural_variant", fmt.Sprintf(
-			"SELECT study_id, sample_id, site1_hugo_symbol, toInt64OrNull(site1_entrez_gene_id) AS site1_entrez_gene_id, site2_hugo_symbol, toInt64OrNull(site2_entrez_gene_id) AS site2_entrez_gene_id, "+
-				"%s AS sv_status, %s AS cbp_driver, %s AS cbp_driver_tiers FROM `%s`.structural_variant", svStatus, svDriver, svTiers, rawDB)); err != nil {
+			"SELECT "+svPassThrough(svc)+"v.study_id AS study_id, v.sample_id AS sample_id, v.site1_hugo_symbol AS site1_hugo_symbol, %s AS site1_entrez_gene_id, "+
+				"v.site2_hugo_symbol AS site2_hugo_symbol, %s AS site2_entrez_gene_id, "+
+				"%s AS sv_status, %s AS cbp_driver, %s AS cbp_driver_tiers, %s AS namespace_columns FROM `%s`.structural_variant v%s",
+			entrez("site1"), entrez("site2"),
+			strings.ReplaceAll(svStatus, "sv_status", "v.sv_status"), strings.ReplaceAll(svDriver, "cbp_driver", "v.cbp_driver"),
+			strings.ReplaceAll(svTiers, "cbp_driver_tiers", "v.cbp_driver_tiers"), namespaceColumnsExpr(c, rawDB, svc, "v."), rawDB, joins)); err != nil {
 			return nil, err
 		}
 	}
 	cnaMatrix, cnaLong := exists("cna_matrix"), exists("cna_discrete_long")
 	if cnaMatrix || cnaLong {
-		if err := make("cna", cnaSQL(c, rawDB, cnaMatrix, cnaLong)); err != nil {
+		sql := cnaSQL(c, rawDB, cnaMatrix, cnaLong)
+		if hasRef {
+			// Blank entrez ids are resolved from the gene symbol, as the importer does.
+			sql = fmt.Sprintf("SELECT u.* EXCEPT (entrez_gene_id), if(toInt64OrNull(u.entrez_gene_id) > 0, u.entrez_gene_id, "+
+				"if(g.entrez_gene_id > 0, toString(g.entrez_gene_id), '')) AS entrez_gene_id FROM (%s) u "+
+				"LEFT JOIN `%s`.gene g ON u.hugo_symbol != '' AND upper(u.hugo_symbol) = upper(g.hugo_gene_symbol)", sql, refDB)
+		}
+		if err := make("cna", sql); err != nil {
 			return nil, err
 		}
 	}
@@ -151,6 +202,32 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		created = append(created, "clinical_patient")
 	}
 
+	// sample_profile is materialized rather than a view: it is small, read on
+	// every study-view and alteration query, and expensive to derive (it scans
+	// every profile's staging table), like prod's own sample_profile table.
+	hasSampleProfile := false
+	if sql, ok := sampleProfileSQL(c, rawDB); ok {
+		engine, _ := c.Execute(fmt.Sprintf(
+			"SELECT engine FROM system.tables WHERE database = '%s' AND name = 'sample_profile' FORMAT TabSeparated", targetDB))
+		if strings.TrimSpace(engine) == "View" {
+			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`sample_profile`", targetDB)); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := c.Execute(fmt.Sprintf(
+			"CREATE OR REPLACE TABLE `%s`.`sample_profile` ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, sample_id) AS %s",
+			targetDB, sql)); err != nil {
+			return nil, fmt.Errorf("creating table sample_profile: %w", err)
+		}
+		created = append(created, "sample_profile")
+		hasSampleProfile = true
+	}
+	if hasSampleProfile && exists("clinical_sample") && exists("clinical_attribute_meta") {
+		if err := computedClinicalAttributes(c, rawDB, targetDB, exists("mutation_extended"), exists("cna_seg")); err != nil {
+			return nil, err
+		}
+	}
+
 	// Prod-aligned column-store `*_derived` views (built from our staging with
 	// prod's exact column names), created after the base views they read.
 	type derived struct {
@@ -158,21 +235,28 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		guard bool
 		sql   string
 	}
+	// Ordered so every table is built after the tables it reads.
 	for _, d := range []derived{
-		{"sample_derived", exists("clinical_sample"), sampleDerivedSQL(rawDB, refDB)},
-		{"clinical_data_derived", exists("clinical_sample") || exists("clinical_patient"), clinicalDataDerivedSQL(rawDB, refDB)},
-		{"genomic_event_derived", exists("mutation_extended") && exists("cna_discrete_long") && exists("structural_variant"), genomicEventDerivedSQL(rawDB, refDB)},
-		{"genetic_alteration_derived", exists("cna_discrete_long") && exists("cna_matrix") && exists("methylation_matrix") && exists("mrna_expression_matrix"), geneticAlterationDerivedSQL(rawDB, refDB)},
-		{"generic_assay_data_derived", exists("generic_assay_matrix"), genericAssayDataDerivedSQL(rawDB, refDB)},
-		{"sample_to_gene_panel_derived", exists("gene_panel_matrix"), sampleToGenePanelDerivedSQL(rawDB, refDB)},
 		{"gene_panel_to_gene_derived", exists("gene_panel"), genePanelToGeneDerivedSQL(rawDB, refDB)},
+		{"sample_to_gene_panel_derived", hasSampleProfile, sampleToGenePanelDerivedSQL(targetDB)},
+		{"sample_derived", exists("clinical_sample"), sampleDerivedSQL(rawDB, refDB, targetDB)},
+		{"clinical_data_derived", exists("clinical_sample") || exists("clinical_patient"), clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
+		{"genomic_event_derived", exists("mutation_extended") && exists("cna_discrete_long") && exists("structural_variant") && hasSampleProfile, genomicEventDerivedSQL(rawDB, refDB, targetDB)},
+		{"genetic_alteration_derived", exists("cna_discrete_long") && exists("cna_matrix") && exists("methylation_matrix") && exists("mrna_expression_matrix"), geneticAlterationDerivedSQL(rawDB, refDB)},
+		{"generic_assay_data_derived", exists("generic_assay_matrix"), genericAssayDataDerivedSQL(rawDB, refDB, targetDB)},
 		{"clinical_event_derived", exists("timeline"), clinicalEventDerivedSQL(rawDB, refDB)},
 		{"clinical_event_data_derived", exists("timeline"), clinicalEventDataDerivedSQL(rawDB, refDB)},
 	} {
 		if !d.guard {
 			continue
 		}
-		if err := make(d.name, d.sql); err != nil {
+		if err := materialize(d.name, d.sql); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, v := range studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists) {
+		if err := make(v.name, v.sql); err != nil {
 			return nil, err
 		}
 	}
@@ -199,12 +283,20 @@ func namespaceColumnsExpr(c *ch.Client, rawDB string, has map[string]bool, table
 	names := distinctNamespaces(c, rawDB)
 	var frags []string
 	for _, name := range names {
+		// ASCN columns populate Mutation.alleleSpecificCopyNumber instead.
+		if strings.EqualFold(name, "ASCN") {
+			continue
+		}
 		prefix := strings.ToLower(name) + "_"
 		var subCols, nonEmpty []string
 		for col := range has {
 			if strings.HasPrefix(col, prefix) && len(col) > len(prefix) {
 				sub := col[len(prefix):]
-				subCols = append(subCols, fmt.Sprintf(`'"%s":', toJSONString(%s%s)`, sub, tablePrefix, col))
+				// Numeric values are emitted as JSON numbers, as the importer's
+				// namespace parser stores them.
+				v := tablePrefix + col
+				subCols = append(subCols, fmt.Sprintf(
+					`'"%s":', if(match(%s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %s, toJSONString(%s))`, sub, v, v, v))
 				nonEmpty = append(nonEmpty, fmt.Sprintf("%s%s != ''", tablePrefix, col))
 			}
 		}
@@ -267,10 +359,36 @@ func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 	has, _ := c.TableColumns("mutation_extended")
 	driverCol := func(name string) string {
 		if has[name] {
-			return "ifNull(nullIf(nullIf(m." + name + ", 'NA'), 'Unknown'), '') AS " + name
+			return "if(lower(trimBoth(m." + name + ")) IN ('', 'na'), '', m." + name + ") AS " + name
 		}
 		return "'' AS " + name
 	}
+	// col projects an optional staging column, or def when the MAF lacks it.
+	col := func(name, alias, def string) string {
+		if has[name] {
+			return "m." + name + " AS " + alias
+		}
+		return def + " AS " + alias
+	}
+	extras := strings.Join([]string{
+		"concat(m.study_id, '_', m.profile_stable_id) AS molecular_profile_id",
+		"ifNull(sp.patient_id, '') AS patient_id",
+		col("center", "center", "''"),
+		col("n_alt_count", "n_alt_count", "''"),
+		col("n_ref_count", "n_ref_count", "''"),
+		col("amino_acid_change", "amino_acid_change", "''"),
+		col("ncbi_build", "ncbi_build", "''"),
+		col("refseq", "refseq_mrna_id", "''"),
+		col("protein_position", "protein_position", "''"),
+		col("ascn_ascn_integer_copy_number", "ascn_integer_copy_number", "''"),
+		col("ascn_ascn_method", "ascn_method", "''"),
+		col("ascn_ccf_expected_copies_upper", "ascn_ccf_expected_copies_upper", "''"),
+		col("ascn_ccf_expected_copies", "ascn_ccf_expected_copies", "''"),
+		col("ascn_clonal", "ascn_clonal", "''"),
+		col("ascn_minor_copy_number", "ascn_minor_copy_number", "''"),
+		col("ascn_expected_alt_copies", "ascn_expected_alt_copies", "''"),
+		col("ascn_total_copy_number", "ascn_total_copy_number", "''"),
+	}, ", ")
 	drivers := driverCol("cbp_driver") + ", " + driverCol("cbp_driver_annotation") + ", " +
 		driverCol("cbp_driver_tiers") + ", " + driverCol("cbp_driver_tiers_annotation")
 	nsCol := namespaceColumnsExpr(c, rawDB, has, "m.")
@@ -280,9 +398,11 @@ func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 			"m.end_position AS end_position, m.reference_allele AS reference_allele, m.tumor_seq_allele2 AS tumor_seq_allele2, "+
 			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
 			"m.validation_status AS validation_status, "+
-			"if(startsWith(m.hgvsp_short, 'p.'), substring(m.hgvsp_short, 3), m.hgvsp_short) AS protein_change, "+
-			"m.t_alt_count AS t_alt_count, m.t_ref_count AS t_ref_count, "+drivers+", "+nsCol+" AS namespace_columns "+
+			proteinChangeSQL(has)+" AS protein_change, "+
+			"m.t_alt_count AS t_alt_count, m.t_ref_count AS t_ref_count, "+drivers+", "+nsCol+" AS namespace_columns, "+extras+" "+
 			"FROM `%s`.mutation_extended m%s "+
+			"LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM `"+rawDB+"`.clinical_sample) sp "+
+			"ON sp.study_id = m.study_id AND sp.sample_id = m.tumor_sample_barcode "+
 			"WHERE NOT startsWith(lower(m.mutation_status), 'none') AND NOT startsWith(lower(m.mutation_status), 'loh') "+
 			"AND NOT startsWith(lower(m.mutation_status), 'wildtype') AND NOT startsWith(lower(m.validation_status), 'redacted') "+
 			"AND lower(m.variant_classification) NOT IN ('silent', 'intron', '3''utr', '5''utr', '3''flank', 'igr', 'rna') "+
@@ -299,28 +419,54 @@ func cnaSQL(c *ch.Client, rawDB string, fromMatrix, fromLong bool) string {
 			entrez = "entrez_gene_id"
 		}
 		parts = append(parts, fmt.Sprintf(
-			"SELECT study_id, sample_id, hugo_symbol, %s AS entrez_gene_id, value AS alteration, profile_stable_id, '' AS cbp_driver, '' AS cbp_driver_tiers, '{}' AS namespace_columns FROM `%s`.cna_matrix WHERE datatype = 'DISCRETE' AND value IN ('-2', '-1', '1', '2')", entrez, rawDB))
+			"SELECT study_id, sample_id, hugo_symbol, %s AS entrez_gene_id, value AS alteration, profile_stable_id, '' AS cbp_driver, '' AS cbp_driver_tiers, '' AS cbp_driver_annotation, '' AS cbp_driver_tiers_annotation, '{}' AS namespace_columns FROM `%s`.cna_matrix WHERE datatype = 'DISCRETE' AND value IN ('-2', '-1', '1', '2')", entrez, rawDB))
 	}
 	if fromLong {
 		lcols, _ := c.TableColumns("cna_discrete_long")
-		driver, tiers := "''", "''"
-		if lcols["cbp_driver"] {
-			driver = "ifNull(nullIf(nullIf(cbp_driver, 'NA'), 'Unknown'), '')"
-		}
-		if lcols["cbp_driver_tiers"] {
-			tiers = "ifNull(nullIf(cbp_driver_tiers, 'NA'), '')"
+		opt := func(name string) string {
+			if lcols[name] {
+				return driverValue(name)
+			}
+			return "''"
 		}
 		ns := namespaceColumnsExpr(c, rawDB, lcols, "")
 		parts = append(parts, fmt.Sprintf(
-			"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id, value AS alteration, profile_stable_id, %s AS cbp_driver, %s AS cbp_driver_tiers, %s AS namespace_columns FROM `%s`.cna_discrete_long WHERE value IN ('-2', '-1', '1', '2')", driver, tiers, ns, rawDB))
+			"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id, value AS alteration, profile_stable_id, %s AS cbp_driver, %s AS cbp_driver_tiers, "+
+				"%s AS cbp_driver_annotation, %s AS cbp_driver_tiers_annotation, %s AS namespace_columns FROM `%s`.cna_discrete_long WHERE value IN ('-2', '-1', '1', '2')",
+			opt("cbp_driver"), opt("cbp_driver_tiers"), opt("cbp_driver_annotation"), opt("cbp_driver_tiers_annotation"), ns, rawDB))
 	}
 	return strings.Join(parts, " UNION ALL ")
 }
 
+// missingClinicalValue returns a SQL predicate that is true when a clinical
+// value is one cBioPortal's clinical importer never stores
+// (ImportClinicalData.MissingAttributeValues.has): blank after trimming, or —
+// after deleting '[', '|' and ']' and turning spaces into underscores —
+// case-insensitively one of NOT_APPLICABLE, NOT_AVAILABLE, PENDING,
+// DISCREPANCY, COMPLETED, NULL, MISSING, NA. "[Unknown]" is kept.
+func missingClinicalValue(col string) string {
+	return fmt.Sprintf(
+		"(replaceRegexpAll(%[1]s, '^[\\\\x00-\\\\x20]+|[\\\\x00-\\\\x20]+$', '') = '' OR "+
+			"upper(replaceAll(replaceRegexpAll(%[1]s, '[\\\\[|\\\\]]', ''), ' ', '_')) IN "+
+			"('NOT_APPLICABLE', 'NOT_AVAILABLE', 'PENDING', 'DISCREPANCY', 'COMPLETED', 'NULL', 'MISSING', 'NA'))",
+		col)
+}
+
 func clinicalLong(c *ch.Client, rawDB, targetDB, srcTable, idCol string) error {
-	cols, err := c.TableColumns(srcTable)
+	sel, err := clinicalLongSQL(c, rawDB, srcTable, idCol)
 	if err != nil {
 		return err
+	}
+	_, err = c.Execute(fmt.Sprintf("CREATE OR REPLACE VIEW `%s`.`%s` AS %s", targetDB, srcTable, sel))
+	return err
+}
+
+// clinicalLongSQL unpivots a wide clinical staging table into
+// (study_id, <id>, attr_id, attr_value) rows, dropping missing values.
+func clinicalLongSQL(c *ch.Client, rawDB, srcTable, idCol string) (string, error) {
+	cols, err := c.TableColumns(srcTable)
+	if err != nil {
+		return "", err
 	}
 	skip := map[string]bool{"study_id": true, "source_file": true, "alteration_type": true,
 		"datatype": true, "profile_stable_id": true, "patient_id": true, "sample_id": true}
@@ -340,9 +486,59 @@ func clinicalLong(c *ch.Client, rawDB, targetDB, srcTable, idCol string) error {
 			pairs[i] = fmt.Sprintf("('%s', `%s`)", strings.ToUpper(n), n)
 		}
 		sel = fmt.Sprintf(
-			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, kv.2 AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE kv.2 != ''",
-			idCol, idCol, rawDB, srcTable, strings.Join(pairs, ", "))
+			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, kv.2 AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
+			idCol, idCol, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
 	}
-	_, err = c.Execute(fmt.Sprintf("CREATE OR REPLACE VIEW `%s`.`%s` AS %s", targetDB, srcTable, sel))
-	return err
+	return sel, nil
+}
+
+// proteinChangeSQL follows ExtendedMutationUtil.getProteinChange: the first
+// valid of HGVSp_Short and Amino_Acid_Change (else "MUTATED"), without a
+// leading "p."; whitelisted 5'Flank (TERT promoter) variants read "Promoter".
+func proteinChangeSQL(has map[string]bool) string {
+	valid := func(c string) string {
+		return fmt.Sprintf("(%[1]s != '' AND upper(%[1]s) NOT IN ('NULL', 'NA', '[NOT AVAILABLE]'))", c)
+	}
+	cands := []string{}
+	for _, c := range []string{"hgvsp_short", "amino_acid_change"} {
+		if has[c] {
+			cands = append(cands, "m."+c)
+		}
+	}
+	expr := "'MUTATED'"
+	for i := len(cands) - 1; i >= 0; i-- {
+		expr = fmt.Sprintf("if(%s, %s, %s)", valid(cands[i]), cands[i], expr)
+	}
+	return fmt.Sprintf("if(lower(m.variant_classification) = '5''flank', 'Promoter', "+
+		"if(startsWith(%[1]s, 'p.'), substring(%[1]s, 3), %[1]s))", expr)
+}
+
+// driverValue keeps a custom-driver value as given unless it is empty or NA,
+// which the importer does not store.
+func driverValue(col string) string {
+	return fmt.Sprintf("if(lower(trimBoth(%[1]s)) IN ('', 'na'), '', %[1]s)", col)
+}
+
+// svPassThrough lists the staged structural-variant detail columns the view
+// carries unchanged (positions, regions, read counts, annotations, ...).
+func svPassThrough(cols map[string]bool) string {
+	derived := map[string]bool{"study_id": true, "sample_id": true, "site1_hugo_symbol": true, "site1_entrez_gene_id": true,
+		"site2_hugo_symbol": true, "site2_entrez_gene_id": true, "sv_status": true, "cbp_driver": true, "cbp_driver_tiers": true,
+		"source_file": true, "alteration_type": true, "datatype": true}
+	var out []string
+	for _, c := range sortedColumnNames(cols) {
+		if !derived[c] {
+			out = append(out, "v.`"+c+"` AS `"+c+"`, ")
+		}
+	}
+	return strings.Join(out, "")
+}
+
+func sortedColumnNames(cols map[string]bool) []string {
+	out := make([]string, 0, len(cols))
+	for c := range cols {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out
 }

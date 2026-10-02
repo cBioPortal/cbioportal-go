@@ -192,6 +192,9 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	if err := ingestProfiles(c, s); err != nil {
 		return nil, err
 	}
+	if err := ingestProfileSamples(c, s); err != nil {
+		return nil, err
+	}
 	if err := ingestGenePanels(c, s); err != nil {
 		return nil, err
 	}
@@ -199,6 +202,9 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		return nil, err
 	}
 	if err := ingestCaseLists(c, s); err != nil {
+		return nil, err
+	}
+	if err := ingestStudyTags(c, s); err != nil {
 		return nil, err
 	}
 
@@ -223,5 +229,9 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		}
 		stats = append(stats, st)
 	}
-	return stats, nil
+	mutsig, err := ingestMutSig(c, s)
+	if err != nil {
+		return nil, err
+	}
+	return append(stats, mutsig...), nil
 }

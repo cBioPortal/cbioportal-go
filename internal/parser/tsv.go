@@ -40,6 +40,31 @@ func ReadHeader(path string) (*Header, error) {
 	}
 }
 
+// ReadSequencedSamples returns the sample ids listed on `#sequenced_samples:`
+// lines among a MAF's leading comment lines (whitespace-separated), in file
+// order. Lines after the first non-`#` line are not inspected.
+func ReadSequencedSamples(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r := bufio.NewReader(f)
+	var out []string
+	for {
+		line, err := r.ReadString('\n')
+		if !strings.HasPrefix(line, "#") {
+			return out, nil
+		}
+		if i := strings.LastIndex(line, "sequenced_samples:"); i >= 0 {
+			out = append(out, strings.Fields(line[i+len("sequenced_samples:"):])...)
+		}
+		if err != nil {
+			return out, nil
+		}
+	}
+}
+
 // SanitizeIdent turns a raw column name into a safe ClickHouse identifier:
 // lowercase, non-alphanumerics collapsed to `_`, leading digit prefixed.
 func SanitizeIdent(raw string) string {
@@ -84,14 +109,14 @@ func SanitizeColumns(columns []string) []string {
 // optionally, the header line, yielding the pure data body for a FORMAT
 // TabSeparatedRaw insert. It optionally counts emitted data lines.
 type BodyReader struct {
-	inner        *bufio.Reader
-	f            *os.File
-	skipHeader   bool
-	headerDone   bool
-	buf          []byte
-	pos          int
-	done         bool
-	emitted      *uint64
+	inner      *bufio.Reader
+	f          *os.File
+	skipHeader bool
+	headerDone bool
+	buf        []byte
+	pos        int
+	done       bool
+	emitted    *uint64
 }
 
 func OpenBody(path string, skipHeader bool, emitted *uint64) (*BodyReader, error) {

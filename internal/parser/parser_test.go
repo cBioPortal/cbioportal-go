@@ -108,3 +108,18 @@ func splitTrim(s string, sep byte) []string {
 	out = append(out, s[start:])
 	return out
 }
+
+func TestReadSequencedSamples(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data_mutations.txt")
+	body := "#version 2.4\n#sequenced_samples: S1 S2\tS3\nHugo_Symbol\tTumor_Sample_Barcode\n#sequenced_samples: S9\nTP53\tS1\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadSequencedSamples(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"S1", "S2", "S3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ReadSequencedSamples = %v, want %v", got, want)
+	}
+}

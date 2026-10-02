@@ -2,31 +2,20 @@ package transform
 
 import "fmt"
 
-// sampleToGenePanelDerivedSQL reproduces prod's sample_to_gene_panel_derived from
-// our file-staging gene_panel_matrix (one wide column per alteration type, each
-// holding the gene-panel id for that sample or 'NA'/empty when not profiled).
-// Prod columns: sample_unique_id, alteration_type, gene_panel_id,
-// cancer_study_identifier, genetic_profile_id. The matrix column name is the
-// molecular profile's stable-id suffix, so genetic_profile_id = study_<suffix>.
-// Whole-exome/genome markers (WES/WGS/WXS) collapse to 'WES' as in prod's
-// no-panel fallback; 'NA' and empty mean not-profiled and are dropped.
-func sampleToGenePanelDerivedSQL(rawDB, refDB string) string {
-	return fmt.Sprintf(
+// sampleToGenePanelDerivedSQL reproduces prod's sample_to_gene_panel_derived
+// (sample_unique_id, alteration_type, gene_panel_id, cancer_study_identifier,
+// genetic_profile_id) over the target-DB `sample_profile` view: one row per
+// profiled (sample, profile), with a NULL panel (whole exome/genome or no
+// panel declared) reported as 'WES', as prod does.
+func sampleToGenePanelDerivedSQL(targetDB string) string {
+	return inTarget(targetDB,
 		"SELECT "+
-			"concat(m.study_id, '_', m.sample_id) AS sample_unique_id, "+
-			"kv.1 AS alteration_type, "+
-			"if(upper(kv.3) IN ('WES', 'WGS', 'WXS'), 'WES', kv.3) AS gene_panel_id, "+
-			"m.study_id AS cancer_study_identifier, "+
-			"concat(m.study_id, '_', kv.2) AS genetic_profile_id "+
-			"FROM `%s`.gene_panel_matrix m "+
-			"ARRAY JOIN ["+
-			"('MUTATION_EXTENDED', 'mutations', m.mutations), "+
-			"('COPY_NUMBER_ALTERATION', 'cna', m.cna), "+
-			"('COPY_NUMBER_ALTERATION', 'gistic', m.gistic), "+
-			"('STRUCTURAL_VARIANT', 'structural_variants', m.structural_variants)"+
-			"] AS kv "+
-			"WHERE kv.3 != '' AND kv.3 != 'NA'",
-		rawDB)
+			"concat(sp.study_id, '_', sp.sample_id) AS sample_unique_id, "+
+			"sp.alteration_type AS alteration_type, "+
+			"ifNull(sp.gene_panel_id, 'WES') AS gene_panel_id, "+
+			"sp.study_id AS cancer_study_identifier, "+
+			"sp.molecular_profile_id AS genetic_profile_id "+
+			"FROM {{target}}.sample_profile sp")
 }
 
 // genePanelToGeneDerivedSQL reproduces prod's gene_panel_to_gene_derived
@@ -36,10 +25,10 @@ func sampleToGenePanelDerivedSQL(rawDB, refDB string) string {
 // prod's whole-exome expansion used by the off_panel check.
 func genePanelToGeneDerivedSQL(rawDB, refDB string) string {
 	return fmt.Sprintf(
-		"SELECT gp.gene_panel_id AS gene_panel_id, gp.hugo_symbol AS gene "+
+		"SELECT DISTINCT gp.gene_panel_id AS gene_panel_id, gp.hugo_symbol AS gene "+
 			"FROM `%s`.gene_panel gp WHERE gp.gene_panel_id != '' "+
 			"UNION ALL "+
-			"SELECT 'WES' AS gene_panel_id, g.hugo_gene_symbol AS gene "+
+			"SELECT DISTINCT 'WES' AS gene_panel_id, g.hugo_gene_symbol AS gene "+
 			"FROM `%s`.gene g WHERE g.entrez_gene_id > 0",
 		rawDB, refDB)
 }
