@@ -27,12 +27,16 @@ func ids(rows []map[string]any, field string) []string {
 func TestContractPagingSlicesGetLists(t *testing.T) {
 	requireAPI(t)
 	var all, page []map[string]any
-	get(t, "/api/studies?projection=SUMMARY", &all)
-	get(t, "/api/studies?projection=SUMMARY&pageSize=2&pageNumber=1", &page)
-	if len(all) < 4 {
-		t.Skipf("need >= 4 studies, have %d", len(all))
-	}
-	wantEq(t, ids(page, "studyId"), ids(all, "studyId")[2:4])
+	get(t, "/api/studies/study_es_0/samples", &all)
+	get(t, "/api/studies/study_es_0/samples?pageSize=2&pageNumber=1", &page)
+	wantEq(t, ids(page, "sampleId"), ids(all, "sampleId")[2:4])
+
+	// ColumnStoreStudyController limits the study list to pageSize and
+	// ignores pageNumber.
+	var studies, limited []map[string]any
+	get(t, "/api/studies?projection=SUMMARY", &studies)
+	get(t, "/api/studies?projection=SUMMARY&pageSize=2&pageNumber=1", &limited)
+	wantEq(t, ids(limited, "studyId"), ids(studies, "studyId")[:2])
 
 	var beyond []map[string]any
 	get(t, "/api/studies/study_es_0/samples?pageSize=10&pageNumber=1000", &beyond)
@@ -70,7 +74,7 @@ func TestContractPatientsKeyword(t *testing.T) {
 
 func TestContractSamplesFetchByUniqueSampleKeys(t *testing.T) {
 	requireAPI(t)
-	key := base64.RawStdEncoding.EncodeToString([]byte("study_es_0:TCGA-A1-A0SB-01"))
+	key := base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB-01:study_es_0"))
 	var d []map[string]any
 	post(t, "/api/samples/fetch", map[string]any{"uniqueSampleKeys": []string{key}}, &d)
 	wantEq(t, ids(d, "sampleId"), []string{"TCGA-A1-A0SB-01"})
@@ -79,7 +83,7 @@ func TestContractSamplesFetchByUniqueSampleKeys(t *testing.T) {
 func TestContractMutationsBySampleList(t *testing.T) {
 	requireAPI(t)
 	var get1, all, cnaseq []map[string]any
-	get(t, "/api/molecular-profiles/study_es_0_mutations/mutations?sampleListId=study_es_0_all&entrezGeneId=672", &get1)
+	get(t, "/api/molecular-profiles/study_es_0_mutations/mutations?sampleListId=study_es_0_all&entrezGeneId=672&projection=DETAILED", &get1)
 	post(t, "/api/molecular-profiles/study_es_0_mutations/mutations/fetch",
 		map[string]any{"sampleListId": "study_es_0_all", "entrezGeneIds": []int{672}}, &all)
 	post(t, "/api/molecular-profiles/study_es_0_mutations/mutations/fetch",

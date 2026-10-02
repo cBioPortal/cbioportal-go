@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -25,6 +24,7 @@ type studyRow struct {
 	CancerTypeName   string `json:"cancerTypeName"`
 	CancerTypeColor  string `json:"cancerTypeColor"`
 	CancerTypeParent string `json:"cancerTypeParent"`
+	CancerTypeShort  string `json:"cancerTypeShort"`
 	studyCounts
 }
 
@@ -45,22 +45,43 @@ type studyCounts struct {
 	StructuralVariantCount      int64 `json:"structuralVariantCount"`
 }
 
+// CancerStudy is a study as the Java controllers write it (Jackson NON_NULL):
+// the summary block is absent from the ID projection, and the per-data-type
+// counts and nested cancer type belong to the DETAILED projection only.
 type CancerStudy struct {
-	StudyID         string      `json:"studyId"`
-	CancerTypeID    string      `json:"cancerTypeId"`
-	Name            string      `json:"name"`
-	Description     string      `json:"description"`
-	PublicStudy     bool        `json:"publicStudy"`
-	Pmid            string      `json:"pmid"`
-	Citation        string      `json:"citation"`
-	Groups          string      `json:"groups"`
-	Status          int         `json:"status"`
-	AllSampleCount  int64       `json:"allSampleCount"`
-	ReferenceGenome string      `json:"referenceGenome"`
-	ReadPermission  bool        `json:"readPermission"`
-	CancerType      *CancerType `json:"cancerType"`
-	studyCounts
-	ResourceCounts []ResourceCount `json:"resourceCounts,omitempty"`
+	StudyID string `json:"studyId"`
+	*studySummary
+	*studyCounts
+	CancerType     *studyCancerType `json:"cancerType,omitempty"`
+	ReadPermission bool             `json:"readPermission"`
+	ResourceCounts *[]ResourceCount `json:"resourceCounts,omitempty"`
+}
+
+// studySummary is the SUMMARY block of a study.
+type studySummary struct {
+	CancerTypeID    string `json:"cancerTypeId"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	PublicStudy     bool   `json:"publicStudy"`
+	Pmid            string `json:"pmid"`
+	Citation        string `json:"citation"`
+	Groups          string `json:"groups"`
+	Status          int    `json:"status"`
+	ImportDate      string `json:"importDate,omitempty"`
+	AllSampleCount  int64  `json:"allSampleCount"`
+	ReferenceGenome string `json:"referenceGenome"`
+}
+
+// studyCancerType is a study's nested cancer type. The column-store study
+// endpoints (CancerStudyMetadataDTO) key it as `id`, the legacy ones
+// (TypeOfCancerMixin) as `cancerTypeId`.
+type studyCancerType struct {
+	ID             string `json:"id,omitempty"`
+	CancerTypeID   string `json:"cancerTypeId,omitempty"`
+	Name           string `json:"name"`
+	DedicatedColor string `json:"dedicatedColor"`
+	ShortName      string `json:"shortName"`
+	Parent         string `json:"parent"`
 }
 
 type ResourceCount struct {
@@ -103,22 +124,45 @@ const studySelect = "SELECT c.study_id AS studyId, c.cancer_type_id AS cancerTyp
 	"toInt64(ifNull(sc.cnt, 0)) AS allSampleCount, " +
 	"toUInt8(position(c.groups, 'PUBLIC') > 0) AS publicFlag, " +
 	"ifNull(t.name, '') AS cancerTypeName, ifNull(t.dedicated_color, '') AS cancerTypeColor, ifNull(t.parent, '') AS cancerTypeParent, " +
+	"ifNull(t.short_name, '') AS cancerTypeShort, " +
 	studyCountCols +
 	"FROM cancer_study c LEFT JOIN (SELECT study_id, count() AS cnt FROM sample GROUP BY study_id) sc " +
 	"ON c.study_id = sc.study_id " + studyCountJoins +
-	"LEFT JOIN (" + studyCancerTypesSQL + ") t ON c.cancer_type_id = t.type_of_cancer_id"
+	"LEFT JOIN (" + cancerTypesSQL + ") t ON c.cancer_type_id = t.type_of_cancer_id"
 
-func toCancerStudy(r studyRow) CancerStudy {
-	return CancerStudy{
-		StudyID: r.StudyID, CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description,
-		PublicStudy: r.PublicFlag != 0, Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups,
-		AllSampleCount: r.AllSampleCount, ReferenceGenome: referenceGenome(r.ReferenceGenome), ReadPermission: true,
-		studyCounts: r.studyCounts,
-		CancerType: &CancerType{
-			CancerTypeID: r.CancerTypeID, Name: cancerTypeName(r.CancerTypeName, r.CancerTypeID),
-			DedicatedColor: r.CancerTypeColor, ShortName: r.CancerTypeID, Parent: r.CancerTypeParent,
-		},
+// studyShape selects the parts of a study a response carries.
+type studyShape struct {
+	summary, detailed bool
+	// columnStore keys the nested cancer type as `id` (CancerStudyMetadataDTO)
+	// rather than `cancerTypeId` (legacy CancerStudy).
+	columnStore bool
+}
+
+func toCancerStudy(r studyRow, shape studyShape, importDates map[string]string) CancerStudy {
+	out := CancerStudy{StudyID: r.StudyID, ReadPermission: true}
+	if !shape.summary {
+		return out
 	}
+	out.studySummary = &studySummary{
+		CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description, PublicStudy: r.PublicFlag != 0,
+		Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups, ImportDate: importDates[r.StudyID],
+		AllSampleCount: r.AllSampleCount, ReferenceGenome: referenceGenome(r.ReferenceGenome),
+	}
+	if shape.detailed {
+		counts := r.studyCounts
+		out.studyCounts = &counts
+		ct := &studyCancerType{
+			Name: cancerTypeName(r.CancerTypeName, r.CancerTypeID), DedicatedColor: r.CancerTypeColor,
+			ShortName: r.CancerTypeShort, Parent: r.CancerTypeParent,
+		}
+		if shape.columnStore {
+			ct.ID = r.CancerTypeID
+		} else {
+			ct.CancerTypeID = r.CancerTypeID
+		}
+		out.CancerType = ct
+	}
+	return out
 }
 
 // cancerTypeName falls back to the id (then a generic label) so the nested
@@ -133,8 +177,10 @@ func cancerTypeName(name, id string) string {
 	return "Other"
 }
 
-// studies serves GET /api/studies: keyword search over name / id / cancer
-// type, sorting, paging and the META projection's total-count header.
+// studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
+// keyword search over name / id / cancer type and sorting. The ID projection
+// yields an empty list and META an empty list with the total-count header;
+// paging is a plain limit (see pageList).
 func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
@@ -157,43 +203,51 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 			order += " DESC"
 		}
 	}
+	projection := projectionParam(r)
+	if projection == "ID" {
+		writeJSON(w, []CancerStudy{})
+		return
+	}
 	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", studySelect, where, order))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if strings.EqualFold(q.Get("projection"), "META") {
+	if projection == "META" {
 		w.Header().Set("total-count", fmt.Sprint(len(rows)))
-		w.WriteHeader(http.StatusOK)
+		writeJSON(w, []CancerStudy{})
 		return
 	}
-	if size, err := strconv.Atoi(q.Get("pageSize")); err == nil && size >= 0 {
-		page, _ := strconv.Atoi(q.Get("pageNumber"))
-		start := min(page*size, len(rows))
-		end := min(start+size, len(rows))
-		rows = rows[start:end]
-	}
+	shape := studyShape{summary: true, detailed: projection == "DETAILED", columnStore: true}
+	dates := s.studyImportDates()
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
-		out[i] = toCancerStudy(r)
+		out[i] = toCancerStudy(r, shape, dates)
+		// CancerStudyMetadataMapper.toDtos maps readPermission from publicStudy.
+		out[i].ReadPermission = r.PublicFlag != 0
 	}
 	writeJSON(w, s.withResourceCounts(out))
 }
 
+// study serves GET /api/studies/{studyId} (ColumnStoreStudyController
+// .getStudy): the DETAILED study with its resource counts.
 func (s *State) study(w http.ResponseWriter, r *http.Request) {
-	sql := fmt.Sprintf("%s WHERE c.study_id = '%s'", studySelect, sqlLit(r.PathValue("studyId")))
-	rows, err := cachedQuery[studyRow](s, sql)
+	id := r.PathValue("studyId")
+	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE c.study_id = '%s'", studySelect, sqlLit(id)))
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	if len(rows) == 0 {
-		http.Error(w, "study not found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, msgStudyNotFound(id))
 		return
 	}
-	writeJSON(w, s.withResourceCounts([]CancerStudy{toCancerStudy(rows[0])})[0])
+	st := toCancerStudy(rows[0], studyShape{summary: true, detailed: true, columnStore: true}, s.studyImportDates())
+	writeJSON(w, s.withResourceCounts([]CancerStudy{st})[0])
 }
 
+// studiesFetch serves POST /api/studies/fetch (legacy StudyController
+// .fetchStudies) in the ID, SUMMARY or DETAILED projection.
 func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	readBody(r, &ids)
@@ -207,11 +261,44 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	projection := projectionParam(r)
+	shape := studyShape{summary: projection != "ID", detailed: projection == "DETAILED"}
+	dates := s.studyImportDates()
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
-		out[i] = toCancerStudy(r)
+		out[i] = toCancerStudy(r, shape, dates)
 	}
-	writeJSON(w, s.withResourceCounts(out))
+	if shape.summary {
+		out = s.withResourceCounts(out)
+	}
+	writeJSON(w, out)
+}
+
+// studyImportDates maps each study to the time its study row was loaded (the
+// raw cancer_study part it lives in), formatted as Java's importDate. Studies
+// are absent when the raw database is not reachable.
+func (s *State) studyImportDates() map[string]string {
+	type row struct {
+		StudyID    string `json:"studyId"`
+		ImportDate string `json:"importDate"`
+	}
+	out := map[string]string{}
+	if s.CH == nil {
+		return out
+	}
+	rows, err := cachedQuery[row](s, "SELECT c.study_id AS studyId, "+
+		"formatDateTime(max(p.modification_time), '%Y-%m-%d %H:%i:%S') AS importDate "+
+		"FROM (SELECT study_id, _part FROM cbioportal_raw.cancer_study) c "+
+		"JOIN (SELECT name, modification_time FROM system.parts "+
+		"WHERE database = 'cbioportal_raw' AND table = 'cancer_study' AND active) p ON p.name = c._part "+
+		"GROUP BY c.study_id")
+	if err != nil {
+		return out
+	}
+	for _, r := range rows {
+		out[r.StudyID] = r.ImportDate
+	}
+	return out
 }
 
 // ---------- Samples ----------
@@ -298,10 +385,11 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Patients ----------
 
+// Patient is the legacy Patient model; the DETAILED projection adds the
+// patient's study (see javaContract).
 type Patient struct {
 	PatientID        string `json:"patientId"`
 	StudyID          string `json:"studyId"`
-	UniqueSampleKey  string `json:"uniqueSampleKey"`
 	UniquePatientKey string `json:"uniquePatientKey"`
 }
 
@@ -355,8 +443,7 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 func toPatients(rows []idRow) []Patient {
 	out := make([]Patient, len(rows))
 	for i, r := range rows {
-		key := uniqueKey(r.StudyID, r.PatientID)
-		out[i] = Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniqueSampleKey: key, UniquePatientKey: key}
+		out[i] = Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID)}
 	}
 	return out
 }
@@ -379,8 +466,6 @@ func (s *State) cancerTypes(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, out)
 }
-
-var _ = strings.TrimSpace
 
 // referenceGenome defaults to hg19, the importer's default for studies whose
 // meta file names none.
@@ -412,14 +497,18 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 			"JOIN resource_definition rd ON rd.study_id = x.study_id AND rd.resource_id = x.resource_id "+
 			"WHERE x.study_id IN (%s) GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId", inList(ids)))
 	if err != nil {
-		return studies
+		rows = nil
 	}
 	byStudy := map[string][]ResourceCount{}
 	for _, r := range rows {
 		byStudy[r.CancerStudyIdentifier] = append(byStudy[r.CancerStudyIdentifier], r)
 	}
 	for i := range studies {
-		studies[i].ResourceCounts = byStudy[studies[i].StudyID]
+		rc := byStudy[studies[i].StudyID]
+		if rc == nil {
+			rc = []ResourceCount{}
+		}
+		studies[i].ResourceCounts = &rc
 	}
 	return studies
 }

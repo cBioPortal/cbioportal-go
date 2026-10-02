@@ -63,10 +63,26 @@ func clinicalSQL(patient bool, where string) string {
 		"LEFT JOIN sample s ON s.study_id = c.study_id AND s.sample_id = c.sample_id ORDER BY studyId, id, clinicalAttributeId"
 }
 
+// clinicalDataOut is a legacy ClinicalData record as Jackson writes it
+// (NON_NULL, see ClinicalDataMapper.selectSample / selectPatient): ID carries
+// the identifying fields only, SUMMARY adds the value and DETAILED the
+// attribute metadata, with patientAttribute derived from it.
+type clinicalDataOut struct {
+	UniqueSampleKey     string             `json:"uniqueSampleKey,omitempty"`
+	UniquePatientKey    string             `json:"uniquePatientKey"`
+	SampleID            string             `json:"sampleId,omitempty"`
+	PatientID           string             `json:"patientId"`
+	StudyID             string             `json:"studyId"`
+	ClinicalAttribute   *ClinicalAttribute `json:"clinicalAttribute,omitempty"`
+	PatientAttribute    *bool              `json:"patientAttribute,omitempty"`
+	ClinicalAttributeID string             `json:"clinicalAttributeId"`
+	Value               *string            `json:"value,omitempty"`
+}
+
 // writeClinical runs the query and writes it in the requested projection
 // (ID, SUMMARY, DETAILED with the attribute metadata, or META as a count header).
 func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, where string) {
-	projection := strings.ToUpper(r.URL.Query().Get("projection"))
+	projection := projectionParam(r)
 	if projection == "META" {
 		type c struct {
 			N uint64 `json:"n"`
@@ -89,19 +105,29 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		fail(w, err)
 		return
 	}
-	out := toClinicalData(rows, patient)
-	if projection == "DETAILED" && len(out) > 0 {
+	data := toClinicalData(rows, patient)
+	var attrs map[string]ClinicalAttribute
+	if projection == "DETAILED" && len(data) > 0 {
 		studies := map[string]bool{}
-		for _, d := range out {
+		for _, d := range data {
 			studies[d.StudyID] = true
 		}
-		attrs := s.clinicalAttributes(sortedKeys(studies))
-		for i := range out {
-			if a, ok := attrs[out[i].StudyID+"\x00"+out[i].ClinicalAttributeID]; ok {
-				a := a
-				out[i].ClinicalAttribute = &a
-			}
+		attrs = s.clinicalAttributes(sortedKeys(studies))
+	}
+	out := make([]clinicalDataOut, len(data))
+	for i, d := range data {
+		o := clinicalDataOut{
+			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, SampleID: d.SampleID,
+			PatientID: d.PatientID, StudyID: d.StudyID, ClinicalAttributeID: d.ClinicalAttributeID,
 		}
+		if projection != "ID" {
+			o.Value = &data[i].Value
+		}
+		if a, ok := attrs[d.StudyID+"\x00"+d.ClinicalAttributeID]; ok {
+			o.ClinicalAttribute = &a
+			o.PatientAttribute = &a.PatientAttribute
+		}
+		out[i] = o
 	}
 	writeJSON(w, out)
 }

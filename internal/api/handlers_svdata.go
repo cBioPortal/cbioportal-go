@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -20,59 +22,61 @@ func (s *State) routeSvData(mux *http.ServeMux) {
 
 // ---------- Structural variants (detail rows) ----------
 
-// StructuralVariant mirrors the Java StructuralVariant JSON shape. Only a subset
-// of fields is populated from the transform view; the rest are left null/empty,
-// matching how the Java backend reports absent optional columns.
+// StructuralVariant is the Java model as Jackson writes it (NON_NULL). Text
+// columns read as the importer stores them ("NA" when empty or absent),
+// numeric columns as TabDelimitedFileUtil.getPartInt (-1 when empty). Site
+// Hugo symbols are the reference genes' of the site entrez ids (absent
+// without a gene); driver fields exist only with a driver annotation.
 type StructuralVariant struct {
-	Annotation               string          `json:"annotation"`
-	BreakpointType           string          `json:"breakpointType"`
-	Comments                 string          `json:"comments"`
-	ConnectionType           string          `json:"connectionType"`
-	DnaSupport               string          `json:"dnaSupport"`
-	DriverFilter             string          `json:"driverFilter"`
-	DriverFilterAnn          string          `json:"driverFilterAnn"`
-	DriverTiersFilter        string          `json:"driverTiersFilter"`
-	DriverTiersFilterAnn     string          `json:"driverTiersFilterAnn"`
-	EventInfo                string          `json:"eventInfo"`
-	Length                   *int64          `json:"length"`
+	UniqueSampleKey          string          `json:"uniqueSampleKey"`
+	UniquePatientKey         string          `json:"uniquePatientKey"`
 	MolecularProfileID       string          `json:"molecularProfileId"`
-	NamespaceColumns         json.RawMessage `json:"namespaceColumns"`
-	NcbiBuild                string          `json:"ncbiBuild"`
-	NormalPairedEndReadCount *int64          `json:"normalPairedEndReadCount"`
-	NormalReadCount          *int64          `json:"normalReadCount"`
-	NormalSplitReadCount     *int64          `json:"normalSplitReadCount"`
-	NormalVariantCount       *int64          `json:"normalVariantCount"`
-	PatientID                string          `json:"patientId"`
-	RnaSupport               string          `json:"rnaSupport"`
 	SampleID                 string          `json:"sampleId"`
-	Site1Chromosome          string          `json:"site1Chromosome"`
-	Site1Contig              string          `json:"site1Contig"`
-	Site1Description         string          `json:"site1Description"`
+	PatientID                string          `json:"patientId"`
+	StudyID                  string          `json:"studyId"`
+	Site1EntrezGeneID        *int64          `json:"site1EntrezGeneId,omitempty"`
+	Site1HugoSymbol          string          `json:"site1HugoSymbol,omitempty"`
 	Site1EnsemblTranscriptID string          `json:"site1EnsemblTranscriptId"`
-	Site1EntrezGeneID        *int64          `json:"site1EntrezGeneId"`
-	Site1HugoSymbol          string          `json:"site1HugoSymbol"`
-	Site1Position            *int64          `json:"site1Position"`
+	Site1Chromosome          string          `json:"site1Chromosome"`
+	Site1Position            int64           `json:"site1Position"`
+	Site1Contig              string          `json:"site1Contig"`
 	Site1Region              string          `json:"site1Region"`
-	Site1RegionNumber        *int64          `json:"site1RegionNumber"`
+	Site1RegionNumber        int64           `json:"site1RegionNumber"`
+	Site1Description         string          `json:"site1Description"`
+	Site2EntrezGeneID        *int64          `json:"site2EntrezGeneId,omitempty"`
+	Site2HugoSymbol          string          `json:"site2HugoSymbol,omitempty"`
+	Site2EnsemblTranscriptID string          `json:"site2EnsemblTranscriptId"`
 	Site2Chromosome          string          `json:"site2Chromosome"`
+	Site2Position            int64           `json:"site2Position"`
 	Site2Contig              string          `json:"site2Contig"`
+	Site2Region              string          `json:"site2Region"`
+	Site2RegionNumber        int64           `json:"site2RegionNumber"`
 	Site2Description         string          `json:"site2Description"`
 	Site2EffectOnFrame       string          `json:"site2EffectOnFrame"`
-	Site2EnsemblTranscriptID string          `json:"site2EnsemblTranscriptId"`
-	Site2EntrezGeneID        *int64          `json:"site2EntrezGeneId"`
-	Site2HugoSymbol          string          `json:"site2HugoSymbol"`
-	Site2Position            *int64          `json:"site2Position"`
-	Site2Region              string          `json:"site2Region"`
-	Site2RegionNumber        *int64          `json:"site2RegionNumber"`
-	StudyID                  string          `json:"studyId"`
-	SvStatus                 string          `json:"svStatus"`
-	TumorPairedEndReadCount  *int64          `json:"tumorPairedEndReadCount"`
-	TumorReadCount           *int64          `json:"tumorReadCount"`
-	TumorSplitReadCount      *int64          `json:"tumorSplitReadCount"`
-	TumorVariantCount        *int64          `json:"tumorVariantCount"`
-	UniquePatientKey         string          `json:"uniquePatientKey"`
-	UniqueSampleKey          string          `json:"uniqueSampleKey"`
+	NcbiBuild                string          `json:"ncbiBuild"`
+	DnaSupport               string          `json:"dnaSupport"`
+	RnaSupport               string          `json:"rnaSupport"`
+	NormalReadCount          int64           `json:"normalReadCount"`
+	TumorReadCount           int64           `json:"tumorReadCount"`
+	NormalVariantCount       int64           `json:"normalVariantCount"`
+	TumorVariantCount        int64           `json:"tumorVariantCount"`
+	NormalPairedEndReadCount int64           `json:"normalPairedEndReadCount"`
+	TumorPairedEndReadCount  int64           `json:"tumorPairedEndReadCount"`
+	NormalSplitReadCount     int64           `json:"normalSplitReadCount"`
+	TumorSplitReadCount      int64           `json:"tumorSplitReadCount"`
+	Annotation               string          `json:"annotation"`
+	BreakpointType           string          `json:"breakpointType"`
+	ConnectionType           string          `json:"connectionType"`
+	EventInfo                string          `json:"eventInfo"`
 	VariantClass             string          `json:"variantClass"`
+	Length                   int64           `json:"length"`
+	Comments                 string          `json:"comments"`
+	DriverFilter             *string         `json:"driverFilter,omitempty"`
+	DriverFilterAnn          *string         `json:"driverFilterAnn,omitempty"`
+	DriverTiersFilter        *string         `json:"driverTiersFilter,omitempty"`
+	DriverTiersFilterAnn     *string         `json:"driverTiersFilterAnn,omitempty"`
+	SvStatus                 string          `json:"svStatus"`
+	NamespaceColumns         json.RawMessage `json:"namespaceColumns,omitempty"`
 }
 
 type svDataRow struct {
@@ -168,74 +172,127 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	var geneOrs []string
 	if len(f.EntrezGeneIDs) > 0 {
 		joined := intListSQL(f.EntrezGeneIDs)
-		geneOrs = append(geneOrs, fmt.Sprintf("sv.site1_entrez_gene_id IN (%s) OR sv.site2_entrez_gene_id IN (%s)", joined, joined))
+		geneOrs = append(geneOrs, fmt.Sprintf("sv.e1 IN (%s) OR sv.e2 IN (%s)", joined, joined))
 	}
 	for _, q := range f.StructuralVariantQueries {
-		geneOrs = append(geneOrs, "("+joinPreds(q.Gene1.clause("sv.site1_entrez_gene_id"), q.Gene2.clause("sv.site2_entrez_gene_id"))+")")
+		geneOrs = append(geneOrs, "("+joinPreds(q.Gene1.clause("sv.e1"), q.Gene2.clause("sv.e2"))+")")
 	}
 	if len(geneOrs) > 0 {
 		scope += " AND (" + strings.Join(geneOrs, " OR ") + ")"
 	}
 
-	type svDetailRow struct {
-		StructuralVariant
-		NamespaceColumns string `json:"namespaceColumns"`
-	}
-	num := func(col, alias string) string { return fmt.Sprintf("toInt64OrNull(toString(sv.%s)) AS %s", col, alias) }
-	str := func(col, alias string) string { return fmt.Sprintf("toString(sv.%s) AS %s", col, alias) }
+	have := s.svViewColumns()
 	cols := []string{
 		"sv.study_id AS studyId", "sv.sample_id AS sampleId", "ifNull(sm.patient_id, '') AS patientId",
-		"sv.site1_hugo_symbol AS site1HugoSymbol", "sv.site1_entrez_gene_id AS site1EntrezGeneId",
-		"sv.site2_hugo_symbol AS site2HugoSymbol", "sv.site2_entrez_gene_id AS site2EntrezGeneId",
+		"sv.e1 AS site1EntrezGeneId", "g1.hugo_gene_symbol AS site1HugoSymbol",
+		"sv.e2 AS site2EntrezGeneId", "g2.hugo_gene_symbol AS site2HugoSymbol",
 		"concat(sv.study_id, '_', sv.profile_stable_id) AS molecularProfileId",
-		"sv.sv_status AS svStatus", "sv.cbp_driver AS driverFilter", "sv.cbp_driver_tiers AS driverTiersFilter",
-		"sv.namespace_columns AS namespaceColumns",
 	}
-	have := s.svViewColumns()
-	for _, c := range [][3]string{
-		{"str", "site1_chromosome", "site1Chromosome"}, {"num", "site1_position", "site1Position"},
-		{"str", "site1_region", "site1Region"}, {"num", "site1_region_number", "site1RegionNumber"},
-		{"str", "site1_description", "site1Description"}, {"str", "site1_ensembl_transcript_id", "site1EnsemblTranscriptId"},
-		{"str", "site2_chromosome", "site2Chromosome"}, {"num", "site2_position", "site2Position"},
-		{"str", "site2_region", "site2Region"}, {"num", "site2_region_number", "site2RegionNumber"},
-		{"str", "site2_description", "site2Description"}, {"str", "site2_ensembl_transcript_id", "site2EnsemblTranscriptId"},
-		{"str", "site2_effect_on_frame", "site2EffectOnFrame"}, {"str", "site2_contig", "site2Contig"},
-		{"str", "dna_support", "dnaSupport"}, {"str", "rna_support", "rnaSupport"}, {"str", "event_info", "eventInfo"},
-		{"str", "ncbi_build", "ncbiBuild"}, {"str", "class", "variantClass"}, {"num", "sv_length", "length"},
-		{"str", "connection_type", "connectionType"}, {"str", "breakpoint_type", "breakpointType"},
-		{"str", "annotation", "annotation"}, {"str", "comments", "comments"},
-		{"num", "normal_read_count", "normalReadCount"}, {"num", "normal_variant_count", "normalVariantCount"},
-		{"num", "normal_paired_end_read_count", "normalPairedEndReadCount"}, {"num", "normal_split_read_count", "normalSplitReadCount"},
-		{"num", "tumor_read_count", "tumorReadCount"}, {"num", "tumor_variant_count", "tumorVariantCount"},
-		{"num", "tumor_paired_end_read_count", "tumorPairedEndReadCount"}, {"num", "tumor_split_read_count", "tumorSplitReadCount"},
-		{"str", "cbp_driver_annotation", "driverFilterAnn"}, {"str", "cbp_driver_tiers_annotation", "driverTiersFilterAnn"},
-	} {
-		if !have[c[1]] {
-			continue
-		}
-		if c[0] == "num" {
-			cols = append(cols, num(c[1], c[2]))
+	textCols := [][2]string{
+		{"site1_ensembl_transcript_id", "site1EnsemblTranscriptId"}, {"site1_chromosome", "site1Chromosome"},
+		{"site1_position", "site1Position"}, {"site1_contig", "site1Contig"}, {"site1_region", "site1Region"},
+		{"site1_region_number", "site1RegionNumber"}, {"site1_description", "site1Description"},
+		{"site2_ensembl_transcript_id", "site2EnsemblTranscriptId"}, {"site2_chromosome", "site2Chromosome"},
+		{"site2_position", "site2Position"}, {"site2_contig", "site2Contig"}, {"site2_region", "site2Region"},
+		{"site2_region_number", "site2RegionNumber"}, {"site2_description", "site2Description"},
+		{"site2_effect_on_frame", "site2EffectOnFrame"}, {"ncbi_build", "ncbiBuild"},
+		{"dna_support", "dnaSupport"}, {"rna_support", "rnaSupport"},
+		{"normal_read_count", "normalReadCount"}, {"tumor_read_count", "tumorReadCount"},
+		{"normal_variant_count", "normalVariantCount"}, {"tumor_variant_count", "tumorVariantCount"},
+		{"normal_paired_end_read_count", "normalPairedEndReadCount"}, {"tumor_paired_end_read_count", "tumorPairedEndReadCount"},
+		{"normal_split_read_count", "normalSplitReadCount"}, {"tumor_split_read_count", "tumorSplitReadCount"},
+		{"annotation", "annotation"}, {"breakpoint_type", "breakpointType"}, {"connection_type", "connectionType"},
+		{"event_info", "eventInfo"}, {"class", "variantClass"}, {"sv_length", "length"}, {"comments", "comments"},
+		{"cbp_driver", "driverFilter"}, {"cbp_driver_annotation", "driverFilterAnn"},
+		{"cbp_driver_tiers", "driverTiersFilter"}, {"cbp_driver_tiers_annotation", "driverTiersFilterAnn"},
+		{"sv_status", "svStatus"}, {"namespace_columns", "namespaceColumns"},
+	}
+	for _, c := range textCols {
+		if have[c[0]] {
+			cols = append(cols, fmt.Sprintf("ifNull(toString(sv.%s), '') AS %s", c[0], c[1]))
 		} else {
-			cols = append(cols, str(c[1], c[2]))
+			cols = append(cols, "'' AS "+c[1])
 		}
 	}
-	rows, err := ch.Query[svDetailRow](s.CH, fmt.Sprintf(
-		"SELECT %s FROM structural_variant sv "+
+	rows, err := ch.Query[map[string]any](s.CH, fmt.Sprintf(
+		"SELECT %s FROM (%s) sv "+
 			"LEFT JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
-			"WHERE %s ORDER BY sv.study_id, sv.sample_id", strings.Join(cols, ", "), scope))
+			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
+			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
+			"WHERE %s ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId",
+		strings.Join(cols, ", "), svSiteEntrezSQL, scope))
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	out := make([]StructuralVariant, len(rows))
 	for i, r := range rows {
-		v := r.StructuralVariant
-		v.NamespaceColumns = rawJSONOrEmpty(r.NamespaceColumns)
-		v.UniqueSampleKey = uniqueKey(v.StudyID, v.SampleID)
-		v.UniquePatientKey = uniqueKey(v.StudyID, v.PatientID)
-		out[i] = v
+		out[i] = toStructuralVariant(r)
 	}
 	writeJSON(w, out)
+}
+
+// svSiteEntrezSQL is the structural_variant view with each site's entrez id
+// (e1, e2) resolved from its Hugo symbol when the file gave none, as the
+// importer does.
+const svSiteEntrezSQL = "SELECT sv0.*, " +
+	"if(sv0.site1_entrez_gene_id IS NULL AND h1.entrez_gene_id != 0, h1.entrez_gene_id, sv0.site1_entrez_gene_id) AS e1, " +
+	"if(sv0.site2_entrez_gene_id IS NULL AND h2.entrez_gene_id != 0, h2.entrez_gene_id, sv0.site2_entrez_gene_id) AS e2 " +
+	"FROM structural_variant sv0 " +
+	"LEFT JOIN cbioportal_ref.gene h1 ON h1.hugo_gene_symbol = sv0.site1_hugo_symbol " +
+	"LEFT JOIN cbioportal_ref.gene h2 ON h2.hugo_gene_symbol = sv0.site2_hugo_symbol"
+
+// toStructuralVariant maps one fetched row (column alias -> value) to the
+// Java record.
+func toStructuralVariant(r map[string]any) StructuralVariant {
+	str := func(k string) string {
+		v, _ := r[k].(string)
+		return v
+	}
+	entrez := func(k string) *int64 {
+		switch v := r[k].(type) {
+		case float64:
+			n := int64(v)
+			return &n
+		case string:
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				return &n
+			}
+		}
+		return nil
+	}
+	na := func(k string) string { return naString(str(k)) }
+	num := func(k string) int64 { return javaPartInt(str(k)) }
+	study, sample, patient := str("studyId"), str("sampleId"), str("patientId")
+	v := StructuralVariant{
+		UniqueSampleKey: uniqueKey(study, sample), UniquePatientKey: uniqueKey(study, patient),
+		MolecularProfileID: str("molecularProfileId"), SampleID: sample, PatientID: patient, StudyID: study,
+		Site1EntrezGeneID: entrez("site1EntrezGeneId"), Site1HugoSymbol: str("site1HugoSymbol"),
+		Site1EnsemblTranscriptID: na("site1EnsemblTranscriptId"), Site1Chromosome: na("site1Chromosome"),
+		Site1Position: num("site1Position"), Site1Contig: na("site1Contig"), Site1Region: na("site1Region"),
+		Site1RegionNumber: num("site1RegionNumber"), Site1Description: na("site1Description"),
+		Site2EntrezGeneID: entrez("site2EntrezGeneId"), Site2HugoSymbol: str("site2HugoSymbol"),
+		Site2EnsemblTranscriptID: na("site2EnsemblTranscriptId"), Site2Chromosome: na("site2Chromosome"),
+		Site2Position: num("site2Position"), Site2Contig: na("site2Contig"), Site2Region: na("site2Region"),
+		Site2RegionNumber: num("site2RegionNumber"), Site2Description: na("site2Description"),
+		Site2EffectOnFrame: na("site2EffectOnFrame"), NcbiBuild: na("ncbiBuild"),
+		DnaSupport: na("dnaSupport"), RnaSupport: na("rnaSupport"),
+		NormalReadCount: num("normalReadCount"), TumorReadCount: num("tumorReadCount"),
+		NormalVariantCount: num("normalVariantCount"), TumorVariantCount: num("tumorVariantCount"),
+		NormalPairedEndReadCount: num("normalPairedEndReadCount"), TumorPairedEndReadCount: num("tumorPairedEndReadCount"),
+		NormalSplitReadCount: num("normalSplitReadCount"), TumorSplitReadCount: num("tumorSplitReadCount"),
+		Annotation: na("annotation"), BreakpointType: na("breakpointType"), ConnectionType: na("connectionType"),
+		EventInfo: na("eventInfo"), VariantClass: na("variantClass"), Length: num("length"), Comments: na("comments"),
+		SvStatus:         str("svStatus"),
+		NamespaceColumns: namespaceColumnsJSON(str("namespaceColumns")),
+	}
+	// An NA status takes the column default.
+	if v.SvStatus == "" || v.SvStatus == "NA" {
+		v.SvStatus = "SOMATIC"
+	}
+	d := newDriverAnnotation(str("driverFilter"), str("driverFilterAnn"), str("driverTiersFilter"), str("driverTiersFilterAnn"), naString)
+	v.DriverFilter, v.DriverFilterAnn, v.DriverTiersFilter, v.DriverTiersFilterAnn = d.Filter, d.FilterAnn, d.TiersFilter, d.TiersFilterAnn
+	return v
 }
 
 // ---------- Gene panel data (sample -> panel mapping) ----------
@@ -457,6 +514,9 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 
 // ---------- Multi-study numeric molecular data ----------
 
+// molecularDataMultipleStudyFetch is MolecularDataServiceImpl.getMolecularDataInMultipleMolecularProfiles:
+// sample-major (samples by stable id); for each sample every requested
+// profile of its study, then the genes in request order.
 func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		EntrezGeneIDs              []int64  `json:"entrezGeneIds"`
@@ -468,37 +528,89 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	}
 	readBody(r, &f)
 
-	out := []MolecularData{}
+	profileSet := map[string]bool{}
+	samplesByStudy := map[string]map[string]bool{}
 	if len(f.SampleMolecularIdentifiers) > 0 {
-		byProfile := map[string][]string{}
-		var order []string
 		for _, id := range f.SampleMolecularIdentifiers {
-			if _, seen := byProfile[id.MolecularProfileID]; !seen {
-				order = append(order, id.MolecularProfileID)
-			}
-			byProfile[id.MolecularProfileID] = append(byProfile[id.MolecularProfileID], id.SampleID)
-		}
-		for _, p := range order {
-			out = append(out, s.molecularDataForProfile(p, byProfile[p], f.EntrezGeneIDs)...)
+			profileSet[id.MolecularProfileID] = true
 		}
 	} else {
 		for _, p := range f.MolecularProfileIDs {
-			out = append(out, s.molecularDataForProfile(p, nil, f.EntrezGeneIDs)...)
+			profileSet[p] = true
 		}
 	}
-	if strings.EqualFold(r.URL.Query().Get("projection"), "META") {
-		w.Header().Set("total-count", fmt.Sprint(len(out)))
-		w.WriteHeader(http.StatusOK)
-		return
+	profiles := sortedKeys(profileSet)
+	studyOf := map[string]string{}
+	for _, p := range profiles {
+		if m, ok := s.profileMeta(p); ok {
+			studyOf[p] = m.StudyID
+		}
 	}
-	writeJSON(w, out)
-}
+	for _, id := range f.SampleMolecularIdentifiers {
+		if st, ok := studyOf[id.MolecularProfileID]; ok {
+			if samplesByStudy[st] == nil {
+				samplesByStudy[st] = map[string]bool{}
+			}
+			samplesByStudy[st][id.SampleID] = true
+		}
+	}
 
-// molecularDataForProfile mirrors molecularDataFetch's per-profile query, scoped
-// to an optional sample subset, returning the rows for one molecular profile.
-func (s *State) molecularDataForProfile(mpid string, sampleIDs []string, entrez []int64) []MolecularData {
-	out, _ := s.molecularData(mpid, molecularDataFilter{EntrezGeneIDs: entrez, SampleIDs: sampleIDs})
-	return out
+	geneRank := map[int64]int{}
+	for _, e := range f.EntrezGeneIDs {
+		if _, seen := geneRank[e]; !seen {
+			geneRank[e] = len(geneRank)
+		}
+	}
+	type cellKey struct{ profile, sample string }
+	cells := map[cellKey][]MolecularData{}
+	type sampleRef struct{ study, sample string }
+	sampleSet := map[sampleRef]bool{}
+	for _, p := range profiles {
+		study, ok := studyOf[p]
+		if !ok {
+			continue
+		}
+		var sampleIDs []string
+		if len(f.SampleMolecularIdentifiers) > 0 {
+			sampleIDs = sortedKeys(samplesByStudy[study])
+		}
+		data, err := s.molecularData(p, molecularDataFilter{EntrezGeneIDs: f.EntrezGeneIDs, SampleIDs: sampleIDs})
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		for _, d := range data {
+			k := cellKey{p, d.SampleID}
+			cells[k] = append(cells[k], d)
+			sampleSet[sampleRef{study, d.SampleID}] = true
+		}
+	}
+	samples := make([]sampleRef, 0, len(sampleSet))
+	for sr := range sampleSet {
+		samples = append(samples, sr)
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		if samples[i].sample != samples[j].sample {
+			return samples[i].sample < samples[j].sample
+		}
+		return samples[i].study < samples[j].study
+	})
+	var out []MolecularData
+	for _, sr := range samples {
+		for _, p := range profiles {
+			if studyOf[p] != sr.study {
+				continue
+			}
+			rows := cells[cellKey{p, sr.sample}]
+			if len(geneRank) > 0 {
+				sort.SliceStable(rows, func(i, j int) bool {
+					return geneRank[derefInt(rows[i].EntrezGeneID)] < geneRank[derefInt(rows[j].EntrezGeneID)]
+				})
+			}
+			out = append(out, rows...)
+		}
+	}
+	writeJSON(w, numericMolecularData(out, projectionOf(r)))
 }
 
 // svViewColumns lists the columns of the structural_variant view (the staged

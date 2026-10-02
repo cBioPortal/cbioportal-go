@@ -53,9 +53,10 @@ type CountSummary struct {
 	ProfiledCount int    `json:"profiledCount"`
 }
 
+// AlterationEnrichment is one gene's alteration-enrichment row. cBioPortal
+// never populates its cytoband, so the null field is not serialized.
 type AlterationEnrichment struct {
 	Counts         []CountSummary `json:"counts"`
-	Cytoband       string         `json:"cytoband"`
 	EntrezGeneID   int64          `json:"entrezGeneId"`
 	HugoGeneSymbol string         `json:"hugoGeneSymbol"`
 	PValue         float64        `json:"pValue"`
@@ -200,7 +201,7 @@ func enrichmentPValue(counts []CountSummary) float64 {
 		return 0
 	}
 	if len(counts) == 2 {
-		return stats.FisherExactTest(counts[1].ProfiledCount-counts[1].AlteredCount, counts[1].AlteredCount,
+		return stats.JavaFisherTwoTailed(counts[1].ProfiledCount-counts[1].AlteredCount, counts[1].AlteredCount,
 			counts[0].ProfiledCount-counts[0].AlteredCount, counts[0].AlteredCount)
 	}
 	altered, profiled := make([]int, len(counts)), make([]int, len(counts))

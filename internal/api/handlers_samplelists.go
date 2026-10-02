@@ -16,6 +16,8 @@ type sampleListRow struct {
 	SampleIDs    []string `json:"sampleIds"`
 }
 
+// SampleList is the legacy SampleList model; sampleCount and sampleIds belong
+// to the DETAILED projection (the others are cut by javaContract).
 type SampleList struct {
 	SampleListID string   `json:"sampleListId"`
 	Category     string   `json:"category"`
@@ -59,15 +61,17 @@ func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
 	s.sampleListsQuery(w, fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId"))))
 }
 
+// sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
 func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
-	sql := fmt.Sprintf("%s WHERE list_id = '%s' GROUP BY study_id, list_id", sampleListSelect, sqlLit(r.PathValue("id")))
+	id := r.PathValue("id")
+	sql := fmt.Sprintf("%s WHERE list_id = '%s' GROUP BY study_id, list_id", sampleListSelect, sqlLit(id))
 	rows, err := ch.Query[sampleListRow](s.CH, sql)
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	if len(rows) == 0 {
-		http.Error(w, "sample list not found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, msgSampleListNotFound(id))
 		return
 	}
 	writeJSON(w, toSampleList(rows[0]))

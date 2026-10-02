@@ -428,7 +428,8 @@ func (s *State) copyNumberEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	altFilter := ""
+	// cna holds every discrete level; enrichments count CNA events only.
+	altFilter := " AND alteration IN ('-2', '2')"
 	switch strings.ToUpper(r.URL.Query().Get("copyNumberEventType")) {
 	case "AMP", "2":
 		altFilter = " AND alteration = '2'"
@@ -483,7 +484,7 @@ func (s *State) copyNumberEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			c := counts[1].AlteredCount
 			d := counts[1].ProfiledCount - c
 			if b >= 0 && d >= 0 {
-				p = stats.FisherExactTest(a, b, c, d)
+				p = stats.JavaFisherTwoTailed(a, b, c, d)
 			}
 		}
 		out = append(out, AlterationEnrichment{

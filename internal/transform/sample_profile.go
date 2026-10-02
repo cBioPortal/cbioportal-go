@@ -9,14 +9,16 @@ import (
 )
 
 // mutationFilterSQL is cBioPortal's default MutationFilter (no
-// filtered_mutations override) as a WHERE condition over a MAF staging alias.
-func mutationFilterSQL(a string) string {
+// filtered_mutations override) as a WHERE condition over a MAF staging alias;
+// entrez is the resolved Entrez id expression (5'Flank variants are kept only
+// for the promoter whitelist, TERT = 7015).
+func mutationFilterSQL(a, entrez string) string {
 	return fmt.Sprintf(
 		"NOT startsWith(lower(%[1]s.mutation_status), 'none') AND NOT startsWith(lower(%[1]s.mutation_status), 'loh') "+
 			"AND NOT startsWith(lower(%[1]s.mutation_status), 'wildtype') AND NOT startsWith(lower(%[1]s.validation_status), 'redacted') "+
 			"AND lower(%[1]s.variant_classification) NOT IN ('silent', 'intron', '3''utr', '5''utr', '3''flank', 'igr', 'rna') "+
-			"AND ( lower(%[1]s.variant_classification) != '5''flank' OR %[1]s.entrez_gene_id = '7015' OR upper(%[1]s.hugo_symbol) = 'TERT' )",
-		a)
+			"AND ( lower(%[1]s.variant_classification) != '5''flank' OR %[2]s = 7015 )",
+		a, entrez)
 }
 
 // sanitizeIdentSQL mirrors parser.SanitizeIdent in SQL so profile stable ids
@@ -33,10 +35,12 @@ func sanitizeIdentSQL(expr string) string {
 //   - gene panel matrix (ImportGenePanelProfileMap): each non-NA cell, column =
 //     profile, value = panel (WXS/WGS/WXS/WGS → NULL). Imported last, so its
 //     panel wins over every other source.
-//   - MAF (ImportExtendedMutationData): samples with ≥1 mutation passing the
-//     default MutationFilter, plus the MAF's `#sequenced_samples:` ids.
-//   - SV (ImportStructuralVariantData) and discrete-long CNA
-//     (ImportCnaDiscreteLongData): samples present in the file.
+//   - MAF (ImportExtendedMutationData): samples with ≥1 mutation whose gene
+//     resolves and that passes the default MutationFilter, plus the MAF's
+//     `#sequenced_samples:` ids.
+//   - SV (ImportStructuralVariantData): samples of the stored structural
+//     variants (target-DB structural_variant).
+//   - discrete-long CNA (ImportCnaDiscreteLongData): samples in the file.
 //   - wide matrices (ImportTabDelimData: CNA, expression, methylation, GSVA,
 //     sample-level generic assay): every sample column of the header.
 //   - patient-level generic assay: every sample of each patient column.
@@ -50,7 +54,7 @@ func sanitizeIdentSQL(expr string) string {
 // Header ids come from the ingest-captured `profile_sample` staging table; for
 // raw databases ingested before it existed, the distinct sample ids of each
 // matrix staging table stand in for the header.
-func sampleProfileSQL(c *ch.Client, rawDB string) (string, bool) {
+func sampleProfileSQL(c *ch.Client, rawDB, targetDB string) (string, bool) {
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
 	if !exists("genetic_profile") || !exists("clinical_sample") {
 		return "", false
@@ -116,14 +120,24 @@ func sampleProfileSQL(c *ch.Client, rawDB string) (string, bool) {
 			continue
 		}
 		mc, _ := c.TableColumns(t)
-		where := ""
 		if mc["mutation_status"] && mc["validation_status"] && mc["variant_classification"] &&
 			mc["entrez_gene_id"] && mc["hugo_symbol"] {
-			where = mutationFilterSQL("r")
+			// Only records whose gene resolves and that pass the filter are
+			// stored, and only their samples are profiled.
+			sources = append(sources, fmt.Sprintf(
+				"SELECT DISTINCT r.study_id AS study_id, r.tumor_sample_barcode AS sample_id, r.profile_stable_id AS profile_stable_id, "+
+					"'' AS panel, toUInt8(1) AS prio FROM `%s`.%s r%s WHERE %s",
+				rawDB, t, geneKeyJoin(targetDB, t, "r", "hugo_symbol", "entrez_gene_id"),
+				mutationFilterSQL("r", "gk.resolved_entrez_gene_id")))
+			continue
 		}
-		record(t, "tumor_sample_barcode", where)
+		record(t, "tumor_sample_barcode", "")
 	}
-	record("structural_variant", "sample_id", "")
+	if exists("structural_variant") {
+		// Samples of the structural variants actually stored.
+		sources = append(sources, fmt.Sprintf(
+			"SELECT DISTINCT study_id, sample_id, profile_stable_id, '' AS panel, toUInt8(1) AS prio FROM `%s`.structural_variant", targetDB))
+	}
 	record("cna_discrete_long", "sample_id", "")
 
 	// Declared case ids: (study_id, id, profile_stable_id), where id is a

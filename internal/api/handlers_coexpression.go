@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"math"
+	"math/big"
+	"math/bits"
 	"net/http"
 	"sort"
 	"strconv"
@@ -504,11 +506,8 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		min, max              float64
 	}
 	boxes := map[string]*catBox{}
-	categories := make([]string, 0, len(byCategory))
-	for cat := range byCategory {
-		categories = append(categories, cat)
-	}
-	sort.Strings(categories)
+	// Rows follow the iteration order of the service's category HashMap.
+	categories := javaHashMapOrder(sortedKeys(byCategory))
 
 	for _, cat := range categories {
 		data := byCategory[cat]
@@ -594,16 +593,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 			pointsToRender = append(pointsToRender, cb.nonOutliers...)
 			pointsToRender = append(pointsToRender, cb.outliers...)
 		} else {
-			curve := make([]float64, numCurvePoints)
-			if sigma > 0 {
-				for _, d := range cb.nonOutliers {
-					for i, p := range curvePoints {
-						z := (p - d.val) / sigma
-						curve[i] += math.Exp(-0.5 * z * z)
-					}
-				}
-			}
-			row.CurveData = curve
+			row.CurveData = violinCurve(curvePoints, cb.nonOutliers, sigma, func(d point) float64 { return d.val })
 			pointsToRender = cb.outliers
 		}
 		for _, d := range pointsToRender {
@@ -614,6 +604,115 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		result.Rows = append(result.Rows, row)
 	}
 	writeJSON(w, result)
+}
+
+// violinCurve is the kernel density of ViolinPlotServiceImpl: at each curve
+// point, the sum over the values of a normalized Gaussian (commons-math
+// Gaussian(value, sigma)) evaluated there, summed as the service does.
+func violinCurve[T any](curvePoints []float64, data []T, sigma float64, value func(T) float64) []float64 {
+	curve := make([]float64, len(curvePoints))
+	if sigma <= 0 || math.IsNaN(sigma) {
+		return curve
+	}
+	norm := 1 / (sigma * math.Sqrt(2*math.Pi))
+	i2s2 := 1 / (2 * sigma * sigma)
+	terms := make([]float64, len(data))
+	for i, p := range curvePoints {
+		for j, d := range data {
+			diff := p - value(d)
+			terms[j] = norm * math.Exp(-diff*diff*i2s2)
+		}
+		curve[i] = bigDecimalSum(terms)
+	}
+	return curve
+}
+
+// bigDecimalSum is the sum of BigDecimal.valueOf(term) over the terms,
+// converted back with doubleValue(): each term contributes its shortest
+// decimal representation (Double.toString) and the sum is exact, rounded
+// once to the nearest double. Terms below 2^-200 of the largest are left out:
+// together they are far below the last bit of the sum.
+func bigDecimalSum(terms []float64) float64 {
+	largest := 0.0
+	for _, t := range terms {
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return t
+		}
+		largest = max(largest, math.Abs(t))
+	}
+	cutoff := math.Ldexp(largest, -200)
+
+	// Significand sums (128-bit, with sign) per decimal exponent: a term is
+	// digits * 10^exp with at most 17 digits.
+	byExp := map[int]*[2]uint64{}
+	negByExp := map[int]*[2]uint64{}
+	var buf []byte
+	for _, t := range terms {
+		if t == 0 || math.Abs(t) < cutoff {
+			continue
+		}
+		buf = strconv.AppendFloat(buf[:0], math.Abs(t), 'e', -1, 64)
+		var digits uint64
+		nFrac := -1
+		i := 0
+		for ; i < len(buf) && buf[i] != 'e'; i++ {
+			switch c := buf[i]; {
+			case c == '.':
+				nFrac = 0
+			default:
+				digits = digits*10 + uint64(c-'0')
+				if nFrac >= 0 {
+					nFrac++
+				}
+			}
+		}
+		e, _ := strconv.Atoi(string(buf[i+1:]))
+		exp := e - max(nFrac, 0)
+		m := byExp
+		if t < 0 {
+			m = negByExp
+		}
+		a := m[exp]
+		if a == nil {
+			a = &[2]uint64{}
+			m[exp] = a
+		}
+		var carry uint64
+		a[1], carry = bits.Add64(a[1], digits, 0)
+		a[0] += carry
+	}
+	if len(byExp)+len(negByExp) == 0 {
+		return 0
+	}
+	scale := 0
+	for e := range byExp {
+		scale = max(scale, -e)
+	}
+	for e := range negByExp {
+		scale = max(scale, -e)
+	}
+	ten := big.NewInt(10)
+	sum := new(big.Int)
+	var v, hi, pow big.Int
+	add := func(m map[int]*[2]uint64, sign int) {
+		for e, a := range m {
+			v.SetUint64(a[1])
+			hi.SetUint64(a[0])
+			v.Add(&v, hi.Lsh(&hi, 64))
+			pow.Exp(ten, big.NewInt(int64(e+scale)), nil)
+			v.Mul(&v, &pow)
+			if sign < 0 {
+				sum.Sub(sum, &v)
+			} else {
+				sum.Add(sum, &v)
+			}
+		}
+	}
+	add(byExp, 1)
+	add(negByExp, -1)
+	den := new(big.Int).Exp(ten, big.NewInt(int64(scale)), nil)
+	f, _ := new(big.Rat).SetFrac(sum, den).Float64()
+	return f
 }
 
 func clampWhiskers(b ClinicalViolinPlotBoxData, lo, hi float64) ClinicalViolinPlotBoxData {

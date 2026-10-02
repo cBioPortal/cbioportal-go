@@ -48,7 +48,7 @@ func NewState(c *ch.Client) *State {
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return cors(gzipResponse(gunzipBody(auth(loadAuthConfig(), s.extraEndpoints(pageList(metaProjection(mux)))))))
+	return cors(gzipResponse(gunzipBody(auth(loadAuthConfig(), s.extraEndpoints(s.javaContract(pageList(metaProjection(bodyErrors(mux)))))))))
 }
 
 // gunzipBody transparently decompresses gzip-encoded request bodies. The
@@ -104,16 +104,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// drainReadJSON decodes the request body into v, ensuring the body is fully
-// consumed (an unread large body makes Go close the keep-alive connection,
-// which the browser reports as a failed/cross-domain request).
-func readBody(r *http.Request, v any) {
-	if v != nil {
-		json.NewDecoder(r.Body).Decode(v)
-	}
-	io.Copy(io.Discard, r.Body)
-}
-
 // emptyArray drains the body and returns [] — for not-yet-implemented endpoints.
 func emptyArray(w http.ResponseWriter, r *http.Request) {
 	readBody(r, nil)
@@ -162,14 +152,17 @@ func metaProjection(next http.Handler) http.Handler {
 				w.Header().Del("Content-Type")
 				w.Header().Del("Content-Length")
 				w.Header().Set("total-count", fmt.Sprint(len(items)))
-				// Mutation META also reports the distinct samples (MutationMeta).
-				samples := map[string]bool{}
-				for _, it := range items {
-					if it.UniqueSampleKey != "" {
-						samples[it.UniqueSampleKey] = true
+				// Mutation META also reports the distinct samples (MutationMeta);
+				// no other endpoint sets sample-count.
+				if strings.Contains(r.URL.Path, "/mutations") {
+					samples := map[string]bool{}
+					for _, it := range items {
+						if it.UniqueSampleKey != "" {
+							samples[it.UniqueSampleKey] = true
+						}
 					}
+					w.Header().Set("sample-count", fmt.Sprint(len(samples)))
 				}
-				w.Header().Set("sample-count", fmt.Sprint(len(samples)))
 				w.WriteHeader(http.StatusOK)
 				return
 			}

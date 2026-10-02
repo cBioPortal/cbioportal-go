@@ -28,6 +28,13 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	hasRefText, _ := c.Execute(fmt.Sprintf(
 		"SELECT count() FROM system.tables WHERE database = '%s' AND name = 'gene' FORMAT TabSeparated", refDB))
 	hasRef := strings.TrimSpace(hasRefText) != "0" && strings.TrimSpace(hasRefText) != ""
+	genomeText, _ := c.Execute(fmt.Sprintf(
+		"SELECT count() FROM system.tables WHERE database = '%s' AND name IN ('reference_genome', 'reference_genome_gene') FORMAT TabSeparated", refDB))
+	hasGenomeGenes := strings.TrimSpace(genomeText) == "2"
+
+	if err := buildGeneKeyMap(c, rawDB, targetDB, refDB, hasRef); err != nil {
+		return nil, err
+	}
 
 	var created []string
 	engineOf := func(name string) string {
@@ -99,33 +106,13 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			return nil, err
 		}
 	}
-	// sample_list = the study's case lists plus the auto-generated
-	// "<studyId>_all" list (every sample), which cBioPortal synthesizes for
-	// studies with add_global_case_list.
 	if exists("sample_list") || exists("clinical_sample") {
-		parts := []string{}
-		if exists("sample_list") {
-			parts = append(parts, fmt.Sprintf(
-				"SELECT study_id, list_id, category, name, description, sample_id FROM `%s`.sample_list", rawDB))
-		}
-		if exists("clinical_sample") {
-			parts = append(parts, fmt.Sprintf(
-				"SELECT study_id, concat(study_id, '_all') AS list_id, 'all_cases_in_study' AS category, "+
-					"'All samples' AS name, 'All samples' AS description, sample_id "+
-					"FROM (SELECT DISTINCT study_id, sample_id FROM `%s`.clinical_sample WHERE sample_id != '')", rawDB))
-		}
-		if err := make("sample_list", strings.Join(parts, " UNION ALL ")); err != nil {
+		if err := make("sample_list", sampleListSQL(c, rawDB)); err != nil {
 			return nil, err
 		}
 	}
 	if exists("gene_panel") {
-		entrez, join := "''", ""
-		if hasRef {
-			entrez = "if(g.entrez_gene_id > 0, toString(g.entrez_gene_id), '')"
-			join = fmt.Sprintf(" LEFT JOIN `%s`.gene g ON upper(p.hugo_symbol) = upper(g.hugo_gene_symbol)", refDB)
-		}
-		if err := make("gene_panel", fmt.Sprintf(
-			"SELECT p.study_id AS study_id, p.gene_panel_id AS gene_panel_id, p.description AS description, p.hugo_symbol AS hugo_gene_symbol, %s AS entrez_gene_id FROM `%s`.gene_panel p%s", entrez, rawDB, join)); err != nil {
+		if err := make("gene_panel", genePanelSQL(rawDB, refDB, hasRef)); err != nil {
 			return nil, err
 		}
 	}
@@ -142,56 +129,18 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		}
 	}
 	if exists("mutation_extended") {
-		if err := make("mutation", mutationSQL(c, rawDB, refDB, hasRef)); err != nil {
+		if err := make("mutation", mutationSQL(c, rawDB, targetDB)); err != nil {
 			return nil, err
 		}
 	}
 	if exists("structural_variant") {
-		svc, _ := c.TableColumns("structural_variant")
-		svStatus, svDriver, svTiers := "''", "''", "''"
-		if svc["sv_status"] {
-			svStatus = "sv_status"
-		}
-		if svc["cbp_driver"] {
-			svDriver = driverValue("cbp_driver")
-		}
-		if svc["cbp_driver_tiers"] {
-			svTiers = driverValue("cbp_driver_tiers")
-		}
-		// Missing entrez ids are resolved from the gene symbol, as the importer does.
-		entrez := func(site string) string {
-			if !hasRef {
-				return fmt.Sprintf("toInt64OrNull(v.%s_entrez_gene_id)", site)
-			}
-			return fmt.Sprintf("if(toInt64OrNull(v.%[1]s_entrez_gene_id) > 0, toInt64OrNull(v.%[1]s_entrez_gene_id), "+
-				"nullIf(toInt64(%[1]s_g.entrez_gene_id), 0))", site)
-		}
-		joins := ""
-		if hasRef {
-			joins = fmt.Sprintf(
-				" LEFT JOIN `%[1]s`.gene site1_g ON v.site1_hugo_symbol != '' AND upper(v.site1_hugo_symbol) = upper(site1_g.hugo_gene_symbol)"+
-					" LEFT JOIN `%[1]s`.gene site2_g ON v.site2_hugo_symbol != '' AND upper(v.site2_hugo_symbol) = upper(site2_g.hugo_gene_symbol)", refDB)
-		}
-		if err := make("structural_variant", fmt.Sprintf(
-			"SELECT "+svPassThrough(svc)+"v.study_id AS study_id, v.sample_id AS sample_id, v.site1_hugo_symbol AS site1_hugo_symbol, %s AS site1_entrez_gene_id, "+
-				"v.site2_hugo_symbol AS site2_hugo_symbol, %s AS site2_entrez_gene_id, "+
-				"%s AS sv_status, %s AS cbp_driver, %s AS cbp_driver_tiers, %s AS namespace_columns FROM `%s`.structural_variant v%s",
-			entrez("site1"), entrez("site2"),
-			strings.ReplaceAll(svStatus, "sv_status", "v.sv_status"), strings.ReplaceAll(svDriver, "cbp_driver", "v.cbp_driver"),
-			strings.ReplaceAll(svTiers, "cbp_driver_tiers", "v.cbp_driver_tiers"), namespaceColumnsExpr(c, rawDB, svc, "v."), rawDB, joins)); err != nil {
+		if err := make("structural_variant", structuralVariantSQL(c, rawDB, targetDB)); err != nil {
 			return nil, err
 		}
 	}
 	cnaMatrix, cnaLong := exists("cna_matrix"), exists("cna_discrete_long")
 	if cnaMatrix || cnaLong {
-		sql := cnaSQL(c, rawDB, cnaMatrix, cnaLong)
-		if hasRef {
-			// Blank entrez ids are resolved from the gene symbol, as the importer does.
-			sql = fmt.Sprintf("SELECT u.* EXCEPT (entrez_gene_id), if(toInt64OrNull(u.entrez_gene_id) > 0, u.entrez_gene_id, "+
-				"if(g.entrez_gene_id > 0, toString(g.entrez_gene_id), '')) AS entrez_gene_id FROM (%s) u "+
-				"LEFT JOIN `%s`.gene g ON u.hugo_symbol != '' AND upper(u.hugo_symbol) = upper(g.hugo_gene_symbol)", sql, refDB)
-		}
-		if err := make("cna", sql); err != nil {
+		if err := make("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong)); err != nil {
 			return nil, err
 		}
 	}
@@ -218,7 +167,7 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	// every study-view and alteration query, and expensive to derive (it scans
 	// every profile's staging table), like prod's own sample_profile table.
 	hasSampleProfile := false
-	if sql, ok := sampleProfileSQL(c, rawDB); ok {
+	if sql, ok := sampleProfileSQL(c, rawDB, targetDB); ok {
 		engine, _ := c.Execute(fmt.Sprintf(
 			"SELECT engine FROM system.tables WHERE database = '%s' AND name = 'sample_profile' FORMAT TabSeparated", targetDB))
 		if strings.TrimSpace(engine) == "View" {
@@ -249,12 +198,12 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	}
 	// Ordered so every table is built after the tables it reads.
 	for _, d := range []derived{
-		{"gene_panel_to_gene_derived", exists("gene_panel"), genePanelToGeneDerivedSQL(rawDB, refDB)},
+		{"gene_panel_to_gene_derived", exists("gene_panel"), genePanelToGeneDerivedSQL(targetDB, refDB)},
 		{"sample_to_gene_panel_derived", hasSampleProfile, sampleToGenePanelDerivedSQL(targetDB)},
 		{"sample_derived", exists("clinical_sample"), sampleDerivedSQL(rawDB, refDB, targetDB)},
 		{"clinical_data_derived", exists("clinical_sample") || exists("clinical_patient"), clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
-		{"genomic_event_derived", exists("mutation_extended") && exists("cna_discrete_long") && exists("structural_variant") && hasSampleProfile, genomicEventDerivedSQL(rawDB, refDB, targetDB)},
-		{"genetic_alteration_derived", exists("cna_discrete_long") && exists("cna_matrix") && exists("methylation_matrix") && exists("mrna_expression_matrix"), geneticAlterationDerivedSQL(rawDB, refDB)},
+		{"genomic_event_derived", exists("mutation_extended") && (cnaMatrix || cnaLong) && exists("structural_variant") && hasSampleProfile, genomicEventDerivedSQL(rawDB, refDB, targetDB, hasGenomeGenes)},
+		{"genetic_alteration_derived", exists("cna_discrete_long") && exists("cna_matrix") && exists("methylation_matrix") && exists("mrna_expression_matrix"), geneticAlterationDerivedSQL(rawDB, targetDB)},
 		{"generic_assay_data_derived", exists("generic_assay_matrix"), genericAssayDataDerivedSQL(rawDB, refDB, targetDB)},
 		{"clinical_event_derived", exists("timeline"), clinicalEventDerivedSQL(rawDB, refDB)},
 		{"clinical_event_data_derived", exists("timeline"), clinicalEventDataDerivedSQL(rawDB, refDB)},
@@ -392,15 +341,13 @@ func hasColumn(c *ch.Client, rawDB, table, col string) bool {
 	return strings.TrimSpace(text) == "1"
 }
 
-func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
-	entrez, join := "m.entrez_gene_id", ""
-	if hasRef {
-		entrez = "if(toInt64OrNull(m.entrez_gene_id) > 0, m.entrez_gene_id, if(g.entrez_gene_id > 0, toString(g.entrez_gene_id), if(ga.e > 0, toString(ga.e), '')))"
-		join = fmt.Sprintf(
-			" LEFT JOIN `%s`.gene g ON upper(m.hugo_symbol) = upper(g.hugo_gene_symbol)"+
-				" LEFT JOIN (SELECT upper(gene_alias) AS a, any(entrez_gene_id) AS e FROM `%s`.gene_alias GROUP BY a HAVING uniqExact(entrez_gene_id) = 1) ga ON upper(m.hugo_symbol) = ga.a",
-			refDB, refDB)
-	}
+// mutationSQL builds the `mutation` view: the MAF records ImportExtendedMutationData
+// stores — gene resolved through gene_key_map (unresolved records are skipped,
+// hugo_symbol / entrez_gene_id are the reference gene's) — that pass the default
+// MutationFilter.
+func mutationSQL(c *ch.Client, rawDB, targetDB string) string {
+	entrez := "toString(gk.resolved_entrez_gene_id)"
+	join := geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id")
 	// Custom driver annotations (cbp_driver*): projected as normalized columns so
 	// the API can populate Mutation.driverFilter/driverTiersFilter, which the
 	// frontend reads directly to enable the custom-driver annotation controls.
@@ -443,7 +390,7 @@ func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 		driverCol("cbp_driver_tiers") + ", " + driverCol("cbp_driver_tiers_annotation")
 	nsCol := namespaceColumnsExpr(c, rawDB, has, "m.")
 	return fmt.Sprintf(
-		"SELECT m.study_id AS study_id, m.tumor_sample_barcode AS sample_id, m.hugo_symbol AS hugo_symbol, "+
+		"SELECT m.study_id AS study_id, m.tumor_sample_barcode AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
 			"%s AS entrez_gene_id, m.chromosome AS chromosome, m.start_position AS start_position, "+
 			"m.end_position AS end_position, m.reference_allele AS reference_allele, m.tumor_seq_allele2 AS tumor_seq_allele2, "+
 			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
@@ -453,37 +400,46 @@ func mutationSQL(c *ch.Client, rawDB, refDB string, hasRef bool) string {
 			"FROM `%s`.mutation_extended m%s "+
 			"LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM `"+rawDB+"`.clinical_sample) sp "+
 			"ON sp.study_id = m.study_id AND sp.sample_id = m.tumor_sample_barcode "+
-			"WHERE NOT startsWith(lower(m.mutation_status), 'none') AND NOT startsWith(lower(m.mutation_status), 'loh') "+
-			"AND NOT startsWith(lower(m.mutation_status), 'wildtype') AND NOT startsWith(lower(m.validation_status), 'redacted') "+
-			"AND lower(m.variant_classification) NOT IN ('silent', 'intron', '3''utr', '5''utr', '3''flank', 'igr', 'rna') "+
-			"AND ( lower(m.variant_classification) != '5''flank' OR m.entrez_gene_id = '7015' OR upper(m.hugo_symbol) = 'TERT' )",
+			"WHERE "+mutationFilterSQL("m", "gk.resolved_entrez_gene_id"),
 		entrez, rawDB, join)
 }
 
-func cnaSQL(c *ch.Client, rawDB string, fromMatrix, fromLong bool) string {
+// cnaSQL builds the `cna` view: the discrete copy-number values cbioportal-core
+// stores in genetic_alteration (every integer level -2..2 per gene x sample, so
+// GAIN/HETLOSS/DIPLOID queries work), from the DISCRETE wide matrices
+// (ImportTabDelimData) and the discrete long files (ImportCnaDiscreteLongData,
+// which stores a partial deletion -1.5 as -2 and keeps the first line per gene
+// and sample). Genes are resolved through gene_key_map; unresolved lines are
+// skipped, as are matrix lines stored through the microRNA branch, which
+// ImportTabDelimData keeps out of cna_event.
+func cnaSQL(c *ch.Client, rawDB, targetDB string, fromMatrix, fromLong bool) string {
+	const levels = "('-2', '-1', '0', '1', '2')"
 	var parts []string
 	if fromMatrix {
-		cols, _ := c.TableColumns("cna_matrix")
-		entrez := "''"
-		if cols["entrez_gene_id"] {
-			entrez = "entrez_gene_id"
-		}
 		parts = append(parts, fmt.Sprintf(
-			"SELECT study_id, sample_id, hugo_symbol, %s AS entrez_gene_id, value AS alteration, profile_stable_id, '' AS cbp_driver, '' AS cbp_driver_tiers, '' AS cbp_driver_annotation, '' AS cbp_driver_tiers_annotation, '{}' AS namespace_columns FROM `%s`.cna_matrix WHERE datatype = 'DISCRETE' AND value IN ('-2', '-1', '1', '2')", entrez, rawDB))
+			"SELECT c.study_id AS study_id, c.sample_id AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
+				"toString(gk.resolved_entrez_gene_id) AS entrez_gene_id, c.value AS alteration, c.profile_stable_id AS profile_stable_id, "+
+				"'' AS cbp_driver, '' AS cbp_driver_tiers, '' AS cbp_driver_annotation, '' AS cbp_driver_tiers_annotation, '{}' AS namespace_columns "+
+				"FROM `%s`.cna_matrix c%s WHERE c.datatype = 'DISCRETE' AND gk.mirna = 0 AND c.value IN %s",
+			rawDB, geneKeyJoin(targetDB, "cna_matrix", "c", "hugo_symbol", "entrez_gene_id"), levels))
 	}
 	if fromLong {
 		lcols, _ := c.TableColumns("cna_discrete_long")
 		opt := func(name string) string {
 			if lcols[name] {
-				return driverValue(name)
+				return driverValue("c." + name)
 			}
 			return "''"
 		}
-		ns := namespaceColumnsExpr(c, rawDB, lcols, "")
+		ns := namespaceColumnsExpr(c, rawDB, lcols, "c.")
 		parts = append(parts, fmt.Sprintf(
-			"SELECT study_id, sample_id, hugo_symbol, entrez_gene_id, value AS alteration, profile_stable_id, %s AS cbp_driver, %s AS cbp_driver_tiers, "+
-				"%s AS cbp_driver_annotation, %s AS cbp_driver_tiers_annotation, %s AS namespace_columns FROM `%s`.cna_discrete_long WHERE value IN ('-2', '-1', '1', '2')",
-			opt("cbp_driver"), opt("cbp_driver_tiers"), opt("cbp_driver_annotation"), opt("cbp_driver_tiers_annotation"), ns, rawDB))
+			"SELECT * FROM (SELECT c.study_id AS study_id, c.sample_id AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
+				"toString(gk.resolved_entrez_gene_id) AS entrez_gene_id, if(c.value = '-1.5', '-2', c.value) AS alteration, "+
+				"c.profile_stable_id AS profile_stable_id, %s AS cbp_driver, %s AS cbp_driver_tiers, "+
+				"%s AS cbp_driver_annotation, %s AS cbp_driver_tiers_annotation, %s AS namespace_columns FROM `%s`.cna_discrete_long c%s "+
+				"WHERE alteration IN %s) LIMIT 1 BY study_id, profile_stable_id, entrez_gene_id, sample_id",
+			opt("cbp_driver"), opt("cbp_driver_tiers"), opt("cbp_driver_annotation"), opt("cbp_driver_tiers_annotation"), ns, rawDB,
+			geneKeyJoin(targetDB, "cna_discrete_long", "c", "hugo_symbol", "entrez_gene_id"), levels))
 	}
 	return strings.Join(parts, " UNION ALL ")
 }
@@ -567,21 +523,6 @@ func proteinChangeSQL(has map[string]bool) string {
 // which the importer does not store.
 func driverValue(col string) string {
 	return fmt.Sprintf("if(lower(trimBoth(%[1]s)) IN ('', 'na'), '', %[1]s)", col)
-}
-
-// svPassThrough lists the staged structural-variant detail columns the view
-// carries unchanged (positions, regions, read counts, annotations, ...).
-func svPassThrough(cols map[string]bool) string {
-	derived := map[string]bool{"study_id": true, "sample_id": true, "site1_hugo_symbol": true, "site1_entrez_gene_id": true,
-		"site2_hugo_symbol": true, "site2_entrez_gene_id": true, "sv_status": true, "cbp_driver": true, "cbp_driver_tiers": true,
-		"source_file": true, "alteration_type": true, "datatype": true}
-	var out []string
-	for _, c := range sortedColumnNames(cols) {
-		if !derived[c] {
-			out = append(out, "v.`"+c+"` AS `"+c+"`, ")
-		}
-	}
-	return strings.Join(out, "")
 }
 
 func sortedColumnNames(cols map[string]bool) []string {

@@ -286,7 +286,8 @@ type ReferenceGenomeGene struct {
 }
 
 // referenceGenomeIDFor maps a genome name to the numeric reference-genome id used
-// by cBioPortal (GRCh37/hg19 -> 1, GRCh38/hg38 -> 2).
+// by cBioPortal (GRCh37/hg19 -> 1, GRCh38/hg38 -> 2), for reference DBs loaded
+// without the reference_genome table.
 func referenceGenomeIDFor(name string) int64 {
 	switch strings.ToLower(name) {
 	case "hg38", "grch38":
@@ -296,35 +297,55 @@ func referenceGenomeIDFor(name string) int64 {
 	}
 }
 
-// refGenomeGenesWhere loads genes from cbioportal_ref.gene into ReferenceGenomeGene
-// rows. Position columns (chromosome/cytoband/start/end) are not present in the
-// reference table, so they are returned empty. The where clause selects which genes.
+// refGenomeGenes returns the genes of a reference genome with their location,
+// as ReferenceGenomeGeneMapper does: reference_genome_gene joined to gene and
+// to the reference_genome whose name (hg19, hg38, mm10; case-insensitive)
+// matches. where filters on gene (aliased g). Reference DBs without the
+// reference_genome tables yield every gene with an empty location.
 func (s *State) refGenomeGenes(genomeName, where string) ([]ReferenceGenomeGene, error) {
-	refID := referenceGenomeIDFor(genomeName)
 	type geneRow struct {
-		Entrez int64  `json:"entrez"`
-		Hugo   string `json:"hugo"`
+		Entrez     int64  `json:"entrez"`
+		Hugo       string `json:"hugo"`
+		GenomeID   int64  `json:"genomeId"`
+		Chromosome string `json:"chromosome"`
+		Cytoband   string `json:"cytoband"`
+		Start      int64  `json:"start"`
+		End        int64  `json:"end"`
 	}
 	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
-		"SELECT entrez_gene_id AS entrez, hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE %s ORDER BY entrez_gene_id", where))
+		"SELECT g.entrez_gene_id AS entrez, g.hugo_gene_symbol AS hugo, toInt64(rg.reference_genome_id) AS genomeId, "+
+			"ifNull(rgg.chr, '') AS chromosome, ifNull(rgg.cytoband, '') AS cytoband, ifNull(rgg.start, 0) AS start, ifNull(rgg.end, 0) AS end "+
+			"FROM cbioportal_ref.reference_genome_gene rgg "+
+			"INNER JOIN cbioportal_ref.reference_genome rg ON rg.reference_genome_id = rgg.reference_genome_id "+
+			"INNER JOIN cbioportal_ref.gene g ON g.entrez_gene_id = rgg.entrez_gene_id "+
+			"WHERE lower(rg.name) = lower('%s') AND (%s) ORDER BY g.entrez_gene_id", sqlLit(genomeName), where))
 	if err != nil {
-		return nil, err
+		rows, err = ch.Query[geneRow](s.CH, fmt.Sprintf(
+			"SELECT g.entrez_gene_id AS entrez, g.hugo_gene_symbol AS hugo, toInt64(%d) AS genomeId "+
+				"FROM cbioportal_ref.gene g WHERE %s ORDER BY g.entrez_gene_id", referenceGenomeIDFor(genomeName), where))
+		if err != nil {
+			return nil, err
+		}
 	}
 	out := make([]ReferenceGenomeGene, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, ReferenceGenomeGene{
 			EntrezGeneID:      row.Entrez,
 			HugoGeneSymbol:    row.Hugo,
-			ReferenceGenomeID: refID,
+			ReferenceGenomeID: row.GenomeID,
+			Chromosome:        row.Chromosome,
+			Cytoband:          row.Cytoband,
+			Start:             row.Start,
+			End:               row.End,
 		})
 	}
 	return out, nil
 }
 
-// referenceGenomeGenes handles GET /api/reference-genome-genes/{genomeName}.
+// referenceGenomeGenes handles GET /api/reference-genome-genes/{genomeName}:
+// every gene of the genome.
 func (s *State) referenceGenomeGenes(w http.ResponseWriter, r *http.Request) {
-	genomeName := r.PathValue("genomeName")
-	out, err := s.refGenomeGenes(genomeName, "type = 'protein-coding'")
+	out, err := s.refGenomeGenes(r.PathValue("genomeName"), "1")
 	if err != nil {
 		fail(w, err)
 		return
@@ -333,55 +354,62 @@ func (s *State) referenceGenomeGenes(w http.ResponseWriter, r *http.Request) {
 }
 
 // referenceGenomeGeneGet handles GET /api/reference-genome-genes/{genomeName}/{geneId}.
+// geneId is an Entrez id; an unknown gene is 404.
 func (s *State) referenceGenomeGeneGet(w http.ResponseWriter, r *http.Request) {
-	genomeName := r.PathValue("genomeName")
-	entrez, _, ok := s.resolveRefGene(r.PathValue("geneId"))
-	if !ok {
-		writeJSON(w, ReferenceGenomeGene{ReferenceGenomeID: referenceGenomeIDFor(genomeName)})
+	entrez, err := strconv.ParseInt(r.PathValue("geneId"), 10, 32)
+	if err != nil {
+		http.Error(w, "geneId must be an integer", http.StatusBadRequest)
 		return
 	}
-	out, err := s.refGenomeGenes(genomeName, fmt.Sprintf("entrez_gene_id = %d", entrez))
+	out, err := s.refGenomeGenes(r.PathValue("genomeName"), fmt.Sprintf("g.entrez_gene_id = %d", entrez))
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	if len(out) == 0 {
-		writeJSON(w, ReferenceGenomeGene{ReferenceGenomeID: referenceGenomeIDFor(genomeName)})
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	writeJSON(w, out[0])
 }
 
 // referenceGenomeGenesFetch handles POST /api/reference-genome-genes/{genomeName}/fetch.
-// Body is a JSON array of gene ids (Entrez ids or Hugo symbols).
+// As in ReferenceGenomeGeneController, the body is read as Entrez ids when its
+// first entry is an integer, else as Hugo symbols.
 func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request) {
-	genomeName := r.PathValue("genomeName")
 	var geneIDs []string
 	readBody(r, &geneIDs)
 	if len(geneIDs) == 0 {
 		writeJSON(w, []ReferenceGenomeGene{})
 		return
 	}
-
-	var entrez, hugo []string
-	for _, id := range geneIDs {
-		if _, err := strconv.ParseInt(id, 10, 64); err == nil {
-			entrez = append(entrez, id)
-		} else {
-			hugo = append(hugo, id)
+	var where string
+	if _, err := strconv.ParseInt(geneIDs[0], 10, 32); err == nil {
+		ids := make([]int64, 0, len(geneIDs))
+		for _, id := range geneIDs {
+			n, err := strconv.ParseInt(id, 10, 32)
+			if err != nil {
+				http.Error(w, "gene ids must all be integers", http.StatusBadRequest)
+				return
+			}
+			ids = append(ids, n)
 		}
+		where = fmt.Sprintf("g.entrez_gene_id IN (%s)", intListSQL(ids))
+	} else {
+		where = fmt.Sprintf("upper(g.hugo_gene_symbol) IN (%s)", inList(upperAll(geneIDs)))
 	}
-	var clauses []string
-	if len(entrez) > 0 {
-		clauses = append(clauses, fmt.Sprintf("toString(entrez_gene_id) IN (%s)", inList(entrez)))
-	}
-	if len(hugo) > 0 {
-		clauses = append(clauses, fmt.Sprintf("hugo_gene_symbol IN (%s)", inList(hugo)))
-	}
-	out, err := s.refGenomeGenes(genomeName, strings.Join(clauses, " OR "))
+	out, err := s.refGenomeGenes(r.PathValue("genomeName"), where)
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	writeJSON(w, out)
+}
+
+func upperAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = strings.ToUpper(v)
+	}
+	return out
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -45,21 +44,35 @@ func naFilter(col string) string {
 
 // ClinicalDataEnrichment is one attribute's group-comparison result: a
 // Kruskal-Wallis/Wilcoxon test for numeric attributes or a chi-squared test for
-// categorical ones.
+// categorical ones (legacy ClinicalDataEnrichment; no q-value).
 type ClinicalDataEnrichment struct {
 	ClinicalAttribute ClinicalAttribute `json:"clinicalAttribute"`
+	Score             float64           `json:"score"`
 	Method            string            `json:"method"`
 	PValue            float64           `json:"pValue"`
-	QValue            *float64          `json:"qValue"`
-	Score             float64           `json:"score"`
 }
 
-type enrichAttr struct {
-	attr    ClinicalAttribute
-	numeric bool
-	patient bool
-}
+// enrichmentLevel is how an attribute's values are read for the groups, as
+// ClinicalAttributeUtil.extractCategorizedClinicalAttributes classifies it
+// across the groups' studies: sample-level, patient-level (one value per
+// patient), or conflicting (patient-level in some studies, sample-level in
+// others: sample values plus the patient value repeated for every sample of
+// the patient).
+type enrichmentLevel int
 
+const (
+	levelSample enrichmentLevel = iota
+	levelPatient
+	levelConflicting
+)
+
+// clinicalDataEnrichmentsFetch ports ClinicalDataEnrichmentController and
+// ClinicalDataEnrichmentUtil: groups keep their resolvable samples and empty
+// groups are dropped; attributes are deduplicated by id and patient flag (the
+// last study's metadata wins) and tested in that HashMap's order, categorical
+// (STRING) attributes first, then numeric (NUMBER) ones. Statistics are
+// Datumbox's (internal/stats DatumboxKruskalWallisFromRanks /
+// DatumboxChisquare).
 func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Groups []struct {
@@ -86,107 +99,120 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	withGroups := "WITH group_samples AS (" + strings.Join(groupSelects, " UNION ALL ") + ") "
 
-	// Load attribute metadata for the involved studies (dedup by attribute id).
+	type groupRow struct {
+		Grp uint32 `json:"grp"`
+	}
+	present, err := ch.Query[groupRow](s.CH, withGroups+"SELECT DISTINCT grp FROM group_samples ORDER BY grp")
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	numGroups := len(present)
+	if numGroups < 2 {
+		writeJSON(w, out)
+		return
+	}
+	testName := "Kruskal Wallis Test"
+	if numGroups == 2 {
+		testName = "Wilcoxon Test"
+	}
+
 	attrRows, err := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
 		"%sSELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta "+
-			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples)",
+			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples) ORDER BY study_id, clinical_attribute_id",
 		withGroups))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	attrs := map[string]enrichAttr{}
-	var attrOrder []string
+	// Unique attributes by id + patient flag, and each id's level.
+	attrs := map[string]ClinicalAttribute{}
+	var keys []string
+	flags := map[string]map[bool]bool{}
 	for _, a := range attrRows {
-		if _, ok := attrs[a.ClinicalAttributeID]; ok {
-			continue
+		patient := a.PatientFlag != 0
+		key := a.ClinicalAttributeID + strconv.FormatBool(patient)
+		if _, ok := attrs[key]; !ok {
+			keys = append(keys, key)
 		}
-		dt := a.Datatype
-		if dt == "" {
-			dt = "STRING"
+		attrs[key] = ClinicalAttribute{
+			ClinicalAttributeID: a.ClinicalAttributeID, DisplayName: a.DisplayName, Description: a.Description,
+			Datatype: a.Datatype, PatientAttribute: patient, Priority: a.Priority, StudyID: a.StudyID,
 		}
-		pr := a.Priority
-		if pr == "" {
-			pr = "1"
+		if flags[a.ClinicalAttributeID] == nil {
+			flags[a.ClinicalAttributeID] = map[bool]bool{}
 		}
-		attrOrder = append(attrOrder, a.ClinicalAttributeID)
-		attrs[a.ClinicalAttributeID] = enrichAttr{
-			attr: ClinicalAttribute{
-				ClinicalAttributeID: a.ClinicalAttributeID, DisplayName: a.DisplayName, Description: a.Description,
-				Datatype: dt, PatientAttribute: a.PatientFlag != 0, Priority: pr, StudyID: a.StudyID,
-			},
-			numeric: strings.EqualFold(dt, "NUMBER"),
-			patient: a.PatientFlag != 0,
+		flags[a.ClinicalAttributeID][patient] = true
+	}
+	levelOf := func(id string) enrichmentLevel {
+		switch fl := flags[id]; {
+		case len(fl) > 1:
+			return levelConflicting
+		case fl[true]:
+			return levelPatient
+		}
+		return levelSample
+	}
+	var numeric, categorical []ClinicalAttribute
+	for _, key := range javaHashMapOrder(keys) {
+		switch a := attrs[key]; a.Datatype {
+		case "NUMBER":
+			numeric = append(numeric, a)
+		case "STRING":
+			categorical = append(categorical, a)
 		}
 	}
-	if len(attrOrder) == 0 {
-		writeJSON(w, out)
-		return
+	idsByLevel := func(list []ClinicalAttribute) map[enrichmentLevel][]string {
+		m := map[enrichmentLevel][]string{}
+		seen := map[string]bool{}
+		for _, a := range list {
+			if !seen[a.ClinicalAttributeID] {
+				seen[a.ClinicalAttributeID] = true
+				l := levelOf(a.ClinicalAttributeID)
+				m[l] = append(m[l], a.ClinicalAttributeID)
+			}
+		}
+		return m
 	}
-	sort.Strings(attrOrder)
 
-	var numSample, numPatient, catSample, catPatient []string
-	for _, id := range attrOrder {
-		a := attrs[id]
-		switch {
-		case a.numeric && a.patient:
-			numPatient = append(numPatient, id)
-		case a.numeric:
-			numSample = append(numSample, id)
-		case a.patient:
-			catPatient = append(catPatient, id)
-		default:
-			catSample = append(catSample, id)
-		}
-	}
-
-	// groupValues selects (attr_id, grp, v) for the given sample- and
-	// patient-level attributes over every group's samples, counting a
-	// patient-level value once per patient and group. valueOf renders the value
-	// (and cond the row filter) for an attr_value column. It reads the
-	// group_samples CTE once, so ClickHouse builds the groups' sample sets once.
-	groupValues := func(valueOf, cond func(col string) string, sampleIDs, patientIDs []string) string {
+	// groupValues selects (attr_id, grp, v) over every group: sample-level
+	// values of the group's samples, patient-level values once per patient of
+	// the group, and for conflicting attributes both the sample-level values
+	// and the patient value once per sample of each of the group's patients.
+	// valueOf renders the value (and cond the row filter) for an attr_value
+	// column.
+	groupValues := func(valueOf, cond func(col string) string, ids map[enrichmentLevel][]string) string {
 		var parts []string
+		sampleIDs := append(append([]string{}, ids[levelSample]...), ids[levelConflicting]...)
 		if len(sampleIDs) > 0 {
 			parts = append(parts, fmt.Sprintf(
-				"SELECT study_id, sample_id, attr_id, %s AS v, sample_id AS k FROM clinical_sample WHERE attr_id IN (%s) AND %s",
-				valueOf("attr_value"), inList(sampleIDs), cond("attr_value")))
+				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM group_samples g "+
+					"INNER JOIN clinical_sample c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
+					"WHERE c.attr_id IN (%s) AND %s",
+				valueOf("c.attr_value"), inList(sampleIDs), cond("c.attr_value")))
 		}
-		if len(patientIDs) > 0 {
+		groupPatients := "(SELECT DISTINCT grp, study_id, patient_id FROM group_samples)"
+		if p := ids[levelPatient]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
-				"SELECT s.study_id, s.sample_id, c.attr_id, %s, c.patient_id FROM clinical_patient c "+
-					"INNER JOIN sample s ON s.study_id = c.study_id AND s.patient_id = c.patient_id WHERE c.attr_id IN (%s) AND %s",
-				valueOf("c.attr_value"), inList(patientIDs), cond("c.attr_value")))
+				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
+					"INNER JOIN clinical_patient c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
+					"WHERE c.attr_id IN (%s) AND %s",
+				valueOf("c.attr_value"), groupPatients, inList(p), cond("c.attr_value")))
 		}
-		return fmt.Sprintf(
-			"SELECT attr_id, grp, v FROM (SELECT c.attr_id AS attr_id, g.grp AS grp, c.v AS v, c.study_id AS st, c.k AS k "+
-				"FROM group_samples g INNER JOIN (%s) c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
-				"LIMIT 1 BY grp, attr_id, st, k)", strings.Join(parts, " UNION ALL "))
+		if p := ids[levelConflicting]; len(p) > 0 {
+			parts = append(parts, fmt.Sprintf(
+				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
+					"INNER JOIN sample s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
+					"INNER JOIN clinical_patient c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
+					"WHERE c.attr_id IN (%s) AND %s",
+				valueOf("c.attr_value"), groupPatients, inList(p), cond("c.attr_value")))
+		}
+		return strings.Join(parts, " UNION ALL ")
 	}
 
-	// Numeric attributes: per attribute and group, the number of values and the
-	// sum of their tie-averaged ranks among all groups' values, plus the number
-	// of distinct values, computed in ClickHouse.
-	numRanks := map[string][]groupRankRow{}
-	if len(numSample)+len(numPatient) > 0 {
-		rows, err := ch.Query[groupRankRow](s.CH, fmt.Sprintf(
-			"%sSELECT attr_id, grp, count() AS n, sum(r) AS rs, any(nd) AS nd FROM ("+
-				"SELECT attr_id, grp, rank() OVER (PARTITION BY attr_id ORDER BY v) + (count() OVER (PARTITION BY attr_id, v) - 1) / 2 AS r, "+
-				"uniqExact(v) OVER (PARTITION BY attr_id) AS nd FROM (%s)"+
-				") GROUP BY attr_id, grp ORDER BY attr_id, grp",
-			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
-				func(col string) string { return "toFloat64OrNull(" + col + ") IS NOT NULL" }, numSample, numPatient)))
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		for _, rw := range rows {
-			numRanks[rw.AttrID] = append(numRanks[rw.AttrID], rw)
-		}
-	}
-
-	// Categorical attributes: per attribute, group and value, the case count.
+	// Categorical attributes: per attribute, group and value, the case count
+	// (NA-like values excluded).
 	type catRow struct {
 		AttrID string `json:"attr_id"`
 		Grp    uint32 `json:"grp"`
@@ -197,10 +223,10 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	for gi := range f.Groups {
 		catData[gi] = map[string]map[string]uint64{}
 	}
-	if len(catSample)+len(catPatient) > 0 {
+	if len(categorical) > 0 {
 		rows, err := ch.Query[catRow](s.CH, fmt.Sprintf(
-			"%sSELECT attr_id, grp, v AS value, count() AS c FROM (%s) GROUP BY attr_id, grp, v",
-			withGroups, groupValues(func(col string) string { return col }, naFilter, catSample, catPatient)))
+			"%sSELECT attr_id, grp, v AS value, count() AS c FROM (%s) GROUP BY attr_id, grp, v ORDER BY attr_id, grp, v",
+			withGroups, groupValues(func(col string) string { return col }, naFilter, idsByLevel(categorical))))
 		if err != nil {
 			fail(w, err)
 			return
@@ -210,49 +236,25 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			if m[rw.AttrID] == nil {
 				m[rw.AttrID] = map[string]uint64{}
 			}
-			m[rw.AttrID][rw.Value] = rw.C
+			m[rw.AttrID][rw.Value] += rw.C
 		}
 	}
-
-	// Numeric attributes: Kruskal-Wallis (Wilcoxon for exactly 2 groups with data).
-	for _, id := range append(append([]string{}, numSample...), numPatient...) {
-		groupRanks := numRanks[id]
-		if len(groupRanks) < 2 || groupRanks[0].Distinct < 2 {
-			continue
-		}
-		p := kruskalWallisFromRanks(groupRanks)
-		if math.IsNaN(p) {
-			continue
-		}
-		method := "Kruskal Wallis Test"
-		if len(groupRanks) == 2 {
-			method = "Wilcoxon Test"
-		}
-		out = append(out, ClinicalDataEnrichment{
-			ClinicalAttribute: attrs[id].attr,
-			Method:            method,
-			PValue:            p,
-			Score:             invChiSquare(p, len(groupRanks)-1),
-		})
-	}
-
-	// Categorical attributes: chi-squared over the group x category contingency table.
-	for _, id := range append(append([]string{}, catSample...), catPatient...) {
+	for _, a := range categorical {
+		id := a.ClinicalAttributeID
+		var seen []string
 		catSet := map[string]bool{}
 		for gi := range f.Groups {
-			for v := range catData[gi][id] {
-				catSet[v] = true
+			for _, v := range sortedKeys(catData[gi][id]) {
+				if !catSet[v] {
+					catSet[v] = true
+					seen = append(seen, v)
+				}
 			}
 		}
 		if len(catSet) < 2 {
 			continue
 		}
-		categories := make([]string, 0, len(catSet))
-		for v := range catSet {
-			categories = append(categories, v)
-		}
-		sort.Strings(categories)
-
+		categories := javaHashMapOrder(seen)
 		var table [][]float64
 		for gi := range f.Groups {
 			row := make([]float64, len(categories))
@@ -271,31 +273,61 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if len(table) < 2 {
 			continue
 		}
-		score, p := chiSquareContingency(table)
-		out = append(out, ClinicalDataEnrichment{
-			ClinicalAttribute: attrs[id].attr,
-			Method:            "Chi-squared Test",
-			PValue:            p,
-			Score:             score,
-		})
+		score, p := stats.DatumboxChisquare(table)
+		out = append(out, ClinicalDataEnrichment{ClinicalAttribute: a, Score: score, Method: "Chi-squared Test", PValue: p})
 	}
 
-	// Benjamini-Hochberg q-values across all tested attributes.
-	if len(out) > 0 {
-		idx := make([]int, len(out))
-		for i := range idx {
-			idx[i] = i
+	// Numeric attributes: per attribute and group, the number of values and the
+	// sum of their tie-averaged ranks among all groups' values, the attribute's
+	// tie term (sum over values of t^2 - 1 for the t values tied with it, i.e.
+	// sum over distinct values of t^3 - t) and its number of distinct values.
+	type rankRow struct {
+		AttrID   string  `json:"attr_id"`
+		Grp      uint32  `json:"grp"`
+		N        uint64  `json:"n"`
+		RankSum  float64 `json:"rs"`
+		TieSum   float64 `json:"ts"`
+		Distinct uint64  `json:"nd"`
+	}
+	numRanks := map[string][]rankRow{}
+	if len(numeric) > 0 {
+		rows, err := ch.Query[rankRow](s.CH, fmt.Sprintf(
+			"%sSELECT attr_id, grp, count() AS n, sum(r) AS rs, sum(t * t - 1) AS ts, any(nd) AS nd FROM ("+
+				"SELECT attr_id, grp, rank() OVER (PARTITION BY attr_id ORDER BY v) + (count() OVER (PARTITION BY attr_id, v) - 1) / 2 AS r, "+
+				"toFloat64(count() OVER (PARTITION BY attr_id, v)) AS t, uniqExact(v) OVER (PARTITION BY attr_id) AS nd FROM (%s)"+
+				") GROUP BY attr_id, grp ORDER BY attr_id, grp",
+			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
+				func(col string) string { return "toFloat64OrNull(" + col + ") IS NOT NULL" }, idsByLevel(numeric))))
+		if err != nil {
+			fail(w, err)
+			return
 		}
-		sort.SliceStable(idx, func(a, b int) bool { return out[idx[a]].PValue < out[idx[b]].PValue })
-		sortedP := make([]float64, len(out))
-		for rank, i := range idx {
-			sortedP[rank] = out[i].PValue
+		for _, rw := range rows {
+			numRanks[rw.AttrID] = append(numRanks[rw.AttrID], rw)
 		}
-		q := benjaminiHochberg(sortedP)
-		for rank, i := range idx {
-			v := q[rank]
-			out[i].QValue = &v
+	}
+	for _, a := range numeric {
+		groupRanks := numRanks[a.ClinicalAttributeID]
+		if len(groupRanks) < 2 || groupRanks[0].Distinct < 2 {
+			continue
 		}
+		counts := make([]uint64, len(groupRanks))
+		sums := make([]float64, len(groupRanks))
+		ties := 0.0
+		for i, g := range groupRanks {
+			counts[i], sums[i] = g.N, g.RankSum
+			ties += g.TieSum
+		}
+		p := stats.DatumboxKruskalWallisFromRanks(counts, sums, ties)
+		if math.IsNaN(p) {
+			continue
+		}
+		out = append(out, ClinicalDataEnrichment{
+			ClinicalAttribute: a,
+			Score:             stats.DatumboxChisquareInverseCdf(p, len(groupRanks)-1),
+			Method:            testName,
+			PValue:            p,
+		})
 	}
 
 	writeJSON(w, out)
@@ -317,120 +349,6 @@ func compactSampleScope(ids []identifier) string {
 		ors = append(ors, fmt.Sprintf("(study_id = '%s' AND sample_id IN (%s))", sqlLit(st), inList(byStudy[st])))
 	}
 	return strings.Join(ors, " OR ")
-}
-
-// groupRankRow is one numeric attribute's values within one group: their
-// count, the sum of their tie-averaged ranks among all groups' values, and the
-// number of distinct values across all groups.
-type groupRankRow struct {
-	AttrID   string  `json:"attr_id"`
-	Grp      uint32  `json:"grp"`
-	N        uint64  `json:"n"`
-	RankSum  float64 `json:"rs"`
-	Distinct uint64  `json:"nd"`
-}
-
-// kruskalWallisFromRanks is stats.KruskalWallisTest computed from the
-// non-empty groups' value counts and rank sums, in group order:
-// H = 12/(N(N+1)) * sum(R_i^2/n_i) - 3(N+1), tested against chi-square with
-// k-1 degrees of freedom. Rank sums of tie-averaged ranks are exact in float64,
-// so the result is bit-identical to ranking the raw values.
-func kruskalWallisFromRanks(groups []groupRankRow) float64 {
-	k := len(groups)
-	if k < 2 {
-		return 1.0
-	}
-	var n uint64
-	for _, g := range groups {
-		n += g.N
-	}
-	if n < 2 {
-		return 1.0
-	}
-	N := float64(n)
-	h := 0.0
-	for _, g := range groups {
-		ni := float64(g.N)
-		if ni == 0 {
-			continue
-		}
-		h += (g.RankSum * g.RankSum) / ni
-	}
-	h = (12.0/(N*(N+1)))*h - 3.0*(N+1)
-	if math.IsNaN(h) || h < 0 {
-		return 1.0
-	}
-	pValue := 1.0 - stats.ChiSquareCDF(h, float64(k-1))
-	if math.IsNaN(pValue) {
-		return 1.0
-	}
-	return pValue
-}
-
-// invChiSquare returns the chi-square statistic whose upper-tail probability
-// equals pValue at df degrees of freedom (the inverse of the survival function),
-// matching the backend's score for Kruskal-Wallis enrichments.
-func invChiSquare(pValue float64, df int) float64 {
-	if df < 1 {
-		return 0
-	}
-	target := 1 - pValue
-	d := float64(df)
-	lo, hi := 0.0, 1.0
-	for stats.ChiSquareCDF(hi, d) < target && hi < 1e12 {
-		hi *= 2
-	}
-	for range 100 {
-		mid := (lo + hi) / 2
-		if stats.ChiSquareCDF(mid, d) < target {
-			lo = mid
-		} else {
-			hi = mid
-		}
-	}
-	return (lo + hi) / 2
-}
-
-// chiSquareContingency computes the Pearson chi-square statistic and p-value for
-// a groups x categories contingency table.
-func chiSquareContingency(table [][]float64) (float64, float64) {
-	rows := len(table)
-	if rows < 2 {
-		return 0, 1
-	}
-	cols := len(table[0])
-	rowT := make([]float64, rows)
-	colT := make([]float64, cols)
-	total := 0.0
-	for i := range table {
-		for j := range cols {
-			rowT[i] += table[i][j]
-			colT[j] += table[i][j]
-			total += table[i][j]
-		}
-	}
-	if total == 0 {
-		return 0, 1
-	}
-	chi := 0.0
-	for i := range table {
-		for j := range cols {
-			exp := rowT[i] * colT[j] / total
-			if exp > 0 {
-				diff := table[i][j] - exp
-				chi += diff * diff / exp
-			}
-		}
-	}
-	df := float64((rows - 1) * (cols - 1))
-	if df < 1 {
-		return chi, 1
-	}
-	p := 1 - stats.ChiSquareCDF(chi, df)
-	if math.IsNaN(p) {
-		p = 1
-	}
-	return chi, p
 }
 
 // ---------- Clinical data table (study-view Clinical tab) ----------

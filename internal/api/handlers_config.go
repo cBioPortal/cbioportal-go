@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -59,10 +60,61 @@ func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, report)
 }
 
+// Info is InfoController's response. Versions name what this backend serves:
+// the cBioPortal schema / derived-table versions its views reproduce and the
+// gene / gene-set tables of the seed database the reference is loaded from.
+// Git properties the build does not record are "not set", as in Java.
+type Info struct {
+	PortalVersion             string `json:"portalVersion"`
+	DbVersion                 string `json:"dbVersion"`
+	DerivedTableVersion       string `json:"derivedTableVersion"`
+	GenesetVersion            string `json:"genesetVersion"`
+	GeneTableVersion          string `json:"geneTableVersion"`
+	GitBranch                 string `json:"gitBranch"`
+	GitCommitID               string `json:"gitCommitId"`
+	GitCommitIDDescribe       string `json:"gitCommitIdDescribe"`
+	GitCommitIDDescribeShort  string `json:"gitCommitIdDescribeShort"`
+	GitCommitMessageFull      string `json:"gitCommitMessageFull"`
+	GitCommitMessageShort     string `json:"gitCommitMessageShort"`
+	GitCommitMessageUserEmail string `json:"gitCommitMessageUserEmail"`
+	GitCommitMessageUserName  string `json:"gitCommitMessageUserName"`
+	GitDirty                  bool   `json:"gitDirty"`
+}
+
+const (
+	portalVersion       = "go-0.1.0"
+	dbSchemaVersion     = "2.14.5"
+	derivedTableVersion = "1.0.11"
+	seedGenesetVersion  = "msigdb_v2025.1.Hs"
+	seedGeneTable       = "hgnc_v7_2025.10.7"
+	gitNotSet           = "not set"
+)
+
 func (s *State) info(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{
-		"portalVersion": "go-0.1.0", "gitBranch": "master", "gitCommitId": "", "dbVersion": "clickhouse",
-	})
+	info := Info{
+		PortalVersion: portalVersion, DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
+		GenesetVersion: seedGenesetVersion, GeneTableVersion: seedGeneTable,
+		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
+		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,
+		GitCommitMessageUserEmail: gitNotSet, GitCommitMessageUserName: gitNotSet,
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, kv := range bi.Settings {
+			switch kv.Key {
+			case "vcs.revision":
+				info.GitCommitID = kv.Value
+				info.GitCommitIDDescribe = kv.Value[:min(7, len(kv.Value))]
+				info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
+			case "vcs.modified":
+				info.GitDirty = kv.Value == "true"
+			}
+		}
+		if info.GitDirty && info.GitCommitID != gitNotSet {
+			info.GitCommitIDDescribe += "-dirty"
+			info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
+		}
+	}
+	writeJSON(w, info)
 }
 
 func (s *State) portal(w http.ResponseWriter, r *http.Request) {

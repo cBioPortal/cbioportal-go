@@ -16,6 +16,12 @@ var selfPagedPaths = map[string]bool{
 	"/api/clinical-data-table/fetch": true,
 }
 
+// limitOnlyPaths page with pageSize alone: ColumnStoreStudyController
+// truncates the study list to pageSize and ignores pageNumber.
+var limitOnlyPaths = map[string]bool{
+	"/api/studies": true,
+}
+
 // pageList implements the pageSize / pageNumber / sortBy / direction query
 // params of the Java list endpoints for every handler returning a JSON array:
 // the array is stably sorted by the sortBy field (ASC unless direction=DESC)
@@ -31,8 +37,11 @@ func pageList(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		size, sizeErr := strconv.Atoi(sizeParam)
-		number, _ := strconv.Atoi(numberParam)
+		size, sizeErr := strconv.Atoi(strings.TrimSpace(sizeParam))
+		number, _ := strconv.Atoi(strings.TrimSpace(numberParam))
+		if limitOnlyPaths[r.URL.Path] {
+			number = 0
+		}
 		q.Del("pageSize")
 		q.Del("pageNumber")
 		r2 := r.Clone(r.Context())

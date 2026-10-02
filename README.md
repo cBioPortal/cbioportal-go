@@ -34,8 +34,8 @@ interface, `compress/gzip` for the seed dump.
 - `internal/clickhouse` — HTTP client (Execute, InsertStream, JSON query helper, schema helpers, synchronous DeleteWhere).
 - `internal/parser` — meta files, study scan/classify, TSV header + streaming `BodyReader`/`MatrixUnpivotReader` (`io.Reader`s), clinical attribute-meta.
 - `internal/ingest` — orchestration: record/matrix/headerless streaming, provenance columns, schema evolution, dimensions (study/profile/gene-panel/clinical-meta).
-- `internal/reference` — gene/alias/cancer-type loading from the seed gzip via `FORMAT Values`.
-- `internal/transform` — the SQL views (dimensions, mutation filter with Hugo→Entrez resolution, CNA/SV, clinical unpivot).
+- `internal/reference` — gene/alias/cancer-type and reference-genome gene loading from the seed gzip via `FORMAT Values`.
+- `internal/transform` — the SQL views and tables (dimensions, cbioportal-core's gene resolution per importer recorded in `gene_key_map`, mutation filter, CNA/SV, case lists, clinical unpivot).
 - `cmd/cbioportal-import` — CLI.
 
 ## Usage
@@ -47,6 +47,7 @@ bin/cbioportal-import plan <study-dir>
 bin/cbioportal-import ingest <study-dir> --db cbioportal_raw
 bin/cbioportal-import load-reference <seed.sql.gz> --db cbioportal_ref
 bin/cbioportal-import load-gene-panels <panels-dir> --db cbioportal_raw
+bin/cbioportal-import ingest-case-lists <study-dir>... --db cbioportal_raw   # restage only case_lists/
 bin/cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
 ```
 

@@ -243,6 +243,15 @@ func LoadGenePanelsDir(c *ch.Client, dir string) (int, int, error) {
 	return panels, genes, nil
 }
 
+// IngestCaseLists replaces a study's staged case lists only, leaving its
+// data files' staging rows untouched.
+func IngestCaseLists(c *ch.Client, s *parser.Study) error {
+	if err := c.CreateDatabase(); err != nil {
+		return err
+	}
+	return ingestCaseLists(c, s)
+}
+
 // ingestCaseLists loads the study's case_lists/*.txt (sample lists) into a
 // sample_list staging table: one row per (list, sample).
 func ingestCaseLists(c *ch.Client, s *parser.Study) error {

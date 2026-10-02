@@ -6,25 +6,25 @@ import "fmt"
 // generic per-(sample, gene, profile) value table covering every non-mutation,
 // non-SV, non-generic-assay molecular profile. Prod derives it from the
 // genetic_alteration blob keyed by gene; we source directly from the per-gene
-// long/matrix staging tables (all schema-on-read into the same shape:
-// study_id, hugo_symbol, sample_id, value, profile_stable_id).
+// long/matrix staging tables, with each line's gene resolved through
+// gene_key_map as the importers store it (unresolved and duplicate-gene lines
+// are not stored), so hugo_gene_symbol is the reference symbol.
 //
 // profile_type matches prod's INSERT semantics — the profile stable id with the
 // study prefix stripped (e.g. `gistic`, `log2CNA`, `mrna`), which in our staging
 // is already the bare `profile_stable_id` column. alteration_value drops NA
 // and empty just as prod does (prod maps empty to NULL then filters out NA).
-func geneticAlterationDerivedSQL(rawDB, refDB string) string {
-	_ = refDB
+func geneticAlterationDerivedSQL(rawDB, targetDB string) string {
 	part := func(table string) string {
 		return fmt.Sprintf(
-			"SELECT concat(study_id, '_', sample_id) AS sample_unique_id, "+
-				"study_id AS cancer_study_identifier, "+
-				"hugo_symbol AS hugo_gene_symbol, "+
-				"profile_stable_id AS profile_type, "+
-				"nullIf(value, '') AS alteration_value "+
-				"FROM `%s`.%s "+
-				"WHERE value NOT IN ('NA', '') AND sample_id != ''",
-			rawDB, table)
+			"SELECT concat(t.study_id, '_', t.sample_id) AS sample_unique_id, "+
+				"t.study_id AS cancer_study_identifier, "+
+				"gk.resolved_hugo_gene_symbol AS hugo_gene_symbol, "+
+				"t.profile_stable_id AS profile_type, "+
+				"nullIf(t.value, '') AS alteration_value "+
+				"FROM `%s`.%s t%s "+
+				"WHERE t.value NOT IN ('NA', '') AND t.sample_id != ''",
+			rawDB, table, geneKeyJoin(targetDB, table, "t", "hugo_symbol", "entrez_gene_id"))
 	}
 	return part("cna_discrete_long") + " UNION ALL " +
 		part("cna_matrix") + " UNION ALL " +

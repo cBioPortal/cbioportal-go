@@ -5,23 +5,24 @@ import (
 	"strings"
 )
 
-// uniqueKey mirrors cBioPortal's Encoder.calculateBase64: URL-safe base64
-// without padding of "<studyId>:<id>".
+// uniqueKey mirrors cBioPortal's Encoder.calculateBase64(id, studyId) as used
+// by UniqueKeyInterceptor: standard base64 without padding of "<id>:<studyId>".
 func uniqueKey(studyID, id string) string {
-	return base64.RawStdEncoding.EncodeToString([]byte(studyID + ":" + id))
+	return base64.RawStdEncoding.EncodeToString([]byte(id + ":" + studyID))
 }
 
 // decodeUniqueKey reverses uniqueKey, returning (studyId, id). ok is false if
-// the key is not valid base64 or lacks the ':' separator.
+// the key is not valid base64 or lacks the ':' separator. The study id is the
+// part after the last ':' (study ids never contain one; entity ids may).
 func decodeUniqueKey(key string) (studyID, id string, ok bool) {
 	b, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(key, "="))
 	if err != nil {
 		return "", "", false
 	}
 	s := string(b)
-	before, after, ok := strings.Cut(s, ":")
-	if !ok {
+	i := strings.LastIndex(s, ":")
+	if i < 0 {
 		return "", "", false
 	}
-	return before, after, true
+	return s[i+1:], s[:i], true
 }

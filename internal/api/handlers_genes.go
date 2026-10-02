@@ -10,16 +10,18 @@ import (
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
+// geneRow is the legacy Gene model as GeneMapper selects it: the genetic
+// entity id is never written. The ID projection drops type (javaContract).
 type geneRow struct {
-	EntrezGeneID    int64  `json:"entrezGeneId"`
-	HugoGeneSymbol  string `json:"hugoGeneSymbol"`
-	Type            string `json:"type"`
-	GeneticEntityID int64  `json:"geneticEntityId"`
+	EntrezGeneID   int64  `json:"entrezGeneId"`
+	HugoGeneSymbol string `json:"hugoGeneSymbol"`
+	Type           string `json:"type"`
 }
 
 // genesFetch resolves gene identifiers against the reference. Body is a JSON
 // array of entrez ids (numbers) or Hugo symbols (strings); `geneIdType` query
-// param (ENTREZ_GENE_ID / HUGO_GENE_SYMBOL) hints which, but we detect per item.
+// param (ENTREZ_GENE_ID / HUGO_GENE_SYMBOL) hints which, but we detect per
+// item. Unknown identifiers are skipped.
 func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 	var raw []json.RawMessage
 	readBody(r, &raw)
@@ -48,8 +50,8 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 		conds = append(conds, fmt.Sprintf("upper(hugo_gene_symbol) IN (%s)", strings.Join(up, ", ")))
 	}
 	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
-		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type, "+
-			"genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s",
+		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type "+
+			"FROM cbioportal_ref.gene WHERE %s",
 		strings.Join(conds, " OR ")))
 	if err != nil {
 		fail(w, err)
@@ -66,13 +68,13 @@ func (s *State) gene(w http.ResponseWriter, r *http.Request) {
 		cond = "entrez_gene_id = " + id
 	}
 	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
-		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type, genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s LIMIT 1", cond))
+		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type FROM cbioportal_ref.gene WHERE %s LIMIT 1", cond))
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	if len(rows) == 0 {
-		http.Error(w, "gene not found", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, msgGeneNotFound(id))
 		return
 	}
 	writeJSON(w, rows[0])

@@ -19,18 +19,18 @@ func sampleToGenePanelDerivedSQL(targetDB string) string {
 }
 
 // genePanelToGeneDerivedSQL reproduces prod's gene_panel_to_gene_derived
-// (columns gene_panel_id, gene). Our gene_panel staging lists the panel's Hugo
-// symbols directly, so no gene-list join is needed. The trailing UNION appends
-// the reserved 'WES' panel = every reference gene with a real Entrez id, matching
-// prod's whole-exome expansion used by the off_panel check.
-func genePanelToGeneDerivedSQL(rawDB, refDB string) string {
+// (columns gene_panel_id, gene) from the target-DB gene_panel view, whose
+// genes are already resolved to the reference symbols. The trailing UNION
+// appends the reserved 'WES' panel = every reference gene with a real Entrez
+// id, matching prod's whole-exome expansion used by the off_panel check.
+func genePanelToGeneDerivedSQL(targetDB, refDB string) string {
 	return fmt.Sprintf(
-		"SELECT DISTINCT gp.gene_panel_id AS gene_panel_id, gp.hugo_symbol AS gene "+
+		"SELECT DISTINCT gp.gene_panel_id AS gene_panel_id, gp.hugo_gene_symbol AS gene "+
 			"FROM `%s`.gene_panel gp WHERE gp.gene_panel_id != '' "+
 			"UNION ALL "+
 			"SELECT DISTINCT 'WES' AS gene_panel_id, g.hugo_gene_symbol AS gene "+
 			"FROM `%s`.gene g WHERE g.entrez_gene_id > 0",
-		rawDB, refDB)
+		targetDB, refDB)
 }
 
 // clinicalEventDerivedSQL reproduces prod's clinical_event_derived from our

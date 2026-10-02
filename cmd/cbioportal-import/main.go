@@ -26,6 +26,8 @@ func main() {
 		cmdPlan(os.Args[2:])
 	case "ingest":
 		cmdIngest(os.Args[2:])
+	case "ingest-case-lists":
+		cmdIngestCaseLists(os.Args[2:])
 	case "transform":
 		cmdTransform(os.Args[2:])
 	case "load-reference":
@@ -38,7 +40,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cbioportal-import <plan|ingest|transform|load-reference|load-gene-panels> [args]")
+	fmt.Fprintln(os.Stderr, "usage: cbioportal-import <plan|ingest|ingest-case-lists|transform|load-reference|load-gene-panels> [args]")
 	os.Exit(2)
 }
 
@@ -121,6 +123,22 @@ func cmdIngest(args []string) {
 	fmt.Printf("TOTAL: %d rows, %.1f MB in %.2fs  =>  %.0f MB/s, %.0f krows/s\n", totalRows, mb, elapsed, mbps, krps)
 	if mismatch > 0 {
 		fmt.Printf("WARNING: %d file(s) had a row-count mismatch (marked !) — check TSV escaping.\n", mismatch)
+	}
+}
+
+// cmdIngestCaseLists re-stages only the case lists of one or more study
+// directories, e.g. for raw databases whose data files cannot be re-read.
+func cmdIngestCaseLists(args []string) {
+	fs := flag.NewFlagSet("ingest-case-lists", flag.ExitOnError)
+	url := fs.String("url", "http://localhost:18123", "ClickHouse HTTP endpoint")
+	db := fs.String("db", "cbioportal_raw", "target database")
+	fs.Parse(reorder(args))
+	c := ch.New(*url, *db)
+	for _, dir := range fs.Args() {
+		s, err := parser.Scan(dir)
+		fatal(err)
+		fatal(ingest.IngestCaseLists(c, s))
+		fmt.Printf("staged case lists of study=%s into `%s`\n", s.StudyID, *db)
 	}
 }
 

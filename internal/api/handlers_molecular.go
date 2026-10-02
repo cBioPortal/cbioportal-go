@@ -110,34 +110,44 @@ func (s *State) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Mutations ----------
 
+// mutationSelect reads the mutation view with each record's reference gene
+// (by entrez id): Java reports the gene's Hugo symbol and type.
 const mutationSelect = "SELECT study_id AS studyId, sample_id AS sampleId, hugo_symbol AS hugoGeneSymbol, " +
+	"rg.rg_hugo AS refHugoGeneSymbol, rg.rg_type AS geneType, " +
 	"toInt64OrNull(entrez_gene_id) AS entrezGeneId, chromosome AS chr, toInt64OrNull(start_position) AS startPosition, " +
 	"toInt64OrNull(end_position) AS endPosition, reference_allele AS referenceAllele, tumor_seq_allele2 AS variantAllele, " +
-	"protein_change AS proteinChange, variant_classification AS mutationType, toInt64OrNull(t_alt_count) AS tumorAltCount, " +
-	"toInt64OrNull(t_ref_count) AS tumorRefCount, cbp_driver AS driverFilter, cbp_driver_annotation AS driverFilterAnnotation, " +
+	"protein_change AS proteinChange, variant_classification AS mutationType, t_alt_count AS tumorAltCount, " +
+	"t_ref_count AS tumorRefCount, cbp_driver AS driverFilter, cbp_driver_annotation AS driverFilterAnnotation, " +
 	"cbp_driver_tiers AS driverTiersFilter, cbp_driver_tiers_annotation AS driverTiersFilterAnnotation, namespace_columns AS namespaceColumns, " +
 	"molecular_profile_id AS molecularProfileId, patient_id AS patientId, center, mutation_status AS mutationStatus, " +
-	"validation_status AS validationStatus, toInt64OrNull(n_alt_count) AS normalAltCount, toInt64OrNull(n_ref_count) AS normalRefCount, " +
-	"amino_acid_change AS aminoAcidChange, ncbi_build AS ncbiBuild, variant_type AS variantType, refseq_mrna_id AS refseqMrnaId, " +
+	"validation_status AS validationStatus, n_alt_count AS normalAltCount, n_ref_count AS normalRefCount, " +
+	"ncbi_build AS ncbiBuild, variant_type AS variantType, refseq_mrna_id AS refseqMrnaId, " +
 	"protein_position AS proteinPosition, toInt64OrNull(ascn_integer_copy_number) AS ascnIntegerCopyNumber, ascn_method AS ascnMethod, " +
 	"toFloat64OrNull(ascn_ccf_expected_copies_upper) AS ccfExpectedCopiesUpper, toFloat64OrNull(ascn_ccf_expected_copies) AS ccfExpectedCopies, " +
 	"ascn_clonal AS clonal, toInt64OrNull(ascn_minor_copy_number) AS minorCopyNumber, toInt64OrNull(ascn_expected_alt_copies) AS expectedAltCopies, " +
-	"toInt64OrNull(ascn_total_copy_number) AS totalCopyNumber FROM mutation"
+	"toInt64OrNull(ascn_total_copy_number) AS totalCopyNumber FROM mutation " +
+	"LEFT JOIN (SELECT entrez_gene_id AS rg_entrez, hugo_gene_symbol AS rg_hugo, type AS rg_type FROM cbioportal_ref.gene) rg " +
+	"ON rg.rg_entrez = toInt64OrNull(mutation.entrez_gene_id)"
+
+// mutationOrder is MutationMapper's default ORDER BY.
+const mutationOrder = "molecular_profile_id, sample_id, toInt64OrNull(entrez_gene_id), protein_change"
 
 type mutationRow struct {
-	StudyID         string `json:"studyId"`
-	SampleID        string `json:"sampleId"`
-	HugoGeneSymbol  string `json:"hugoGeneSymbol"`
-	EntrezGeneID    *int64 `json:"entrezGeneId"`
-	Chr             string `json:"chr"`
-	StartPosition   *int64 `json:"startPosition"`
-	EndPosition     *int64 `json:"endPosition"`
-	ReferenceAllele string `json:"referenceAllele"`
-	VariantAllele   string `json:"variantAllele"`
-	ProteinChange   string `json:"proteinChange"`
-	MutationType    string `json:"mutationType"`
-	TumorAltCount   *int64 `json:"tumorAltCount"`
-	TumorRefCount   *int64 `json:"tumorRefCount"`
+	StudyID           string `json:"studyId"`
+	SampleID          string `json:"sampleId"`
+	HugoGeneSymbol    string `json:"hugoGeneSymbol"`
+	RefHugoGeneSymbol string `json:"refHugoGeneSymbol"`
+	GeneType          string `json:"geneType"`
+	EntrezGeneID      *int64 `json:"entrezGeneId"`
+	Chr               string `json:"chr"`
+	StartPosition     *int64 `json:"startPosition"`
+	EndPosition       *int64 `json:"endPosition"`
+	ReferenceAllele   string `json:"referenceAllele"`
+	VariantAllele     string `json:"variantAllele"`
+	ProteinChange     string `json:"proteinChange"`
+	MutationType      string `json:"mutationType"`
+	TumorAltCount     string `json:"tumorAltCount"`
+	TumorRefCount     string `json:"tumorRefCount"`
 
 	DriverFilter                string `json:"driverFilter"`
 	DriverFilterAnnotation      string `json:"driverFilterAnnotation"`
@@ -150,9 +160,8 @@ type mutationRow struct {
 	Center             string `json:"center"`
 	MutationStatus     string `json:"mutationStatus"`
 	ValidationStatus   string `json:"validationStatus"`
-	NormalAltCount     *int64 `json:"normalAltCount"`
-	NormalRefCount     *int64 `json:"normalRefCount"`
-	AminoAcidChange    string `json:"aminoAcidChange"`
+	NormalAltCount     string `json:"normalAltCount"`
+	NormalRefCount     string `json:"normalRefCount"`
 	NcbiBuild          string `json:"ncbiBuild"`
 	VariantType        string `json:"variantType"`
 	RefseqMrnaID       string `json:"refseqMrnaId"`
@@ -160,48 +169,64 @@ type mutationRow struct {
 	alleleSpecificCopyNumber
 }
 
+// Gene is the nested gene of DETAILED records (GeneMapper.select).
 type Gene struct {
 	EntrezGeneID   *int64 `json:"entrezGeneId"`
 	HugoGeneSymbol string `json:"hugoGeneSymbol"`
+	Type           string `json:"type,omitempty"`
 }
 
+// Mutation is the Java Mutation model as Jackson writes it (NON_NULL): null
+// fields are absent. The nested gene and allele-specific copy number belong
+// to the DETAILED projection only.
 type Mutation struct {
 	MolecularProfileID string `json:"molecularProfileId"`
 	SampleID           string `json:"sampleId"`
 	StudyID            string `json:"studyId"`
 	EntrezGeneID       *int64 `json:"entrezGeneId"`
-	Gene               Gene   `json:"gene"`
+	Gene               *Gene  `json:"gene,omitempty"`
 	Chr                string `json:"chr"`
-	StartPosition      *int64 `json:"startPosition"`
-	EndPosition        *int64 `json:"endPosition"`
+	StartPosition      *int64 `json:"startPosition,omitempty"`
+	EndPosition        *int64 `json:"endPosition,omitempty"`
 	ReferenceAllele    string `json:"referenceAllele"`
 	VariantAllele      string `json:"variantAllele"`
 	ProteinChange      string `json:"proteinChange"`
 	MutationType       string `json:"mutationType"`
-	TumorAltCount      *int64 `json:"tumorAltCount"`
-	TumorRefCount      *int64 `json:"tumorRefCount"`
+	TumorAltCount      *int64 `json:"tumorAltCount,omitempty"`
+	TumorRefCount      *int64 `json:"tumorRefCount,omitempty"`
 	UniqueSampleKey    string `json:"uniqueSampleKey"`
+	Keyword            string `json:"keyword,omitempty"`
 
-	DriverFilter                string          `json:"driverFilter"`
-	DriverFilterAnnotation      string          `json:"driverFilterAnnotation"`
-	DriverTiersFilter           string          `json:"driverTiersFilter"`
-	DriverTiersFilterAnnotation string          `json:"driverTiersFilterAnnotation"`
-	NamespaceColumns            json.RawMessage `json:"namespaceColumns"`
+	DriverFilter                *string         `json:"driverFilter,omitempty"`
+	DriverFilterAnnotation      *string         `json:"driverFilterAnnotation,omitempty"`
+	DriverTiersFilter           *string         `json:"driverTiersFilter,omitempty"`
+	DriverTiersFilterAnnotation *string         `json:"driverTiersFilterAnnotation,omitempty"`
+	NamespaceColumns            json.RawMessage `json:"namespaceColumns,omitempty"`
 
 	PatientID                string                    `json:"patientId"`
 	UniquePatientKey         string                    `json:"uniquePatientKey"`
-	Center                   string                    `json:"center,omitempty"`
-	MutationStatus           string                    `json:"mutationStatus,omitempty"`
-	ValidationStatus         string                    `json:"validationStatus,omitempty"`
+	Center                   string                    `json:"center"`
+	MutationStatus           string                    `json:"mutationStatus"`
+	ValidationStatus         string                    `json:"validationStatus"`
 	NormalAltCount           *int64                    `json:"normalAltCount,omitempty"`
 	NormalRefCount           *int64                    `json:"normalRefCount,omitempty"`
-	AminoAcidChange          string                    `json:"aminoAcidChange,omitempty"`
-	NcbiBuild                string                    `json:"ncbiBuild,omitempty"`
-	VariantType              string                    `json:"variantType,omitempty"`
-	RefseqMrnaID             string                    `json:"refseqMrnaId,omitempty"`
-	ProteinPosStart          *int64                    `json:"proteinPosStart,omitempty"`
-	ProteinPosEnd            *int64                    `json:"proteinPosEnd,omitempty"`
+	NcbiBuild                string                    `json:"ncbiBuild"`
+	VariantType              string                    `json:"variantType"`
+	RefseqMrnaID             string                    `json:"refseqMrnaId"`
+	ProteinPosStart          int64                     `json:"proteinPosStart"`
+	ProteinPosEnd            int64                     `json:"proteinPosEnd"`
 	AlleleSpecificCopyNumber *alleleSpecificCopyNumber `json:"alleleSpecificCopyNumber,omitempty"`
+}
+
+// MutationID is a mutation in the ID projection.
+type MutationID struct {
+	MolecularProfileID string `json:"molecularProfileId"`
+	SampleID           string `json:"sampleId"`
+	PatientID          string `json:"patientId"`
+	EntrezGeneID       *int64 `json:"entrezGeneId"`
+	StudyID            string `json:"studyId"`
+	UniqueSampleKey    string `json:"uniqueSampleKey"`
+	UniquePatientKey   string `json:"uniquePatientKey"`
 }
 
 // alleleSpecificCopyNumber is the ASCN namespace of a MAF record.
@@ -222,82 +247,68 @@ func (a alleleSpecificCopyNumber) present() bool {
 		a.TotalCopyNumber != nil
 }
 
-// proteinPositions parses Protein_position ("600/766", "600-601/766"), else
-// the first number(s) of the protein change ("V600E" -> 600, "K23_E24del" -> 23-24).
-func proteinPositions(position, change string) (*int64, *int64) {
-	parse := func(s string) []int64 {
-		var out []int64
-		var cur int64
-		in := false
-		for _, c := range s {
-			if c >= '0' && c <= '9' {
-				cur = cur*10 + int64(c-'0')
-				in = true
-			} else if in {
-				out = append(out, cur)
-				cur, in = 0, false
-			}
-		}
-		if in {
-			out = append(out, cur)
-		}
-		return out
-	}
-	if p, _, _ := strings.Cut(position, "/"); p != "" {
-		if n := parse(p); len(n) > 0 {
-			start, end := n[0], n[len(n)-1]
-			return &start, &end
-		}
-	}
-	n := parse(change)
-	if len(n) == 0 {
-		return nil, nil
-	}
-	start, end := n[0], n[0]
-	if len(n) > 1 && strings.Contains(change, "_") {
-		end = n[1]
-	}
-	return &start, &end
-}
-
 func profileStudy(mpid string) string { return strings.TrimSuffix(mpid, "_mutations") }
 
-func toMutation(r mutationRow) Mutation {
+// geneHugo is the gene symbol Java reports: the reference gene's, else the
+// record's own.
+func geneHugo(ref, own string) string {
+	if ref != "" {
+		return ref
+	}
+	return own
+}
+
+// toMutation maps a mutation view row to the Java Mutation record of the
+// SUMMARY / DETAILED projection: string MAF columns read as the importer
+// stores them (empty -> "NA"), counts null when absent, protein positions
+// and keyword derived as the importer derives them.
+func toMutation(r mutationRow, detailed bool) Mutation {
+	hugo := geneHugo(r.RefHugoGeneSymbol, r.HugoGeneSymbol)
+	mutationType := naString(r.MutationType)
 	m := Mutation{
 		MolecularProfileID: r.StudyID + "_mutations", SampleID: r.SampleID, StudyID: r.StudyID,
-		EntrezGeneID: r.EntrezGeneID, Gene: Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol},
-		Chr: r.Chr, StartPosition: r.StartPosition, EndPosition: r.EndPosition, ReferenceAllele: r.ReferenceAllele,
-		VariantAllele: r.VariantAllele, ProteinChange: r.ProteinChange, MutationType: r.MutationType,
-		TumorAltCount: r.TumorAltCount, TumorRefCount: r.TumorRefCount, UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID),
-		DriverFilter: r.DriverFilter, DriverFilterAnnotation: r.DriverFilterAnnotation,
-		DriverTiersFilter: r.DriverTiersFilter, DriverTiersFilterAnnotation: r.DriverTiersFilterAnnotation,
-		NamespaceColumns: rawJSONOrEmpty(r.NamespaceColumns),
+		EntrezGeneID: r.EntrezGeneID,
+		Chr:          naString(r.Chr), StartPosition: r.StartPosition, EndPosition: r.EndPosition,
+		ReferenceAllele: naString(r.ReferenceAllele), VariantAllele: r.VariantAllele, ProteinChange: r.ProteinChange,
+		MutationType: mutationType, TumorAltCount: javaCount(r.TumorAltCount), TumorRefCount: javaCount(r.TumorRefCount),
+		UniqueSampleKey:  uniqueKey(r.StudyID, r.SampleID),
+		Keyword:          mutationKeyword(hugo, r.ProteinChange, mutationType),
+		NamespaceColumns: namespaceColumnsJSON(r.NamespaceColumns),
 		PatientID:        r.PatientID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
-		Center: r.Center, MutationStatus: r.MutationStatus, ValidationStatus: r.ValidationStatus,
-		NormalAltCount: r.NormalAltCount, NormalRefCount: r.NormalRefCount, AminoAcidChange: r.AminoAcidChange,
-		NcbiBuild: r.NcbiBuild, VariantType: r.VariantType, RefseqMrnaID: r.RefseqMrnaID,
+		Center: naString(r.Center), MutationStatus: naString(r.MutationStatus), ValidationStatus: naString(r.ValidationStatus),
+		NormalAltCount: javaCount(r.NormalAltCount), NormalRefCount: javaCount(r.NormalRefCount),
+		NcbiBuild: naString(r.NcbiBuild), VariantType: naString(r.VariantType), RefseqMrnaID: naString(r.RefseqMrnaID),
+	}
+	d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, mafDriverFilter)
+	m.DriverFilter, m.DriverTiersFilter = d.Filter, d.TiersFilter
+	if d.Filter != nil {
+		ann, tiersAnn := strings.TrimSpace(r.DriverFilterAnnotation), strings.TrimSpace(r.DriverTiersFilterAnnotation)
+		m.DriverFilterAnnotation, m.DriverTiersFilterAnnotation = &ann, &tiersAnn
 	}
 	if r.MolecularProfileID != "" {
 		m.MolecularProfileID = r.MolecularProfileID
 	}
-	m.ProteinPosStart, m.ProteinPosEnd = proteinPositions(r.ProteinPosition, r.ProteinChange)
-	if r.alleleSpecificCopyNumber.present() {
-		a := r.alleleSpecificCopyNumber
-		m.AlleleSpecificCopyNumber = &a
+	m.ProteinPosStart, m.ProteinPosEnd = javaProteinPositions(r.ProteinPosition, r.ProteinChange)
+	if detailed {
+		m.Gene = &Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: hugo, Type: r.GeneType}
+		if r.alleleSpecificCopyNumber.present() {
+			a := r.alleleSpecificCopyNumber
+			m.AlleleSpecificCopyNumber = &a
+		}
 	}
 	return m
 }
 
-// rawJSONOrEmpty returns s as raw JSON when it is valid, else the empty object.
-func rawJSONOrEmpty(s string) json.RawMessage {
-	if s != "" && json.Valid([]byte(s)) {
-		return json.RawMessage(s)
+// projectionOf is the request's projection (SUMMARY when absent).
+func projectionOf(r *http.Request) string {
+	if p := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("projection"))); p != "" {
+		return p
 	}
-	return json.RawMessage("{}")
+	return "SUMMARY"
 }
 
-func (s *State) mutationsWhere(w http.ResponseWriter, where, order string, limit int) {
-	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", mutationSelect, where, order)
+func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, limit int) {
+	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", mutationSelect, where, mutationOrder)
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
 	}
@@ -306,9 +317,20 @@ func (s *State) mutationsWhere(w http.ResponseWriter, where, order string, limit
 		fail(w, err)
 		return
 	}
+	projection := projectionOf(r)
+	if projection == "ID" {
+		out := make([]MutationID, len(rows))
+		for i, row := range rows {
+			m := toMutation(row, false)
+			out[i] = MutationID{MolecularProfileID: m.MolecularProfileID, SampleID: m.SampleID, PatientID: m.PatientID,
+				EntrezGeneID: m.EntrezGeneID, StudyID: m.StudyID, UniqueSampleKey: m.UniqueSampleKey, UniquePatientKey: m.UniquePatientKey}
+		}
+		writeJSON(w, out)
+		return
+	}
 	out := make([]Mutation, len(rows))
-	for i, r := range rows {
-		out[i] = toMutation(r)
+	for i, row := range rows {
+		out[i] = toMutation(row, projection == "DETAILED")
 	}
 	writeJSON(w, out)
 }
@@ -330,7 +352,7 @@ func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	if q.Get("sampleListId") == "" && len(entrez) == 0 {
 		limit = 100000
 	}
-	s.mutationsWhere(w, where, "sample_id", limit)
+	s.mutationsWhere(w, r, where, limit)
 }
 
 // sampleListClause restricts col to the members of a sample list (no-op for
@@ -376,7 +398,7 @@ func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 		where += sampleListClause("sample_id", f.SampleListID)
 	}
 	where += geneFilter(f.EntrezGeneIDs)
-	s.mutationsWhere(w, where, "sample_id", 0)
+	s.mutationsWhere(w, r, where, 0)
 }
 
 func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
@@ -391,7 +413,7 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 			pairs[i] = [2]string{profileStudy(id.MolecularProfileID), id.SampleID}
 		}
 		where := fmt.Sprintf("(study_id, sample_id) IN (%s)%s", tupleIn(pairs), geneFilter(f.EntrezGeneIDs))
-		s.mutationsWhere(w, where, "study_id, sample_id", 0)
+		s.mutationsWhere(w, r, where, 0)
 		return
 	}
 	if len(f.MolecularProfileIDs) > 0 {
@@ -400,7 +422,7 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 			studies[i] = profileStudy(id)
 		}
 		where := fmt.Sprintf("study_id IN (%s)%s", inList(studies), geneFilter(f.EntrezGeneIDs))
-		s.mutationsWhere(w, where, "study_id, sample_id", 0)
+		s.mutationsWhere(w, r, where, 0)
 		return
 	}
 	writeJSON(w, []Mutation{})

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -61,19 +62,59 @@ type molecularDataRow struct {
 	PatientID      string `json:"patientId"`
 	EntrezGeneID   *int64 `json:"entrezGeneId"`
 	HugoGeneSymbol string `json:"hugoGeneSymbol"`
+	GeneType       string `json:"geneType"`
 	Value          string `json:"value"`
 }
 
+// MolecularData is one sample's value of one gene in a molecular profile,
+// with the value as the Java mapper reads it (getTruncatedGeneticAlterationValues).
 type MolecularData struct {
-	MolecularProfileID string `json:"molecularProfileId"`
-	SampleID           string `json:"sampleId"`
-	PatientID          string `json:"patientId"`
-	EntrezGeneID       *int64 `json:"entrezGeneId"`
-	Gene               Gene   `json:"gene"`
-	StudyID            string `json:"studyId"`
-	Value              string `json:"value"`
-	UniqueSampleKey    string `json:"uniqueSampleKey"`
-	UniquePatientKey   string `json:"uniquePatientKey"`
+	MolecularProfileID string
+	SampleID           string
+	PatientID          string
+	EntrezGeneID       *int64
+	Gene               Gene
+	StudyID            string
+	Value              string
+	UniqueSampleKey    string
+	UniquePatientKey   string
+}
+
+// NumericGeneMolecularData is the Java model as Jackson writes it: value is
+// a JSON number (BigDecimal), the nested gene is DETAILED-only.
+type NumericGeneMolecularData struct {
+	UniqueSampleKey    string      `json:"uniqueSampleKey"`
+	UniquePatientKey   string      `json:"uniquePatientKey"`
+	EntrezGeneID       *int64      `json:"entrezGeneId"`
+	Gene               *Gene       `json:"gene,omitempty"`
+	MolecularProfileID string      `json:"molecularProfileId"`
+	SampleID           string      `json:"sampleId"`
+	PatientID          string      `json:"patientId"`
+	StudyID            string      `json:"studyId"`
+	Value              json.Number `json:"value"`
+}
+
+// numericMolecularData is MolecularDataController.filterNonNumberMolecularData:
+// records whose value is not a number are dropped.
+func numericMolecularData(data []MolecularData, projection string) []NumericGeneMolecularData {
+	out := make([]NumericGeneMolecularData, 0, len(data))
+	for _, d := range data {
+		v, ok := javaDecimal(d.Value)
+		if !ok {
+			continue
+		}
+		rec := NumericGeneMolecularData{
+			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, EntrezGeneID: d.EntrezGeneID,
+			MolecularProfileID: d.MolecularProfileID, SampleID: d.SampleID, PatientID: d.PatientID, StudyID: d.StudyID,
+			Value: v,
+		}
+		if projection == "DETAILED" {
+			g := d.Gene
+			rec.Gene = &g
+		}
+		out = append(out, rec)
+	}
+	return out
 }
 
 type molecularDataFilter struct {
@@ -90,7 +131,7 @@ func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, out)
+	writeJSON(w, numericMolecularData(out, projectionOf(r)))
 }
 
 // molecularDataGet serves GET /api/molecular-profiles/{id}/molecular-data
@@ -108,11 +149,13 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, out)
+	writeJSON(w, numericMolecularData(out, projectionOf(r)))
 }
 
 // molecularData returns a profile's per-sample gene values, optionally limited
-// to genes and samples (explicit ids or a sample list).
+// to genes and samples (explicit ids or a sample list), sample-major as
+// MolecularDataServiceImpl builds them (samples by stable id). Records are
+// limited to reference genes, as the mapper joins the gene table.
 func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularData, error) {
 	meta, ok := s.profileMeta(mpid)
 	if !ok {
@@ -125,15 +168,6 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 		return []MolecularData{}, nil
 	}
 	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
-	if len(f.EntrezGeneIDs) > 0 {
-		ids := make([]string, len(f.EntrezGeneIDs))
-		for i, e := range f.EntrezGeneIDs {
-			ids[i] = fmt.Sprintf("%d", e)
-		}
-		joined := strings.Join(ids, ", ")
-		where += fmt.Sprintf(" AND (toInt64OrNull(entrez_gene_id) IN (%[1]s) OR (ifNull(toInt64OrNull(entrez_gene_id), 0) <= 0 "+
-			"AND upper(hugo_symbol) IN (SELECT upper(hugo_gene_symbol) FROM cbioportal_ref.gene WHERE entrez_gene_id IN (%[1]s))))", joined)
-	}
 	if len(f.SampleIDs) > 0 {
 		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(f.SampleIDs))
 	} else if f.SampleListID != "" {
@@ -141,9 +175,12 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 	}
 	rows, err := ch.Query[molecularDataRow](s.CH, fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
-			"m.hugo_symbol AS hugoGeneSymbol, m.value AS value FROM (%s) m "+
-			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id",
-		resolvedEntrezSQL("cbioportal_raw."+table, where)))
+			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
+			"%s AS value FROM (%s) m "+
+			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
+			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
+			"WHERE m.entrez IS NOT NULL ORDER BY m.sample_id, m.entrez",
+		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(table, meta, where, f.EntrezGeneIDs)))
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +188,7 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 	for i, r := range rows {
 		out[i] = MolecularData{
 			MolecularProfileID: mpid, SampleID: r.SampleID, PatientID: r.PatientID, EntrezGeneID: r.EntrezGeneID,
-			Gene:    Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol},
+			Gene:    Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol, Type: r.GeneType},
 			StudyID: meta.StudyID, Value: r.Value,
 			UniqueSampleKey: uniqueKey(meta.StudyID, r.SampleID), UniquePatientKey: uniqueKey(meta.StudyID, r.PatientID),
 		}
@@ -159,12 +196,42 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 	return out, nil
 }
 
-// resolvedEntrezSQL selects a staged per-gene table with an `entrez` column:
-// the file's entrez id, or the reference gene's for a blank one (as the
-// importer resolves Hugo symbols). where filters the staged rows.
-func resolvedEntrezSQL(table, where string) string {
+// geneKeyMapSources are the staging tables whose gene identifiers the
+// transform resolves into gene_key_map.
+var geneKeyMapSources = map[string]bool{
+	"cna_matrix": true, "cna_discrete_long": true, "mrna_expression_matrix": true, "methylation_matrix": true,
+}
+
+// resolvedEntrezSQL selects a profile's rows of a staged per-gene table with
+// an `entrez` column holding the gene each row is stored under: the
+// importer's resolution (entrez id, symbol or unique alias, recorded in
+// gene_key_map) where the transform provides it — rows it could not resolve
+// are dropped — and otherwise the row's entrez id or its symbol's. entrez, if
+// non-empty, restricts the result to those genes.
+func resolvedEntrezSQL(table string, meta profileMeta, where string, entrez []int64) string {
+	ids := make([]string, len(entrez))
+	for i, e := range entrez {
+		ids[i] = fmt.Sprintf("%d", e)
+	}
+	idList := strings.Join(ids, ", ")
+	if geneKeyMapSources[table] {
+		keyFilter := fmt.Sprintf("source = '%s' AND study_id = '%s' AND profile_stable_id = '%s'",
+			table, sqlLit(meta.StudyID), sqlLit(meta.StableID))
+		if len(entrez) > 0 {
+			keyFilter += fmt.Sprintf(" AND resolved_entrez_gene_id IN (%s)", idList)
+			where += fmt.Sprintf(" AND (hugo_symbol, entrez_gene_id) IN (SELECT hugo_symbol, entrez_gene_id FROM gene_key_map WHERE %s)", keyFilter)
+		}
+		return fmt.Sprintf("SELECT t.*, gk.resolved_entrez_gene_id AS entrez FROM (SELECT * FROM cbioportal_raw.%s WHERE %s) t "+
+			"INNER JOIN (SELECT * FROM gene_key_map WHERE %s) gk "+
+			"ON gk.hugo_symbol = t.hugo_symbol AND gk.entrez_gene_id = t.entrez_gene_id",
+			table, where, keyFilter)
+	}
+	if len(entrez) > 0 {
+		where += fmt.Sprintf(" AND (toInt64OrNull(entrez_gene_id) IN (%[1]s) OR (ifNull(toInt64OrNull(entrez_gene_id), 0) <= 0 "+
+			"AND upper(hugo_symbol) IN (SELECT upper(hugo_gene_symbol) FROM cbioportal_ref.gene WHERE entrez_gene_id IN (%[1]s))))", idList)
+	}
 	return fmt.Sprintf("SELECT t.*, if(toInt64OrNull(t.entrez_gene_id) > 0, toInt64OrNull(t.entrez_gene_id), "+
-		"nullIf(toInt64(g.entrez_gene_id), 0)) AS entrez FROM (SELECT * FROM %s WHERE %s) t "+
+		"nullIf(toInt64(g.entrez_gene_id), 0)) AS entrez FROM (SELECT * FROM cbioportal_raw.%s WHERE %s) t "+
 		"LEFT JOIN cbioportal_ref.gene g ON t.hugo_symbol != '' AND upper(t.hugo_symbol) = upper(g.hugo_gene_symbol)",
 		table, where)
 }

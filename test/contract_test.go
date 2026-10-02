@@ -156,7 +156,7 @@ func TestContractSamplesFetchBySampleList(t *testing.T) {
 
 func TestContractPatientsFetchByUniqueKeys(t *testing.T) {
 	requireAPI(t)
-	key := base64.RawStdEncoding.EncodeToString([]byte("study_es_0:TCGA-A1-A0SB"))
+	key := base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB:study_es_0"))
 	var d []map[string]any
 	post(t, "/api/patients/fetch", map[string]any{"uniquePatientKeys": []string{key}}, &d)
 	if len(d) != 1 || d[0]["patientId"] != "TCGA-A1-A0SB" {
@@ -215,7 +215,7 @@ func TestContractCnaNamespaceColumns(t *testing.T) {
 		HugoGeneSymbol   string                    `json:"hugoGeneSymbol"`
 		NamespaceColumns map[string]map[string]any `json:"namespaceColumns"`
 	}
-	post(t, "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=ALL",
+	post(t, "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=HOMDEL_AND_AMP",
 		map[string]any{"sampleIds": []string{"TCGA-A2-A04U-01"}, "entrezGeneIds": []int{116983}}, &d)
 	if len(d) == 0 {
 		t.Fatal("no ACAP3 CNA row")
@@ -228,7 +228,7 @@ func TestContractCnaNamespaceColumns(t *testing.T) {
 
 func TestContractGzipRequestBody(t *testing.T) {
 	requireAPI(t)
-	key := base64.RawStdEncoding.EncodeToString([]byte("study_es_0:TCGA-A1-A0SB"))
+	key := base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB:study_es_0"))
 	var d []map[string]any
 	do(t, "POST", "/api/patients/fetch", map[string]any{"uniquePatientKeys": []string{key}}, true, &d)
 	wantEq(t, len(d), 1)
@@ -268,7 +268,7 @@ func TestContractGenePanelsFetchPost(t *testing.T) {
 		GenePanelID string `json:"genePanelId"`
 		Genes       []any  `json:"genes"`
 	}
-	post(t, "/api/gene-panels/fetch", []string{"TESTPANEL1", "TESTPANEL2"}, &d)
+	post(t, "/api/gene-panels/fetch?projection=DETAILED", []string{"TESTPANEL1", "TESTPANEL2"}, &d)
 	got := map[string]int{}
 	for _, p := range d {
 		got[p.GenePanelID] = len(p.Genes)

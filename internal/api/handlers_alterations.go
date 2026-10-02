@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -15,16 +16,40 @@ import (
 // covers the gene (first profile of the type per study) plus all whole-exome
 // profiled samples. Ported from the column-store ClickhouseAlterationMapper.
 
+// GeneAlterationCount is AlterationCountByGene (CopyNumberCountByGene for the
+// CNA table) as Jackson serializes it with null fields omitted: the base
+// counts, the gene, and the derived uniqueEventKey / entrezGeneIds /
+// hugoGeneSymbols getters.
 type GeneAlterationCount struct {
+	NumberOfAlteredCases        uint64   `json:"numberOfAlteredCases"`
+	NumberOfAlteredCasesOnPanel uint64   `json:"numberOfAlteredCasesOnPanel"`
+	TotalCount                  uint64   `json:"totalCount"`
+	NumberOfProfiledCases       uint64   `json:"numberOfProfiledCases"`
+	MatchingGenePanelIDs        []string `json:"matchingGenePanelIds"`
 	EntrezGeneID                *int64   `json:"entrezGeneId"`
 	HugoGeneSymbol              string   `json:"hugoGeneSymbol"`
 	Alteration                  *int64   `json:"alteration,omitempty"`
 	Cytoband                    string   `json:"cytoband,omitempty"`
-	NumberOfAlteredCases        uint64   `json:"numberOfAlteredCases"`
-	NumberOfAlteredCasesOnPanel uint64   `json:"numberOfAlteredCasesOnPanel"`
-	NumberOfProfiledCases       uint64   `json:"numberOfProfiledCases"`
-	TotalCount                  uint64   `json:"totalCount"`
-	MatchingGenePanelIDs        []string `json:"matchingGenePanelIds"`
+	UniqueEventKey              string   `json:"uniqueEventKey"`
+	EntrezGeneIDs               []*int64 `json:"entrezGeneIds"`
+	HugoGeneSymbols             []string `json:"hugoGeneSymbols"`
+}
+
+// withEventKeys fills the derived getters: the event key is the symbol for a
+// gene count and entrezGeneId followed by the alteration (e.g. "8086-2") for
+// a copy-number count.
+func (c GeneAlterationCount) withEventKeys() GeneAlterationCount {
+	c.EntrezGeneIDs = []*int64{c.EntrezGeneID}
+	c.HugoGeneSymbols = []string{c.HugoGeneSymbol}
+	c.UniqueEventKey = c.HugoGeneSymbol
+	if c.Alteration != nil {
+		entrez := "null"
+		if c.EntrezGeneID != nil {
+			entrez = strconv.FormatInt(*c.EntrezGeneID, 10)
+		}
+		c.UniqueEventKey = entrez + strconv.FormatInt(*c.Alteration, 10)
+	}
+	return c
 }
 
 // alterationSQL renders the alteration filter (AlterationFilterHelper semantics)
@@ -229,6 +254,9 @@ func (s *State) geneCounts(f studyViewFilter, variantType, alterationType, extra
 		return []GeneAlterationCount{}, nil
 	}
 	s.populateProfiled(f, filtered, alterationType, out)
+	for i := range out {
+		out[i] = out[i].withEventKeys()
+	}
 	return out, nil
 }
 
@@ -361,24 +389,27 @@ func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http
 	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
 		"SELECT replaceOne(sp.molecular_profile_id, concat(sp.study_id, '_'), '') AS value, any(mp.name) AS label, count() AS count "+
 			"FROM sample_profile sp LEFT JOIN molecular_profile mp ON mp.molecular_profile_id = sp.molecular_profile_id "+
-			"WHERE concat(sp.study_id, '_', sp.sample_id) IN (%s) GROUP BY sp.molecular_profile_id, sp.study_id",
+			"WHERE concat(sp.study_id, '_', sp.sample_id) IN (%s) GROUP BY sp.molecular_profile_id, sp.study_id "+
+			"ORDER BY sp.study_id, sp.molecular_profile_id",
 		s.filterSQL(f)))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	// Merge the same profile suffix across studies.
+	// Merge the same profile suffix across studies under the first label, in
+	// the HashMap order of StudyViewColumnarServiceUtil.mergeGenomicDataCounts.
 	byValue := map[string]*GenomicDataCount{}
+	var values []string
 	for _, r := range rows {
 		if c, ok := byValue[r.Value]; ok {
 			c.Count += r.Count
-			c.UniqueCount += r.Count
 			continue
 		}
-		byValue[r.Value] = &GenomicDataCount{Value: r.Value, Label: r.Label, Count: r.Count, UniqueCount: r.Count}
+		byValue[r.Value] = &GenomicDataCount{Value: r.Value, Label: r.Label, Count: r.Count}
+		values = append(values, r.Value)
 	}
 	out := []GenomicDataCount{}
-	for _, k := range sortedKeys(byValue) {
+	for _, k := range javaHashMapOrder(values) {
 		out = append(out, *byValue[k])
 	}
 	writeJSON(w, out)

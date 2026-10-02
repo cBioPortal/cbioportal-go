@@ -264,19 +264,40 @@ type CaseListDataCount struct {
 	Count uint64 `json:"count"`
 }
 
+// mergeCaseListCounts is StudyViewColumnarServiceUtil.mergeCaseListCounts:
+// the per-study lists of one type (stable id without the study prefix) are
+// summed under the first list's label, in the type's HashMap order.
+func mergeCaseListCounts(rows []CaseListDataCount) []CaseListDataCount {
+	merged := map[string]*CaseListDataCount{}
+	var values []string
+	for _, r := range rows {
+		if c, ok := merged[r.Value]; ok {
+			c.Count += r.Count
+			continue
+		}
+		c := r
+		merged[r.Value] = &c
+		values = append(values, r.Value)
+	}
+	out := make([]CaseListDataCount, 0, len(values))
+	for _, v := range javaHashMapOrder(values) {
+		out = append(out, *merged[v])
+	}
+	return out
+}
+
+// sampleListsCountsFetch counts the filtered samples in each case list
+// (ClickhousePatientMapper.getCaseListDataCounts), keyed by list type.
 func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
 	scope := s.sampleScope(f)
 	rows, err := ch.Query[CaseListDataCount](s.CH, fmt.Sprintf(
-		"SELECT list_id AS value, any(name) AS label, uniqExact(sample_id) AS count "+
-			"FROM sample_list WHERE %s GROUP BY list_id ORDER BY count DESC", scope))
+		"SELECT replaceAll(list_id, concat(study_id, '_'), '') AS value, any(name) AS label, count() AS count "+
+			"FROM sample_list WHERE %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", scope))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if rows == nil {
-		rows = []CaseListDataCount{}
-	}
-	writeJSON(w, rows)
+	writeJSON(w, mergeCaseListCounts(rows))
 }
