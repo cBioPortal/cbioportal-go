@@ -34,6 +34,9 @@ type State struct {
 	// mux is the route table, consulted by the catch-all to tell an unknown
 	// path from a known one requested with an unsupported method.
 	mux *http.ServeMux
+	// Props are the portal properties (skin.*, priority_studies, …) the
+	// frontend configuration is built from, over the embedded defaults.
+	Props map[string]string
 }
 
 // NewState loads the session store (SESSION_STORE_FILE, if set) at startup.

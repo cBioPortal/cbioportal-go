@@ -20,7 +20,7 @@ var portalHTML []byte
 // skin_show_settings_menu drive the UI correctly. Runtime bits (auth, session)
 // are layered on top of the embedded defaults.
 func (s *State) configService(w http.ResponseWriter, r *http.Request) {
-	cfg := config.FrontendConfig("/", nil)
+	cfg := config.FrontendConfig("/", s.Props)
 	cfg["authenticationMethod"] = "noauthsessionservice"
 	cfg["sessionServiceEnabled"] = true
 	cfg["clickhouse_mode"] = true

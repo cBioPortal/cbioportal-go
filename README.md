@@ -168,6 +168,22 @@ The Kubernetes manifests (Deployment, CronJob, ConfigMap
 [knowledgesystems-k8s-deployment](https://github.com/knowledgesystems/knowledgesystems-k8s-deployment/tree/go-cbioportal-org),
 branch `go-cbioportal-org`.
 
+### Portal properties
+
+Portal settings — `skin.*` (title, blurb, logos, footer, example queries,
+quick-select buttons), `priority_studies`, `quick_search.enabled`,
+`oncokb.public_api.url`, … — use the Java portal's property names and are
+passed the same ways: as `--key=value` arguments (exactly as the Java portal is
+started, so an existing deployment's argument list can be reused) or in a
+properties file named by `PORTAL_PROPERTIES`. A legacy `portal.properties`
+works as is: it has the same `key=value` syntax as `application.properties`.
+Arguments override the file, which overrides the built-in defaults.
+
+```bash
+bin/cbioportal-api --skin.title="My portal" --quick_search.enabled=true
+PORTAL_PROPERTIES=portal.properties bin/cbioportal-api
+```
+
 ## Code layout
 
 - `cmd/cbioportal-import`, `cmd/cbioportal-api` — the two binaries;
