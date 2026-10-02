@@ -1,0 +1,37 @@
+# Public datahub studies imported daily into go.cbioportal.org
+# (deploy/import-datahub.sh). One study id per line; '#' starts a comment.
+#
+# Total LFS download ~6.0 GB (git lfs ls-files -s, datahub 2026-08); the
+# largest single study is ccle_broad_2019 at ~2.1 GB. Studies are downloaded
+# and deleted one at a time, so peak scratch disk is ~2x the largest study.
+#
+# study id                          LFS size  covers
+
+# Small and medium
+acbc_mskcc_2015                   # 0.2 MB  tiny; mutations + clinical
+blca_mskcc_solit_2014             # 0.9 MB  small; mutations, CNA
+lung_msk_2017                     # 5 MB    structural variants
+lgg_ucsf_2014                     # 4 MB    timeline
+sclc_ucologne_2015                # 47 MB   structural variants, mRNA
+mixed_allen_2018                  # 60 MB   gene panels, multi-cancer
+nsclc_tracerx_2017                # 82 MB   multi-region sequencing
+
+# MSK clinical sequencing (gene panels, timelines)
+msk_impact_2017                   # 64 MB   ~10k samples, IMPACT panels
+msk_met_2021                      # 202 MB  SV, timeline, resources
+msk_chord_2024                    # 347 MB  ~25k samples, treatment timeline, SV
+
+# Generic assay
+msk_spectrum_tme_2022             # 4 MB    generic assay, SV
+brca_cptac_2020                   # 159 MB  generic assay (phospho), protein
+
+# hg38
+pancan_pdx_uthsa_2023             # 8 MB    hg38, generic assay, SV
+thyroid_gatci_2024                # 16 MB   hg38, gene panels
+
+# Larger studies
+prad_su2c_2019                    # 295 MB  SV, mRNA
+chol_tcga_pan_can_atlas_2018      # 199 MB  TCGA PanCancer Atlas (smallest methylation)
+gbm_tcga_pan_can_atlas_2018       # 1.0 GB  TCGA PanCancer Atlas, all data types
+brca_metabric                     # 1.4 GB  mRNA, methylation
+ccle_broad_2019                   # 2.1 GB  cell lines, drug response (generic assay)
