@@ -62,29 +62,43 @@ type GenesetHierarchyInfo struct {
 	ParentNodeName string    `json:"parentNodeName"`
 }
 
-type genesetHierarchyFilter struct {
-	GeneticProfileID string   `json:"geneticProfileId"`
-	SampleListID     string   `json:"sampleListId"`
-	SampleIDs        []string `json:"sampleIds"`
-	GenesetIDs       []string `json:"genesetIds"`
-}
-
-// genesetHierarchyFetch returns the geneset hierarchy tree. No hierarchy metadata
-// (GMT node structure) is loaded, so all genesets are exposed under a single root
-// node built from real geneset ids. Shape: []GenesetHierarchyInfo.
+// genesetHierarchyFetch returns the geneset hierarchy tree for the GSVA score
+// profile given by the geneticProfileId query param, over the samples in the
+// optional body (a bare list of sample ids) or else the sampleListId sample
+// list (else every sample). No hierarchy metadata (GMT node structure) is
+// loaded, so the profile's genesets are exposed under a single root node.
+// Shape: []GenesetHierarchyInfo.
 func (s *State) genesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
-	var f genesetHierarchyFilter
-	readBody(r, &f)
-
-	ids := f.GenesetIDs
-	genesets, err := s.genesetsForIDs(ids)
+	var sampleIDs []string
+	readBody(r, &sampleIDs)
+	q := r.URL.Query()
+	meta, ok := s.profileMeta(q.Get("geneticProfileId"))
+	if !ok || !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
+		writeJSON(w, []GenesetHierarchyInfo{})
+		return
+	}
+	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
+	if len(sampleIDs) > 0 {
+		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(sampleIDs))
+	} else {
+		where += sampleListClause("sample_id", q.Get("sampleListId"))
+	}
+	type row struct {
+		GenesetID string `json:"genesetId"`
+	}
+	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+		"SELECT DISTINCT geneset_id AS genesetId FROM cbioportal_raw.geneset_score_matrix WHERE %s ORDER BY geneset_id", where))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	if len(genesets) == 0 {
+	if len(rows) == 0 {
 		writeJSON(w, []GenesetHierarchyInfo{})
 		return
+	}
+	genesets := make([]Geneset, len(rows))
+	for i, r := range rows {
+		genesets[i] = Geneset{GenesetID: r.GenesetID, Name: r.GenesetID, Description: r.GenesetID}
 	}
 	writeJSON(w, []GenesetHierarchyInfo{{
 		Genesets:       genesets,

@@ -3,85 +3,16 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
-// studyViewFilter is the subset of cBioPortal's StudyViewFilter we act on: the
-// study/sample scope. Richer sub-filters are accepted but not yet applied.
-type studyViewFilter struct {
-	StudyIDs          []string          `json:"studyIds"`
-	SampleIdentifiers []identifier       `json:"sampleIdentifiers"`
-	AlterationFilter  *alterationFilter `json:"alterationFilter"`
-}
-
-func (f studyViewFilter) sampleScope() string {
-	if len(f.SampleIdentifiers) > 0 {
-		pairs := make([][2]string, len(f.SampleIdentifiers))
-		for i, id := range f.SampleIdentifiers {
-			pairs[i] = [2]string{id.StudyID, id.id()}
-		}
-		return fmt.Sprintf("(study_id, sample_id) IN (%s)", tupleIn(pairs))
-	}
-	if len(f.StudyIDs) > 0 {
-		return fmt.Sprintf("study_id IN (%s)", inList(f.StudyIDs))
-	}
-	return "1 = 0"
-}
-
-// sampleDerivedScope expresses the same sample-selection semantics as
-// sampleScope but over a `<x>_unique_id` column of the prod-aligned `*_derived`
-// views, where `sample_unique_id = concat(study_id,'_',sample_id)`. When only
-// studies are given it scopes by `cancer_study_identifier`. Pass
-// "sample_unique_id" for the sample scope and "patient_unique_id" for the
-// patient scope; the identifier-based branch reuses the same id values in both
-// positions, matching the legacy `ReplaceAll(scope,"sample_id","patient_id")`.
-func (f studyViewFilter) sampleDerivedScope(uniqueCol string) string {
-	if len(f.SampleIdentifiers) > 0 {
-		ids := make([]string, len(f.SampleIdentifiers))
-		for i, id := range f.SampleIdentifiers {
-			ids[i] = id.StudyID + "_" + id.id()
-		}
-		return fmt.Sprintf("%s IN (%s)", uniqueCol, inList(ids))
-	}
-	if len(f.StudyIDs) > 0 {
-		return fmt.Sprintf("cancer_study_identifier IN (%s)", inList(f.StudyIDs))
-	}
-	return "1 = 0"
-}
-
-func (s *State) scopeSampleCount(f studyViewFilter) uint64 {
-	type c struct {
-		N uint64 `json:"n"`
-	}
-	rows, _ := ch.Query[c](s.CH, fmt.Sprintf(
-		"SELECT count() AS n FROM sample_derived WHERE %s", f.sampleDerivedScope("sample_unique_id")))
-	if len(rows) > 0 {
-		return rows[0].N
-	}
-	return 0
-}
-
 func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId, patient_stable_id AS patientId "+
-			"FROM sample_derived WHERE %s ORDER BY cancer_study_identifier, sample_stable_id",
-		f.sampleDerivedScope("sample_unique_id")))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]Sample, len(rows))
-	for i, r := range rows {
-		out[i] = Sample{
-			SampleID: r.SampleID, PatientID: r.PatientID, StudyID: r.StudyID,
-			UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID), UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
-		}
-	}
-	writeJSON(w, out)
+	s.writeSamples(w, fmt.Sprintf("concat(s.study_id, '_', s.sample_id) IN (%s)", s.filterSQL(f)))
 }
 
 // ---------- Clinical data counts ----------
@@ -98,51 +29,158 @@ type ClinicalDataCountItem struct {
 func (s *State) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes []struct {
-			AttributeID      string `json:"attributeId"`
-			ClinicalDataType string `json:"clinicalDataType"`
+			AttributeID string `json:"attributeId"`
 		} `json:"attributes"`
 		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
 	}
 	readBody(r, &f)
-	var sampleAttrs, patientAttrs []string
-	for _, a := range f.Attributes {
-		if strings.EqualFold(a.ClinicalDataType, "PATIENT") {
-			patientAttrs = append(patientAttrs, a.AttributeID)
-		} else {
-			sampleAttrs = append(sampleAttrs, a.AttributeID)
+	svf := f.StudyViewFilter
+	if len(f.Attributes) == 1 {
+		svf = svf.withoutClinical(f.Attributes[0].AttributeID)
+	}
+	ids := make([]string, len(f.Attributes))
+	for i, a := range f.Attributes {
+		ids[i] = a.AttributeID
+	}
+	writeJSON(w, s.clinicalDataCounts(svf, ids))
+}
+
+// clinicalDataCounts counts the values of each attribute over the filtered
+// samples (sample attributes) or patients (patient attributes), with the
+// remainder reported as NA. An attribute defined at both levels in the
+// involved studies is counted per sample.
+func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+	out := []ClinicalDataCountItem{}
+	studies := f.studyIDs()
+	if len(attrIDs) == 0 || len(studies) == 0 {
+		return out
+	}
+	type levelRow struct {
+		AttrID  string `json:"attrId"`
+		Patient uint8  `json:"patient"`
+		Sample  uint8  `json:"sample"`
+	}
+	levels, _ := ch.Query[levelRow](s.CH, fmt.Sprintf(
+		"SELECT clinical_attribute_id AS attrId, max(patient_attribute = 1) AS patient, max(patient_attribute = 0) AS sample "+
+			"FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id IN (%s) GROUP BY clinical_attribute_id",
+		inList(studies), inList(attrIDs)))
+	var sampleAttrs, patientAttrs, conflicting []string
+	isPatient := map[string]bool{}
+	for _, l := range levels {
+		switch {
+		case l.Patient == 1 && l.Sample == 1:
+			conflicting = append(conflicting, l.AttrID)
+		case l.Patient == 1:
+			patientAttrs = append(patientAttrs, l.AttrID)
+			isPatient[l.AttrID] = true
+		default:
+			sampleAttrs = append(sampleAttrs, l.AttrID)
 		}
 	}
-	items := map[string][]ClinicalDataCount{}
+	filtered := s.filterSQL(f)
+	notNA := "NOT " + isNASQL("attribute_value")
 	type countRow struct {
-		AttrID string `json:"attr_id"`
+		AttrID string `json:"attrId"`
 		Value  string `json:"value"`
 		C      uint64 `json:"c"`
 	}
-	queries := []struct {
-		attrs []string
-		typ   string
-		scope string
-	}{
-		{sampleAttrs, "sample", f.StudyViewFilter.sampleDerivedScope("sample_unique_id")},
-		{patientAttrs, "patient", f.StudyViewFilter.sampleDerivedScope("patient_unique_id")},
+	var queries []string
+	if len(sampleAttrs) > 0 {
+		queries = append(queries, fmt.Sprintf(
+			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM clinical_data_derived "+
+				"WHERE type = 'sample' AND %s AND sample_unique_id IN (%s) AND attribute_name IN (%s) GROUP BY attribute_name, attribute_value",
+			notNA, filtered, inList(sampleAttrs)))
 	}
+	if len(patientAttrs) > 0 {
+		queries = append(queries, fmt.Sprintf(
+			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM clinical_data_derived "+
+				"WHERE type = 'patient' AND %s AND patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE sample_unique_id IN (%s)) "+
+				"AND attribute_name IN (%s) GROUP BY attribute_name, attribute_value",
+			notNA, filtered, inList(patientAttrs)))
+	}
+	if len(conflicting) > 0 {
+		queries = append(queries, fmt.Sprintf(
+			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM ("+
+				"SELECT attribute_name, attribute_value, sample_unique_id FROM clinical_data_derived "+
+				"WHERE type = 'sample' AND %[1]s AND sample_unique_id IN (%[2]s) AND attribute_name IN (%[3]s) "+
+				"UNION ALL SELECT cdd.attribute_name, cdd.attribute_value, sd.sample_unique_id FROM clinical_data_derived cdd "+
+				"JOIN sample_derived sd ON cdd.patient_unique_id = sd.patient_unique_id "+
+				"WHERE cdd.type = 'patient' AND %[1]s AND sd.sample_unique_id IN (%[2]s) AND cdd.attribute_name IN (%[3]s)"+
+				") GROUP BY attribute_name, attribute_value",
+			notNA, filtered, inList(conflicting)))
+	}
+	counts := map[string]map[string]*ClinicalDataCount{}
+	sums := map[string]uint64{}
 	for _, q := range queries {
-		if len(q.attrs) == 0 {
+		rows, err := ch.Query[countRow](s.CH, q)
+		if err != nil {
 			continue
 		}
-		rows, _ := ch.Query[countRow](s.CH, fmt.Sprintf(
-			"SELECT attribute_name AS attr_id, attribute_value AS value, count() AS c FROM clinical_data_derived "+
-				"WHERE type = '%s' AND %s AND attribute_name IN (%s) GROUP BY attribute_name, attribute_value",
-			q.typ, q.scope, inList(q.attrs)))
 		for _, r := range rows {
-			items[r.AttrID] = append(items[r.AttrID], ClinicalDataCount{Value: r.Value, Count: r.C})
+			byLower := counts[r.AttrID]
+			if byLower == nil {
+				byLower = map[string]*ClinicalDataCount{}
+				counts[r.AttrID] = byLower
+			}
+			k := strings.ToLower(r.Value)
+			if c, ok := byLower[k]; ok {
+				c.Count += r.C
+				if r.Value > c.Value {
+					c.Value = r.Value
+				}
+			} else {
+				byLower[k] = &ClinicalDataCount{Value: r.Value, Count: r.C}
+			}
+			sums[r.AttrID] += r.C
 		}
 	}
-	out := make([]ClinicalDataCountItem, 0, len(items))
-	for id, counts := range items {
-		out = append(out, ClinicalDataCountItem{AttributeID: id, Counts: counts})
+	nSamples := s.scopeSampleCount(f)
+	var nPatients uint64
+	if len(patientAttrs) > 0 {
+		type c struct {
+			N uint64 `json:"n"`
+		}
+		rows, _ := ch.Query[c](s.CH, fmt.Sprintf(
+			"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE sample_unique_id IN (%s)", filtered))
+		if len(rows) > 0 {
+			nPatients = rows[0].N
+		}
 	}
-	writeJSON(w, out)
+	for _, l := range levels {
+		total := nSamples
+		if isPatient[l.AttrID] {
+			total = nPatients
+		}
+		// Order as Java's two HashMap groupings do: by lower-cased value, then by
+		// value (NA included); the frontend keeps this order for equal counts.
+		byValue := map[string]ClinicalDataCount{}
+		var values []string
+		for _, k := range javaHashMapOrder(sortedKeys(counts[l.AttrID])) {
+			c := *counts[l.AttrID][k]
+			byValue[c.Value] = c
+			values = append(values, c.Value)
+		}
+		if total > sums[l.AttrID] {
+			byValue["NA"] = ClinicalDataCount{Value: "NA", Count: total - sums[l.AttrID]}
+			values = append(values, "NA")
+		}
+		item := ClinicalDataCountItem{AttributeID: l.AttrID, Counts: []ClinicalDataCount{}}
+		for _, v := range javaHashMapOrder(values) {
+			item.Counts = append(item.Counts, byValue[v])
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// sortedKeys returns the map's keys in order.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ---------- Gene alteration counts ----------
@@ -162,40 +200,6 @@ type AlterationCountByGene struct {
 	NumberOfAlteredCases  uint64 `json:"numberOfAlteredCases"`
 	NumberOfProfiledCases uint64 `json:"numberOfProfiledCases"`
 	TotalCount            uint64 `json:"totalCount"`
-}
-
-func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
-	var f studyViewFilter
-	readBody(r, &f)
-	scope := andClause(f.sampleScope(), f.AlterationFilter.mutationFilterClause())
-	profiled := s.scopeSampleCount(f)
-	rows, err := ch.Query[geneCountRow](s.CH, fmt.Sprintf(
-		"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, "+
-			"uniqExact(sample_id) AS numberOfAlteredCases, count() AS totalCount FROM mutation WHERE %s "+
-			"GROUP BY hugo_symbol, entrez_gene_id ORDER BY numberOfAlteredCases DESC", scope))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, toAlterationCounts(rows, profiled, false))
-}
-
-func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
-	var f studyViewFilter
-	readBody(r, &f)
-	// The study-view CNA genes table shows only deep events: AMP (2) and
-	// HOMDEL (-2), not shallow GAIN (1) / HETLOSS (-1).
-	scope := andClause(f.sampleScope(), f.AlterationFilter.cnaFilterClause()) + " AND alteration IN ('-2', '2')"
-	profiled := s.scopeSampleCount(f)
-	rows, err := ch.Query[geneCountRow](s.CH, fmt.Sprintf(
-		"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, "+
-			"toInt64OrNull(alteration) AS alteration, uniqExact(sample_id) AS numberOfAlteredCases, count() AS totalCount "+
-			"FROM cna WHERE %s GROUP BY hugo_symbol, entrez_gene_id, alteration ORDER BY numberOfAlteredCases DESC", scope))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, toAlterationCounts(rows, profiled, true))
 }
 
 func toAlterationCounts(rows []geneCountRow, profiled uint64, keepAlteration bool) []AlterationCountByGene {
@@ -219,32 +223,8 @@ type GenomicDataCount struct {
 	Value       string   `json:"value"`
 	Label       string   `json:"label"`
 	Count       uint64   `json:"count"`
-	UniqueCount uint64   `json:"uniqueCount"`
-	SampleIDs   []string `json:"sampleIds"`
-}
-
-func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http.Request) {
-	var f studyViewFilter
-	readBody(r, &f)
-	scope := f.sampleScope()
-	sources := []struct{ stable, label, view string }{
-		{"mutations", "MUTATION_EXTENDED", "mutation"},
-		{"cna", "COPY_NUMBER_ALTERATION", "cna"},
-		{"structural_variants", "STRUCTURAL_VARIANT", "structural_variant"},
-	}
-	out := []GenomicDataCount{}
-	type c struct {
-		Value string `json:"value"`
-		Count uint64 `json:"count"`
-	}
-	for _, src := range sources {
-		rows, _ := ch.Query[c](s.CH, fmt.Sprintf(
-			"SELECT '%s' AS value, uniqExact(sample_id) AS count FROM %s WHERE %s", src.stable, src.view, scope))
-		if len(rows) > 0 && rows[0].Count > 0 {
-			out = append(out, GenomicDataCount{Value: rows[0].Value, Label: src.label, Count: rows[0].Count, UniqueCount: rows[0].Count, SampleIDs: []string{}})
-		}
-	}
-	writeJSON(w, out)
+	UniqueCount uint64   `json:"uniqueCount,omitempty"`
+	SampleIDs   []string `json:"sampleIds,omitempty"`
 }
 
 type svRow struct {
@@ -267,39 +247,4 @@ type AlterationCountByStructuralVariant struct {
 	NumberOfProfiledCases uint64   `json:"numberOfProfiledCases"`
 	TotalCount            uint64   `json:"totalCount"`
 	UniqueEventKey        string   `json:"uniqueEventKey"`
-}
-
-func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
-	var f studyViewFilter
-	readBody(r, &f)
-	scope := andClause(f.sampleScope(), f.AlterationFilter.svFilterClause())
-	profiled := s.scopeSampleCount(f)
-	rows, _ := ch.Query[svRow](s.CH, fmt.Sprintf(
-		"SELECT site1_hugo_symbol AS gene1, site1_entrez_gene_id AS gene1Entrez, site2_hugo_symbol AS gene2, "+
-			"site2_entrez_gene_id AS gene2Entrez, uniqExact(sample_id) AS numberOfAlteredCases, count() AS totalCount "+
-			"FROM structural_variant WHERE %s GROUP BY site1_hugo_symbol, site1_entrez_gene_id, site2_hugo_symbol, site2_entrez_gene_id "+
-			"ORDER BY numberOfAlteredCases DESC", scope))
-	out := make([]AlterationCountByStructuralVariant, len(rows))
-	for i, r := range rows {
-		var symbols []string
-		var entrez []int64
-		for _, g := range []string{r.Gene1, r.Gene2} {
-			if g != "" {
-				symbols = append(symbols, g)
-			}
-		}
-		for _, e := range []*int64{r.Gene1Entrez, r.Gene2Entrez} {
-			if e != nil {
-				entrez = append(entrez, *e)
-			}
-		}
-		out[i] = AlterationCountByStructuralVariant{
-			Gene1HugoGeneSymbol: r.Gene1, Gene1EntrezGeneID: r.Gene1Entrez,
-			Gene2HugoGeneSymbol: r.Gene2, Gene2EntrezGeneID: r.Gene2Entrez,
-			HugoGeneSymbols: symbols, EntrezGeneIDs: entrez,
-			NumberOfAlteredCases: r.NumberOfAlteredCases, NumberOfProfiledCases: profiled, TotalCount: r.TotalCount,
-			UniqueEventKey: r.Gene1 + "::" + r.Gene2,
-		}
-	}
-	writeJSON(w, out)
 }

@@ -85,11 +85,11 @@ func post(t *testing.T, path string, body any, out any) { do(t, "POST", path, bo
 func get(t *testing.T, path string, out any)            { do(t, "GET", path, nil, false, out) }
 
 type geneCount struct {
-	HugoGeneSymbol        string   `json:"hugoGeneSymbol"`
-	NumberOfAlteredCases  int      `json:"numberOfAlteredCases"`
-	TotalCount            int      `json:"totalCount"`
-	Alteration            *int     `json:"alteration"`
-	HugoGeneSymbols       []string `json:"hugoGeneSymbols"`
+	HugoGeneSymbol       string   `json:"hugoGeneSymbol"`
+	NumberOfAlteredCases int      `json:"numberOfAlteredCases"`
+	TotalCount           int      `json:"totalCount"`
+	Alteration           *int     `json:"alteration"`
+	HugoGeneSymbols      []string `json:"hugoGeneSymbols"`
 }
 
 func totals(rows []geneCount) map[string]int {
@@ -279,7 +279,9 @@ func TestContractGenePanelsFetchPost(t *testing.T) {
 	}
 }
 
-func TestContractGenePanelDataWholeGenomeProfiled(t *testing.T) {
+// Profiled = member of the profile (sample_profile), as in Java: for
+// study_es_0_mutations that is the 31 samples of its _sequenced list.
+func TestContractGenePanelDataProfiledMembership(t *testing.T) {
 	requireAPI(t)
 	var d []struct {
 		Profiled bool `json:"profiled"`
@@ -291,9 +293,7 @@ func TestContractGenePanelDataWholeGenomeProfiled(t *testing.T) {
 			profiled++
 		}
 	}
-	if profiled < 800 {
-		t.Fatalf("expected most samples whole-genome profiled, got %d/%d", profiled, len(d))
-	}
+	wantEq(t, []int{profiled, len(d)}, []int{31, 845})
 }
 
 // ------------------------------------------- study-view alteration filter ----
@@ -358,15 +358,7 @@ func TestContractSvGenesStatusFilter(t *testing.T) {
 
 	var germOff []geneCount
 	post(t, "/api/structuralvariant-genes/fetch", studyFilter(af(map[string]any{"includeGermline": false})), &germOff)
-	braf := 0
-	for _, r := range germOff {
-		for _, g := range r.HugoGeneSymbols {
-			if g == "BRAF" {
-				braf += r.TotalCount
-			}
-		}
-	}
-	wantEq(t, braf, 37)
+	wantEq(t, totals(germOff)["BRAF"], 37)
 }
 
 func TestContractAlterationEnrichmentsProfileTyped(t *testing.T) {
@@ -395,3 +387,86 @@ func TestContractAlterationEnrichmentsProfileTyped(t *testing.T) {
 }
 
 var _ = fmt.Sprintf // keep fmt imported for future cases
+
+// Session service: a main_session posted by the results view is served back
+// under the same id with the session envelope.
+func TestContractMainSessionRoundTrip(t *testing.T) {
+	requireAPI(t)
+	data := map[string]any{"cancer_study_list": "study_es_0", "gene_list": "TP53", "nonce": time.Now().UnixNano()}
+	var created struct {
+		ID string `json:"id"`
+	}
+	post(t, "/api/session/main_session", data, &created)
+	if len(created.ID) != 24 {
+		t.Fatalf("want 24-char id, got %q", created.ID)
+	}
+	var got struct {
+		ID     string         `json:"id"`
+		Source string         `json:"source"`
+		Type   string         `json:"type"`
+		Data   map[string]any `json:"data"`
+	}
+	get(t, "/api/session/main_session/"+created.ID, &got)
+	wantEq(t, []any{got.ID, got.Source, got.Type, got.Data["gene_list"]},
+		[]any{created.ID, "cbioportal", "main_session", "TP53"})
+}
+
+// A created (not saved) virtual study gets the requester as owner ("anonymous"
+// without a login) and no users.
+func TestContractVirtualStudyRoundTrip(t *testing.T) {
+	requireAPI(t)
+	vs := map[string]any{
+		"name": fmt.Sprintf("contract vs %d", time.Now().UnixNano()), "description": "d",
+		"studies": []any{map[string]any{"id": "study_es_0", "samples": []string{"TCGA-A1-A0SB-01"}}},
+		"origin":  []string{"study_es_0"},
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	post(t, "/api/session/virtual_study", vs, &created)
+	var got struct {
+		ID   string `json:"id"`
+		Data struct {
+			Name    string   `json:"name"`
+			Owner   string   `json:"owner"`
+			Users   []string `json:"users"`
+			Origin  []string `json:"origin"`
+			Studies []struct {
+				ID      string   `json:"id"`
+				Samples []string `json:"samples"`
+			} `json:"studies"`
+		} `json:"data"`
+	}
+	get(t, "/api/session/virtual_study/"+created.ID, &got)
+	wantEq(t, []any{got.ID, got.Data.Name, len(got.Data.Users), got.Data.Origin},
+		[]any{created.ID, vs["name"], 0, []string{"study_es_0"}})
+	if got.Data.Owner == "" {
+		t.Errorf("virtual study has no owner")
+	}
+	if len(got.Data.Studies) != 1 || got.Data.Studies[0].ID != "study_es_0" {
+		t.Errorf("studies not round-tripped: %+v", got.Data.Studies)
+	}
+}
+
+func TestContractUserVirtualStudiesAnonymousEmpty(t *testing.T) {
+	requireAPI(t)
+	var cfg map[string]any
+	get(t, "/config_service", &cfg)
+	if u, _ := cfg["user_display_name"].(string); u != "" && u != "anonymousUser" {
+		t.Skipf("server runs with a logged-in user (%s)", u)
+	}
+	var got []any
+	get(t, "/api/session/virtual_study", &got)
+	if got == nil || len(got) != 0 {
+		t.Errorf("want [], got %v", got)
+	}
+}
+
+func TestContractPublicVirtualStudiesArray(t *testing.T) {
+	requireAPI(t)
+	var got []map[string]any
+	get(t, "/api/public_virtual_studies", &got)
+	if got == nil {
+		t.Errorf("want a JSON array, got null")
+	}
+}

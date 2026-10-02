@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -17,172 +16,10 @@ func (s *State) routeStudyView2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/mutation-data-counts/fetch", s.mutationDataCountsFetch)
 	mux.HandleFunc("POST /api/genomic-data-counts/fetch", s.genomicDataCountsFetch)
 	mux.HandleFunc("POST /api/genomic-data-bin-counts/fetch", s.genomicDataBinCountsFetch)
-	mux.HandleFunc("POST /api/treatments/patient", s.treatmentsPatient)
-	mux.HandleFunc("POST /api/treatments/sample", s.treatmentsSample)
 	mux.HandleFunc("POST /api/sample-lists-counts/fetch", s.sampleListsCountsFetch)
 }
 
-// studyIDs derives the distinct study ids referenced by the filter, from the
-// explicit study list or the sample identifiers.
-func (f studyViewFilter) studyIDs() []string {
-	if len(f.StudyIDs) > 0 {
-		return f.StudyIDs
-	}
-	seen := map[string]bool{}
-	var out []string
-	for _, id := range f.SampleIdentifiers {
-		if id.StudyID != "" && !seen[id.StudyID] {
-			seen[id.StudyID] = true
-			out = append(out, id.StudyID)
-		}
-	}
-	return out
-}
-
 // ---------- Clinical data bin counts ----------
-
-// ClinicalDataBin is one histogram bucket for a numeric clinical attribute.
-// A ranged bucket carries start/end; a categorical/NA bucket carries a
-// specialValue instead.
-type ClinicalDataBin struct {
-	AttributeID  string   `json:"attributeId"`
-	SpecialValue string   `json:"specialValue,omitempty"`
-	Start        *float64 `json:"start,omitempty"`
-	End          *float64 `json:"end,omitempty"`
-	Count        uint64   `json:"count"`
-}
-
-func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
-	var f struct {
-		Attributes []struct {
-			AttributeID string `json:"attributeId"`
-		} `json:"attributes"`
-		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
-	}
-	readBody(r, &f)
-
-	studyIDs := f.StudyViewFilter.studyIDs()
-	out := []ClinicalDataBin{}
-	if len(f.Attributes) == 0 || len(studyIDs) == 0 {
-		writeJSON(w, out)
-		return
-	}
-
-	// Resolve which attributes are numeric and whether they are patient-level.
-	type metaRow struct {
-		AttrID     string `json:"attrId"`
-		Datatype   string `json:"datatype"`
-		PatientAtt uint8  `json:"patientAtt"`
-	}
-	attrIDs := make([]string, len(f.Attributes))
-	for i, a := range f.Attributes {
-		attrIDs[i] = a.AttributeID
-	}
-	metaRows, _ := ch.Query[metaRow](s.CH, fmt.Sprintf(
-		"SELECT clinical_attribute_id AS attrId, any(datatype) AS datatype, max(patient_attribute) AS patientAtt "+
-			"FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id IN (%s) "+
-			"GROUP BY clinical_attribute_id", inList(studyIDs), inList(attrIDs)))
-	meta := map[string]metaRow{}
-	for _, m := range metaRows {
-		meta[m.AttrID] = m
-	}
-
-	sampleScope := f.StudyViewFilter.sampleDerivedScope("sample_unique_id")
-	patientScope := f.StudyViewFilter.sampleDerivedScope("patient_unique_id")
-
-	for _, a := range f.Attributes {
-		m, ok := meta[a.AttributeID]
-		if !ok || !strings.EqualFold(m.Datatype, "NUMBER") {
-			continue
-		}
-		typ, scope := "sample", sampleScope
-		if m.PatientAtt == 1 {
-			typ, scope = "patient", patientScope
-		}
-		rows, _ := ch.Query[binValRow](s.CH, fmt.Sprintf(
-			"SELECT attribute_value AS value, count() AS c FROM clinical_data_derived "+
-				"WHERE type = '%s' AND %s AND attribute_name = '%s' GROUP BY attribute_value",
-			typ, scope, sqlLit(a.AttributeID)))
-		out = append(out, binNumericValues(a.AttributeID, rows)...)
-	}
-	writeJSON(w, out)
-}
-
-// binValRow is a grouped clinical value with its occurrence count.
-type binValRow struct {
-	Value string `json:"value"`
-	C     uint64 `json:"c"`
-}
-
-// binNumericValues buckets grouped (value,count) rows into ~10 equal-width bins
-// plus an NA bucket for values that are not finite numbers.
-func binNumericValues(attrID string, rows []binValRow) []ClinicalDataBin {
-	type num struct {
-		v float64
-		c uint64
-	}
-	var nums []num
-	var na uint64
-	minV, maxV := 0.0, 0.0
-	first := true
-	for _, r := range rows {
-		v, err := strconv.ParseFloat(strings.TrimSpace(r.Value), 64)
-		if err != nil || r.Value == "" {
-			na += r.C
-			continue
-		}
-		nums = append(nums, num{v, r.C})
-		if first {
-			minV, maxV, first = v, v, false
-		} else {
-			if v < minV {
-				minV = v
-			}
-			if v > maxV {
-				maxV = v
-			}
-		}
-	}
-
-	var out []ClinicalDataBin
-	const nbins = 10
-	if len(nums) > 0 {
-		if minV == maxV {
-			var total uint64
-			for _, n := range nums {
-				total += n.c
-			}
-			lo, hi := minV, maxV
-			out = append(out, ClinicalDataBin{AttributeID: attrID, Start: &lo, End: &hi, Count: total})
-		} else {
-			width := (maxV - minV) / nbins
-			counts := make([]uint64, nbins)
-			for _, n := range nums {
-				idx := int((n.v - minV) / width)
-				if idx >= nbins {
-					idx = nbins - 1
-				}
-				if idx < 0 {
-					idx = 0
-				}
-				counts[idx] += n.c
-			}
-			for i := 0; i < nbins; i++ {
-				if counts[i] == 0 {
-					continue
-				}
-				lo := minV + float64(i)*width
-				hi := minV + float64(i+1)*width
-				loCopy, hiCopy := lo, hi
-				out = append(out, ClinicalDataBin{AttributeID: attrID, Start: &loCopy, End: &hiCopy, Count: counts[i]})
-			}
-		}
-	}
-	if na > 0 {
-		out = append(out, ClinicalDataBin{AttributeID: attrID, SpecialValue: "NA", Count: na})
-	}
-	return out
-}
 
 // ---------- Mutation data counts ----------
 
@@ -193,82 +30,213 @@ type GenomicDataCountItem struct {
 	Counts         []GenomicDataCount `json:"counts"`
 }
 
-func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) {
-	var f struct {
-		GenomicDataFilters []struct {
-			HugoGeneSymbol string `json:"hugoGeneSymbol"`
-			ProfileType    string `json:"profileType"`
-		} `json:"genomicDataFilters"`
-		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
-	}
-	readBody(r, &f)
-	scope := f.StudyViewFilter.sampleScope()
-	profiled := s.scopeSampleCount(f.StudyViewFilter)
+type genomicDataCountFilter struct {
+	GenomicDataFilters []genomicDataFilter `json:"genomicDataFilters"`
+	StudyViewFilter    studyViewFilter     `json:"studyViewFilter"`
+}
 
-	out := []GenomicDataCountItem{}
-	type c struct {
-		N uint64 `json:"n"`
+// mutationDataCountsFetch serves the per-gene mutation charts: the SUMMARY
+// projection gives the Mutated / Not Mutated / Not Profiled pie, DETAILED the
+// per-mutation-type table.
+func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+	var f genomicDataCountFilter
+	readBody(r, &f)
+	summary := !strings.EqualFold(r.URL.Query().Get("projection"), "DETAILED")
+	includeSampleIDs := r.URL.Query().Get("includeSampleIds") == "true"
+	svf := f.StudyViewFilter
+	if len(f.GenomicDataFilters) == 1 && summary {
+		g := f.GenomicDataFilters[0]
+		svf = svf.withoutMutation(g.HugoGeneSymbol, g.ProfileType, "MUTATED")
 	}
-	for _, g := range f.GenomicDataFilters {
-		if g.HugoGeneSymbol == "" {
-			continue
+	filtered := s.filterSQL(svf)
+	out := []GenomicDataCountItem{}
+	if summary {
+		total := s.scopeSampleCount(svf)
+		type countsRow struct {
+			Mutated  uint64 `json:"mutated"`
+			Profiled uint64 `json:"profiled"`
 		}
-		rows, _ := ch.Query[c](s.CH, fmt.Sprintf(
-			"SELECT uniqExact(sample_id) AS n FROM mutation WHERE %s AND hugo_symbol = '%s'",
-			scope, sqlLit(g.HugoGeneSymbol)))
-		var mutated uint64
-		if len(rows) > 0 {
-			mutated = rows[0].N
+		for _, g := range f.GenomicDataFilters {
+			gene := sqlLit(g.HugoGeneSymbol)
+			rows, err := ch.Query[countsRow](s.CH, fmt.Sprintf(
+				"SELECT (SELECT uniqExact(sample_unique_id) FROM genomic_event_derived WHERE sample_unique_id IN (%[1]s) "+
+					"AND hugo_gene_symbol = '%[2]s' AND variant_type = 'mutation') AS mutated, "+
+					"(SELECT uniqExact(sgp.sample_unique_id) FROM sample_to_gene_panel_derived sgp "+
+					"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
+					"WHERE sgp.sample_unique_id IN (%[1]s) AND gpg.gene = '%[2]s' AND sgp.alteration_type = 'MUTATION_EXTENDED') AS profiled",
+				filtered, gene))
+			if err != nil || len(rows) == 0 {
+				continue
+			}
+			mutated, profiled := rows[0].Mutated, rows[0].Profiled
+			item := GenomicDataCountItem{HugoGeneSymbol: g.HugoGeneSymbol, ProfileType: "mutations", Counts: []GenomicDataCount{}}
+			add := func(label, value string, n uint64) {
+				if n > 0 {
+					item.Counts = append(item.Counts, GenomicDataCount{Label: label, Value: value, Count: n, UniqueCount: n})
+				}
+			}
+			add("Mutated", "MUTATED", mutated)
+			if profiled > mutated {
+				add("Not Mutated", "NOT_MUTATED", profiled-mutated)
+			}
+			if total > profiled {
+				add("Not Profiled", "NOT_PROFILED", total-profiled)
+			}
+			out = append(out, item)
 		}
-		notMutated := uint64(0)
-		if profiled > mutated {
-			notMutated = profiled - mutated
+		writeJSON(w, out)
+		return
+	}
+	if len(f.GenomicDataFilters) == 0 {
+		writeJSON(w, out)
+		return
+	}
+	genes := make([]string, len(f.GenomicDataFilters))
+	for i, g := range f.GenomicDataFilters {
+		genes[i] = g.HugoGeneSymbol
+	}
+	if includeSampleIDs {
+		genes = genes[:1]
+	}
+	type typeRow struct {
+		Gene   string `json:"gene"`
+		Type   string `json:"type"`
+		C      uint64 `json:"c"`
+		U      uint64 `json:"u"`
+		Sample string `json:"samples"`
+	}
+	rows, _ := ch.Query[typeRow](s.CH, fmt.Sprintf(
+		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
+			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM genomic_event_derived "+
+			"WHERE sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN (%s) "+
+			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
+		filtered, inList(genes)))
+	byGene := map[string]*GenomicDataCountItem{}
+	var order []string
+	for _, r := range rows {
+		it, ok := byGene[r.Gene]
+		if !ok {
+			it = &GenomicDataCountItem{HugoGeneSymbol: r.Gene, ProfileType: "mutations", Counts: []GenomicDataCount{}}
+			byGene[r.Gene] = it
+			order = append(order, r.Gene)
 		}
-		out = append(out, GenomicDataCountItem{
-			HugoGeneSymbol: g.HugoGeneSymbol,
-			ProfileType:    g.ProfileType,
-			Counts: []GenomicDataCount{
-				{Value: "Mutated", Label: "Mutated", Count: mutated, UniqueCount: mutated, SampleIDs: []string{}},
-				{Value: "Not Mutated", Label: "Not Mutated", Count: notMutated, UniqueCount: notMutated, SampleIDs: []string{}},
-			},
-		})
+		c := GenomicDataCount{Label: strings.ReplaceAll(r.Type, "_", " "), Value: r.Type, Count: r.C, UniqueCount: r.U}
+		if includeSampleIDs {
+			c.SampleIDs = strings.Split(r.Sample, ",")
+		}
+		it.Counts = append(it.Counts, c)
+	}
+	for _, g := range order {
+		out = append(out, *byGene[g])
+	}
+	if includeSampleIDs {
+		gene := sqlLit(genes[0])
+		type idsRow struct {
+			N   uint64 `json:"n"`
+			IDs string `json:"ids"`
+		}
+		profiled := fmt.Sprintf(
+			"SELECT DISTINCT sgp.sample_unique_id FROM sample_to_gene_panel_derived sgp "+
+				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
+				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = '%s' AND sgp.alteration_type = 'MUTATION_EXTENDED'", filtered, gene)
+		mutated := fmt.Sprintf(
+			"SELECT sample_unique_id FROM genomic_event_derived WHERE sample_unique_id IN (%s) "+
+				"AND variant_type = 'mutation' AND hugo_gene_symbol = '%s'", filtered, gene)
+		extra := []struct{ label, value, sql string }{
+			{"Not Mutated", "NOT_MUTATED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM (%s) WHERE sample_unique_id NOT IN (%s)", profiled, mutated)},
+			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM sample_derived WHERE cancer_study_identifier IN (%s) AND sample_unique_id NOT IN (%s)", inList(svf.studyIDs()), profiled)},
+		}
+		if len(out) == 0 {
+			out = append(out, GenomicDataCountItem{HugoGeneSymbol: genes[0], ProfileType: "mutations", Counts: []GenomicDataCount{}})
+		}
+		for _, e := range extra {
+			r, err := ch.Query[idsRow](s.CH, e.sql)
+			if err != nil || len(r) == 0 {
+				continue
+			}
+			c := GenomicDataCount{Label: e.label, Value: e.value, Count: r[0].N, UniqueCount: r[0].N}
+			if r[0].IDs != "" {
+				c.SampleIDs = strings.Split(r[0].IDs, ",")
+			}
+			out[0].Counts = append(out[0].Counts, c)
+		}
 	}
 	writeJSON(w, out)
 }
 
-// ---------- Genomic (molecular) data counts / bins ----------
+// cnaLabels names the discrete copy-number values.
+var cnaLabels = map[string]string{
+	"2": "Amplified", "1": "Gained", "0": "Diploid", "-1": "Heterozygously deleted", "-2": "Homozygously deleted",
+}
 
+// genomicDataCountsFetch counts discrete CNA values per gene over the filtered
+// samples (the endpoint is CNA-specific), with the remainder reported as NA.
 func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []GenomicDataCountItem{})
-}
-
-// GenomicDataBin is one histogram bucket for a numeric molecular profile.
-type GenomicDataBin struct {
-	HugoGeneSymbol string   `json:"hugoGeneSymbol"`
-	ProfileType    string   `json:"profileType"`
-	SpecialValue   string   `json:"specialValue,omitempty"`
-	Start          *float64 `json:"start,omitempty"`
-	End            *float64 `json:"end,omitempty"`
-	Count          uint64   `json:"count"`
-}
-
-func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []GenomicDataBin{})
+	var f genomicDataCountFilter
+	readBody(r, &f)
+	out := []GenomicDataCountItem{}
+	if len(f.GenomicDataFilters) == 0 {
+		writeJSON(w, out)
+		return
+	}
+	svf := f.StudyViewFilter
+	if len(f.GenomicDataFilters) == 1 {
+		g := f.GenomicDataFilters[0]
+		svf = svf.withoutGenomic(g.HugoGeneSymbol, g.ProfileType)
+	}
+	profileType := f.GenomicDataFilters[0].ProfileType
+	genes := make([]string, len(f.GenomicDataFilters))
+	for i, g := range f.GenomicDataFilters {
+		genes[i] = g.HugoGeneSymbol
+	}
+	type row struct {
+		Gene  string `json:"gene"`
+		Value string `json:"value"`
+		C     uint64 `json:"c"`
+	}
+	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM genetic_alteration_derived "+
+			"WHERE NOT %s AND profile_type = '%s' AND sample_unique_id IN (%s) AND hugo_gene_symbol IN (%s) "+
+			"GROUP BY hugo_gene_symbol, alteration_value ORDER BY hugo_gene_symbol, alteration_value",
+		isNASQL("assumeNotNull(alteration_value)"), sqlLit(profileType), s.filterSQL(svf), inList(genes)))
+	total := s.scopeSampleCount(svf)
+	byGene := map[string]*GenomicDataCountItem{}
+	var order []string
+	var sum uint64
+	for _, r := range rows {
+		it, ok := byGene[r.Gene]
+		if !ok {
+			it = &GenomicDataCountItem{HugoGeneSymbol: r.Gene, ProfileType: profileType, Counts: []GenomicDataCount{}}
+			byGene[r.Gene] = it
+			order = append(order, r.Gene)
+		}
+		label, ok := cnaLabels[r.Value]
+		if !ok {
+			label = "NA"
+		}
+		it.Counts = append(it.Counts, GenomicDataCount{Label: label, Value: r.Value, Count: r.C})
+		sum += r.C
+	}
+	naGene := genes[0]
+	if len(order) > 0 {
+		naGene = order[0]
+	}
+	if _, ok := byGene[naGene]; !ok {
+		byGene[naGene] = &GenomicDataCountItem{HugoGeneSymbol: naGene, ProfileType: profileType, Counts: []GenomicDataCount{}}
+		order = append(order, naGene)
+	}
+	var na uint64
+	if total > sum {
+		na = total - sum
+	}
+	byGene[naGene].Counts = append(byGene[naGene].Counts, GenomicDataCount{Label: "NA", Value: "NA", Count: na})
+	for _, g := range order {
+		out = append(out, *byGene[g])
+	}
+	writeJSON(w, out)
 }
 
 // ---------- Treatments (no treatment data loaded) ----------
-
-func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []any{})
-}
-
-func (s *State) treatmentsSample(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []any{})
-}
 
 // ---------- Sample list (case list) counts ----------
 
@@ -282,7 +250,7 @@ type CaseListDataCount struct {
 func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	scope := f.sampleScope()
+	scope := s.sampleScope(f)
 	rows, err := ch.Query[CaseListDataCount](s.CH, fmt.Sprintf(
 		"SELECT list_id AS value, any(name) AS label, uniqExact(sample_id) AS count "+
 			"FROM sample_list WHERE %s GROUP BY list_id ORDER BY count DESC", scope))

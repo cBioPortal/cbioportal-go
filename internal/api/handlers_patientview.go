@@ -9,51 +9,31 @@ import (
 
 // samplesOfPatient — GET /api/studies/{studyId}/patients/{patientId}/samples
 func (s *State) samplesOfPatient(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	pid := sqlLit(r.PathValue("patientId"))
-	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample "+
-			"WHERE study_id = '%s' AND patient_id = '%s' ORDER BY sample_id", sid, pid))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]Sample, len(rows))
-	for i, r := range rows {
-		out[i] = Sample{
-			SampleID: r.SampleID, PatientID: r.PatientID, StudyID: r.StudyID,
-			UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID), UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
-		}
-	}
-	writeJSON(w, out)
+	s.writeSamples(w, fmt.Sprintf("s.study_id = '%s' AND s.patient_id = '%s'",
+		sqlLit(r.PathValue("studyId")), sqlLit(r.PathValue("patientId"))))
 }
 
 // patientClinicalData — GET /api/studies/{studyId}/patients/{patientId}/clinical-data
 func (s *State) patientClinicalData(w http.ResponseWriter, r *http.Request) {
 	sid := sqlLit(r.PathValue("studyId"))
 	pid := sqlLit(r.PathValue("patientId"))
-	rows, err := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-			"FROM clinical_patient WHERE study_id = '%s' AND patient_id = '%s' ORDER BY attr_id", sid, pid))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, toClinicalData(rows, true))
+	s.writeClinical(w, r, true, fmt.Sprintf("study_id = '%s' AND patient_id = '%s'%s", sid, pid, attributeIDClause(r)))
 }
 
 // sampleClinicalData — GET /api/studies/{studyId}/samples/{sampleId}/clinical-data
 func (s *State) sampleClinicalData(w http.ResponseWriter, r *http.Request) {
 	sid := sqlLit(r.PathValue("studyId"))
 	smp := sqlLit(r.PathValue("sampleId"))
-	rows, err := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-			"FROM clinical_sample WHERE study_id = '%s' AND sample_id = '%s' ORDER BY attr_id", sid, smp))
-	if err != nil {
-		fail(w, err)
-		return
+	s.writeClinical(w, r, false, fmt.Sprintf("study_id = '%s' AND sample_id = '%s'%s", sid, smp, attributeIDClause(r)))
+}
+
+// attributeIDClause restricts clinical rows to the optional attributeId query
+// parameter.
+func attributeIDClause(r *http.Request) string {
+	if a := r.URL.Query().Get("attributeId"); a != "" {
+		return fmt.Sprintf(" AND attr_id = '%s'", sqlLit(a))
 	}
-	writeJSON(w, toClinicalData(rows, false))
+	return ""
 }
 
 // patient — GET /api/studies/{studyId}/patients/{patientId}

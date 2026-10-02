@@ -31,12 +31,16 @@ func GetUser(ctx context.Context) (User, bool) {
 type AuthConfig struct {
 	Enabled bool
 	Secret  []byte // HS256 shared secret
+	// DefaultUser, when set, is the principal of every request that carries no
+	// verified token — a single-user development login.
+	DefaultUser string
 }
 
 func loadAuthConfig() AuthConfig {
 	return AuthConfig{
-		Enabled: strings.EqualFold(os.Getenv("AUTH_ENABLED"), "true"),
-		Secret:  []byte(os.Getenv("AUTH_JWT_SECRET")),
+		Enabled:     strings.EqualFold(os.Getenv("AUTH_ENABLED"), "true"),
+		Secret:      []byte(os.Getenv("AUTH_JWT_SECRET")),
+		DefaultUser: os.Getenv("AUTH_DEFAULT_USER"),
 	}
 }
 
@@ -49,6 +53,9 @@ func loadAuthConfig() AuthConfig {
 func auth(cfg AuthConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !cfg.Enabled {
+			if cfg.DefaultUser != "" {
+				r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, User{Name: cfg.DefaultUser}))
+			}
 			next.ServeHTTP(w, r)
 			return
 		}

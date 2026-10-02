@@ -14,7 +14,7 @@ func uniqueKey(studyID, id string) string {
 // decodeUniqueKey reverses uniqueKey, returning (studyId, id). ok is false if
 // the key is not valid base64 or lacks the ':' separator.
 func decodeUniqueKey(key string) (studyID, id string, ok bool) {
-	b, err := base64.RawStdEncoding.DecodeString(key)
+	b, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(key, "="))
 	if err != nil {
 		return "", "", false
 	}

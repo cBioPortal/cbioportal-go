@@ -2,7 +2,9 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -13,78 +15,206 @@ func (s *State) routeSurvival(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/survival-data/fetch", s.survivalDataFetch)
 	mux.HandleFunc("POST /api/clinical-events-meta/fetch", s.clinicalEventsMetaFetch)
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-events", s.studyClinicalEvents)
+	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-events", s.patientClinicalEvents)
 }
 
 // ---------- Survival data ----------
 
-// survivalDataFetch serves POST /api/survival-data/fetch. Survival data is a set
-// of patient-level clinical attributes derived from an attributeIdPrefix
-// (e.g. "OS" -> OS_STATUS, OS_MONTHS). Returns ClinicalData rows, matching the
-// generated client's Array<ClinicalData> response.
+// clinicalEventRequest selects events of one type, optionally only those
+// carrying one of the given key/value attributes.
+type clinicalEventRequest struct {
+	EventType  string              `json:"eventType"`
+	Attributes []ClinicalEventData `json:"attributes"`
+}
+
+// clinicalEventRequestIdentifier is a set of event requests plus which
+// occurrence (FIRST: earliest start, LAST: latest start/stop) dates them.
+type clinicalEventRequestIdentifier struct {
+	ClinicalEventRequests []clinicalEventRequest `json:"clinicalEventRequests"`
+	Position              string                 `json:"position"`
+}
+
+// patientIdentifierPairs turns PatientIdentifiers into (studyId, patientId) pairs.
+func patientIdentifierPairs(ids []identifier) [][2]string {
+	pairs := make([][2]string, 0, len(ids))
+	for _, id := range ids {
+		pairs = append(pairs, [2]string{id.StudyID, id.id()})
+	}
+	return pairs
+}
+
+// patientEventScope is the clinical_event_data_derived predicate selecting the
+// given patients.
+func patientEventScope(pairs [][2]string) string {
+	keys := make([]string, len(pairs))
+	studies := map[string]bool{}
+	for i, p := range pairs {
+		keys[i] = p[0] + "_" + p[1]
+		studies[p[0]] = true
+	}
+	return fmt.Sprintf("cancer_study_identifier IN (%s) AND patient_unique_id IN (%s)",
+		inList(sortedKeys(studies)), inList(keys))
+}
+
+// eventRequestsSQL renders event requests as an OR over event type (and, with
+// attributes, the event_type_key[_value] combinations); "" selects every event.
+func eventRequestsSQL(reqs []clinicalEventRequest, withValue bool) string {
+	var ors []string
+	for _, q := range reqs {
+		if len(q.Attributes) == 0 {
+			ors = append(ors, fmt.Sprintf("event_type = '%s'", sqlLit(q.EventType)))
+			continue
+		}
+		combos := make([]string, len(q.Attributes))
+		for i, a := range q.Attributes {
+			combos[i] = q.EventType + "_" + a.Key
+			if withValue {
+				combos[i] += "_" + a.Value
+			}
+		}
+		expr := "concat(event_type, '_', key)"
+		if withValue {
+			expr = "concat(event_type, '_', key, '_', value)"
+		}
+		ors = append(ors, fmt.Sprintf("%s IN (%s)", expr, inList(combos)))
+	}
+	if len(ors) == 0 {
+		return ""
+	}
+	return " AND (" + strings.Join(ors, " OR ") + ")"
+}
+
+// timelineSpan is a patient's matching events collapsed to the earliest start
+// and the latest start/stop day.
+type timelineSpan struct {
+	StudyID   string `json:"studyId"`
+	PatientID string `json:"patientId"`
+	StartDate int64  `json:"startDate"`
+	StopDate  int64  `json:"stopDate"`
+}
+
+func (t timelineSpan) at(position string) int64 {
+	if strings.EqualFold(position, "FIRST") {
+		return t.StartDate
+	}
+	return t.StopDate
+}
+
+// timelineSpans collapses each patient's events matching reqs (all events when
+// reqs is empty) into a span, keyed by studyId+"\x00"+patientId.
+func (s *State) timelineSpans(pairs [][2]string, reqs []clinicalEventRequest) (map[string]timelineSpan, []string, error) {
+	out := map[string]timelineSpan{}
+	if len(pairs) == 0 {
+		return out, nil, nil
+	}
+	rows, err := ch.Query[timelineSpan](s.CH, fmt.Sprintf(
+		"SELECT cancer_study_identifier AS studyId, substring(patient_unique_id, length(cancer_study_identifier) + 2) AS patientId, "+
+			"toInt64(min(start_date)) AS startDate, toInt64(greatest(max(start_date), max(stop_date))) AS stopDate "+
+			"FROM clinical_event_data_derived WHERE %s%s GROUP BY cancer_study_identifier, patient_unique_id "+
+			"ORDER BY studyId, patientId",
+		patientEventScope(pairs), eventRequestsSQL(reqs, true)))
+	if err != nil {
+		return nil, nil, err
+	}
+	order := make([]string, len(rows))
+	for i, r := range rows {
+		order[i] = r.StudyID + "\x00" + r.PatientID
+		out[order[i]] = r
+	}
+	return out, order, nil
+}
+
+// javaDouble formats v like Java's String.valueOf(double) for the magnitudes
+// survival months take.
+func javaDouble(v float64) string {
+	if v == math.Trunc(v) && math.Abs(v) < 1e7 {
+		return strconv.FormatFloat(v, 'f', 1, 64)
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+// survivalDataFetch serves POST /api/survival-data/fetch: survival computed from
+// timeline events (ClinicalEventServiceImpl.getSurvivalData). For each patient
+// with a start event, <prefix>_MONTHS is the time from the start event to the
+// end event (status 1:EVENT) or, without one, to a later censoring event
+// (status 0:CENSORED); patients with neither are skipped.
 func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AttributeIdPrefix  string       `json:"attributeIdPrefix"`
-		PatientIdentifiers []identifier `json:"patientIdentifiers"`
-		SampleIds          []string     `json:"sampleIds"`
-		StudyIds           []string     `json:"studyIds"`
+		AttributeIDPrefix              string                          `json:"attributeIdPrefix"`
+		PatientIdentifiers             []identifier                    `json:"patientIdentifiers"`
+		StartEventRequestIdentifier    *clinicalEventRequestIdentifier `json:"startEventRequestIdentifier"`
+		EndEventRequestIdentifier      *clinicalEventRequestIdentifier `json:"endEventRequestIdentifier"`
+		CensoredEventRequestIdentifier *clinicalEventRequestIdentifier `json:"censoredEventRequestIdentifier"`
 	}
 	readBody(r, &req)
-
-	prefix := strings.TrimSpace(req.AttributeIdPrefix)
-	if prefix == "" {
-		writeJSON(w, []ClinicalData{})
+	out := []ClinicalData{}
+	if req.AttributeIDPrefix == "" || len(req.PatientIdentifiers) == 0 || req.StartEventRequestIdentifier == nil {
+		writeJSON(w, out)
 		return
 	}
-	attrs := inList([]string{prefix + "_STATUS", prefix + "_MONTHS"})
-
-	scope := survivalPatientScope(req.PatientIdentifiers, req.SampleIds, req.StudyIds)
-	if scope == "" {
-		writeJSON(w, []ClinicalData{})
-		return
+	start := req.StartEventRequestIdentifier
+	end := req.EndEventRequestIdentifier
+	if end == nil {
+		end = &clinicalEventRequestIdentifier{Position: "LAST"}
 	}
-
-	rows, err := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-			"FROM cbioportal.clinical_patient WHERE %s AND attr_id IN (%s) ORDER BY id, attr_id",
-		scope, attrs))
+	censored := req.CensoredEventRequestIdentifier
+	if censored == nil {
+		censored = &clinicalEventRequestIdentifier{Position: "LAST"}
+	}
+	spansOf := func(keys []string, spans map[string]timelineSpan, reqs []clinicalEventRequest) (map[string]timelineSpan, error) {
+		pairs := make([][2]string, len(keys))
+		for i, k := range keys {
+			pairs[i] = [2]string{spans[k].StudyID, spans[k].PatientID}
+		}
+		m, _, err := s.timelineSpans(pairs, reqs)
+		return m, err
+	}
+	starts, order, err := s.timelineSpans(patientIdentifierPairs(req.PatientIdentifiers), start.ClinicalEventRequests)
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, toClinicalData(rows, true))
-}
-
-// survivalPatientScope builds a SQL predicate over (study_id, patient_id) for the
-// requested patients. Patients may be given directly as patientIdentifiers, or
-// resolved from sampleIds + studyIds (parallel arrays; a single studyId applies
-// to every sample). Returns "" when no scope can be built.
-func survivalPatientScope(patients []identifier, sampleIds, studyIds []string) string {
-	if len(patients) > 0 {
-		pairs := make([][2]string, len(patients))
-		for i, id := range patients {
-			pairs[i] = [2]string{id.StudyID, id.id()}
+	ends, err := spansOf(order, starts, end.ClinicalEventRequests)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var kept []string
+	for _, k := range order {
+		if e, ok := ends[k]; !ok || starts[k].at(start.Position) < e.at(end.Position) {
+			kept = append(kept, k)
 		}
-		return fmt.Sprintf("(study_id, patient_id) IN (%s)", tupleIn(pairs))
 	}
-	if len(sampleIds) == 0 {
-		return ""
+	censors, err := spansOf(kept, starts, censored.ClinicalEventRequests)
+	if err != nil {
+		fail(w, err)
+		return
 	}
-	pairs := make([][2]string, 0, len(sampleIds))
-	for i, sid := range sampleIds {
-		var study string
-		switch {
-		case len(studyIds) == len(sampleIds):
-			study = studyIds[i]
-		case len(studyIds) == 1:
-			study = studyIds[0]
-		default:
-			return ""
+	for _, k := range kept {
+		ev := starts[k]
+		startDate := ev.at(start.Position)
+		status := "1:EVENT"
+		var endDate int64
+		if e, ok := ends[k]; ok {
+			endDate = e.at(end.Position)
+		} else {
+			c, ok := censors[k]
+			if !ok || startDate >= c.at(censored.Position) {
+				continue
+			}
+			endDate, status = c.at(censored.Position), "0:CENSORED"
 		}
-		pairs = append(pairs, [2]string{study, sid})
+		for _, d := range [][2]string{
+			{req.AttributeIDPrefix + "_MONTHS", javaDouble(float64(endDate-startDate) / 30.4)},
+			{req.AttributeIDPrefix + "_STATUS", status},
+		} {
+			out = append(out, ClinicalData{
+				ClinicalAttributeID: d[0], Value: d[1], PatientID: ev.PatientID, StudyID: ev.StudyID,
+				UniquePatientKey: uniqueKey(ev.StudyID, ev.PatientID), PatientAttribute: true,
+			})
+		}
 	}
-	return fmt.Sprintf(
-		"(study_id, patient_id) IN (SELECT study_id, patient_id FROM cbioportal.sample WHERE (study_id, sample_id) IN (%s))",
-		tupleIn(pairs))
+	writeJSON(w, out)
 }
 
 // ---------- Clinical events (timeline) ----------
@@ -105,42 +235,24 @@ type ClinicalEvent struct {
 	EndNumberOfDaysSinceDiagnosis   *int64              `json:"endNumberOfDaysSinceDiagnosis"`
 	Attributes                      []ClinicalEventData `json:"attributes"`
 	UniquePatientKey                string              `json:"uniquePatientKey"`
-	UniqueSampleKey                 string              `json:"uniqueSampleKey"`
+	UniqueSampleKey                 string              `json:"uniqueSampleKey,omitempty"`
 }
 
-// timelineRow is one row of cbioportal_raw.timeline.
+// timelineRow is one event of cbioportal_raw.timeline with its non-empty
+// extra columns as (KEY, value) attributes.
 type timelineRow struct {
-	StudyID           string `json:"studyId"`
-	PatientID         string `json:"patientId"`
-	SampleID          string `json:"sampleId"`
-	EventType         string `json:"eventType"`
-	StartDate         *int64 `json:"startDate"`
-	StopDate          *int64 `json:"stopDate"`
-	Status            string `json:"status"`
-	EventTypeDetailed string `json:"eventTypeDetailed"`
-	TreatmentType     string `json:"treatmentType"`
-	Surgery           string `json:"surgery"`
-	Subtype           string `json:"subtype"`
-	Agent             string `json:"agent"`
+	StudyID   string      `json:"studyId"`
+	PatientID string      `json:"patientId"`
+	EventType string      `json:"eventType"`
+	StartDate *int64      `json:"startDate"`
+	StopDate  *int64      `json:"stopDate"`
+	Attrs     [][2]string `json:"attrs"`
 }
 
 func (row timelineRow) toEvent() ClinicalEvent {
-	attrs := []ClinicalEventData{}
-	add := func(k, v string) {
-		if v != "" {
-			attrs = append(attrs, ClinicalEventData{Key: k, Value: v})
-		}
-	}
-	add("EVENT_TYPE_DETAILED", row.EventTypeDetailed)
-	add("STATUS", row.Status)
-	add("TREATMENT_TYPE", row.TreatmentType)
-	add("SURGERY", row.Surgery)
-	add("SUBTYPE", row.Subtype)
-	add("AGENT", row.Agent)
-
-	sampleKey := ""
-	if row.SampleID != "" {
-		sampleKey = uniqueKey(row.StudyID, row.SampleID)
+	attrs := make([]ClinicalEventData, len(row.Attrs))
+	for i, kv := range row.Attrs {
+		attrs[i] = ClinicalEventData{Key: kv[0], Value: kv[1]}
 	}
 	return ClinicalEvent{
 		StudyID:                         row.StudyID,
@@ -150,48 +262,79 @@ func (row timelineRow) toEvent() ClinicalEvent {
 		EndNumberOfDaysSinceDiagnosis:   row.StopDate,
 		Attributes:                      attrs,
 		UniquePatientKey:                uniqueKey(row.StudyID, row.PatientID),
-		UniqueSampleKey:                 sampleKey,
 	}
 }
 
-const timelineSelect = "SELECT study_id AS studyId, patient_id AS patientId, sample_id AS sampleId, " +
-	"event_type AS eventType, toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " +
-	"status AS status, event_type_detailed AS eventTypeDetailed, treatment_type AS treatmentType, " +
-	"surgery AS surgery, subtype AS subtype, agent AS agent FROM cbioportal_raw.timeline"
+// timelineFixedCols are the timeline columns that are not event attributes.
+var timelineFixedCols = map[string]bool{
+	"study_id": true, "source_file": true, "alteration_type": true, "datatype": true, "profile_stable_id": true,
+	"patient_id": true, "start_date": true, "stop_date": true, "event_type": true,
+}
 
-// clinicalEventsMetaFetch serves POST /api/clinical-events-meta/fetch. Returns one
-// ClinicalEvent per distinct event type present for the requested patients (event
-// meta). When no patients are given or none have timeline data, returns a typed
-// empty array.
+// timelineSelect selects timeline events, turning every other staged column
+// into an attribute keyed by its upper-cased header.
+func (s *State) timelineSelect() string {
+	type col struct {
+		Name string `json:"name"`
+	}
+	cols, _ := ch.Query[col](s.CH,
+		"SELECT name FROM system.columns WHERE database = 'cbioportal_raw' AND table = 'timeline' ORDER BY position")
+	var kv []string
+	for _, c := range cols {
+		if !timelineFixedCols[c.Name] {
+			kv = append(kv, fmt.Sprintf("('%s', toString(`%s`))", sqlLit(strings.ToUpper(c.Name)), c.Name))
+		}
+	}
+	attrs := "[]"
+	if len(kv) > 0 {
+		attrs = fmt.Sprintf("arrayFilter(x -> x.2 != '', [%s])", strings.Join(kv, ", "))
+	}
+	return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
+		"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " + attrs +
+		" AS attrs FROM cbioportal_raw.timeline"
+}
+
+// ClinicalEventMeta is an event type with the distinct (lower-cased)
+// attribute key/values seen for it, as POST /api/clinical-events-meta/fetch
+// returns it.
+type ClinicalEventMeta struct {
+	EventType  string              `json:"eventType"`
+	Attributes []ClinicalEventData `json:"attributes"`
+}
+
+// clinicalEventsMetaFetch serves POST /api/clinical-events-meta/fetch: per
+// event type of the requested patients (optionally limited to the
+// clinicalEventRequests types / attribute keys), its distinct attributes.
 func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PatientIdentifiers []identifier `json:"patientIdentifiers"`
+		PatientIdentifiers    []identifier           `json:"patientIdentifiers"`
+		ClinicalEventRequests []clinicalEventRequest `json:"clinicalEventRequests"`
 	}
 	readBody(r, &req)
+	out := []ClinicalEventMeta{}
 	if len(req.PatientIdentifiers) == 0 {
-		writeJSON(w, []ClinicalEvent{})
+		writeJSON(w, out)
 		return
 	}
-	pairs := make([][2]string, len(req.PatientIdentifiers))
-	for i, id := range req.PatientIdentifiers {
-		pairs[i] = [2]string{id.StudyID, id.id()}
-	}
-
 	type metaRow struct {
-		StudyID   string `json:"studyId"`
 		EventType string `json:"eventType"`
+		Key       string `json:"attrKey"`
+		Value     string `json:"attrValue"`
 	}
 	rows, err := ch.Query[metaRow](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT study_id AS studyId, event_type AS eventType FROM cbioportal_raw.timeline "+
-			"WHERE (study_id, patient_id) IN (%s) ORDER BY studyId, eventType",
-		tupleIn(pairs)))
+		"SELECT DISTINCT lower(event_type) AS eventType, lower(key) AS attrKey, lower(value) AS attrValue "+
+			"FROM clinical_event_data_derived WHERE %s%s ORDER BY eventType, attrKey, attrValue",
+		patientEventScope(patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(req.ClinicalEventRequests, false)))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	out := make([]ClinicalEvent, len(rows))
-	for i, row := range rows {
-		out[i] = ClinicalEvent{StudyID: row.StudyID, EventType: row.EventType, Attributes: []ClinicalEventData{}}
+	for _, row := range rows {
+		if len(out) == 0 || out[len(out)-1].EventType != row.EventType {
+			out = append(out, ClinicalEventMeta{EventType: row.EventType, Attributes: []ClinicalEventData{}})
+		}
+		m := &out[len(out)-1]
+		m.Attributes = append(m.Attributes, ClinicalEventData{Key: row.Key, Value: row.Value})
 	}
 	writeJSON(w, out)
 }
@@ -200,10 +343,19 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 // all timeline events for the study as ClinicalEvent rows. Empty (typed) when the
 // study has no timeline data.
 func (s *State) studyClinicalEvents(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
+	s.writeClinicalEvents(w, fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId"))))
+}
+
+// patientClinicalEvents serves the patient-view timeline:
+// GET /api/studies/{studyId}/patients/{patientId}/clinical-events.
+func (s *State) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
+	s.writeClinicalEvents(w, fmt.Sprintf("study_id = '%s' AND patient_id = '%s'",
+		sqlLit(r.PathValue("studyId")), sqlLit(r.PathValue("patientId"))))
+}
+
+func (s *State) writeClinicalEvents(w http.ResponseWriter, where string) {
 	rows, err := ch.Query[timelineRow](s.CH, fmt.Sprintf(
-		"%s WHERE study_id = '%s' ORDER BY patientId, startDate, eventType",
-		timelineSelect, sid))
+		"%s WHERE %s ORDER BY patientId, startDate, eventType", s.timelineSelect(), where))
 	if err != nil {
 		fail(w, err)
 		return

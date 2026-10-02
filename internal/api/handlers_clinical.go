@@ -11,19 +11,21 @@ import (
 type clinicalRow struct {
 	StudyID             string `json:"studyId"`
 	ID                  string `json:"id"`
+	PatientID           string `json:"patientId"`
 	ClinicalAttributeID string `json:"clinicalAttributeId"`
 	Value               string `json:"value"`
 }
 
 type ClinicalData struct {
-	ClinicalAttributeID string `json:"clinicalAttributeId"`
-	Value               string `json:"value"`
-	SampleID            string `json:"sampleId"`
-	PatientID           string `json:"patientId"`
-	StudyID             string `json:"studyId"`
-	UniqueSampleKey     string `json:"uniqueSampleKey"`
-	UniquePatientKey    string `json:"uniquePatientKey"`
-	PatientAttribute    bool   `json:"patientAttribute"`
+	ClinicalAttributeID string             `json:"clinicalAttributeId"`
+	Value               string             `json:"value"`
+	SampleID            string             `json:"sampleId,omitempty"`
+	PatientID           string             `json:"patientId"`
+	StudyID             string             `json:"studyId"`
+	UniqueSampleKey     string             `json:"uniqueSampleKey,omitempty"`
+	UniquePatientKey    string             `json:"uniquePatientKey"`
+	PatientAttribute    bool               `json:"patientAttribute"`
+	ClinicalAttribute   *ClinicalAttribute `json:"clinicalAttribute,omitempty"`
 }
 
 func isPatient(r *http.Request) bool {
@@ -33,66 +35,149 @@ func isPatient(r *http.Request) bool {
 func toClinicalData(rows []clinicalRow, patient bool) []ClinicalData {
 	out := make([]ClinicalData, len(rows))
 	for i, r := range rows {
-		var sampleID, patientID string
+		d := ClinicalData{
+			ClinicalAttributeID: r.ClinicalAttributeID, Value: r.Value, StudyID: r.StudyID, PatientAttribute: patient,
+		}
 		if patient {
-			patientID = r.ID
+			d.PatientID = r.ID
 		} else {
-			sampleID = r.ID
+			d.SampleID, d.PatientID = r.ID, r.PatientID
+			d.UniqueSampleKey = uniqueKey(r.StudyID, r.ID)
 		}
-		out[i] = ClinicalData{
-			ClinicalAttributeID: r.ClinicalAttributeID, Value: r.Value,
-			SampleID: sampleID, PatientID: patientID, StudyID: r.StudyID,
-			UniqueSampleKey: uniqueKey(r.StudyID, sampleID), UniquePatientKey: uniqueKey(r.StudyID, patientID),
-			PatientAttribute: patient,
-		}
+		d.UniquePatientKey = uniqueKey(r.StudyID, d.PatientID)
+		out[i] = d
 	}
 	return out
 }
 
-func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	patient := isPatient(r)
-	view, idCol := "clinical_sample", "sample_id"
+// clinicalSQL selects clinical rows (sample- or patient-level) matching where,
+// which may reference study_id, the entity id column (sample_id / patient_id)
+// and attr_id. Sample rows carry their patient id.
+func clinicalSQL(patient bool, where string) string {
 	if patient {
-		view, idCol = "clinical_patient", "patient_id"
+		return "SELECT study_id AS studyId, patient_id AS id, patient_id AS patientId, attr_id AS clinicalAttributeId, " +
+			"attr_value AS value FROM clinical_patient WHERE " + where + " ORDER BY studyId, id, clinicalAttributeId"
 	}
-	rows, err := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, %s AS id, attr_id AS clinicalAttributeId, attr_value AS value FROM %s WHERE study_id = '%s' ORDER BY id, attr_id",
-		idCol, view, sid))
+	return "SELECT c.study_id AS studyId, c.sample_id AS id, s.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
+		"c.attr_value AS value FROM (SELECT * FROM clinical_sample WHERE " + where + ") c " +
+		"LEFT JOIN sample s ON s.study_id = c.study_id AND s.sample_id = c.sample_id ORDER BY studyId, id, clinicalAttributeId"
+}
+
+// writeClinical runs the query and writes it in the requested projection
+// (ID, SUMMARY, DETAILED with the attribute metadata, or META as a count header).
+func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, where string) {
+	projection := strings.ToUpper(r.URL.Query().Get("projection"))
+	if projection == "META" {
+		type c struct {
+			N uint64 `json:"n"`
+		}
+		view := "clinical_sample"
+		if patient {
+			view = "clinical_patient"
+		}
+		rows, _ := ch.Query[c](s.CH, fmt.Sprintf("SELECT count() AS n FROM %s WHERE %s", view, where))
+		var n uint64
+		if len(rows) > 0 {
+			n = rows[0].N
+		}
+		w.Header().Set("total-count", fmt.Sprint(n))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	rows, err := ch.Query[clinicalRow](s.CH, clinicalSQL(patient, where))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, toClinicalData(rows, patient))
+	out := toClinicalData(rows, patient)
+	if projection == "DETAILED" && len(out) > 0 {
+		studies := map[string]bool{}
+		for _, d := range out {
+			studies[d.StudyID] = true
+		}
+		attrs := s.clinicalAttributes(sortedKeys(studies))
+		for i := range out {
+			if a, ok := attrs[out[i].StudyID+"\x00"+out[i].ClinicalAttributeID]; ok {
+				a := a
+				out[i].ClinicalAttribute = &a
+			}
+		}
+	}
+	writeJSON(w, out)
+}
+
+func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
+	where := fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId")))
+	if a := r.URL.Query().Get("attributeId"); a != "" {
+		where += fmt.Sprintf(" AND attr_id = '%s'", sqlLit(a))
+	}
+	s.writeClinical(w, r, isPatient(r), where)
 }
 
 func (s *State) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
 	var f struct {
 		IDs          []string `json:"ids"`
 		AttributeIDs []string `json:"attributeIds"`
 	}
 	readBody(r, &f)
 	patient := isPatient(r)
-	view, idCol := "clinical_sample", "sample_id"
+	idCol := "sample_id"
 	if patient {
-		view, idCol = "clinical_patient", "patient_id"
+		idCol = "patient_id"
 	}
-	where := fmt.Sprintf("study_id = '%s'", sid)
+	where := fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId")))
 	if len(f.IDs) > 0 {
 		where += fmt.Sprintf(" AND %s IN (%s)", idCol, inList(f.IDs))
 	}
 	if len(f.AttributeIDs) > 0 {
 		where += fmt.Sprintf(" AND attr_id IN (%s)", inList(f.AttributeIDs))
 	}
-	rows, err := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, %s AS id, attr_id AS clinicalAttributeId, attr_value AS value FROM %s WHERE %s ORDER BY id, attr_id",
-		idCol, view, where))
-	if err != nil {
-		fail(w, err)
+	s.writeClinical(w, r, patient, where)
+}
+
+// clinicalDataFetch serves POST /api/clinical-data/fetch: clinical data for
+// (studyId, entityId) identifiers across studies, optionally limited to
+// attributeIds.
+func (s *State) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
+	var f struct {
+		Identifiers []struct {
+			StudyID  string `json:"studyId"`
+			EntityID string `json:"entityId"`
+		} `json:"identifiers"`
+		AttributeIDs []string `json:"attributeIds"`
+	}
+	readBody(r, &f)
+	if len(f.Identifiers) == 0 {
+		writeJSON(w, []ClinicalData{})
 		return
 	}
-	writeJSON(w, toClinicalData(rows, patient))
+	patient := isPatient(r)
+	idCol := "sample_id"
+	if patient {
+		idCol = "patient_id"
+	}
+	pairs := make([][2]string, len(f.Identifiers))
+	for i, id := range f.Identifiers {
+		pairs[i] = [2]string{id.StudyID, id.EntityID}
+	}
+	where := fmt.Sprintf("(study_id, %s) IN (%s)", idCol, tupleIn(pairs))
+	if len(f.AttributeIDs) > 0 {
+		where += fmt.Sprintf(" AND attr_id IN (%s)", inList(f.AttributeIDs))
+	}
+	s.writeClinical(w, r, patient, where)
+}
+
+// clinicalAttributes indexes the studies' attribute metadata by study and id.
+func (s *State) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribute {
+	out := map[string]ClinicalAttribute{}
+	rows, _ := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
+		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
+			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN (%s)",
+		orEmpty(studyIDs)))
+	for _, r := range rows {
+		out[r.StudyID+"\x00"+r.ClinicalAttributeID] = r.toAttribute()
+	}
+	return out
 }
 
 type clinAttrRow struct {
@@ -132,18 +217,22 @@ func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) 
 	}
 	out := make([]ClinicalAttribute, len(rows))
 	for i, r := range rows {
-		dt := r.Datatype
-		if dt == "" {
-			dt = "STRING"
-		}
-		pr := r.Priority
-		if pr == "" {
-			pr = "1"
-		}
-		out[i] = ClinicalAttribute{
-			ClinicalAttributeID: r.ClinicalAttributeID, DisplayName: r.DisplayName, Description: r.Description,
-			Datatype: dt, PatientAttribute: r.PatientFlag != 0, Priority: pr, StudyID: r.StudyID,
-		}
+		out[i] = r.toAttribute()
 	}
 	writeJSON(w, out)
+}
+
+func (r clinAttrRow) toAttribute() ClinicalAttribute {
+	dt := r.Datatype
+	if dt == "" {
+		dt = "STRING"
+	}
+	pr := r.Priority
+	if pr == "" {
+		pr = "1"
+	}
+	return ClinicalAttribute{
+		ClinicalAttributeID: r.ClinicalAttributeID, DisplayName: r.DisplayName, Description: r.Description,
+		Datatype: dt, PatientAttribute: r.PatientFlag != 0, Priority: pr, StudyID: r.StudyID,
+	}
 }

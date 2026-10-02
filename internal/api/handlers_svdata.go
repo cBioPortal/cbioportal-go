@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -23,55 +24,55 @@ func (s *State) routeSvData(mux *http.ServeMux) {
 // of fields is populated from the transform view; the rest are left null/empty,
 // matching how the Java backend reports absent optional columns.
 type StructuralVariant struct {
-	Annotation               string   `json:"annotation"`
-	BreakpointType           string   `json:"breakpointType"`
-	Comments                 string   `json:"comments"`
-	ConnectionType           string   `json:"connectionType"`
-	DnaSupport               string   `json:"dnaSupport"`
-	DriverFilter             string   `json:"driverFilter"`
-	DriverFilterAnn          string   `json:"driverFilterAnn"`
-	DriverTiersFilter        string   `json:"driverTiersFilter"`
-	DriverTiersFilterAnn     string   `json:"driverTiersFilterAnn"`
-	EventInfo                string   `json:"eventInfo"`
-	Length                   *int64   `json:"length"`
-	MolecularProfileID       string   `json:"molecularProfileId"`
-	NamespaceColumns         struct{} `json:"namespaceColumns"`
-	NcbiBuild                string   `json:"ncbiBuild"`
-	NormalPairedEndReadCount *int64   `json:"normalPairedEndReadCount"`
-	NormalReadCount          *int64   `json:"normalReadCount"`
-	NormalSplitReadCount     *int64   `json:"normalSplitReadCount"`
-	NormalVariantCount       *int64   `json:"normalVariantCount"`
-	PatientID                string   `json:"patientId"`
-	RnaSupport               string   `json:"rnaSupport"`
-	SampleID                 string   `json:"sampleId"`
-	Site1Chromosome          string   `json:"site1Chromosome"`
-	Site1Contig              string   `json:"site1Contig"`
-	Site1Description         string   `json:"site1Description"`
-	Site1EnsemblTranscriptID string   `json:"site1EnsemblTranscriptId"`
-	Site1EntrezGeneID        *int64   `json:"site1EntrezGeneId"`
-	Site1HugoSymbol          string   `json:"site1HugoSymbol"`
-	Site1Position            *int64   `json:"site1Position"`
-	Site1Region              string   `json:"site1Region"`
-	Site1RegionNumber        *int64   `json:"site1RegionNumber"`
-	Site2Chromosome          string   `json:"site2Chromosome"`
-	Site2Contig              string   `json:"site2Contig"`
-	Site2Description         string   `json:"site2Description"`
-	Site2EffectOnFrame       string   `json:"site2EffectOnFrame"`
-	Site2EnsemblTranscriptID string   `json:"site2EnsemblTranscriptId"`
-	Site2EntrezGeneID        *int64   `json:"site2EntrezGeneId"`
-	Site2HugoSymbol          string   `json:"site2HugoSymbol"`
-	Site2Position            *int64   `json:"site2Position"`
-	Site2Region              string   `json:"site2Region"`
-	Site2RegionNumber        *int64   `json:"site2RegionNumber"`
-	StudyID                  string   `json:"studyId"`
-	SvStatus                 string   `json:"svStatus"`
-	TumorPairedEndReadCount  *int64   `json:"tumorPairedEndReadCount"`
-	TumorReadCount           *int64   `json:"tumorReadCount"`
-	TumorSplitReadCount      *int64   `json:"tumorSplitReadCount"`
-	TumorVariantCount        *int64   `json:"tumorVariantCount"`
-	UniquePatientKey         string   `json:"uniquePatientKey"`
-	UniqueSampleKey          string   `json:"uniqueSampleKey"`
-	VariantClass             string   `json:"variantClass"`
+	Annotation               string          `json:"annotation"`
+	BreakpointType           string          `json:"breakpointType"`
+	Comments                 string          `json:"comments"`
+	ConnectionType           string          `json:"connectionType"`
+	DnaSupport               string          `json:"dnaSupport"`
+	DriverFilter             string          `json:"driverFilter"`
+	DriverFilterAnn          string          `json:"driverFilterAnn"`
+	DriverTiersFilter        string          `json:"driverTiersFilter"`
+	DriverTiersFilterAnn     string          `json:"driverTiersFilterAnn"`
+	EventInfo                string          `json:"eventInfo"`
+	Length                   *int64          `json:"length"`
+	MolecularProfileID       string          `json:"molecularProfileId"`
+	NamespaceColumns         json.RawMessage `json:"namespaceColumns"`
+	NcbiBuild                string          `json:"ncbiBuild"`
+	NormalPairedEndReadCount *int64          `json:"normalPairedEndReadCount"`
+	NormalReadCount          *int64          `json:"normalReadCount"`
+	NormalSplitReadCount     *int64          `json:"normalSplitReadCount"`
+	NormalVariantCount       *int64          `json:"normalVariantCount"`
+	PatientID                string          `json:"patientId"`
+	RnaSupport               string          `json:"rnaSupport"`
+	SampleID                 string          `json:"sampleId"`
+	Site1Chromosome          string          `json:"site1Chromosome"`
+	Site1Contig              string          `json:"site1Contig"`
+	Site1Description         string          `json:"site1Description"`
+	Site1EnsemblTranscriptID string          `json:"site1EnsemblTranscriptId"`
+	Site1EntrezGeneID        *int64          `json:"site1EntrezGeneId"`
+	Site1HugoSymbol          string          `json:"site1HugoSymbol"`
+	Site1Position            *int64          `json:"site1Position"`
+	Site1Region              string          `json:"site1Region"`
+	Site1RegionNumber        *int64          `json:"site1RegionNumber"`
+	Site2Chromosome          string          `json:"site2Chromosome"`
+	Site2Contig              string          `json:"site2Contig"`
+	Site2Description         string          `json:"site2Description"`
+	Site2EffectOnFrame       string          `json:"site2EffectOnFrame"`
+	Site2EnsemblTranscriptID string          `json:"site2EnsemblTranscriptId"`
+	Site2EntrezGeneID        *int64          `json:"site2EntrezGeneId"`
+	Site2HugoSymbol          string          `json:"site2HugoSymbol"`
+	Site2Position            *int64          `json:"site2Position"`
+	Site2Region              string          `json:"site2Region"`
+	Site2RegionNumber        *int64          `json:"site2RegionNumber"`
+	StudyID                  string          `json:"studyId"`
+	SvStatus                 string          `json:"svStatus"`
+	TumorPairedEndReadCount  *int64          `json:"tumorPairedEndReadCount"`
+	TumorReadCount           *int64          `json:"tumorReadCount"`
+	TumorSplitReadCount      *int64          `json:"tumorSplitReadCount"`
+	TumorVariantCount        *int64          `json:"tumorVariantCount"`
+	UniquePatientKey         string          `json:"uniquePatientKey"`
+	UniqueSampleKey          string          `json:"uniqueSampleKey"`
+	VariantClass             string          `json:"variantClass"`
 }
 
 type svDataRow struct {
@@ -84,10 +85,49 @@ type svDataRow struct {
 	Site2EntrezGeneID *int64 `json:"site2EntrezGeneId"`
 }
 
+// svResolvedSQL is the structural_variant view with each site's missing entrez
+// id resolved from its Hugo symbol through the reference genes, as the Java
+// importer does.
+const svResolvedSQL = "SELECT sv.study_id AS study_id, sv.sample_id AS sample_id, " +
+	"sv.site1_hugo_symbol AS site1_hugo_symbol, " +
+	"if(sv.site1_entrez_gene_id IS NULL AND g1.entrez_gene_id != 0, g1.entrez_gene_id, sv.site1_entrez_gene_id) AS site1_entrez_gene_id, " +
+	"sv.site2_hugo_symbol AS site2_hugo_symbol, " +
+	"if(sv.site2_entrez_gene_id IS NULL AND g2.entrez_gene_id != 0, g2.entrez_gene_id, sv.site2_entrez_gene_id) AS site2_entrez_gene_id, " +
+	"sv.sv_status AS sv_status, sv.cbp_driver AS cbp_driver, sv.cbp_driver_tiers AS cbp_driver_tiers " +
+	"FROM structural_variant sv " +
+	"LEFT JOIN cbioportal_ref.gene g1 ON g1.hugo_gene_symbol = sv.site1_hugo_symbol " +
+	"LEFT JOIN cbioportal_ref.gene g2 ON g2.hugo_gene_symbol = sv.site2_hugo_symbol"
+
 // svStudy strips the structural-variant profile suffix to recover the study id.
 func svStudy(mpid string) string { return strings.TrimSuffix(mpid, "_structural_variants") }
 
+// svGeneSubQuery is one side of a structural-variant query: an entrez id, or
+// the special values ANY_GENE / NO_GENE.
+type svGeneSubQuery struct {
+	EntrezID     *int64 `json:"entrezId"`
+	HugoSymbol   string `json:"hugoSymbol"`
+	SpecialValue string `json:"specialValue"`
+}
+
+// clause renders the sub-query as a predicate over one site's entrez column
+// ("" when it does not constrain the site).
+func (q *svGeneSubQuery) clause(col string) string {
+	switch {
+	case q == nil:
+		return ""
+	case q.EntrezID != nil:
+		return fmt.Sprintf("%s = %d", col, *q.EntrezID)
+	case strings.EqualFold(q.SpecialValue, "NO_GENE"):
+		return col + " IS NULL"
+	}
+	return ""
+}
+
 type svFilter struct {
+	StructuralVariantQueries []struct {
+		Gene1 *svGeneSubQuery `json:"gene1"`
+		Gene2 *svGeneSubQuery `json:"gene2"`
+	} `json:"structuralVariantQueries"`
 	EntrezGeneIDs              []int64  `json:"entrezGeneIds"`
 	MolecularProfileIDs        []string `json:"molecularProfileIds"`
 	SampleListID               string   `json:"sampleListId"`
@@ -123,40 +163,77 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// SVs matching any entrezGeneIds gene (either site) OR any of the
+	// structuralVariantQueries; neither given means no gene restriction.
+	var geneOrs []string
 	if len(f.EntrezGeneIDs) > 0 {
-		ids := make([]string, len(f.EntrezGeneIDs))
-		for i, e := range f.EntrezGeneIDs {
-			ids[i] = fmt.Sprintf("%d", e)
-		}
-		joined := strings.Join(ids, ", ")
-		scope += fmt.Sprintf(" AND (sv.site1_entrez_gene_id IN (%s) OR sv.site2_entrez_gene_id IN (%s))", joined, joined)
+		joined := intListSQL(f.EntrezGeneIDs)
+		geneOrs = append(geneOrs, fmt.Sprintf("sv.site1_entrez_gene_id IN (%s) OR sv.site2_entrez_gene_id IN (%s)", joined, joined))
+	}
+	for _, q := range f.StructuralVariantQueries {
+		geneOrs = append(geneOrs, "("+joinPreds(q.Gene1.clause("sv.site1_entrez_gene_id"), q.Gene2.clause("sv.site2_entrez_gene_id"))+")")
+	}
+	if len(geneOrs) > 0 {
+		scope += " AND (" + strings.Join(geneOrs, " OR ") + ")"
 	}
 
-	rows, err := ch.Query[svDataRow](s.CH, fmt.Sprintf(
-		"SELECT sv.study_id AS studyId, sv.sample_id AS sampleId, sm.patient_id AS patientId, "+
-			"sv.site1_hugo_symbol AS site1HugoSymbol, sv.site1_entrez_gene_id AS site1EntrezGeneId, "+
-			"sv.site2_hugo_symbol AS site2HugoSymbol, sv.site2_entrez_gene_id AS site2EntrezGeneId "+
-			"FROM structural_variant sv "+
+	type svDetailRow struct {
+		StructuralVariant
+		NamespaceColumns string `json:"namespaceColumns"`
+	}
+	num := func(col, alias string) string { return fmt.Sprintf("toInt64OrNull(toString(sv.%s)) AS %s", col, alias) }
+	str := func(col, alias string) string { return fmt.Sprintf("toString(sv.%s) AS %s", col, alias) }
+	cols := []string{
+		"sv.study_id AS studyId", "sv.sample_id AS sampleId", "ifNull(sm.patient_id, '') AS patientId",
+		"sv.site1_hugo_symbol AS site1HugoSymbol", "sv.site1_entrez_gene_id AS site1EntrezGeneId",
+		"sv.site2_hugo_symbol AS site2HugoSymbol", "sv.site2_entrez_gene_id AS site2EntrezGeneId",
+		"concat(sv.study_id, '_', sv.profile_stable_id) AS molecularProfileId",
+		"sv.sv_status AS svStatus", "sv.cbp_driver AS driverFilter", "sv.cbp_driver_tiers AS driverTiersFilter",
+		"sv.namespace_columns AS namespaceColumns",
+	}
+	have := s.svViewColumns()
+	for _, c := range [][3]string{
+		{"str", "site1_chromosome", "site1Chromosome"}, {"num", "site1_position", "site1Position"},
+		{"str", "site1_region", "site1Region"}, {"num", "site1_region_number", "site1RegionNumber"},
+		{"str", "site1_description", "site1Description"}, {"str", "site1_ensembl_transcript_id", "site1EnsemblTranscriptId"},
+		{"str", "site2_chromosome", "site2Chromosome"}, {"num", "site2_position", "site2Position"},
+		{"str", "site2_region", "site2Region"}, {"num", "site2_region_number", "site2RegionNumber"},
+		{"str", "site2_description", "site2Description"}, {"str", "site2_ensembl_transcript_id", "site2EnsemblTranscriptId"},
+		{"str", "site2_effect_on_frame", "site2EffectOnFrame"}, {"str", "site2_contig", "site2Contig"},
+		{"str", "dna_support", "dnaSupport"}, {"str", "rna_support", "rnaSupport"}, {"str", "event_info", "eventInfo"},
+		{"str", "ncbi_build", "ncbiBuild"}, {"str", "class", "variantClass"}, {"num", "sv_length", "length"},
+		{"str", "connection_type", "connectionType"}, {"str", "breakpoint_type", "breakpointType"},
+		{"str", "annotation", "annotation"}, {"str", "comments", "comments"},
+		{"num", "normal_read_count", "normalReadCount"}, {"num", "normal_variant_count", "normalVariantCount"},
+		{"num", "normal_paired_end_read_count", "normalPairedEndReadCount"}, {"num", "normal_split_read_count", "normalSplitReadCount"},
+		{"num", "tumor_read_count", "tumorReadCount"}, {"num", "tumor_variant_count", "tumorVariantCount"},
+		{"num", "tumor_paired_end_read_count", "tumorPairedEndReadCount"}, {"num", "tumor_split_read_count", "tumorSplitReadCount"},
+		{"str", "cbp_driver_annotation", "driverFilterAnn"}, {"str", "cbp_driver_tiers_annotation", "driverTiersFilterAnn"},
+	} {
+		if !have[c[1]] {
+			continue
+		}
+		if c[0] == "num" {
+			cols = append(cols, num(c[1], c[2]))
+		} else {
+			cols = append(cols, str(c[1], c[2]))
+		}
+	}
+	rows, err := ch.Query[svDetailRow](s.CH, fmt.Sprintf(
+		"SELECT %s FROM structural_variant sv "+
 			"LEFT JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
-			"WHERE %s ORDER BY sv.study_id, sv.sample_id", scope))
+			"WHERE %s ORDER BY sv.study_id, sv.sample_id", strings.Join(cols, ", "), scope))
 	if err != nil {
 		fail(w, err)
 		return
 	}
 	out := make([]StructuralVariant, len(rows))
 	for i, r := range rows {
-		out[i] = StructuralVariant{
-			MolecularProfileID: r.StudyID + "_structural_variants",
-			SampleID:           r.SampleID,
-			PatientID:          r.PatientID,
-			StudyID:            r.StudyID,
-			Site1HugoSymbol:    r.Site1HugoSymbol,
-			Site1EntrezGeneID:  r.Site1EntrezGeneID,
-			Site2HugoSymbol:    r.Site2HugoSymbol,
-			Site2EntrezGeneID:  r.Site2EntrezGeneID,
-			UniqueSampleKey:    uniqueKey(r.StudyID, r.SampleID),
-			UniquePatientKey:   uniqueKey(r.StudyID, r.PatientID),
-		}
+		v := r.StructuralVariant
+		v.NamespaceColumns = rawJSONOrEmpty(r.NamespaceColumns)
+		v.UniqueSampleKey = uniqueKey(v.StudyID, v.SampleID)
+		v.UniquePatientKey = uniqueKey(v.StudyID, v.PatientID)
+		out[i] = v
 	}
 	writeJSON(w, out)
 }
@@ -164,7 +241,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 // ---------- Gene panel data (sample -> panel mapping) ----------
 
 type GenePanelData struct {
-	GenePanelID        string `json:"genePanelId"`
+	GenePanelID        string `json:"genePanelId,omitempty"`
 	MolecularProfileID string `json:"molecularProfileId"`
 	PatientID          string `json:"patientId"`
 	Profiled           bool   `json:"profiled"`
@@ -195,22 +272,6 @@ func (s *State) resolvePanelProfiles(ids []string) map[string]panelProfile {
 			"FROM molecular_profile WHERE molecular_profile_id IN (%s)", inList(ids)))
 	for _, r := range rows {
 		out[r.MolecularProfileID] = r
-	}
-	return out
-}
-
-// gpmValueColumns returns the set of gene_panel_matrix columns that hold a
-// per-profile panel id (i.e. the wide value columns, not the metadata columns).
-func (s *State) gpmValueColumns() map[string]bool {
-	type nameRow struct {
-		Name string `json:"name"`
-	}
-	rows, _ := ch.Query[nameRow](s.CH,
-		"SELECT name FROM system.columns WHERE database = 'cbioportal_raw' AND table = 'gene_panel_matrix' "+
-			"AND name NOT IN ('study_id', 'source_file', 'alteration_type', 'datatype', 'profile_stable_id', 'sample_id')")
-	out := map[string]bool{}
-	for _, r := range rows {
-		out[r.Name] = true
 	}
 	return out
 }
@@ -295,150 +356,103 @@ func (s *State) studySampleIDs(study string) []string {
 	return out
 }
 
+// buildGenePanelData resolves each (profile, sample) request against
+// sample_profile: a sample is profiled when it belongs to the profile, with the
+// panel it was profiled on (none for whole-exome/genome). Mutation profiles also
+// count members of the study's _sequenced sample list as profiled. Samples not
+// in the profile's study are skipped.
 func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 	out := []GenePanelData{}
 	if len(reqs) == 0 {
 		return out
 	}
-
-	// Resolve profiles (study + stable id / matrix column name).
-	profIDset := map[string]bool{}
+	profSet := map[string]bool{}
 	for _, q := range reqs {
-		profIDset[q.profileID] = true
+		profSet[q.profileID] = true
 	}
-	profIDs := make([]string, 0, len(profIDset))
-	for id := range profIDset {
-		profIDs = append(profIDs, id)
-	}
+	profIDs := sortedKeys(profSet)
 	profs := s.resolvePanelProfiles(profIDs)
-
-	valueCols := s.gpmValueColumns()
-
-	// Study for each request, plus the distinct studies and needed columns.
-	studyOf := func(profileID string) string {
-		if p, ok := profs[profileID]; ok && p.StudyID != "" {
-			return p.StudyID
-		}
-		return deriveStudyFromProfile(profileID, valueCols)
+	type typeRow struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
 	}
-	stableOf := func(profileID string) string {
-		if p, ok := profs[profileID]; ok && p.StableID != "" {
-			return p.StableID
-		}
-		return ""
+	types, _ := ch.Query[typeRow](s.CH, fmt.Sprintf(
+		"SELECT molecular_profile_id AS id, molecular_alteration_type AS type FROM molecular_profile WHERE molecular_profile_id IN (%s)",
+		inList(profIDs)))
+	isMutation := map[string]bool{}
+	for _, t := range types {
+		isMutation[t.ID] = t.Type == "MUTATION_EXTENDED"
 	}
-
 	studySet := map[string]bool{}
-	colSet := map[string]bool{}
-	for _, q := range reqs {
-		studySet[studyOf(q.profileID)] = true
-		if c := stableOf(q.profileID); c != "" && valueCols[c] {
-			colSet[c] = true
-		}
+	for _, p := range profs {
+		studySet[p.StudyID] = true
 	}
-	studies := make([]string, 0, len(studySet))
-	for st := range studySet {
-		if st != "" {
-			studies = append(studies, st)
-		}
+	studies := sortedKeys(studySet)
+	if len(studies) == 0 {
+		return out
 	}
-
-	// patient_id per (study, sample).
 	patientOf := map[string]string{}
-	if len(studies) > 0 {
-		rows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
-			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id IN (%s)",
-			inList(studies)))
-		for _, r := range rows {
-			patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
-		}
+	rows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id IN (%s)",
+		inList(studies)))
+	for _, r := range rows {
+		patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
 	}
-
-	// Which of the requested studies actually have a gene panel matrix.
-	matrixStudies := map[string]bool{}
-	if len(studies) > 0 {
-		type sr struct {
-			StudyID string `json:"studyId"`
-		}
-		rows, _ := ch.Query[sr](s.CH, fmt.Sprintf(
-			"SELECT DISTINCT study_id AS studyId FROM cbioportal_raw.gene_panel_matrix WHERE study_id IN (%s)",
-			inList(studies)))
-		for _, r := range rows {
-			matrixStudies[r.StudyID] = true
-		}
+	type memberRow struct {
+		Profile  string  `json:"profile"`
+		SampleID string  `json:"sampleId"`
+		Panel    *string `json:"panel"`
 	}
-
-	// Panel value per (study, sample, column).
-	panelOf := map[string]string{}
-	if len(studies) > 0 {
-		for col := range colSet {
-			type pr struct {
-				StudyID  string `json:"studyId"`
-				SampleID string `json:"sampleId"`
-				Panel    string `json:"panel"`
+	members, _ := ch.Query[memberRow](s.CH, fmt.Sprintf(
+		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
+			"WHERE molecular_profile_id IN (%s)", inList(profIDs)))
+	type membership struct{ panel string }
+	member := map[string]membership{}
+	for _, m := range members {
+		panel := ""
+		if m.Panel != nil {
+			panel = *m.Panel
+		}
+		member[jkey(m.Profile, m.SampleID)] = membership{panel}
+	}
+	sequenced := map[string]bool{}
+	seqRows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
+		"SELECT study_id AS studyId, sample_id AS sampleId FROM sample_list WHERE list_id IN (%s)",
+		inList(func() []string {
+			ids := make([]string, len(studies))
+			for i, st := range studies {
+				ids[i] = st + "_sequenced"
 			}
-			rows, _ := ch.Query[pr](s.CH, fmt.Sprintf(
-				"SELECT study_id AS studyId, sample_id AS sampleId, %s AS panel FROM cbioportal_raw.gene_panel_matrix WHERE study_id IN (%s)",
-				col, inList(studies)))
-			for _, r := range rows {
-				panelOf[jkey(r.StudyID, r.SampleID, col)] = r.Panel
-			}
-		}
+			return ids
+		}())))
+	for _, r := range seqRows {
+		sequenced[jkey(r.StudyID, r.SampleID)] = true
 	}
-
 	for _, q := range reqs {
-		study := studyOf(q.profileID)
-		stable := stableOf(q.profileID)
-		patient := patientOf[jkey(study, q.sampleID)]
-
-		panelID := ""
-		profiled := true
-		if matrixStudies[study] && valueCols[stable] {
-			// A sample only counts as "not profiled" when it has an explicit
-			// empty/NA gene-panel-matrix cell for this alteration type. Samples
-			// absent from the matrix are whole-genome profiled (profiled=true, no
-			// panel) — otherwise the oncoprint hides alterations for every sample
-			// the study didn't put in its (often partial) gene matrix.
-			// Empty / NA / WES / WGS / WXS all mean whole-exome/genome sequenced =
-			// profiled for every gene (profiled=true, no specific panel), matching
-			// cBioPortal. A concrete panel id sets genePanelId. Samples absent from
-			// the matrix are likewise whole-genome profiled (handled by the outer
-			// default profiled=true).
-			if v, inMatrix := panelOf[jkey(study, q.sampleID, stable)]; inMatrix {
-				switch {
-				case v == "" || strings.EqualFold(v, "NA") ||
-					strings.EqualFold(v, "WES") || strings.EqualFold(v, "WXS") || strings.EqualFold(v, "WGS"):
-					profiled = true
-				default:
-					panelID = v
-					profiled = true
-				}
-			}
+		p, ok := profs[q.profileID]
+		if !ok {
+			continue
 		}
-
+		patient, ok := patientOf[jkey(p.StudyID, q.sampleID)]
+		if !ok {
+			continue
+		}
+		m, profiled := member[jkey(q.profileID, q.sampleID)]
+		if !profiled && isMutation[q.profileID] {
+			profiled = sequenced[jkey(p.StudyID, q.sampleID)]
+		}
 		out = append(out, GenePanelData{
-			GenePanelID:        panelID,
+			GenePanelID:        m.panel,
 			MolecularProfileID: q.profileID,
 			PatientID:          patient,
 			Profiled:           profiled,
 			SampleID:           q.sampleID,
-			StudyID:            study,
-			UniquePatientKey:   uniqueKey(study, patient),
-			UniqueSampleKey:    uniqueKey(study, q.sampleID),
+			StudyID:            p.StudyID,
+			UniquePatientKey:   uniqueKey(p.StudyID, patient),
+			UniqueSampleKey:    uniqueKey(p.StudyID, q.sampleID),
 		})
 	}
 	return out
-}
-
-// deriveStudyFromProfile strips a known matrix-column suffix (e.g. "_mutations")
-// to recover the study id when the profile can't be resolved from the DB.
-func deriveStudyFromProfile(profileID string, valueCols map[string]bool) string {
-	for col := range valueCols {
-		if strings.HasSuffix(profileID, "_"+col) {
-			return strings.TrimSuffix(profileID, "_"+col)
-		}
-	}
-	return profileID
 }
 
 // ---------- Multi-study numeric molecular data ----------
@@ -472,38 +486,31 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 			out = append(out, s.molecularDataForProfile(p, nil, f.EntrezGeneIDs)...)
 		}
 	}
+	if strings.EqualFold(r.URL.Query().Get("projection"), "META") {
+		w.Header().Set("total-count", fmt.Sprint(len(out)))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	writeJSON(w, out)
 }
 
 // molecularDataForProfile mirrors molecularDataFetch's per-profile query, scoped
 // to an optional sample subset, returning the rows for one molecular profile.
 func (s *State) molecularDataForProfile(mpid string, sampleIDs []string, entrez []int64) []MolecularData {
-	meta, ok := s.profileMeta(mpid)
-	if !ok {
-		return nil
+	out, _ := s.molecularData(mpid, molecularDataFilter{EntrezGeneIDs: entrez, SampleIDs: sampleIDs})
+	return out
+}
+
+// svViewColumns lists the columns of the structural_variant view (the staged
+// detail columns vary by dataset).
+func (s *State) svViewColumns() map[string]bool {
+	type col struct {
+		Name string `json:"name"`
 	}
-	table := meta.dataTable()
-	if table == "" {
-		return nil
-	}
-	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
-	where += geneFilter(entrez)
-	if len(sampleIDs) > 0 {
-		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(sampleIDs))
-	}
-	rows, err := ch.Query[molecularDataRow](s.CH, fmt.Sprintf(
-		"SELECT sample_id AS sampleId, toInt64OrNull(entrez_gene_id) AS entrezGeneId, hugo_symbol AS hugoGeneSymbol, value FROM cbioportal_raw.%s WHERE %s",
-		table, where))
-	if err != nil {
-		return nil
-	}
-	out := make([]MolecularData, len(rows))
-	for i, r := range rows {
-		out[i] = MolecularData{
-			MolecularProfileID: mpid, SampleID: r.SampleID, EntrezGeneID: r.EntrezGeneID,
-			Gene:    Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol},
-			StudyID: meta.StudyID, Value: r.Value, UniqueSampleKey: uniqueKey(meta.StudyID, r.SampleID),
-		}
+	rows, _ := ch.Query[col](s.CH, "SELECT name FROM system.columns WHERE database = currentDatabase() AND table = 'structural_variant'")
+	out := map[string]bool{}
+	for _, r := range rows {
+		out[r.Name] = true
 	}
 	return out
 }

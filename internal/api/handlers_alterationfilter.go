@@ -10,14 +10,17 @@ import (
 // incl. custom tiers) to count. Bool pointers distinguish "not sent" (nil →
 // include) from an explicit false.
 type alterationFilter struct {
-	IncludeDriver              *bool           `json:"includeDriver"`
-	IncludeVUS                 *bool           `json:"includeVUS"`
-	IncludeUnknownOncogenicity *bool           `json:"includeUnknownOncogenicity"`
-	IncludeGermline            *bool           `json:"includeGermline"`
-	IncludeSomatic             *bool           `json:"includeSomatic"`
-	IncludeUnknownStatus       *bool           `json:"includeUnknownStatus"`
-	IncludeUnknownTier         *bool           `json:"includeUnknownTier"`
-	TiersBooleanMap            map[string]bool `json:"tiersBooleanMap"`
+	IncludeDriver                  *bool           `json:"includeDriver"`
+	IncludeVUS                     *bool           `json:"includeVUS"`
+	IncludeUnknownOncogenicity     *bool           `json:"includeUnknownOncogenicity"`
+	IncludeGermline                *bool           `json:"includeGermline"`
+	IncludeSomatic                 *bool           `json:"includeSomatic"`
+	IncludeUnknownStatus           *bool           `json:"includeUnknownStatus"`
+	IncludeUnknownTier             *bool           `json:"includeUnknownTier"`
+	TiersBooleanMap                map[string]bool `json:"tiersBooleanMap"`
+	MutationEventTypes             map[string]bool `json:"mutationEventTypes"`
+	CopyNumberAlterationEventTypes map[string]bool `json:"copyNumberAlterationEventTypes"`
+	StructuralVariants             *bool           `json:"structuralVariants"`
 }
 
 const falseClause = "1 = 0"

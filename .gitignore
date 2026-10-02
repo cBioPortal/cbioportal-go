@@ -10,3 +10,4 @@
 
 # Editor / OS
 .DS_Store
+.sessions.json

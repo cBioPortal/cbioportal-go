@@ -4,32 +4,49 @@
 package api
 
 import (
+	"bytes"
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 type State struct {
-	CH       *ch.Client
-	sessions sync.Map // id -> json.RawMessage
-	counter  atomic.Uint64
+	CH           *ch.Client
+	sessions     *sessionStore
+	sessionsOnce sync.Once
+	// frontend serves every non-API path — a built frontend (FRONTEND_DIR) or a
+	// proxied dev server (FRONTEND_URL) — so the portal UI and the API share one
+	// origin as in a cBioPortal deployment.
+	frontend http.Handler
 }
 
-func NewState(c *ch.Client) *State { return &State{CH: c} }
+// NewState loads the session store (SESSION_STORE_FILE, if set) at startup.
+func NewState(c *ch.Client) *State {
+	s := &State{CH: c, sessions: newSessionStoreFromEnv()}
+	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
+		s.frontend = spaHandler(dir)
+	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {
+		s.frontend = httputil.NewSingleHostReverseProxy(u)
+	}
+	return s
+}
 
 // NewRouter builds the API handler with CORS, optional bearer-token auth
 // (disabled by default), and a body-draining catch-all.
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return cors(gunzipBody(auth(loadAuthConfig(), mux)))
+	return cors(gunzipBody(auth(loadAuthConfig(), pageList(metaProjection(mux)))))
 }
 
 // gunzipBody transparently decompresses gzip-encoded request bodies. The
@@ -67,7 +84,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		h.Set("Access-Control-Allow-Headers", "*")
 		h.Set("Access-Control-Expose-Headers", "*")
 		if r.Method == http.MethodOptions {
@@ -121,4 +138,91 @@ func tupleIn(pairs [][2]string) string {
 		q[i] = fmt.Sprintf("('%s', '%s')", sqlLit(p[0]), sqlLit(p[1]))
 	}
 	return strings.Join(q, ", ")
+}
+
+// metaProjection implements projection=META for every list endpoint: the
+// handler's JSON array is replaced by a total-count header with its length.
+// Handlers that set total-count themselves are passed through.
+func metaProjection(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(r.URL.Query().Get("projection"), "META") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		for k, v := range rec.header {
+			w.Header()[k] = v
+		}
+		if rec.header.Get("total-count") == "" && rec.status == http.StatusOK {
+			var items []struct {
+				UniqueSampleKey string `json:"uniqueSampleKey"`
+			}
+			if json.Unmarshal(rec.body.Bytes(), &items) == nil {
+				w.Header().Del("Content-Type")
+				w.Header().Del("Content-Length")
+				w.Header().Set("total-count", fmt.Sprint(len(items)))
+				// Mutation META also reports the distinct samples (MutationMeta).
+				samples := map[string]bool{}
+				for _, it := range items {
+					if it.UniqueSampleKey != "" {
+						samples[it.UniqueSampleKey] = true
+					}
+				}
+				w.Header().Set("sample-count", fmt.Sprint(len(samples)))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		w.WriteHeader(rec.status)
+		w.Write(rec.body.Bytes())
+	})
+}
+
+type bufferedResponse struct {
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func (b *bufferedResponse) Header() http.Header         { return b.header }
+func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
+func (b *bufferedResponse) WriteHeader(code int)        { b.status = code }
+
+// spaHandler serves a built frontend: existing files as-is, every other path
+// (client-side routes such as /results or /patient) as index.html.
+func spaHandler(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			files.ServeHTTP(w, r)
+			return
+		}
+		page, err := os.ReadFile(filepath.Join(dir, "index.html"))
+		if err != nil {
+			http.Error(w, "frontend index.html missing", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(withFrontendConfig(page, r.Host))
+	})
+}
+
+// withFrontendConfig sets window.frontendConfig in the frontend's index page
+// as the portal's index template does, pointing the app at this origin.
+func withFrontendConfig(page []byte, host string) []byte {
+	cfg, _ := json.Marshal(map[string]string{
+		"configurationServiceUrl": "//" + host + "/config_service",
+		"apiRoot":                 "//" + host + "/",
+		"baseUrl":                 host,
+		"basePath":                "",
+		"frontendUrl":             "//" + host + "/",
+	})
+	script := []byte("<script>window.frontendConfig = Object.assign(window.frontendConfig || {}, " + string(cfg) + ");</script>")
+	if i := bytes.Index(page, []byte("</head>")); i >= 0 {
+		return append(append(append([]byte{}, page[:i]...), script...), page[i:]...)
+	}
+	return append(script, page...)
 }

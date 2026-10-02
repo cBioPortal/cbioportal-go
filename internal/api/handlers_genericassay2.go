@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -37,135 +38,139 @@ type GenericAssayDataCountItem struct {
 	Counts   []GenericAssayDataCount `json:"counts"`
 }
 
-// genericAssayDataCountsFetch handles POST /api/generic-assay-data-counts/fetch.
-// For the requested profileType it counts, per entity, the distinct scoped
-// samples having each categorical value, plus an "NA" bucket for scoped samples
-// that have data in the profile but no (non-NA) value for that entity.
+// genericAssayDataCountsFetch handles POST /api/generic-assay-data-counts/fetch:
+// per entity, the filtered samples (or patients, for patient-level profiles)
+// having each categorical value, with the remainder reported as NA. Entities
+// come from the data filters, or every entity of the top-level profileType.
 func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
-		GenericAssayDataFilters []struct {
-			ProfileType string `json:"profileType"`
-			StableID    string `json:"stableId"`
-		} `json:"genericAssayDataFilters"`
-		ProfileType     string          `json:"profileType"`
-		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
+		GenericAssayDataFilters []genericAssayDataFilter `json:"genericAssayDataFilters"`
+		ProfileType             string                   `json:"profileType"`
+		StudyViewFilter         studyViewFilter          `json:"studyViewFilter"`
 	}
 	readBody(r, &f)
-
-	scope := f.StudyViewFilter.sampleScope()
-
-	// Resolve the profile type(s) to count: the explicit top-level one, else the
-	// distinct types named by the individual data filters.
-	var profileTypes []string
-	if f.ProfileType != "" {
-		profileTypes = []string{f.ProfileType}
-	} else {
-		seen := map[string]bool{}
-		for _, df := range f.GenericAssayDataFilters {
-			if df.ProfileType != "" && !seen[df.ProfileType] {
-				seen[df.ProfileType] = true
-				profileTypes = append(profileTypes, df.ProfileType)
-			}
+	if len(f.GenericAssayDataFilters) == 0 && f.ProfileType == "" {
+		http.Error(w, "genericAssayDataFilters or profileType required", http.StatusBadRequest)
+		return
+	}
+	svf := f.StudyViewFilter
+	if len(f.GenericAssayDataFilters) == 1 {
+		svf = svf.withoutGenericAssay(f.GenericAssayDataFilters[0].StableID)
+	}
+	profileType := f.ProfileType
+	var entities []string
+	if len(f.GenericAssayDataFilters) > 0 {
+		profileType = f.GenericAssayDataFilters[0].ProfileType
+		for _, g := range f.GenericAssayDataFilters {
+			entities = append(entities, g.StableID)
 		}
 	}
-
-	out := []GenericAssayDataCountItem{}
+	var profiles []string
+	for _, st := range svf.studyIDs() {
+		profiles = append(profiles, st+"_"+profileType)
+	}
+	type lvl struct {
+		P uint8 `json:"p"`
+	}
+	lv, _ := ch.Query[lvl](s.CH, fmt.Sprintf(
+		"SELECT toUInt8(max(patient_level)) AS p FROM generic_assay_data_derived WHERE profile_stable_id IN (%s)", orEmpty(profiles)))
+	unit := "sample_unique_id"
+	if len(lv) > 0 && lv[0].P == 1 {
+		unit = "patient_unique_id"
+	}
+	scope := fmt.Sprintf("profile_type = '%s' AND sample_unique_id IN (%s)", sqlLit(profileType), s.filterSQL(svf))
+	entityClause := ""
+	if len(entities) > 0 {
+		entityClause = fmt.Sprintf(" AND entity_stable_id IN (%s)", inList(entities))
+	}
 	type row struct {
 		StableID string `json:"stableId"`
 		Value    string `json:"value"`
 		Count    uint64 `json:"count"`
 	}
-	for _, pt := range profileTypes {
-		total := fmt.Sprintf(
-			"(SELECT uniqExact(sample_id) FROM cbioportal_raw.generic_assay_matrix WHERE profile_stable_id = '%s' AND %s)",
-			sqlLit(pt), scope)
-		sql := fmt.Sprintf(
-			"SELECT stableId, value, count FROM ("+
-				"SELECT g.entity_stable_id AS stableId, g.value AS value, toUInt64(uniqExact(g.sample_id)) AS count "+
-				"FROM cbioportal_raw.generic_assay_matrix g "+
-				"WHERE g.profile_stable_id = '%[1]s' AND %[2]s AND upper(trimBoth(g.value)) NOT IN ('NA', '') "+
-				"GROUP BY g.entity_stable_id, g.value "+
-				"UNION ALL "+
-				"SELECT g.entity_stable_id AS stableId, 'NA' AS value, "+
-				"toUInt64(%[3]s - uniqExactIf(g.sample_id, upper(trimBoth(g.value)) NOT IN ('NA', ''))) AS count "+
-				"FROM cbioportal_raw.generic_assay_matrix g "+
-				"WHERE g.profile_stable_id = '%[1]s' AND %[2]s "+
-				"GROUP BY g.entity_stable_id"+
-				") WHERE count > 0 ORDER BY stableId, value",
-			sqlLit(pt), scope, total)
-		rows, err := ch.Query[row](s.CH, sql)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		// Group value rows into one item per entity, preserving stableId order.
-		byEntity := map[string]int{}
-		for _, rw := range rows {
-			idx, ok := byEntity[rw.StableID]
-			if !ok {
-				idx = len(out)
-				byEntity[rw.StableID] = idx
-				out = append(out, GenericAssayDataCountItem{StableID: rw.StableID, Counts: []GenericAssayDataCount{}})
+	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+		"SELECT entity_stable_id AS stableId, value, uniqExact(%s) AS count FROM generic_assay_data_derived "+
+			"WHERE NOT %s AND %s%s GROUP BY entity_stable_id, value",
+		unit, isNASQL("value"), scope, entityClause))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var total uint64
+	if len(entities) > 0 {
+		if unit == "patient_unique_id" {
+			type c struct {
+				N uint64 `json:"n"`
 			}
-			out[idx].Counts = append(out[idx].Counts, GenericAssayDataCount{Value: rw.Value, Count: rw.Count})
+			t, _ := ch.Query[c](s.CH, fmt.Sprintf(
+				"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE %s", s.filterWhere(svf)))
+			if len(t) > 0 {
+				total = t[0].N
+			}
+		} else {
+			total = s.scopeSampleCount(svf)
+		}
+	} else {
+		type c struct {
+			N uint64 `json:"n"`
+		}
+		t, _ := ch.Query[c](s.CH, fmt.Sprintf(
+			"SELECT uniqExact(%s) AS n FROM generic_assay_data_derived WHERE %s", unit, scope))
+		if len(t) > 0 {
+			total = t[0].N
+		}
+		type e struct {
+			StableID string `json:"stableId"`
+		}
+		es, _ := ch.Query[e](s.CH, fmt.Sprintf(
+			"SELECT DISTINCT entity_stable_id AS stableId FROM generic_assay_data_derived WHERE %s", scope))
+		for _, x := range es {
+			entities = append(entities, x.StableID)
 		}
 	}
+	values := map[string][]GenericAssayDataCount{}
+	sums := map[string]uint64{}
+	for _, rw := range rows {
+		values[rw.StableID] = append(values[rw.StableID], GenericAssayDataCount{Value: rw.Value, Count: rw.Count})
+		sums[rw.StableID] += rw.Count
+	}
+	sort.Slice(entities, func(i, j int) bool { return entityLess(entities[i], entities[j]) })
+	out := []GenericAssayDataCountItem{}
+	for _, id := range entities {
+		counts := values[id]
+		sort.Slice(counts, func(i, j int) bool { return counts[i].Value < counts[j].Value })
+		if total > sums[id] {
+			counts = append(counts, GenericAssayDataCount{Value: "NA", Count: total - sums[id]})
+		}
+		if len(counts) == 0 {
+			continue
+		}
+		out = append(out, GenericAssayDataCountItem{StableID: id, Counts: counts})
+	}
 	writeJSON(w, out)
+}
+
+// entityLess orders entity ids by their leading number, then lexically.
+func entityLess(a, b string) bool {
+	na, nb := leadingInt(a), leadingInt(b)
+	if na != nb {
+		return na < nb
+	}
+	return a < b
+}
+
+func leadingInt(s string) uint64 {
+	var n uint64
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			break
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n
 }
 
 // ---------- Generic assay data bin counts (study view, numeric) ----------
-
-// GenericAssayDataBin is one histogram bucket for a numeric generic-assay entity.
-type GenericAssayDataBin struct {
-	StableID     string   `json:"stableId"`
-	ProfileType  string   `json:"profileType"`
-	SpecialValue string   `json:"specialValue,omitempty"`
-	Start        *float64 `json:"start,omitempty"`
-	End          *float64 `json:"end,omitempty"`
-	Count        uint64   `json:"count"`
-}
-
-// genericAssayDataBinCountsFetch handles POST /api/generic-assay-data-bin-counts/fetch.
-// For each (profileType, stableId) it groups the entity's values in ClickHouse
-// and buckets them into equal-width numeric bins (plus an NA bucket).
-func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
-	var f struct {
-		GenericAssayDataBinFilters []struct {
-			ProfileType string `json:"profileType"`
-			StableID    string `json:"stableId"`
-		} `json:"genericAssayDataBinFilters"`
-		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
-	}
-	readBody(r, &f)
-
-	scope := f.StudyViewFilter.sampleScope()
-
-	out := []GenericAssayDataBin{}
-	for _, bf := range f.GenericAssayDataBinFilters {
-		if bf.StableID == "" || bf.ProfileType == "" {
-			continue
-		}
-		rows, err := ch.Query[binValRow](s.CH, fmt.Sprintf(
-			"SELECT value AS value, toUInt64(count()) AS c FROM cbioportal_raw.generic_assay_matrix "+
-				"WHERE profile_stable_id = '%s' AND entity_stable_id = '%s' AND %s GROUP BY value",
-			sqlLit(bf.ProfileType), sqlLit(bf.StableID), scope))
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		for _, b := range binNumericValues(bf.StableID, rows) {
-			out = append(out, GenericAssayDataBin{
-				StableID:     bf.StableID,
-				ProfileType:  bf.ProfileType,
-				SpecialValue: b.SpecialValue,
-				Start:        b.Start,
-				End:          b.End,
-				Count:        b.Count,
-			})
-		}
-	}
-	writeJSON(w, out)
-}
 
 // ---------- Single-entity data GET ----------
 

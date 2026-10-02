@@ -12,16 +12,13 @@ func (s *State) routes(mux *http.ServeMux) {
 	// endpoint (Genome Nexus /proxy, features not yet implemented).
 	mux.HandleFunc("/", s.catchAll)
 
-	// Session service
-	mux.HandleFunc("POST /api/session/{source}/{type}", s.sessionCreate)
-	mux.HandleFunc("GET /api/session/{source}/{type}/{id}", s.sessionGet)
+	// Session service + public virtual studies
+	s.routeSession(mux)
 
 	// Studies
 	mux.HandleFunc("GET /api/studies", s.studies)
 	mux.HandleFunc("POST /api/studies/fetch", s.studiesFetch)
 	mux.HandleFunc("GET /api/studies/{studyId}", s.study)
-	mux.HandleFunc("POST /api/studies/tags/fetch", emptyArray)
-	mux.HandleFunc("POST /api/resource-definitions/fetch", emptyArray)
 
 	// Samples / patients
 	mux.HandleFunc("GET /api/studies/{studyId}/samples", s.samples)
@@ -32,8 +29,6 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/samples", s.samplesOfPatient)
 	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-data", s.patientClinicalData)
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/clinical-data", s.sampleClinicalData)
-	// timeline / clinical events (not yet ingested) — empty so patient view loads
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-events", emptyArray)
 
 	// Clinical
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-data", s.clinicalData)
@@ -77,14 +72,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/structuralvariant-genes/fetch", s.svGenesFetch)
 	mux.HandleFunc("POST /api/molecular-profile-sample-counts/fetch", s.molecularProfileSampleCountsFetch)
 
-	// Stubs the study view calls
-	for _, p := range []string{
-		"POST /api/clinical-event-type-counts/fetch",
-		"POST /api/treatments/patient-counts/fetch",
-		"POST /api/clinical-data/fetch",
-	} {
-		mux.HandleFunc(p, emptyArray)
-	}
+	mux.HandleFunc("POST /api/clinical-data/fetch", s.clinicalDataFetch)
 
 	// Endpoint groups implemented in separate handler files.
 	s.routeGenericAssay(mux)
@@ -100,8 +88,12 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.routeMolecular2(mux)
 	s.routeReference(mux)
 	s.routeBulkList(mux)
+	s.routeResources(mux)
+	s.routeSignificance(mux)
+	s.routeStudyTags(mux)
+	s.routeCancerTypes(mux)
 	mux.HandleFunc("POST /api/custom-driver-annotation-report/fetch", s.customDriverAnnotationReport)
-	for _, p := range []string{"POST /api/treatments/display-sample", "POST /api/treatments/display-patient"} {
-		mux.HandleFunc(p, func(w http.ResponseWriter, r *http.Request) { readBody(r, nil); writeJSON(w, false) })
-	}
+	s.routeTreatments(mux)
+	s.routeCompat(mux)
+	s.routeProxy(mux)
 }

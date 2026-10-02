@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -50,7 +51,16 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		SampleIdentifiers []identifier `json:"sampleIdentifiers"`
 		Chromosome        string       `json:"chromosome"`
 	}
-	readBody(r, &f)
+	// The body is a list of sample identifiers (an object wrapping them is also
+	// accepted); the chromosome is a query parameter.
+	var raw json.RawMessage
+	readBody(r, &raw)
+	if json.Unmarshal(raw, &f.SampleIdentifiers) != nil {
+		json.Unmarshal(raw, &f)
+	}
+	if c := r.URL.Query().Get("chromosome"); c != "" {
+		f.Chromosome = c
+	}
 	if len(f.SampleIdentifiers) == 0 {
 		writeJSON(w, []CopyNumberSeg{})
 		return
@@ -160,7 +170,11 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	readBody(r, &f)
 
 	scopeFilter := studyViewFilter{}
+	var sampleScope string
 	switch {
+	case f.SampleListID != "":
+		sampleScope = fmt.Sprintf("(study_id, sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id = '%s')",
+			sqlLit(f.SampleListID))
 	case len(f.SampleIdentifiers) > 0:
 		scopeFilter.SampleIdentifiers = f.SampleIdentifiers
 	case len(f.StudyViewFilter.SampleIdentifiers) > 0 || len(f.StudyViewFilter.StudyIDs) > 0:
@@ -171,7 +185,9 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, []ClinicalAttributeCount{})
 		return
 	}
-	sampleScope := scopeFilter.sampleScope()
+	if sampleScope == "" {
+		sampleScope = s.sampleScope(scopeFilter)
+	}
 	patientScope := fmt.Sprintf(
 		"(study_id, patient_id) IN (SELECT study_id, patient_id FROM sample WHERE %s)", sampleScope)
 

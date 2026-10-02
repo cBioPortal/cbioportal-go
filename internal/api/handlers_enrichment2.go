@@ -188,7 +188,7 @@ func (s *State) computeContinuousMW(groups []casesGroup, keyCol string, withGene
 		groupBy = "hugo_symbol, entrez_gene_id"
 	} else {
 		innerCols = keyCol
-		midKey = keyCol + " AS symbol"
+		midKey = keyCol + " AS symbol, CAST(NULL AS Nullable(Int64)) AS entrez"
 		groupBy = keyCol
 	}
 
@@ -377,6 +377,9 @@ func groupStatistics(groups []casesGroup, groupVals [][]float64) []GroupStatisti
 func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	readBody(r, &groups)
+	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
+		groups = s.patientCasesToSamples(groups)
+	}
 	if len(groups) < 2 {
 		writeJSON(w, []GenomicEnrichment{})
 		return
@@ -409,6 +412,9 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	readBody(r, &groups)
+	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
+		groups = s.patientCasesToSamples(groups)
+	}
 	if len(groups) < 2 {
 		writeJSON(w, []GenericAssayEnrichment{})
 		return
@@ -435,6 +441,45 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	writeJSON(w, out)
+}
+
+// patientCasesToSamples rewrites groups whose case ids are patient ids
+// (enrichmentType=PATIENT) to the samples of those patients, as the Java
+// backend compares every sample of a patient.
+func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
+	metaCache := map[string]profileMeta{}
+	var pairs [][2]string
+	for _, g := range groups {
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			m, seen := metaCache[c.MolecularProfileID]
+			if !seen {
+				m, _ = s.profileMeta(c.MolecularProfileID)
+				metaCache[c.MolecularProfileID] = m
+			}
+			pairs = append(pairs, [2]string{m.StudyID, c.CaseID})
+		}
+	}
+	samplesOf := map[string][]string{}
+	if len(pairs) > 0 {
+		rows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
+			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample "+
+				"WHERE (study_id, patient_id) IN (%s) ORDER BY study_id, sample_id", tupleIn(pairs)))
+		for _, r := range rows {
+			k := jkey(r.StudyID, r.PatientID)
+			samplesOf[k] = append(samplesOf[k], r.SampleID)
+		}
+	}
+	out := make([]casesGroup, len(groups))
+	for i, g := range groups {
+		out[i] = casesGroup{Name: g.Name}
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			for _, sid := range samplesOf[jkey(metaCache[c.MolecularProfileID].StudyID, c.CaseID)] {
+				out[i].MolecularProfileCaseIdentifiers = append(out[i].MolecularProfileCaseIdentifiers,
+					caseIdentifier{CaseID: sid, MolecularProfileID: c.MolecularProfileID})
+			}
+		}
+	}
+	return out
 }
 
 // genericAssayBinaryEnrichmentsFetch returns a correctly-typed empty array; the

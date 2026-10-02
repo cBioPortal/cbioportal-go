@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 	"github.com/inodb/cbioportal-go/internal/stats"
@@ -220,7 +221,7 @@ type scopedSample struct {
 func (s *State) scopedSamples(f studyViewFilter) []scopedSample {
 	rows, _ := ch.Query[scopedSample](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE %s",
-		f.sampleScope()))
+		s.sampleScope(f)))
 	return rows
 }
 
@@ -369,6 +370,18 @@ func queryFloat(r *http.Request, name string) (float64, bool) {
 	return 0, false
 }
 
+// logScaleValues maps every value to ln(1 + v) when the boolean query param
+// is true and the attribute is MUTATION_COUNT, the only attribute the Java
+// backend log-scales in density and violin plots.
+func logScaleValues(r *http.Request, param, attrID string, vals map[string]float64) {
+	if !strings.EqualFold(r.URL.Query().Get(param), "true") || attrID != "MUTATION_COUNT" {
+		return
+	}
+	for k, v := range vals {
+		vals[k] = math.Log(1 + v)
+	}
+}
+
 func queryIntDefault(r *http.Request, name string, def int) int {
 	if v := r.URL.Query().Get(name); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -392,6 +405,8 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 	samples := s.scopedSamples(f)
 	xVals := s.attrValuesBySample(samples, xAttr)
 	yVals := s.attrValuesBySample(samples, yAttr)
+	logScaleValues(r, "xAxisLogScale", xAttr, xVals)
+	logScaleValues(r, "yAxisLogScale", yAttr, yVals)
 
 	var xs, ys []float64
 	for key, xv := range xVals {
@@ -531,6 +546,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 
 	samples := s.scopedSamples(f)
 	numVals := s.attrValuesBySample(samples, numAttr)
+	logScaleValues(r, "logScale", numAttr, numVals)
 	catVals := s.attrCategoriesBySample(samples, catAttr)
 
 	sampleByKey := map[string]scopedSample{}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -23,15 +24,15 @@ type mpRow struct {
 }
 
 type MolecularProfile struct {
-	MolecularProfileID        string `json:"molecularProfileId"`
-	StudyID                   string `json:"studyId"`
-	MolecularAlterationType   string `json:"molecularAlterationType"`
-	Datatype                  string `json:"datatype"`
-	Name                      string `json:"name"`
-	Description               string `json:"description"`
-	ShowProfileInAnalysisTab  bool   `json:"showProfileInAnalysisTab"`
-	PatientLevel              bool   `json:"patientLevel"`
-	GenericAssayType          string `json:"genericAssayType,omitempty"`
+	MolecularProfileID       string `json:"molecularProfileId"`
+	StudyID                  string `json:"studyId"`
+	MolecularAlterationType  string `json:"molecularAlterationType"`
+	Datatype                 string `json:"datatype"`
+	Name                     string `json:"name"`
+	Description              string `json:"description"`
+	ShowProfileInAnalysisTab bool   `json:"showProfileInAnalysisTab"`
+	PatientLevel             bool   `json:"patientLevel"`
+	GenericAssayType         string `json:"genericAssayType,omitempty"`
 }
 
 const mpSelect = "SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, " +
@@ -93,8 +94,8 @@ func (s *State) molecularProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
-		StudyIDs             []string `json:"studyIds"`
-		MolecularProfileIDs  []string `json:"molecularProfileIds"`
+		StudyIDs            []string `json:"studyIds"`
+		MolecularProfileIDs []string `json:"molecularProfileIds"`
 	}
 	readBody(r, &f)
 	switch {
@@ -114,7 +115,14 @@ const mutationSelect = "SELECT study_id AS studyId, sample_id AS sampleId, hugo_
 	"toInt64OrNull(end_position) AS endPosition, reference_allele AS referenceAllele, tumor_seq_allele2 AS variantAllele, " +
 	"protein_change AS proteinChange, variant_classification AS mutationType, toInt64OrNull(t_alt_count) AS tumorAltCount, " +
 	"toInt64OrNull(t_ref_count) AS tumorRefCount, cbp_driver AS driverFilter, cbp_driver_annotation AS driverFilterAnnotation, " +
-	"cbp_driver_tiers AS driverTiersFilter, cbp_driver_tiers_annotation AS driverTiersFilterAnnotation, namespace_columns AS namespaceColumns FROM mutation"
+	"cbp_driver_tiers AS driverTiersFilter, cbp_driver_tiers_annotation AS driverTiersFilterAnnotation, namespace_columns AS namespaceColumns, " +
+	"molecular_profile_id AS molecularProfileId, patient_id AS patientId, center, mutation_status AS mutationStatus, " +
+	"validation_status AS validationStatus, toInt64OrNull(n_alt_count) AS normalAltCount, toInt64OrNull(n_ref_count) AS normalRefCount, " +
+	"amino_acid_change AS aminoAcidChange, ncbi_build AS ncbiBuild, variant_type AS variantType, refseq_mrna_id AS refseqMrnaId, " +
+	"protein_position AS proteinPosition, toInt64OrNull(ascn_integer_copy_number) AS ascnIntegerCopyNumber, ascn_method AS ascnMethod, " +
+	"toFloat64OrNull(ascn_ccf_expected_copies_upper) AS ccfExpectedCopiesUpper, toFloat64OrNull(ascn_ccf_expected_copies) AS ccfExpectedCopies, " +
+	"ascn_clonal AS clonal, toInt64OrNull(ascn_minor_copy_number) AS minorCopyNumber, toInt64OrNull(ascn_expected_alt_copies) AS expectedAltCopies, " +
+	"toInt64OrNull(ascn_total_copy_number) AS totalCopyNumber FROM mutation"
 
 type mutationRow struct {
 	StudyID         string `json:"studyId"`
@@ -136,6 +144,20 @@ type mutationRow struct {
 	DriverTiersFilter           string `json:"driverTiersFilter"`
 	DriverTiersFilterAnnotation string `json:"driverTiersFilterAnnotation"`
 	NamespaceColumns            string `json:"namespaceColumns"`
+
+	MolecularProfileID string `json:"molecularProfileId"`
+	PatientID          string `json:"patientId"`
+	Center             string `json:"center"`
+	MutationStatus     string `json:"mutationStatus"`
+	ValidationStatus   string `json:"validationStatus"`
+	NormalAltCount     *int64 `json:"normalAltCount"`
+	NormalRefCount     *int64 `json:"normalRefCount"`
+	AminoAcidChange    string `json:"aminoAcidChange"`
+	NcbiBuild          string `json:"ncbiBuild"`
+	VariantType        string `json:"variantType"`
+	RefseqMrnaID       string `json:"refseqMrnaId"`
+	ProteinPosition    string `json:"proteinPosition"`
+	alleleSpecificCopyNumber
 }
 
 type Gene struct {
@@ -165,12 +187,83 @@ type Mutation struct {
 	DriverTiersFilter           string          `json:"driverTiersFilter"`
 	DriverTiersFilterAnnotation string          `json:"driverTiersFilterAnnotation"`
 	NamespaceColumns            json.RawMessage `json:"namespaceColumns"`
+
+	PatientID                string                    `json:"patientId"`
+	UniquePatientKey         string                    `json:"uniquePatientKey"`
+	Center                   string                    `json:"center,omitempty"`
+	MutationStatus           string                    `json:"mutationStatus,omitempty"`
+	ValidationStatus         string                    `json:"validationStatus,omitempty"`
+	NormalAltCount           *int64                    `json:"normalAltCount,omitempty"`
+	NormalRefCount           *int64                    `json:"normalRefCount,omitempty"`
+	AminoAcidChange          string                    `json:"aminoAcidChange,omitempty"`
+	NcbiBuild                string                    `json:"ncbiBuild,omitempty"`
+	VariantType              string                    `json:"variantType,omitempty"`
+	RefseqMrnaID             string                    `json:"refseqMrnaId,omitempty"`
+	ProteinPosStart          *int64                    `json:"proteinPosStart,omitempty"`
+	ProteinPosEnd            *int64                    `json:"proteinPosEnd,omitempty"`
+	AlleleSpecificCopyNumber *alleleSpecificCopyNumber `json:"alleleSpecificCopyNumber,omitempty"`
+}
+
+// alleleSpecificCopyNumber is the ASCN namespace of a MAF record.
+type alleleSpecificCopyNumber struct {
+	AscnIntegerCopyNumber  *int64   `json:"ascnIntegerCopyNumber,omitempty"`
+	AscnMethod             string   `json:"ascnMethod,omitempty"`
+	CcfExpectedCopiesUpper *float64 `json:"ccfExpectedCopiesUpper,omitempty"`
+	CcfExpectedCopies      *float64 `json:"ccfExpectedCopies,omitempty"`
+	Clonal                 string   `json:"clonal,omitempty"`
+	MinorCopyNumber        *int64   `json:"minorCopyNumber,omitempty"`
+	ExpectedAltCopies      *int64   `json:"expectedAltCopies,omitempty"`
+	TotalCopyNumber        *int64   `json:"totalCopyNumber,omitempty"`
+}
+
+func (a alleleSpecificCopyNumber) present() bool {
+	return a.AscnIntegerCopyNumber != nil || a.AscnMethod != "" || a.CcfExpectedCopiesUpper != nil ||
+		a.CcfExpectedCopies != nil || a.Clonal != "" || a.MinorCopyNumber != nil || a.ExpectedAltCopies != nil ||
+		a.TotalCopyNumber != nil
+}
+
+// proteinPositions parses Protein_position ("600/766", "600-601/766"), else
+// the first number(s) of the protein change ("V600E" -> 600, "K23_E24del" -> 23-24).
+func proteinPositions(position, change string) (*int64, *int64) {
+	parse := func(s string) []int64 {
+		var out []int64
+		var cur int64
+		in := false
+		for _, c := range s {
+			if c >= '0' && c <= '9' {
+				cur = cur*10 + int64(c-'0')
+				in = true
+			} else if in {
+				out = append(out, cur)
+				cur, in = 0, false
+			}
+		}
+		if in {
+			out = append(out, cur)
+		}
+		return out
+	}
+	if p := strings.SplitN(position, "/", 2)[0]; p != "" {
+		if n := parse(p); len(n) > 0 {
+			start, end := n[0], n[len(n)-1]
+			return &start, &end
+		}
+	}
+	n := parse(change)
+	if len(n) == 0 {
+		return nil, nil
+	}
+	start, end := n[0], n[0]
+	if len(n) > 1 && strings.Contains(change, "_") {
+		end = n[1]
+	}
+	return &start, &end
 }
 
 func profileStudy(mpid string) string { return strings.TrimSuffix(mpid, "_mutations") }
 
 func toMutation(r mutationRow) Mutation {
-	return Mutation{
+	m := Mutation{
 		MolecularProfileID: r.StudyID + "_mutations", SampleID: r.SampleID, StudyID: r.StudyID,
 		EntrezGeneID: r.EntrezGeneID, Gene: Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol},
 		Chr: r.Chr, StartPosition: r.StartPosition, EndPosition: r.EndPosition, ReferenceAllele: r.ReferenceAllele,
@@ -179,7 +272,20 @@ func toMutation(r mutationRow) Mutation {
 		DriverFilter: r.DriverFilter, DriverFilterAnnotation: r.DriverFilterAnnotation,
 		DriverTiersFilter: r.DriverTiersFilter, DriverTiersFilterAnnotation: r.DriverTiersFilterAnnotation,
 		NamespaceColumns: rawJSONOrEmpty(r.NamespaceColumns),
+		PatientID:        r.PatientID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
+		Center: r.Center, MutationStatus: r.MutationStatus, ValidationStatus: r.ValidationStatus,
+		NormalAltCount: r.NormalAltCount, NormalRefCount: r.NormalRefCount, AminoAcidChange: r.AminoAcidChange,
+		NcbiBuild: r.NcbiBuild, VariantType: r.VariantType, RefseqMrnaID: r.RefseqMrnaID,
 	}
+	if r.MolecularProfileID != "" {
+		m.MolecularProfileID = r.MolecularProfileID
+	}
+	m.ProteinPosStart, m.ProteinPosEnd = proteinPositions(r.ProteinPosition, r.ProteinChange)
+	if r.alleleSpecificCopyNumber.present() {
+		a := r.alleleSpecificCopyNumber
+		m.AlleleSpecificCopyNumber = &a
+	}
+	return m
 }
 
 // rawJSONOrEmpty returns s as raw JSON when it is valid, else the empty object.
@@ -207,9 +313,33 @@ func (s *State) mutationsWhere(w http.ResponseWriter, where, order string, limit
 	writeJSON(w, out)
 }
 
+// mutations serves GET /api/molecular-profiles/{id}/mutations: the profile's
+// mutations in the sampleListId sample list, for the entrezGeneId gene.
 func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
-	study := sqlLit(profileStudy(r.PathValue("id")))
-	s.mutationsWhere(w, fmt.Sprintf("study_id = '%s'", study), "sample_id", 100000)
+	q := r.URL.Query()
+	where := fmt.Sprintf("study_id = '%s'", sqlLit(profileStudy(r.PathValue("id"))))
+	where += sampleListClause("sample_id", q.Get("sampleListId"))
+	var entrez []int64
+	for _, e := range q["entrezGeneId"] {
+		if id, err := strconv.ParseInt(e, 10, 64); err == nil {
+			entrez = append(entrez, id)
+		}
+	}
+	where += geneFilter(entrez)
+	limit := 0
+	if q.Get("sampleListId") == "" && len(entrez) == 0 {
+		limit = 100000
+	}
+	s.mutationsWhere(w, where, "sample_id", limit)
+}
+
+// sampleListClause restricts col to the members of a sample list (no-op for
+// an empty list id).
+func sampleListClause(col, listID string) string {
+	if listID == "" {
+		return ""
+	}
+	return fmt.Sprintf(" AND %s IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", col, sqlLit(listID))
 }
 
 type mutationFilter struct {
@@ -218,6 +348,7 @@ type mutationFilter struct {
 		SampleID           string `json:"sampleId"`
 	} `json:"sampleMolecularIdentifiers"`
 	SampleIDs           []string `json:"sampleIds"`
+	SampleListID        string   `json:"sampleListId"`
 	MolecularProfileIDs []string `json:"molecularProfileIds"`
 	EntrezGeneIDs       []int64  `json:"entrezGeneIds"`
 }
@@ -238,8 +369,11 @@ func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	readBody(r, &f)
 	study := sqlLit(profileStudy(r.PathValue("id")))
 	where := fmt.Sprintf("study_id = '%s'", study)
+	// MutationFilter is EITHER explicit sample ids OR a sample list.
 	if len(f.SampleIDs) > 0 {
 		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(f.SampleIDs))
+	} else {
+		where += sampleListClause("sample_id", f.SampleListID)
 	}
 	where += geneFilter(f.EntrezGeneIDs)
 	s.mutationsWhere(w, where, "sample_id", 0)
@@ -292,8 +426,11 @@ type GenePanel struct {
 	Genes       []PanelGene `json:"genes"`
 }
 
-const panelSelect = "SELECT gene_panel_id AS genePanelId, description, hugo_gene_symbol AS hugoGeneSymbol, " +
-	"toInt64OrNull(entrez_gene_id) AS entrezGeneId FROM gene_panel"
+// panelSelect lists each panel gene once: panels are global by stable id even
+// when several studies ship the same panel file.
+const panelSelect = "SELECT genePanelId, description, hugoGeneSymbol, entrezGeneId FROM (" +
+	"SELECT gene_panel_id AS genePanelId, any(description) AS description, hugo_gene_symbol AS hugoGeneSymbol, " +
+	"any(toInt64OrNull(entrez_gene_id)) AS entrezGeneId FROM gene_panel GROUP BY gene_panel_id, hugo_gene_symbol)"
 
 func groupPanels(rows []panelGeneRow) []GenePanel {
 	var out []GenePanel
@@ -308,7 +445,7 @@ func groupPanels(rows []panelGeneRow) []GenePanel {
 }
 
 func (s *State) genePanels(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.Query[panelGeneRow](s.CH, panelSelect+" ORDER BY gene_panel_id, hugo_gene_symbol")
+	rows, err := ch.Query[panelGeneRow](s.CH, panelSelect+" ORDER BY genePanelId, hugoGeneSymbol")
 	if err != nil {
 		fail(w, err)
 		return
@@ -326,7 +463,7 @@ func (s *State) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []GenePanel{})
 		return
 	}
-	sql := fmt.Sprintf("%s WHERE gene_panel_id IN (%s) ORDER BY gene_panel_id, hugo_gene_symbol", panelSelect, inList(ids))
+	sql := fmt.Sprintf("%s WHERE genePanelId IN (%s) ORDER BY genePanelId, hugoGeneSymbol", panelSelect, inList(ids))
 	rows, err := ch.Query[panelGeneRow](s.CH, sql)
 	if err != nil {
 		fail(w, err)
@@ -336,7 +473,7 @@ func (s *State) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) genePanel(w http.ResponseWriter, r *http.Request) {
-	sql := fmt.Sprintf("%s WHERE gene_panel_id = '%s' ORDER BY hugo_gene_symbol", panelSelect, sqlLit(r.PathValue("id")))
+	sql := fmt.Sprintf("%s WHERE genePanelId = '%s' ORDER BY hugoGeneSymbol", panelSelect, sqlLit(r.PathValue("id")))
 	rows, err := ch.Query[panelGeneRow](s.CH, sql)
 	if err != nil {
 		fail(w, err)

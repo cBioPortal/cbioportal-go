@@ -50,7 +50,48 @@ bin/cbioportal-import load-gene-panels <panels-dir> --db cbioportal_raw
 bin/cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
 ```
 
-`go test ./...` runs the parser unit tests.
+## Testing
+
+Three tiers, fastest first:
+
+1. **Unit tests** — `go test ./internal/...` (no services needed). Includes the
+   `internal/databin` port of Java's DataBinner, checked against ~1,800
+   Java-recorded scenarios in `internal/databin/testdata`.
+2. **API contract tests** — `go test ./test/` (~5s) against a running API
+   (`API=http://host:port`, default `http://localhost:18090`; skipped when
+   unreachable). They pin the exact endpoint behaviour the frontend and e2e
+   suite rely on: study-view filters, chart counts, bins, sessions, gene
+   tables, enrichments, resources. Add a case whenever a contract is fixed.
+3. **Frontend e2e** — `test/run_e2e.sh [WORKERS] [spec...]` drives the
+   cBioPortal Playwright suite (`~/projects/cbioportal-rust/cbioportal-frontend/end-to-end-test-playwright`)
+   through the API origin, which serves the portal UI as a cBioPortal
+   deployment does. Use a production frontend build (`pnpm run buildMain` in
+   the frontend checkout → `dist/`); it loads faster than the dev server, has
+   no dev error overlay, and frees memory for more Playwright workers:
+
+   ```bash
+   FRONTEND_DIR=<frontend>/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY \
+     SESSION_STORE_FILE=.sessions.json PORT=18090 bin/cbioportal-api
+   test/run_e2e.sh 4 tests/local/annotation-filter-menu.spec.ts
+   ```
+
+   (`FRONTEND_URL=http://localhost:3000` proxies a dev server instead.)
+
+   Run single specs while iterating; the full suite only at milestones.
+
+## API environment
+
+| Variable | Meaning |
+|---|---|
+| `CLICKHOUSE_URL`, `CBIOPORTAL_DB` | ClickHouse HTTP endpoint and transform database |
+| `PORT` | listen port (binds 0.0.0.0) |
+| `FRONTEND_DIR` | serve this frontend build for every non-`/api/` path (single origin) |
+| `FRONTEND_URL` | reverse-proxy every non-`/api/` path to this frontend dev server instead |
+| `ONCOKB_URL`, `ONCOKB_TOKEN` | OncoKB API behind the frontend's `/proxy/...` endpoint |
+| `SESSION_STORE_FILE` | persist sessions (virtual studies, groups, custom data) to this JSON file |
+| `AUTH_ENABLED`, `AUTH_JWT_SECRET` | HS256 bearer-token auth |
+| `AUTH_DEFAULT_USER` | single-user development login for requests without a token |
+| `PUBLISHER_API_KEY` | key required by `/api/public_virtual_studies` publish/unpublish |
 
 ## Parity with the Rust version
 

@@ -20,8 +20,7 @@ func (s *State) routeMolecular2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/mutation-spectrums/fetch", s.mutationSpectrumsFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/variant-counts/fetch", s.variantCountsFetch)
 	mux.HandleFunc("POST /api/mutation-counts-by-position/fetch", s.mutationCountsByPositionFetch)
-	// SV counts share the study-view SV aggregation (same shape/inputs).
-	mux.HandleFunc("POST /api/structuralvariant-counts/fetch", s.svGenesFetch)
+	mux.HandleFunc("POST /api/structuralvariant-counts/fetch", s.svCountsFetch)
 }
 
 // cnaEventAlterations maps a discreteCopyNumberEventType enum value to the set of
@@ -57,13 +56,13 @@ func intListSQL(vals []int64) string {
 // ---------- Discrete copy-number data ----------
 
 type DiscreteCopyNumberData struct {
-	Alteration                  int64    `json:"alteration"`
-	DriverFilter                string   `json:"driverFilter"`
-	DriverFilterAnnotation      string   `json:"driverFilterAnnotation"`
-	DriverTiersFilter           string   `json:"driverTiersFilter"`
-	DriverTiersFilterAnnotation string   `json:"driverTiersFilterAnnotation"`
-	EntrezGeneID                int64    `json:"entrezGeneId"`
-	Gene                        Gene     `json:"gene"`
+	Alteration                  int64           `json:"alteration"`
+	DriverFilter                string          `json:"driverFilter"`
+	DriverFilterAnnotation      string          `json:"driverFilterAnnotation"`
+	DriverTiersFilter           string          `json:"driverTiersFilter"`
+	DriverTiersFilterAnnotation string          `json:"driverTiersFilterAnnotation"`
+	EntrezGeneID                int64           `json:"entrezGeneId"`
+	Gene                        Gene            `json:"gene"`
 	MolecularProfileID          string          `json:"molecularProfileId"`
 	NamespaceColumns            json.RawMessage `json:"namespaceColumns"`
 	PatientID                   string          `json:"patientId"`
@@ -80,6 +79,11 @@ type discreteCnaRow struct {
 	HugoGeneSymbol   string `json:"hugoGeneSymbol"`
 	Alteration       *int64 `json:"alteration"`
 	NamespaceColumns string `json:"namespaceColumns"`
+
+	DriverFilter                string `json:"driverFilter"`
+	DriverFilterAnnotation      string `json:"driverFilterAnnotation"`
+	DriverTiersFilter           string `json:"driverTiersFilter"`
+	DriverTiersFilterAnnotation string `json:"driverTiersFilterAnnotation"`
 }
 
 func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) {
@@ -119,8 +123,10 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 	rows, err := ch.Query[discreteCnaRow](s.CH, fmt.Sprintf(
 		"SELECT c.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"toInt64OrNull(c.entrez_gene_id) AS entrezGeneId, c.hugo_symbol AS hugoGeneSymbol, "+
-			"toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns "+
-			"FROM cbioportal.cna c LEFT JOIN cbioportal.sample sm "+
+			"toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns, "+
+			"c.cbp_driver AS driverFilter, c.cbp_driver_annotation AS driverFilterAnnotation, "+
+			"c.cbp_driver_tiers AS driverTiersFilter, c.cbp_driver_tiers_annotation AS driverTiersFilterAnnotation "+
+			"FROM cna c LEFT JOIN sample sm "+
 			"ON c.study_id = sm.study_id AND c.sample_id = sm.sample_id "+
 			"WHERE %s ORDER BY c.sample_id, c.hugo_symbol", where))
 	if err != nil {
@@ -140,6 +146,9 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			UniquePatientKey:   uniqueKey(meta.StudyID, r.PatientID),
 			UniqueSampleKey:    uniqueKey(meta.StudyID, r.SampleID),
 			NamespaceColumns:   rawJSONOrEmpty(r.NamespaceColumns),
+
+			DriverFilter: r.DriverFilter, DriverFilterAnnotation: r.DriverFilterAnnotation,
+			DriverTiersFilter: r.DriverTiersFilter, DriverTiersFilterAnnotation: r.DriverTiersFilterAnnotation,
 		}
 	}
 	writeJSON(w, out)
@@ -188,7 +197,7 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 			N int64 `json:"n"`
 		}
 		tr, _ := ch.Query[c](s.CH, fmt.Sprintf(
-			"SELECT uniqExact(sample_id) AS n FROM cbioportal.cna WHERE study_id = '%s' AND profile_stable_id = '%s'",
+			"SELECT uniqExact(sample_id) AS n FROM cna WHERE study_id = '%s' AND profile_stable_id = '%s'",
 			sqlLit(meta.StudyID), sqlLit(meta.StableID)))
 		if len(tr) > 0 {
 			total = tr[0].N
@@ -202,7 +211,7 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[cnCountRow](s.CH, fmt.Sprintf(
 		"SELECT entrezGeneId, alteration, uniqExact(sampleId) AS n FROM ("+
 			"SELECT toInt64OrNull(entrez_gene_id) AS entrezGeneId, toInt64OrNull(alteration) AS alteration, sample_id AS sampleId "+
-			"FROM cbioportal.cna WHERE study_id = '%s' AND profile_stable_id = '%s') "+
+			"FROM cna WHERE study_id = '%s' AND profile_stable_id = '%s') "+
 			"WHERE (entrezGeneId, alteration) IN (%s) GROUP BY entrezGeneId, alteration",
 		sqlLit(meta.StudyID), sqlLit(meta.StableID), tupleIn(pairs)))
 	if err != nil {
@@ -281,7 +290,7 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		"SELECT m.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"countIf(%s) AS CtoT, countIf(%s) AS CtoG, countIf(%s) AS CtoA, "+
 			"countIf(%s) AS TtoC, countIf(%s) AS TtoG, countIf(%s) AS TtoA "+
-			"FROM cbioportal.mutation m LEFT JOIN cbioportal.sample sm "+
+			"FROM mutation m LEFT JOIN sample sm "+
 			"ON m.study_id = sm.study_id AND m.sample_id = sm.sample_id "+
 			"WHERE %s GROUP BY m.sample_id, sm.patient_id ORDER BY m.sample_id",
 		classes["CtoT"], classes["CtoG"], classes["CtoA"], classes["TtoC"], classes["TtoG"], classes["TtoA"], where))
@@ -349,7 +358,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 			N int64 `json:"n"`
 		}
 		tr, _ := ch.Query[c](s.CH, fmt.Sprintf(
-			"SELECT uniqExact(sample_id) AS n FROM cbioportal.mutation WHERE study_id = '%s'", sqlLit(study)))
+			"SELECT uniqExact(sample_id) AS n FROM mutation WHERE study_id = '%s'", sqlLit(study)))
 		if len(tr) > 0 {
 			total = tr[0].N
 		}
@@ -364,7 +373,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		rows, _ := ch.Query[gr](s.CH, fmt.Sprintf(
 			"SELECT toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS n "+
-				"FROM cbioportal.mutation WHERE study_id = '%s' AND toInt64OrNull(entrez_gene_id) IN (%s) "+
+				"FROM mutation WHERE study_id = '%s' AND toInt64OrNull(entrez_gene_id) IN (%s) "+
 				"GROUP BY entrezGeneId", sqlLit(study), intListSQL(entrez)))
 		for _, r := range rows {
 			geneCount[derefInt(r.EntrezGeneID)] = r.N
@@ -390,7 +399,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		rows, _ := ch.Query[kr](s.CH, fmt.Sprintf(
 			"SELECT entrezGeneId, keyword, uniqExact(sampleId) AS n FROM ("+
 				"SELECT toInt64OrNull(m.entrez_gene_id) AS entrezGeneId, m.sample_id AS sampleId, %s AS keyword "+
-				"FROM cbioportal.mutation m WHERE m.study_id = '%s') "+
+				"FROM mutation m WHERE m.study_id = '%s') "+
 				"WHERE (entrezGeneId, keyword) IN (%s) GROUP BY entrezGeneId, keyword",
 			mutationKeywordExpr, sqlLit(study), tupleIn(kwPairs)))
 		for _, r := range rows {

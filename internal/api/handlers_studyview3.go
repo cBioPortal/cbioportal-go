@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -21,8 +22,8 @@ func (s *State) routeStudyView3(mux *http.ServeMux) {
 
 	// Custom (session-defined) chart data is not persisted in this backend, so
 	// these return correctly-typed empty results after draining the body.
-	mux.HandleFunc("POST /api/custom-data-counts/fetch", emptyArray)
-	mux.HandleFunc("POST /api/custom-data-bin-counts/fetch", emptyArray)
+	mux.HandleFunc("POST /api/custom-data-counts/fetch", s.customDataCountsFetch)
+	mux.HandleFunc("POST /api/custom-data-bin-counts/fetch", s.customDataBinCountsFetch)
 
 	// Namespace (custom-column) attributes are not modeled in staging — the
 	// clinical_attribute_meta view carries no namespace-prefixed attributes —
@@ -32,9 +33,6 @@ func (s *State) routeStudyView3(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/namespace-data-counts/fetch", emptyArray)
 	mux.HandleFunc("POST /api/namespace-data/fetch", emptyArray)
 
-	// MutSig / GISTIC significance outputs are not imported (usually absent).
-	mux.HandleFunc("POST /api/studies/{studyId}/significantly-mutated-genes", emptyArray)
-	mux.HandleFunc("POST /api/studies/{studyId}/significant-copy-number-regions", emptyArray)
 }
 
 // naFilter is the cBioPortal rule for excluding "not available" clinical values,
@@ -394,7 +392,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	empty := sampleClinicalDataCollection{ByUniqueSampleKey: map[string][]ClinicalData{}}
 
-	inner := fmt.Sprintf("SELECT study_id, sample_id, patient_id FROM sample WHERE %s", f.sampleScope())
+	inner := fmt.Sprintf("SELECT study_id, sample_id, patient_id FROM sample WHERE %s", s.sampleScope(f))
 	if searchTerm != "" {
 		like := "'%" + sqlLit(searchTerm) + "%'"
 		inner += fmt.Sprintf(
@@ -522,4 +520,88 @@ func (s *State) attrIsPatientLevel(studyIDs []string, attrID string) bool {
 		"SELECT max(patient_attribute) AS flag FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id = '%s'",
 		inList(studyIDs), sqlLit(attrID)))
 	return len(rows) > 0 && rows[0].Flag != 0
+}
+
+// customDataCountsFetch counts the values of user-defined (custom chart) data
+// stored as custom_data sessions over the filtered samples — or their patients
+// for patient-level data — with the remainder reported as NA.
+func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+	var f struct {
+		Attributes []struct {
+			AttributeID string `json:"attributeId"`
+		} `json:"attributes"`
+		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
+	}
+	readBody(r, &f)
+	svf := f.StudyViewFilter
+	if len(f.Attributes) == 1 {
+		svf = svf.withoutCustom(f.Attributes[0].AttributeID)
+	}
+	out := []ClinicalDataCountItem{}
+	type sample struct {
+		StudyID   string `json:"studyId"`
+		SampleID  string `json:"sampleId"`
+		PatientID string `json:"patientId"`
+	}
+	samples, _ := ch.Query[sample](s.CH, fmt.Sprintf(
+		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId, patient_stable_id AS patientId "+
+			"FROM sample_derived WHERE %s", s.filterWhere(svf)))
+	if len(samples) == 0 {
+		writeJSON(w, out)
+		return
+	}
+	filtered := map[string]bool{}
+	patients := map[string]bool{}
+	for _, sm := range samples {
+		filtered[sm.StudyID+sm.SampleID] = true
+		patients[sm.StudyID+sm.PatientID] = true
+	}
+	for _, a := range f.Attributes {
+		raw, ok := s.sessionData("custom_data", a.AttributeID)
+		if !ok {
+			continue
+		}
+		var sess struct {
+			PatientAttribute bool               `json:"patientAttribute"`
+			Data             []customDataSample `json:"data"`
+		}
+		if json.Unmarshal(raw, &sess) != nil {
+			continue
+		}
+		cases := map[string]map[string]bool{}
+		var order []string
+		for _, d := range sess.Data {
+			if !filtered[d.StudyID+d.SampleID] {
+				continue
+			}
+			if cases[d.Value] == nil {
+				cases[d.Value] = map[string]bool{}
+				order = append(order, d.Value)
+			}
+			id := d.SampleID
+			if sess.PatientAttribute {
+				id = d.PatientID
+			}
+			cases[d.Value][d.StudyID+id] = true
+		}
+		item := ClinicalDataCountItem{AttributeID: a.AttributeID, Counts: []ClinicalDataCount{}}
+		var sum uint64
+		for _, v := range order {
+			if u := strings.ToUpper(v); u == "NA" || u == "NAN" || u == "N/A" {
+				continue
+			}
+			n := uint64(len(cases[v]))
+			item.Counts = append(item.Counts, ClinicalDataCount{Value: v, Count: n})
+			sum += n
+		}
+		total := uint64(len(filtered))
+		if sess.PatientAttribute {
+			total = uint64(len(patients))
+		}
+		if total > sum {
+			item.Counts = append(item.Counts, ClinicalDataCount{Value: "NA", Count: total - sum})
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, out)
 }

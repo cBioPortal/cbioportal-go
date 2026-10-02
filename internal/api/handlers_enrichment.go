@@ -2,8 +2,8 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
-	"sort"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -16,7 +16,7 @@ type caseIdentifier struct {
 }
 
 type casesGroup struct {
-	Name                          string           `json:"name"`
+	Name                            string           `json:"name"`
 	MolecularProfileCaseIdentifiers []caseIdentifier `json:"molecularProfileCaseIdentifiers"`
 }
 
@@ -61,104 +61,217 @@ type AlterationEnrichment struct {
 	PValue         float64        `json:"pValue"`
 }
 
-// alterationEnrichmentsFetch computes per-gene alteration enrichment (mutation
-// OR discrete CNA) across the posted groups, with a Fisher-exact p-value for the
-// two-group case.
+// alterationEnrichmentsFetch compares per-gene alteration frequencies across
+// groups (GetAlterationEnrichmentsUseCase): a case counts as profiled for a gene
+// when one of its panels in the group's profiles covers the gene, and as
+// altered when it has a matching event in those profiles under the alteration
+// filter. Two groups are scored with a two-tailed Fisher exact test, more with
+// chi-square.
 func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Groups               []casesGroup      `json:"molecularProfileCasesGroupFilter"`
 		AlterationEventTypes *alterationFilter `json:"alterationEventTypes"`
 	}
 	readBody(r, &body)
-	if len(body.Groups) < 2 {
-		writeJSON(w, []AlterationEnrichment{})
-		return
+	patient := strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT")
+	unit := "sample_unique_id"
+	if patient {
+		unit = "patient_unique_id"
 	}
-
-	type geneKey struct {
-		symbol string
-		entrez int64
+	var a alterationSQL
+	if body.AlterationEventTypes != nil {
+		a = alterationSQL{*body.AlterationEventTypes}
 	}
-	altered := make([]map[geneKey]int, len(body.Groups)) // per group: gene -> altered count
-	profiled := make([]int, len(body.Groups))
-	geneSet := map[geneKey]bool{}
-
-	// Count only the alteration type(s) matching the groups' molecular profiles:
-	// a mutations-profile enrichment must not fold in CNA genes (and vice versa).
-	useMut, useCna := false, false
-	for _, g := range body.Groups {
-		for _, c := range g.MolecularProfileCaseIdentifiers {
-			switch {
-			case strings.HasSuffix(c.MolecularProfileID, "_mutations"):
-				useMut = true
-			case strings.HasSuffix(c.MolecularProfileID, "_gistic"), strings.HasSuffix(c.MolecularProfileID, "_cna"):
-				useCna = true
-			}
+	profileStudy := s.profileStudies(body.Groups)
+	type geneRow struct {
+		Gene   string `json:"gene"`
+		Entrez *int64 `json:"entrez"`
+		N      int    `json:"n"`
+	}
+	type geneCounts struct {
+		entrez            *int64
+		altered, profiled map[string]int
+	}
+	genes := map[string]*geneCounts{}
+	get := func(g string) *geneCounts {
+		if c, ok := genes[g]; ok {
+			return c
 		}
+		c := &geneCounts{altered: map[string]int{}, profiled: map[string]int{}}
+		genes[g] = c
+		return c
 	}
-	if !useMut && !useCna {
-		useMut, useCna = true, true
-	}
-
-	for gi, g := range body.Groups {
-		altered[gi] = map[geneKey]int{}
-		pairs := g.pairs()
-		profiled[gi] = len(pairs)
-		if len(pairs) == 0 {
+	for _, g := range body.Groups {
+		entitySet, profileSet := map[string]bool{}, map[string]bool{}
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			st, ok := profileStudy[c.MolecularProfileID]
+			if !ok {
+				continue
+			}
+			entitySet[st+"_"+c.CaseID] = true
+			profileSet[c.MolecularProfileID] = true
+		}
+		if len(entitySet) == 0 {
 			continue
 		}
-		scope := fmt.Sprintf("(study_id, sample_id) IN (%s)", tupleIn(pairs))
-		var parts []string
-		if useMut {
-			parts = append(parts, "SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM mutation WHERE "+
-				andClause(scope, body.AlterationEventTypes.mutationFilterClause()))
-		}
-		if useCna {
-			parts = append(parts, "SELECT study_id, sample_id, hugo_symbol, entrez_gene_id FROM cna WHERE "+
-				andClause(scope, body.AlterationEventTypes.cnaFilterClause()))
-		}
-		rows, err := ch.Query[geneAlteredRow](s.CH, fmt.Sprintf(
-			"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS altered FROM (%s) GROUP BY hugo_symbol, entrez_gene_id",
-			strings.Join(parts, " UNION ALL ")))
+		entities, profiles := inList(sortedKeys(entitySet)), inList(sortedKeys(profileSet))
+		profiled, err := s.profiledPerGene(unit, profiles, entities)
 		if err != nil {
 			fail(w, err)
 			return
 		}
-		for _, row := range rows {
-			var e int64
-			if row.EntrezGeneID != nil {
-				e = *row.EntrezGeneID
+		altered, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
+			"SELECT hugo_gene_symbol AS gene, any(toInt64OrNull(toString(entrez_gene_id))) AS entrez, toInt64(uniqExact(%[1]s)) AS n "+
+				"FROM genomic_event_derived WHERE mutation_status != 'UNCALLED' AND genetic_profile_stable_id IN (%[2]s) "+
+				"AND %[1]s IN (%[3]s) AND %[4]s GROUP BY hugo_gene_symbol",
+			unit, profiles, entities, a.enrichmentClause()))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		for gene, n := range profiled {
+			get(gene).profiled[g.Name] = n
+		}
+		for _, x := range altered {
+			if c, ok := genes[x.Gene]; ok && c.profiled[g.Name] > 0 {
+				c.altered[g.Name] = x.N
+				if c.entrez == nil {
+					c.entrez = x.Entrez
+				}
 			}
-			k := geneKey{row.HugoGeneSymbol, e}
-			altered[gi][k] = row.Altered
-			geneSet[k] = true
 		}
 	}
-
-	out := make([]AlterationEnrichment, 0, len(geneSet))
-	for k := range geneSet {
+	out := []AlterationEnrichment{}
+	for _, gene := range sortedKeys(genes) {
+		c := genes[gene]
+		any := false
 		counts := make([]CountSummary, len(body.Groups))
-		for gi, g := range body.Groups {
-			counts[gi] = CountSummary{AlteredCount: altered[gi][k], Name: g.Name, ProfiledCount: profiled[gi]}
-		}
-		p := 1.0
-		if len(body.Groups) == 2 {
-			a := counts[0].AlteredCount
-			b := counts[0].ProfiledCount - a
-			c := counts[1].AlteredCount
-			d := counts[1].ProfiledCount - c
-			if b >= 0 && d >= 0 {
-				p = stats.FisherExactTest(a, b, c, d)
+		for i, g := range body.Groups {
+			counts[i] = CountSummary{Name: g.Name, AlteredCount: c.altered[g.Name], ProfiledCount: c.profiled[g.Name]}
+			if counts[i].AlteredCount > 0 {
+				any = true
 			}
 		}
-		out = append(out, AlterationEnrichment{
-			Counts: counts, EntrezGeneID: k.entrez, HugoGeneSymbol: k.symbol, PValue: p,
-		})
+		if !any {
+			continue
+		}
+		var entrez int64
+		if c.entrez != nil {
+			entrez = *c.entrez
+		}
+		out = append(out, AlterationEnrichment{Counts: counts, EntrezGeneID: entrez, HugoGeneSymbol: gene, PValue: enrichmentPValue(counts)})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].PValue < out[j].PValue })
 	writeJSON(w, out)
+}
+
+// enrichmentPValue follows AlterationEnrichmentScoreUtil: 0 unless at least two
+// groups are profiled and no group has more altered than profiled cases.
+func enrichmentPValue(counts []CountSummary) float64 {
+	profiledGroups := 0
+	for _, c := range counts {
+		if c.ProfiledCount > 0 {
+			profiledGroups++
+			if c.AlteredCount > c.ProfiledCount {
+				return 0
+			}
+		}
+	}
+	if profiledGroups < 2 {
+		return 0
+	}
+	if len(counts) == 2 {
+		return stats.FisherExactTest(counts[1].ProfiledCount-counts[1].AlteredCount, counts[1].AlteredCount,
+			counts[0].ProfiledCount-counts[0].AlteredCount, counts[0].AlteredCount)
+	}
+	altered, profiled := make([]int, len(counts)), make([]int, len(counts))
+	for i, c := range counts {
+		altered[i], profiled[i] = c.AlteredCount, c.ProfiledCount
+	}
+	p := stats.ChiSquareTestCounts(altered, profiled)
+	if math.IsNaN(p) {
+		return 1
+	}
+	return p
+}
+
+// profileStudies maps each molecular profile referenced by the groups to its study.
+func (s *State) profileStudies(groups []casesGroup) map[string]string {
+	set := map[string]bool{}
+	for _, g := range groups {
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			set[c.MolecularProfileID] = true
+		}
+	}
+	out := map[string]string{}
+	for id, p := range s.resolvePanelProfiles(sortedKeys(set)) {
+		out[id] = p.StudyID
+	}
+	return out
 }
 
 func (s *State) routeEnrichment(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/alteration-enrichments/fetch", s.alterationEnrichmentsFetch)
+}
+
+// profiledPerGene counts, per gene, the entities with a panel covering it:
+// entities are grouped by their panel combination and each combination's
+// genes are expanded once.
+func (s *State) profiledPerGene(unit, profiles, entities string) (map[string]int, error) {
+	type combo struct {
+		Panels []string `json:"panels"`
+		N      int      `json:"n"`
+	}
+	combos, err := ch.Query[combo](s.CH, fmt.Sprintf(
+		"SELECT panels, toInt64(count()) AS n FROM (SELECT sd.%[1]s AS entity, arraySort(groupUniqArray(p.gene_panel_id)) AS panels "+
+			"FROM sample_to_gene_panel_derived p JOIN sample_derived sd ON sd.sample_unique_id = p.sample_unique_id "+
+			"WHERE p.genetic_profile_id IN (%[2]s) AND sd.%[1]s IN (%[3]s) GROUP BY entity) GROUP BY panels",
+		unit, profiles, entities))
+	if err != nil {
+		return nil, err
+	}
+	panelSet := map[string]bool{}
+	for _, c := range combos {
+		for _, p := range c.Panels {
+			panelSet[p] = true
+		}
+	}
+	genes, err := s.panelGenes(sortedKeys(panelSet))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, c := range combos {
+		seen := map[string]bool{}
+		for _, p := range c.Panels {
+			for _, g := range genes[p] {
+				if !seen[g] {
+					seen[g] = true
+					out[g] += c.N
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// panelGenes returns each panel's genes (WES covers every gene).
+func (s *State) panelGenes(panels []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(panels) == 0 {
+		return out, nil
+	}
+	type row struct {
+		Panel string   `json:"panel"`
+		Genes []string `json:"genes"`
+	}
+	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+		"SELECT gene_panel_id AS panel, groupArray(gene) AS genes FROM gene_panel_to_gene_derived "+
+			"WHERE gene_panel_id IN (%s) GROUP BY gene_panel_id", inList(panels)))
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.Panel] = r.Genes
+	}
+	return out, nil
 }
