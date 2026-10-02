@@ -33,7 +33,7 @@ top of it. Built on the Go standard library (see [Dependencies](#dependencies)).
 
 ## Quick start
 
-Needs Go 1.24, Docker, and Node 22 with pnpm (`corepack enable`) for the
+Needs Go 1.26, Docker, and Node 22 with pnpm (`corepack enable`) for the
 frontend build, plus the cBioPortal seed dump and a study in datahub format
 (both from [cBioPortal/datahub](https://github.com/cBioPortal/datahub):
 `seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz` and e.g.

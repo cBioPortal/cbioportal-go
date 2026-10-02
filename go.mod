@@ -1,3 +1,3 @@
 module github.com/inodb/cbioportal-go
 
-go 1.24.1
+go 1.26.8
