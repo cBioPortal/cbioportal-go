@@ -95,7 +95,8 @@ All settings are environment variables; only `CBIOPORTAL_DB` is usually needed.
 
 | Variable | Meaning |
 |---|---|
-| `CLICKHOUSE_URL` | ClickHouse HTTP endpoint (default `http://localhost:18123`) |
+| `CLICKHOUSE_URL` | ClickHouse HTTP endpoint (default `http://localhost:18123`; ClickHouse Cloud: `https://<host>:8443`) |
+| `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | ClickHouse credentials (unset: the default user); also used by `cbioportal-import` |
 | `CBIOPORTAL_DB` | database built by `transform` (e.g. `cbioportal`) |
 | `CBIOPORTAL_RAW_DB`, `CBIOPORTAL_REF_DB` | staging/reference databases if not named `cbioportal_raw` / `cbioportal_ref` |
 | `PORT` | listen port (binds 0.0.0.0) |

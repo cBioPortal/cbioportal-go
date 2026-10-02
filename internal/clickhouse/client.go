@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -44,12 +45,33 @@ func (c *Client) rewrite(sql string) string {
 	return c.aliases.Replace(sql)
 }
 
+// New returns a client for the ClickHouse HTTP interface at baseURL (e.g.
+// http://localhost:18123 or https://<host>:8443). Credentials come from
+// CLICKHOUSE_USER / CLICKHOUSE_PASSWORD; without them requests are sent as
+// ClickHouse's default user.
 func New(baseURL, database string) *Client {
+	var rt http.RoundTripper = transport
+	if user := os.Getenv("CLICKHOUSE_USER"); user != "" {
+		rt = authTransport{base: transport, user: user, password: os.Getenv("CLICKHOUSE_PASSWORD")}
+	}
 	return &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		database: database,
-		http:     &http.Client{Timeout: time.Hour, Transport: transport},
+		http:     &http.Client{Timeout: time.Hour, Transport: rt},
 	}
+}
+
+// authTransport authenticates every request with ClickHouse's user headers.
+type authTransport struct {
+	base           http.RoundTripper
+	user, password string
+}
+
+func (a authTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("X-ClickHouse-User", a.user)
+	r.Header.Set("X-ClickHouse-Key", a.password)
+	return a.base.RoundTrip(r)
 }
 
 // transport keeps enough idle connections for a page's burst of parallel API

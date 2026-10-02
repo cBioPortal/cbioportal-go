@@ -84,7 +84,7 @@ func cmdPlan(args []string) {
 
 func cmdIngest(args []string) {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
-	url := fs.String("url", "http://localhost:18123", "ClickHouse HTTP endpoint")
+	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
 	db := fs.String("db", "cbioportal_raw", "target database")
 	fs.Parse(reorder(args))
 
@@ -130,7 +130,7 @@ func cmdIngest(args []string) {
 // directories, e.g. for raw databases whose data files cannot be re-read.
 func cmdIngestCaseLists(args []string) {
 	fs := flag.NewFlagSet("ingest-case-lists", flag.ExitOnError)
-	url := fs.String("url", "http://localhost:18123", "ClickHouse HTTP endpoint")
+	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
 	db := fs.String("db", "cbioportal_raw", "target database")
 	fs.Parse(reorder(args))
 	c := ch.New(*url, *db)
@@ -144,7 +144,7 @@ func cmdIngestCaseLists(args []string) {
 
 func cmdTransform(args []string) {
 	fs := flag.NewFlagSet("transform", flag.ExitOnError)
-	url := fs.String("url", "http://localhost:18123", "ClickHouse HTTP endpoint")
+	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
 	rawDB := fs.String("raw-db", "cbioportal_raw", "raw staging database")
 	db := fs.String("db", "cbioportal", "target database for views")
 	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference database")
@@ -161,7 +161,7 @@ func cmdTransform(args []string) {
 
 func cmdLoadReference(args []string) {
 	fs := flag.NewFlagSet("load-reference", flag.ExitOnError)
-	url := fs.String("url", "http://localhost:18123", "ClickHouse HTTP endpoint")
+	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
 	db := fs.String("db", "cbioportal_ref", "reference database")
 	fs.Parse(reorder(args))
 	c := ch.New(*url, *db)
@@ -172,7 +172,7 @@ func cmdLoadReference(args []string) {
 
 func cmdLoadGenePanels(args []string) {
 	fs := flag.NewFlagSet("load-gene-panels", flag.ExitOnError)
-	url := fs.String("url", "http://localhost:18123", "ClickHouse HTTP endpoint")
+	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
 	db := fs.String("db", "cbioportal_raw", "raw staging database")
 	fs.Parse(reorder(args))
 	c := ch.New(*url, *db)
@@ -187,4 +187,12 @@ func dashes(n int) string {
 		b[i] = '-'
 	}
 	return string(b)
+}
+
+// clickhouseURL is the default --url: CLICKHOUSE_URL, else a local server.
+func clickhouseURL() string {
+	if u := os.Getenv("CLICKHOUSE_URL"); u != "" {
+		return u
+	}
+	return "http://localhost:18123"
 }
