@@ -10,6 +10,7 @@
 #   test/run_e2e.sh 2 tests/local/annotation-filter-menu.spec.ts
 #   test/run_e2e.sh 3                      # full suite, 3 workers
 #   nohup test/run_e2e.sh 2 >/tmp/e2e.log 2>&1 &   # long full run, background
+#   E2E_SKIP='toggles gene panel modal from sample icon in copy number' test/run_e2e.sh 3
 #
 # It deliberately does NOT pass --reporter, so the config's json reporter writes
 # test-results/report.json; the summary is parsed from THAT (reliable), not from
@@ -35,11 +36,17 @@ curl -sf -o /dev/null --max-time 30 "$URL/" || { echo "portal UI not served at $
 curl -sf -o /dev/null http://localhost:18090/health || { echo "api :18090 not up"; exit 2; }
 
 cd "$E2E" || exit 1
-pkill -9 -f '@playwright/test' 2>/dev/null; pkill -9 -f chrome-headless 2>/dev/null; sleep 1
+# Stop a leftover run of this checkout's suite (its browsers exit with it).
+for pid in $(pgrep -f '@playwright/test' 2>/dev/null); do
+  [ "$(readlink "/proc/$pid/cwd" 2>/dev/null)" = "$(pwd -P)" ] && kill -9 "$pid" 2>/dev/null
+done
+sleep 1
 rm -rf test-results/* 2>/dev/null
 
+# E2E_SKIP: a test-title regex to leave out (e.g. a known environment gap).
+EXTRA=(); [ -n "${E2E_SKIP:-}" ] && EXTRA=(--grep-invert "$E2E_SKIP")
 CI=1 CBIOPORTAL_URL="$URL" LOCALDEV=1 PW_LOCAL=1 HEADLESS_CHROME=true \
-  corepack pnpm exec playwright test "${SPECS[@]}" --update-snapshots --workers="$WORKERS"
+  corepack pnpm exec playwright test "${SPECS[@]}" --update-snapshots --workers="$WORKERS" "${EXTRA[@]}"
 rc=$?
 
 echo "======================================================================"

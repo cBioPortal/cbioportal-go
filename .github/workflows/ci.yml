@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  # cBioPortal seed dump (genes, aliases, cancer types, reference genomes).
+  SEED_URL: https://raw.githubusercontent.com/cBioPortal/datahub/master/seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz
+  SEED_SHA256: da619680669e5b2a8deb2967ebdccaf6369d98336b666b991efcfe47e1960a7a
+  # cBioPortal/cbioportal-test: the e2e fixture studies.
+  FIXTURES_REF: 8995a9d4d7121969028a93940136aba9599968d0
+
+jobs:
+  unit:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l cmd internal test)
+          if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./internal/...
+
+  contract:
+    name: API contract tests
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        ports:
+          - 18123:8123
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/checkout@v4
+        with:
+          repository: cBioPortal/cbioportal-test
+          ref: ${{ env.FIXTURES_REF }}
+          path: fixtures
+      - name: Download seed
+        run: |
+          curl -fsSL "$SEED_URL" -o seed.sql.gz
+          echo "$SEED_SHA256  seed.sql.gz" | sha256sum -c -
+      - name: Build test databases
+        run: test/setup_test_db.sh fixtures seed.sql.gz
+      - name: Start API
+        run: |
+          go build -o bin/cbioportal-api ./cmd/cbioportal-api
+          AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=sessions.json \
+            PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw \
+            nohup bin/cbioportal-api > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
+          cat api.log; exit 1
+      - run: go test ./test/
+        env:
+          API: http://localhost:18090
+      - name: API log
+        if: failure()
+        run: cat api.log

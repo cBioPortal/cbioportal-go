@@ -1,0 +1,79 @@
+name: Frontend e2e
+
+# The full cBioPortal Playwright suite (frontend/ submodule) against this
+# backend. Heavy (frontend build + ~350 browser tests), so it runs weekly and
+# on demand rather than on every push.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+env:
+  SEED_URL: https://raw.githubusercontent.com/cBioPortal/datahub/master/seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz
+  SEED_SHA256: da619680669e5b2a8deb2967ebdccaf6369d98336b666b991efcfe47e1960a7a
+  FIXTURES_REF: 8995a9d4d7121969028a93940136aba9599968d0
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.3
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: 1
+        ports:
+          - 18123:8123
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+      - run: corepack enable
+      - uses: actions/checkout@v4
+        with:
+          repository: cBioPortal/cbioportal-test
+          ref: ${{ env.FIXTURES_REF }}
+          path: fixtures
+      - name: Download seed
+        run: |
+          curl -fsSL "$SEED_URL" -o seed.sql.gz
+          echo "$SEED_SHA256  seed.sql.gz" | sha256sum -c -
+      - name: Build test databases
+        run: test/setup_test_db.sh fixtures seed.sql.gz
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile && pnpm run buildAll
+      - name: Install Playwright
+        working-directory: frontend/end-to-end-test-playwright
+        run: pnpm install --frozen-lockfile --ignore-workspace && pnpm exec playwright install --with-deps chromium
+      - name: Start API
+        run: |
+          go build -o bin/cbioportal-api ./cmd/cbioportal-api
+          FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=sessions.json \
+            PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw \
+            nohup bin/cbioportal-api > api.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
+          cat api.log; exit 1
+      - name: Run e2e
+        # The patient-view CNA tooltip test needs upstream CI's Keycloak login
+        # step (see README, "Known environment gap").
+        env:
+          E2E_SKIP: toggles gene panel modal from sample icon in copy number table
+        run: test/run_e2e.sh 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-report
+          path: |
+            frontend/end-to-end-test-playwright/test-results/
+            api.log
+          retention-days: 7

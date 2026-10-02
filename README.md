@@ -1,55 +1,125 @@
 # cbioportal-go
 
-A Go port of the cBioPortal ELT import pipeline (a rewrite of the Rust
-`cbioportal-import` in the parent directory). Streams raw datahub study TSVs
-straight into ClickHouse staging tables (schema-on-read), then builds the
-normalized model as SQL views.
+[![CI](https://github.com/inodb/cbioportal-go/actions/workflows/ci.yml/badge.svg)](https://github.com/inodb/cbioportal-go/actions/workflows/ci.yml)
 
-Stdlib-only (no external dependencies): `net/http` for the ClickHouse HTTP
-interface, `compress/gzip` for the seed dump.
+A Go reimplementation of the cBioPortal backend: the study importer and the
+REST API, backed by ClickHouse. The unmodified cBioPortal web frontend runs on
+top of it. Go standard library only — no third-party Go dependencies.
 
-## Binaries
+## How it fits together
 
-- `cbioportal-import` — the ELT loader (ingest / transform / load-reference / load-gene-panels).
-- `cbioportal-api` — a cBioPortal-compatible REST API served from the transform
-  views (`net/http` + Go 1.22 routing, stdlib only). Serves the same endpoint
-  surface as the Rust version — studies/samples/patients/clinical/molecular-
-  profiles/mutations/gene-panels/cancer-types, POST fetch variants, config
-  bootstrap, session service, and the study-view aggregations (clinical-data-
-  counts, mutated-genes, cna-genes, structuralvariant-genes, molecular-profile-
-  sample-counts). The real cBioPortal frontend (rspack dev server) renders its
-  homepage and full study view against it unchanged.
+```
+ study files (datahub-format TSVs)
+        │  cbioportal-import ingest          load raw files as-is
+        ▼
+ ClickHouse  cbioportal_raw  (staging)  +  cbioportal_ref  (genes, cancer types)
+        │  cbioportal-import transform       SQL → normalized + derived tables
+        ▼
+ ClickHouse  cbioportal
+        ▲
+        │  SQL over HTTP
+ cbioportal-api  ──  /api/*  cBioPortal REST API
+        │          ──  everything else: the frontend build (frontend/dist)
+        ▼
+ browser  →  http://localhost:8080
+```
 
-  ```bash
-  go build -o bin/cbioportal-api ./cmd/cbioportal-api
-  PORT=8080 CBIOPORTAL_DB=cbioportal bin/cbioportal-api
-  # point the frontend at it: env/custom.sh -> CBIOPORTAL_URL=http://<host>:8080
-  ```
+| Piece | What it is |
+|---|---|
+| ClickHouse | the only database (HTTP interface, port 18123 below) |
+| `cbioportal-import` | CLI: loads reference genes and studies, builds the queryable tables |
+| `cbioportal-api` | one server for the API and the web UI (same origin, like a cBioPortal deployment) |
+| `frontend/` | the cbioportal-frontend repo as a git submodule, built once into `frontend/dist` |
 
-  The `e2e/` Playwright suite (in the parent repo) passes against this backend:
-  studies list, study view, and the real frontend homepage + study view.
+## Quick start
 
-## Import layout
-
-- `internal/clickhouse` — HTTP client (Execute, InsertStream, JSON query helper, schema helpers, synchronous DeleteWhere).
-- `internal/parser` — meta files, study scan/classify, TSV header + streaming `BodyReader`/`MatrixUnpivotReader` (`io.Reader`s), clinical attribute-meta.
-- `internal/ingest` — orchestration: record/matrix/headerless streaming, provenance columns, schema evolution, dimensions (study/profile/gene-panel/clinical-meta).
-- `internal/reference` — gene/alias/cancer-type and reference-genome gene loading from the seed gzip via `FORMAT Values`.
-- `internal/transform` — the SQL views and tables (dimensions, cbioportal-core's gene resolution per importer recorded in `gene_key_map`, mutation filter, CNA/SV, case lists, clinical unpivot).
-- `cmd/cbioportal-import` — CLI.
-
-## Usage
+Needs Go 1.24, Docker, and Node 22 with pnpm (`corepack enable`) for the
+frontend build, plus the cBioPortal seed dump and a study in datahub format
+(both from [cBioPortal/datahub](https://github.com/cBioPortal/datahub):
+`seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz` and e.g.
+`public/acbc_mskcc_2015`).
 
 ```bash
-go build -o bin/cbioportal-import ./cmd/cbioportal-import
+# 1. ClickHouse
+docker run -d --name cbioportal-clickhouse -p 18123:8123 \
+  -e CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:25.3
 
-bin/cbioportal-import plan <study-dir>
+# 2. Build the two binaries
+go build -o bin/cbioportal-import ./cmd/cbioportal-import
+go build -o bin/cbioportal-api ./cmd/cbioportal-api
+
+# 3. Reference data (genes, aliases, cancer types) — once
+bin/cbioportal-import load-reference seed-cbioportal_hg19_hg38_v2.14.5.sql.gz --db cbioportal_ref
+
+# 4. Import a study, then build the queryable tables
+bin/cbioportal-import ingest datahub/public/acbc_mskcc_2015 --db cbioportal_raw
+bin/cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
+
+# 5. Build the frontend — once (and after updating the submodule)
+git submodule update --init
+(cd frontend && pnpm install --frozen-lockfile && pnpm run buildAll)
+
+# 6. Run the portal
+FRONTEND_DIR=frontend/dist PORT=8080 CBIOPORTAL_DB=cbioportal bin/cbioportal-api
+```
+
+Open <http://localhost:8080>. The API is under the same origin, e.g.
+<http://localhost:8080/api/studies>.
+
+`make build`, `make frontend` and `make run` wrap steps 2, 5 and 6;
+`make help` lists the other targets.
+
+To add more studies, repeat step 4 (`ingest` for each study, then one
+`transform`; re-ingesting a study replaces it) and restart nothing — the API
+picks up changed tables within a second.
+
+### Importer commands
+
+```bash
+bin/cbioportal-import plan <study-dir>                       # show what would be loaded
 bin/cbioportal-import ingest <study-dir> --db cbioportal_raw
+bin/cbioportal-import ingest-case-lists <study-dir>... --db cbioportal_raw   # restage only case_lists/
 bin/cbioportal-import load-reference <seed.sql.gz> --db cbioportal_ref
 bin/cbioportal-import load-gene-panels <panels-dir> --db cbioportal_raw
-bin/cbioportal-import ingest-case-lists <study-dir>... --db cbioportal_raw   # restage only case_lists/
 bin/cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
 ```
+
+`ingest` is fast (msk_impact_2017, ~11k samples, loads in seconds) because
+files are streamed into ClickHouse as-is; `transform` then rebuilds every
+derived table with SQL, which also takes seconds.
+
+## API configuration
+
+All settings are environment variables; only `CBIOPORTAL_DB` is usually needed.
+
+
+| Variable | Meaning |
+|---|---|
+| `CLICKHOUSE_URL` | ClickHouse HTTP endpoint (default `http://localhost:18123`) |
+| `CBIOPORTAL_DB` | database built by `transform` (e.g. `cbioportal`) |
+| `CBIOPORTAL_RAW_DB`, `CBIOPORTAL_REF_DB` | staging/reference databases if not named `cbioportal_raw` / `cbioportal_ref` |
+| `PORT` | listen port (binds 0.0.0.0) |
+| `FRONTEND_DIR` | serve this frontend build for every non-`/api/` path (single origin) |
+| `FRONTEND_URL` | reverse-proxy every non-`/api/` path to this frontend dev server instead |
+| `ONCOKB_URL`, `ONCOKB_TOKEN` | OncoKB API behind the frontend's `/proxy/...` endpoint |
+| `SESSION_STORE_FILE` | persist sessions (virtual studies, groups, custom data) to this JSON file |
+| `AUTH_ENABLED`, `AUTH_JWT_SECRET` | HS256 bearer-token auth |
+| `AUTH_DEFAULT_USER` | single-user development login for requests without a token |
+| `PUBLISHER_API_KEY` | key required by `/api/public_virtual_studies` publish/unpublish |
+
+## Code layout
+
+- `cmd/cbioportal-import`, `cmd/cbioportal-api` — the two binaries;
+  `cmd/apibench` times heavy API requests; `cmd/e2ereport` summarizes e2e runs.
+- `internal/parser`, `internal/ingest` — study file parsing and streaming into
+  staging tables.
+- `internal/reference` — genes, aliases, cancer types and reference-genome
+  genes from the seed dump.
+- `internal/transform` — the SQL that builds the normalized model and the
+  study-view `*_derived` tables, following cbioportal-core's import rules.
+- `internal/api` — HTTP handlers; `internal/databin`, `internal/stats` — ports
+  of cBioPortal's data binning and statistics.
+- `internal/clickhouse` — minimal HTTP client.
 
 ## Testing
 
@@ -58,11 +128,21 @@ Three tiers, fastest first:
 1. **Unit tests** — `go test ./internal/...` (no services needed). Includes the
    `internal/databin` port of Java's DataBinner, checked against ~1,800
    Java-recorded scenarios in `internal/databin/testdata`.
-2. **API contract tests** — `go test ./test/` (~5s) against a running API
-   (`API=http://host:port`, default `http://localhost:18090`; skipped when
-   unreachable). They pin the exact endpoint behaviour the frontend and e2e
-   suite rely on: study-view filters, chart counts, bins, sessions, gene
-   tables, enrichments, resources. Add a case whenever a contract is fixed.
+2. **API contract tests** — `make contract` (`go test ./test/`, ~5s) against a
+   running API (`API=http://host:port`, default `http://localhost:18090`;
+   skipped when unreachable). They pin the exact endpoint behaviour the
+   frontend and e2e suite rely on — study-view filters, chart counts, bins,
+   sessions, gene tables, enrichments, Java's projections and error contract.
+   Add a case whenever a contract is fixed. They expect the API to serve the
+   test databases built from cBioPortal's e2e fixture studies:
+
+   ```bash
+   git clone https://github.com/cBioPortal/cbioportal-test
+   test/setup_test_db.sh cbioportal-test seed-cbioportal_hg19_hg38_v2.14.5.sql.gz
+   AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=.sessions.json \
+     PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api
+   make contract
+   ```
 3. **Frontend e2e** — `test/run_e2e.sh [WORKERS] [spec...]` drives the
    cBioPortal Playwright suite (`frontend/end-to-end-test-playwright`)
    through the API origin, which serves the portal UI as a cBioPortal
@@ -76,7 +156,8 @@ Three tiers, fastest first:
    (cd frontend && pnpm install --frozen-lockfile && pnpm run buildAll)
    (cd frontend/end-to-end-test-playwright && pnpm install --frozen-lockfile --ignore-workspace)
    FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY \
-     SESSION_STORE_FILE=.sessions.json PORT=18090 bin/cbioportal-api
+     SESSION_STORE_FILE=.sessions.json PORT=18090 CBIOPORTAL_DB=cbioportal_e2e \
+     CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api
    test/run_e2e.sh 3 tests/local/annotation-filter-menu.spec.ts
    ```
 
@@ -99,29 +180,13 @@ Three tiers, fastest first:
    renders before it is positioned, and Chrome (RenderDocument is re-enabled
    because the LOCALDEV `--disable-features` flag replaces Playwright's
    defaults) treats the move away as a mouseleave and closes the tooltip.
-   Not a backend issue.
+   Not a backend issue. Leave it out with
+   `E2E_SKIP='toggles gene panel modal from sample icon in copy number' test/run_e2e.sh 3`.
 
-## API environment
-
-| Variable | Meaning |
-|---|---|
-| `CLICKHOUSE_URL`, `CBIOPORTAL_DB` | ClickHouse HTTP endpoint and transform database |
-| `PORT` | listen port (binds 0.0.0.0) |
-| `FRONTEND_DIR` | serve this frontend build for every non-`/api/` path (single origin) |
-| `FRONTEND_URL` | reverse-proxy every non-`/api/` path to this frontend dev server instead |
-| `ONCOKB_URL`, `ONCOKB_TOKEN` | OncoKB API behind the frontend's `/proxy/...` endpoint |
-| `SESSION_STORE_FILE` | persist sessions (virtual studies, groups, custom data) to this JSON file |
-| `AUTH_ENABLED`, `AUTH_JWT_SECRET` | HS256 bearer-token auth |
-| `AUTH_DEFAULT_USER` | single-user development login for requests without a token |
-| `PUBLISHER_API_KEY` | key required by `/api/public_virtual_studies` publish/unpublish |
-
-## Parity with the Rust version
-
-Verified byte-for-count identical on `study_es_0` and `msk_impact_2017`:
-staging row counts match per file, and all transform views match
-(patient 841, sample 845, mutation 34, cna 1743, seg 9, clinical long
-844/3361, …). Throughput on msk_impact_2017 is ~3.5s for 5.2M rows
-(ClickHouse-bound, comparable to the Rust version).
+CI (`.github/workflows/ci.yml`) runs gofmt, vet and the unit tests, then the
+contract tests against a ClickHouse service loaded with the fixture studies,
+on every push and pull request. The full frontend e2e suite
+(`.github/workflows/e2e.yml`) runs weekly and on demand.
 
 ## Notes learned porting
 
