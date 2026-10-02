@@ -41,8 +41,13 @@ func walk(s suite, file string, out *[]result) {
 			if tst.Status != "skipped" {
 				allSkip = false
 			}
-			if tst.Status != "expected" && tst.Status != "skipped" {
+			switch tst.Status {
+			case "unexpected":
 				status = "failed"
+			case "flaky":
+				if status == "passed" {
+					status = "flaky"
+				}
 			}
 		}
 		if allSkip {
@@ -69,8 +74,7 @@ func main() {
 		}
 	}
 	if path == "" {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, "projects/cbioportal-rust/cbioportal-frontend/end-to-end-test-playwright/test-results/report.json")
+		path = "frontend/end-to-end-test-playwright/test-results/report.json"
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -88,7 +92,7 @@ func main() {
 	for _, s := range root.Suites {
 		walk(s, "", &res)
 	}
-	var p, f, sk int
+	var p, f, fl, sk int
 	perSpec := map[string]int{}
 	for _, r := range res {
 		switch r.status {
@@ -99,6 +103,11 @@ func main() {
 			perSpec[filepath.Base(r.file)]++
 			if fails || !byspec {
 				fmt.Printf("  FAIL  %s :: %.70s\n", filepath.Base(r.file), r.title)
+			}
+		case "flaky":
+			fl++
+			if fails || !byspec {
+				fmt.Printf("  FLAKY %s :: %.70s\n", filepath.Base(r.file), r.title)
 			}
 		case "skipped":
 			sk++
@@ -118,5 +127,5 @@ func main() {
 			fmt.Printf("  %3d  %s\n", e.n, e.spec)
 		}
 	}
-	fmt.Printf("\n%d passed / %d failed / %d skipped  (%d specs)\n", p, f, sk, len(res))
+	fmt.Printf("\n%d passed / %d flaky (passed on retry) / %d failed / %d skipped  (%d specs)\n", p, fl, f, sk, len(res))
 }

@@ -11,3 +11,6 @@
 # Editor / OS
 .DS_Store
 .sessions.json
+
+# Local logs
+*.log

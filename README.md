@@ -63,21 +63,42 @@ Three tiers, fastest first:
    suite rely on: study-view filters, chart counts, bins, sessions, gene
    tables, enrichments, resources. Add a case whenever a contract is fixed.
 3. **Frontend e2e** — `test/run_e2e.sh [WORKERS] [spec...]` drives the
-   cBioPortal Playwright suite (`~/projects/cbioportal-rust/cbioportal-frontend/end-to-end-test-playwright`)
+   cBioPortal Playwright suite (`frontend/end-to-end-test-playwright`)
    through the API origin, which serves the portal UI as a cBioPortal
-   deployment does. Use a production frontend build (`pnpm run buildMain` in
-   the frontend checkout → `dist/`); it loads faster than the dev server, has
-   no dev error overlay, and frees memory for more Playwright workers:
+   deployment does. `frontend/` is the cbioportal-frontend repo as a git
+   submodule, so the backend and the frontend/e2e suite it is tested against
+   are pinned together. Build it once (and after bumping the submodule) as
+   upstream CI does:
 
    ```bash
-   FRONTEND_DIR=<frontend>/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY \
+   git submodule update --init
+   (cd frontend && pnpm install --frozen-lockfile && pnpm run buildAll)
+   (cd frontend/end-to-end-test-playwright && pnpm install --frozen-lockfile --ignore-workspace)
+   FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY \
      SESSION_STORE_FILE=.sessions.json PORT=18090 bin/cbioportal-api
-   test/run_e2e.sh 4 tests/local/annotation-filter-menu.spec.ts
+   test/run_e2e.sh 3 tests/local/annotation-filter-menu.spec.ts
    ```
 
+   The production build loads faster than the dev server, has no dev error
+   overlay, and leaves memory for more Playwright workers.
    (`FRONTEND_URL=http://localhost:3000` proxies a dev server instead.)
 
    Run single specs while iterating; the full suite only at milestones.
+
+   The runner mirrors the reference CI job: `CI=1` (one retry per test;
+   tests that pass on retry are reported as flaky), `LOCALDEV=1`, and the
+   config's 120s test timeout. 3 workers matches CI; on a 4-core box shared
+   with ClickHouse, expect occasional load-induced flakes above that.
+   `go run ./cmd/e2ereport --fails` summarizes the last run.
+
+   Known environment gap: `patient-view.spec.ts` "toggles gene panel modal
+   from sample icon in copy number table" fails here but not in upstream CI.
+   CI logs in through Keycloak, which leaves the mouse on the login button;
+   without a login step the mouse stays at (0,0), where the tooltip first
+   renders before it is positioned, and Chrome (RenderDocument is re-enabled
+   because the LOCALDEV `--disable-features` flag replaces Playwright's
+   defaults) treats the move away as a mouseleave and closes the tooltip.
+   Not a backend issue.
 
 ## API environment
 

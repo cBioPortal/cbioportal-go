@@ -15,8 +15,8 @@
 # test-results/report.json; the summary is parsed from THAT (reliable), not from
 # the line reporter's stdout (which yields 0-byte logs when backgrounded).
 set -u
-E2E="$HOME/projects/cbioportal-rust/cbioportal-frontend/end-to-end-test-playwright"
 GO="$(cd "$(dirname "$0")/.." && pwd)"
+E2E="${E2E_DIR:-$GO/frontend/end-to-end-test-playwright}"
 WORKERS="${1:-2}"; shift 2>/dev/null || true
 SPECS=("$@"); [ "${#SPECS[@]}" -eq 0 ] && SPECS=("tests/local/")
 
@@ -25,6 +25,10 @@ SPECS=("$@"); [ "${#SPECS[@]}" -eq 0 ] && SPECS=("tests/local/")
 # (FRONTEND_URL) — so specs that call /api relative to the page work as against
 # a real deployment.
 URL="${E2E_URL:-http://localhost:18090}"
+# LOCALDEV=1 as in the reference CI: the fixtures append ?localdist=true to
+# every URL (ignored by this backend), which turns hash-only navigations in
+# some specs into full page loads. CI=1 also as in the reference CI: one
+# retry per test, reported as flaky when the retry passes.
 
 # Preflight: frontend + API must be up (fail fast rather than a slow all-red run).
 curl -sf -o /dev/null --max-time 30 "$URL/" || { echo "portal UI not served at $URL (FRONTEND_DIR or FRONTEND_URL on the API)"; exit 2; }
@@ -34,10 +38,10 @@ cd "$E2E" || exit 1
 pkill -9 -f '@playwright/test' 2>/dev/null; pkill -9 -f chrome-headless 2>/dev/null; sleep 1
 rm -rf test-results/* 2>/dev/null
 
-CBIOPORTAL_URL="$URL" LOCALDEV=0 PW_LOCAL=1 HEADLESS_CHROME=true \
-  corepack pnpm exec playwright test "${SPECS[@]}" --update-snapshots --workers="$WORKERS" --timeout=60000
+CI=1 CBIOPORTAL_URL="$URL" LOCALDEV=1 PW_LOCAL=1 HEADLESS_CHROME=true \
+  corepack pnpm exec playwright test "${SPECS[@]}" --update-snapshots --workers="$WORKERS"
 rc=$?
 
 echo "======================================================================"
-(cd "$GO" && PATH="$PATH:/home/ino/go-local/go/bin" go run ./cmd/e2ereport --by-spec "$E2E/test-results/report.json") 2>/dev/null || echo "(no report.json — run may have crashed/OOMed)"
+(cd "$GO" && PATH="$PATH:$HOME/go/bin:$HOME/go-local/go/bin" go run ./cmd/e2ereport --by-spec "$E2E/test-results/report.json") 2>/dev/null || echo "(no report.json — run may have crashed/OOMed)"
 exit $rc
