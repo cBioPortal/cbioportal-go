@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 )
 
 // The frontend reaches OncoKB through an obfuscated proxy: the path, query
@@ -35,18 +34,24 @@ func oncokbBaseURL() string {
 // decodeB64 decodes leniently like commons-codec: characters outside the
 // base64 alphabet (quotes, whitespace) are ignored and padding is optional.
 func decodeB64(s string) string {
-	var clean strings.Builder
-	for _, c := range s {
-		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/' {
-			clean.WriteRune(c)
-		} else if c == '-' {
-			clean.WriteRune('+')
-		} else if c == '_' {
-			clean.WriteRune('/')
+	return string(decodeB64Bytes([]byte(s)))
+}
+
+func decodeB64Bytes(src []byte) []byte {
+	clean := make([]byte, 0, len(src))
+	for _, c := range src {
+		switch {
+		case (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' || c == '/':
+			clean = append(clean, c)
+		case c == '-':
+			clean = append(clean, '+')
+		case c == '_':
+			clean = append(clean, '/')
 		}
 	}
-	b, _ := base64.RawStdEncoding.DecodeString(clean.String())
-	return string(b)
+	out := make([]byte, base64.RawStdEncoding.DecodedLen(len(clean)))
+	n, _ := base64.RawStdEncoding.Decode(out, clean)
+	return out[:n]
 }
 
 func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +63,7 @@ func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	var body []byte
 	if len(raw) > 0 {
-		body = []byte(decodeB64(string(raw)))
+		body = decodeB64Bytes(raw)
 	}
 	path := decodeB64(strings.TrimPrefix(r.URL.Path, oncokbProxyPrefix))
 	query := url.Values{}
@@ -67,17 +72,26 @@ func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 			query.Add(decodeB64(k), decodeB64(v))
 		}
 	}
-	resp, status, err := oncokbExchange(r, path, query.Encode(), body, os.Getenv("ONCOKB_TOKEN"))
+	resp, err := oncokbExchange(r, path, query.Encode(), body, os.Getenv("ONCOKB_TOKEN"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	if status >= 400 {
-		http.Error(w, string(resp), status)
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		msg, _ := io.ReadAll(resp.Body)
+		http.Error(w, string(msg), resp.StatusCode)
 		return
 	}
+	// The response is re-encoded as it arrives: a quoted base64 string.
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`"` + base64.StdEncoding.EncodeToString(resp) + `"`))
+	w.Write([]byte{'"'})
+	enc := base64.NewEncoder(base64.StdEncoding, w)
+	if _, err := io.Copy(enc, resp.Body); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	enc.Close()
+	w.Write([]byte{'"'})
 }
 
 // oncokbDevProxy forwards plain (unencoded) requests with the caller's token.
@@ -87,19 +101,28 @@ func (s *State) oncokbDevProxy(w http.ResponseWriter, r *http.Request) {
 	if token == "" {
 		token = "NA"
 	}
-	resp, status, err := oncokbExchange(r, strings.TrimPrefix(r.URL.Path, "/proxy/dev/oncokb"), r.URL.RawQuery, body, token)
+	resp, err := oncokbExchange(r, strings.TrimPrefix(r.URL.Path, "/proxy/dev/oncokb"), r.URL.RawQuery, body, token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
+	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	w.Write(resp)
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		panic(http.ErrAbortHandler)
+	}
 }
 
-var oncokbClient = &http.Client{Timeout: 60 * time.Second}
+// oncokbClient has no overall timeout, like the RestTemplate of Java's
+// ProxyController: large annotation batches can take minutes. Each exchange
+// is bound to its incoming request's context, so a client that gives up
+// cancels the upstream call.
+var oncokbClient = &http.Client{}
 
-func oncokbExchange(r *http.Request, path, query string, body []byte, token string) ([]byte, int, error) {
+// oncokbExchange sends the request to OncoKB and returns the response with
+// its body unread; the caller closes it.
+func oncokbExchange(r *http.Request, path, query string, body []byte, token string) (*http.Response, error) {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
@@ -113,7 +136,7 @@ func oncokbExchange(r *http.Request, path, query string, body []byte, token stri
 	}
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, target, rd)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		req.Header.Set("Content-Type", ct)
@@ -121,11 +144,5 @@ func oncokbExchange(r *http.Request, path, query string, body []byte, token stri
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := oncokbClient.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-	out, err := io.ReadAll(resp.Body)
-	return out, resp.StatusCode, err
+	return oncokbClient.Do(req)
 }

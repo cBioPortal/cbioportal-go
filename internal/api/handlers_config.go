@@ -122,10 +122,32 @@ func (s *State) portal(w http.ResponseWriter, r *http.Request) {
 	w.Write(portalHTML)
 }
 
-// catchAll serves the portal at "/" and drains-and-empties any other unmatched
-// path (Genome Nexus /proxy, features not yet implemented).
+// catchAll serves every path no route matches. An /api/ path gets Spring's
+// default error body, as Java answers it: 405 when the path is served for
+// other methods, else 404. Other paths go to the frontend, or, without one,
+// the portal at "/" and an empty list elsewhere.
 func (s *State) catchAll(w http.ResponseWriter, r *http.Request) {
-	if s.frontend != nil && !strings.HasPrefix(r.URL.Path, "/api/") {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		// Java matches a trailing slash to the route without it
+		// (WebAppConfig setUseTrailingSlashMatch), e.g. /api/gene-panels/.
+		if trimmed := strings.TrimSuffix(r.URL.Path, "/"); trimmed != r.URL.Path && s.mux != nil {
+			r2 := r.Clone(r.Context())
+			r2.URL.Path, r2.URL.RawPath = trimmed, ""
+			if h, pattern := s.mux.Handler(r2); pattern != "/" {
+				h.ServeHTTP(w, r2)
+				return
+			}
+		}
+		readBody(r, nil)
+		if allow := s.allowedMethods(r); len(allow) > 0 {
+			w.Header().Set("Allow", strings.Join(allow, ", "))
+			springError(w, r, http.StatusMethodNotAllowed)
+			return
+		}
+		springNotFound(w, r)
+		return
+	}
+	if s.frontend != nil {
 		if r.Method == http.MethodPost && portalPages[r.URL.Path] {
 			s.postedPage(w, r)
 			return
@@ -139,6 +161,22 @@ func (s *State) catchAll(w http.ResponseWriter, r *http.Request) {
 	}
 	readBody(r, nil)
 	writeJSON(w, []any{})
+}
+
+// allowedMethods lists the methods a route serves r's path for.
+func (s *State) allowedMethods(r *http.Request) []string {
+	var out []string
+	if s.mux == nil {
+		return out
+	}
+	for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
+		probe := r.Clone(r.Context())
+		probe.Method = m
+		if _, pattern := s.mux.Handler(probe); pattern != "/" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // portalPages are the pages that accept a posted query (IndexPageController).

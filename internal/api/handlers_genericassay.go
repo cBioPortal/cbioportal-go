@@ -55,9 +55,9 @@ func (s *State) genericAssayRows(mpid string, entityIDs, sampleIDs []string, sam
 	}
 	rows, err := ch.Query[genericAssayMatrixRow](s.CH, fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, m.value AS value "+
-			"FROM cbioportal_raw.generic_assay_matrix m "+
+			"FROM %s m "+
 			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
-			"WHERE %s", where))
+			"WHERE %s", genericAssaySource(s), where))
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,7 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 func (s *State) genericAssayMetaProperties(where string) (map[string]map[string]string, error) {
 	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
-			"FROM cbioportal_raw.generic_assay_matrix WHERE %s GROUP BY entity_stable_id", where))
+			"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where))
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +222,7 @@ func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
 		GenesetID string `json:"genesetId"`
 	}
 	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT geneset_id AS genesetId FROM cbioportal_raw.geneset_score_matrix WHERE %s ORDER BY geneset_id", where))
+		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where))
 	if err != nil {
 		return nil, err
 	}
@@ -311,9 +311,9 @@ func (s *State) genesetGeneticDataFetch(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, err := ch.Query[genesetMatrixRow](s.CH, fmt.Sprintf(
 		"SELECT m.geneset_id AS genesetId, m.sample_id AS sampleId, s.patient_id AS patientId, m.value AS value "+
-			"FROM cbioportal_raw.geneset_score_matrix m "+
+			"FROM %s m "+
 			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
-			"WHERE %s", where))
+			"WHERE %s", genesetScoreSource(s), where))
 	if err != nil {
 		fail(w, err)
 		return
@@ -349,3 +349,18 @@ func (s *State) routeGenericAssay(mux *http.ServeMux) {
 	// Geneset molecular data (GSVA).
 	mux.HandleFunc("POST /api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch", s.genesetGeneticDataFetch)
 }
+
+// genericAssaySource is the staged generic-assay matrix with every column the
+// handlers read (entity properties a file lacks read as empty).
+func genericAssaySource(s *State) string {
+	return s.rawSource("generic_assay_matrix",
+		"study_id", "profile_stable_id", "entity_stable_id", "sample_id", "value", "name", "description", "url")
+}
+
+// genesetScoreSource is the staged GSVA score matrix.
+func genesetScoreSource(s *State) string {
+	return s.rawSource("geneset_score_matrix", "study_id", "profile_stable_id", "geneset_id", "sample_id", "value")
+}
+
+// geneMatrixCols are the columns read from a staged per-gene matrix.
+var geneMatrixCols = []string{"study_id", "profile_stable_id", "sample_id", "hugo_symbol", "entrez_gene_id", "value"}

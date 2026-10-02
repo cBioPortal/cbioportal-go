@@ -87,7 +87,7 @@ func (s *State) genesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
 		GenesetID string `json:"genesetId"`
 	}
 	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT geneset_id AS genesetId FROM cbioportal_raw.geneset_score_matrix WHERE %s ORDER BY geneset_id", where))
+		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where))
 	if err != nil {
 		fail(w, err)
 		return
@@ -121,7 +121,7 @@ type GenesetCorrelation struct {
 
 // genesetExpressionCorrelationFetch computes, for the given geneset, the Spearman
 // correlation of its per-sample GSVA score against each gene's mRNA expression
-// (like co-expression). The correlation is pushed into ClickHouse via rankCorr so
+// (like co-expression). The correlation is pushed into ClickHouse (spearmanSQL) so
 // only genes above the threshold cross the wire. Shape: []GenesetCorrelation.
 func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http.Request) {
 	genesetID := r.PathValue("genesetId")
@@ -179,28 +179,26 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 	}
 
 	querySub := fmt.Sprintf(
-		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM cbioportal_raw.geneset_score_matrix "+
+		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM %s "+
 			"WHERE study_id = '%s' AND profile_stable_id = '%s' AND geneset_id = '%s' "+
 			"AND toFloat64OrNull(value) IS NOT NULL%s",
-		sqlLit(meta.StudyID), sqlLit(meta.StableID), sqlLit(genesetID), sampleFilter)
+		genesetScoreSource(s), sqlLit(meta.StudyID), sqlLit(meta.StableID), sqlLit(genesetID), sampleFilter)
 
 	type corrRow struct {
-		Entrez *int64   `json:"entrez"`
+		Entrez *int64   `json:"entity"`
 		Hugo   string   `json:"hugo"`
 		N      int      `json:"n"`
 		SC     *float64 `json:"sc"`
 	}
-	rows, err := ch.Query[corrRow](s.CH, fmt.Sprintf(
-		"SELECT toInt64OrNull(b.entrez_gene_id) AS entrez, any(b.hugo_symbol) AS hugo, "+
-			"toInt64(count()) AS n, rankCorr(toFloat64OrZero(b.value), q.qval) AS sc "+
-			"FROM cbioportal_raw.mrna_expression_matrix AS b "+
+	rows, err := ch.Query[corrRow](s.CH, spearmanSQL(fmt.Sprintf(
+		"SELECT toInt64OrNull(b.entrez_gene_id) AS entity, b.hugo_symbol AS hugo, "+
+			"toFloat64OrZero(b.value) AS x, q.qval AS y "+
+			"FROM %s AS b "+
 			"INNER JOIN (%s) AS q USING (sample_id) "+
 			"WHERE b.study_id = '%s' AND b.profile_stable_id = '%s' "+
-			"AND toFloat64OrNull(b.value) IS NOT NULL "+
-			"GROUP BY entrez "+
-			"HAVING n > 2 AND isNotNull(sc) AND abs(sc) >= %g "+
-			"ORDER BY sc DESC",
-		querySub, sqlLit(meta.StudyID), sqlLit(expr.StableID), threshold))
+			"AND toFloat64OrNull(b.value) IS NOT NULL",
+		s.rawSource("mrna_expression_matrix", geneMatrixCols...), querySub, sqlLit(meta.StudyID), sqlLit(expr.StableID)),
+		"1", threshold)+" ORDER BY sc DESC")
 	if err != nil {
 		fail(w, err)
 		return

@@ -195,7 +195,7 @@ func (s *State) genericAssayDataInProfileGet(w http.ResponseWriter, r *http.Requ
 func (s *State) genericAssayMetasWhere(where string) ([]GenericAssayMeta, error) {
 	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
-			"FROM cbioportal_raw.generic_assay_matrix WHERE %s GROUP BY entity_stable_id ORDER BY entity_stable_id", where))
+			"FROM %s WHERE %s GROUP BY entity_stable_id ORDER BY entity_stable_id", genericAssaySource(s), where))
 	if err != nil {
 		return nil, err
 	}

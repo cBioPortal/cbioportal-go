@@ -26,7 +26,7 @@ type GeneAlterationCount struct {
 	TotalCount                  uint64   `json:"totalCount"`
 	NumberOfProfiledCases       uint64   `json:"numberOfProfiledCases"`
 	MatchingGenePanelIDs        []string `json:"matchingGenePanelIds"`
-	EntrezGeneID                *int64   `json:"entrezGeneId"`
+	EntrezGeneID                *int64   `json:"entrezGeneId,omitempty"`
 	HugoGeneSymbol              string   `json:"hugoGeneSymbol"`
 	Alteration                  *int64   `json:"alteration,omitempty"`
 	Cytoband                    string   `json:"cytoband,omitempty"`
@@ -441,9 +441,9 @@ func (a alterationSQL) enrichmentClause() string {
 // StructuralVariantCount is one gene1::gene2 pair of the study-view
 // structural-variant table (AlterationCountByStructuralVariant).
 type StructuralVariantCount struct {
-	Gene1EntrezGeneID     *int64   `json:"gene1EntrezGeneId"`
+	Gene1EntrezGeneID     *int64   `json:"gene1EntrezGeneId,omitempty"`
 	Gene1HugoGeneSymbol   string   `json:"gene1HugoGeneSymbol"`
-	Gene2EntrezGeneID     *int64   `json:"gene2EntrezGeneId"`
+	Gene2EntrezGeneID     *int64   `json:"gene2EntrezGeneId,omitempty"`
 	Gene2HugoGeneSymbol   string   `json:"gene2HugoGeneSymbol"`
 	NumberOfAlteredCases  uint64   `json:"numberOfAlteredCases"`
 	NumberOfProfiledCases uint64   `json:"numberOfProfiledCases"`

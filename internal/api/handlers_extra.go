@@ -43,7 +43,7 @@ func (s *State) extraEndpoints(next http.Handler) http.Handler {
 				next.ServeHTTP(&xTotalCountWriter{ResponseWriter: w}, r)
 				return
 			case isCacheStatsPath(path):
-				cacheStatsDisabled(w, r)
+				springNotFound(w, r)
 				return
 			}
 		}
@@ -135,16 +135,21 @@ func isCacheStatsPath(path string) bool {
 	return len(seg) == 2 && seg[0] != "" && (seg[1] == "keysInCache" || seg[1] == "keyCountsPerClass")
 }
 
-// cacheStatsDisabled answers the cache-statistics routes as Java does with
-// persistence.cache_type=no-cache: CacheStatsController is not registered, so
-// Spring Boot's default 404 error body is returned.
-func cacheStatsDisabled(w http.ResponseWriter, r *http.Request) {
+// springNotFound answers a path no Java controller serves with Spring Boot's
+// default 404 error body. The cache-statistics routes get it too, as Java
+// with persistence.cache_type=no-cache does not register CacheStatsController.
+func springNotFound(w http.ResponseWriter, r *http.Request) {
+	springError(w, r, http.StatusNotFound)
+}
+
+// springError writes Spring Boot's default error body for status.
+func springError(w http.ResponseWriter, r *http.Request, status int) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotFound)
+	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]any{
 		"timestamp": time.Now().UTC().Format("2006-01-02T15:04:05.000+00:00"),
-		"status":    http.StatusNotFound,
-		"error":     "Not Found",
+		"status":    status,
+		"error":     http.StatusText(status),
 		"path":      r.URL.Path,
 	})
 }

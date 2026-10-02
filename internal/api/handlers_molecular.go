@@ -171,7 +171,7 @@ type mutationRow struct {
 
 // Gene is the nested gene of DETAILED records (GeneMapper.select).
 type Gene struct {
-	EntrezGeneID   *int64 `json:"entrezGeneId"`
+	EntrezGeneID   *int64 `json:"entrezGeneId,omitempty"`
 	HugoGeneSymbol string `json:"hugoGeneSymbol"`
 	Type           string `json:"type,omitempty"`
 }
@@ -183,7 +183,7 @@ type Mutation struct {
 	MolecularProfileID string `json:"molecularProfileId"`
 	SampleID           string `json:"sampleId"`
 	StudyID            string `json:"studyId"`
-	EntrezGeneID       *int64 `json:"entrezGeneId"`
+	EntrezGeneID       *int64 `json:"entrezGeneId,omitempty"`
 	Gene               *Gene  `json:"gene,omitempty"`
 	Chr                string `json:"chr"`
 	StartPosition      *int64 `json:"startPosition,omitempty"`
@@ -223,7 +223,7 @@ type MutationID struct {
 	MolecularProfileID string `json:"molecularProfileId"`
 	SampleID           string `json:"sampleId"`
 	PatientID          string `json:"patientId"`
-	EntrezGeneID       *int64 `json:"entrezGeneId"`
+	EntrezGeneID       *int64 `json:"entrezGeneId,omitempty"`
 	StudyID            string `json:"studyId"`
 	UniqueSampleKey    string `json:"uniqueSampleKey"`
 	UniquePatientKey   string `json:"uniquePatientKey"`
@@ -438,7 +438,7 @@ type panelGeneRow struct {
 }
 
 type PanelGene struct {
-	EntrezGeneID   *int64 `json:"entrezGeneId"`
+	EntrezGeneID   *int64 `json:"entrezGeneId,omitempty"`
 	HugoGeneSymbol string `json:"hugoGeneSymbol"`
 }
 

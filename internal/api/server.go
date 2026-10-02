@@ -30,6 +30,9 @@ type State struct {
 	// proxied dev server (FRONTEND_URL) — so the portal UI and the API share one
 	// origin as in a cBioPortal deployment.
 	frontend http.Handler
+	// mux is the route table, consulted by the catch-all to tell an unknown
+	// path from a known one requested with an unsupported method.
+	mux *http.ServeMux
 }
 
 // NewState loads the session store (SESSION_STORE_FILE, if set) at startup.

@@ -70,6 +70,9 @@ func (g *gzipResponseWriter) WriteHeader(code int) {
 }
 
 func (g *gzipResponseWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 && !g.decided {
+		return 0, nil
+	}
 	if !g.decided && g.Header().Get("Content-Type") == "" {
 		g.Header().Set("Content-Type", http.DetectContentType(p))
 	}

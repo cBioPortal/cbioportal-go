@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Imports single studies (and one two-study mix) into fresh scratch databases,
 # transforms them, starts the API over each result and asserts that a broad set
-# of endpoints never answers 5xx. Guards the transform's promise that every
+# of endpoints never answers 5xx, nor a JSON object with a null property (the
+# Java backend serializes NON_NULL). Guards the transform's promise that every
 # object the API reads exists for any subset of data types.
 #
 # Usage: test/transform_subsets.sh [case ...]
 #   case = name=dir[,dir...]; default: the cases below.
 # Env: CLICKHOUSE_URL (default http://localhost:18123), REF_DB (cbioportal_ref,
 # read only), PORT (default 18101), KEEP_DBS=1 keeps the tsub_* databases.
-# Skips (exit 0) when ClickHouse is unreachable.
+# API_URL=http://host:port exercises that running API once instead (no
+# import). Skips (exit 0) when ClickHouse is unreachable.
 set -uo pipefail
 
 CH=${CLICKHOUSE_URL:-http://localhost:18123}
@@ -52,15 +54,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "building into $WORK"
-(cd "$ROOT" && GOTOOLCHAIN=local go build -p 2 -o "$WORK/cbioportal-import" ./cmd/cbioportal-import &&
-  GOTOOLCHAIN=local go build -p 2 -o "$WORK/cbioportal-api" ./cmd/cbioportal-api) || exit 1
+if [ -z "${API_URL:-}" ]; then
+  echo "building into $WORK"
+  (cd "$ROOT" && GOTOOLCHAIN=local go build -p 2 -o "$WORK/cbioportal-import" ./cmd/cbioportal-import &&
+    GOTOOLCHAIN=local go build -p 2 -o "$WORK/cbioportal-api" ./cmd/cbioportal-api) || exit 1
+fi
 
 BASE=""
 CASE_HITS=0
 CASE_FAILS=()
 
-# hit METHOD PATH [JSON]: records the call; any 5xx (or no answer) fails it.
+# hit METHOD PATH [JSON]: records the call; any 5xx (or no answer), or a JSON
+# null property in the answer, fails it. /config_service is a property map,
+# whose null values Java writes.
 hit() {
   local method=$1 path=$2 body=${3:-} code
   if [ "$method" = GET ]; then
@@ -72,6 +78,9 @@ hit() {
   CASE_HITS=$((CASE_HITS + 1))
   if [ "$code" = 000 ] || [ "$code" -ge 500 ]; then
     CASE_FAILS+=("$code $method $path :: $(head -c 300 "$WORK/resp" | tr '\n' ' ')")
+  elif [ "$path" != /config_service ] && grep -q '":null' "$WORK/resp" &&
+    jq -e '[.. | objects | to_entries[] | select(.value == null)] | length > 0' "$WORK/resp" >/dev/null 2>&1; then
+    CASE_FAILS+=("null $method $path :: $(jq -c '[paths(. == null)][:3]' "$WORK/resp")")
   fi
 }
 
@@ -131,6 +140,7 @@ exercise() {
   # Results-view calls the frontend makes whatever profiles the studies have.
   hit POST /api/mutation-counts-by-position/fetch '[{"entrezGeneId":7157,"proteinPosStart":1,"proteinPosEnd":400}]'
   hit GET /api/genesets
+  hit GET /api/genesets/HALLMARK_APOPTOSIS
   hit POST /api/genesets/fetch '["HALLMARK_APOPTOSIS"]'
   hit POST /api/geneset-hierarchy/fetch "[]"
   hit POST /api/generic-assay-meta/fetch '{"genericAssayStableIds":["x"]}'
@@ -210,6 +220,7 @@ exercise() {
           hit POST "/api/molecular-profiles/$mp/discrete-copy-number/fetch" "{\"sampleListId\":\"$sl\",\"entrezGeneIds\":$genes}"
           hit POST "/api/molecular-profiles/$mp/discrete-copy-number-counts/fetch" "{\"entrezGeneIds\":$genes}"
           hit POST "/api/molecular-profiles/$mp/molecular-data/fetch" "{\"sampleListId\":\"$sl\",\"entrezGeneIds\":$genes}"
+          hit POST "/api/molecular-profiles/co-expressions/fetch?molecularProfileIdA=$mp&molecularProfileIdB=$mp" "{\"entrezGeneId\":7157,\"sampleListId\":\"$sl\"}"
           ;;
         STRUCTURAL_VARIANT)
           hit POST /api/structural-variant/fetch "{\"molecularProfileIds\":[\"$mp\"],\"entrezGeneIds\":$genes}"
@@ -225,14 +236,34 @@ exercise() {
           hit POST /api/generic-assay-data-counts/fetch "{\"genericAssayDataFilters\":[{\"stableId\":\"${ent:-x}\",\"profileType\":\"${mp#"${s}_"}\"}],\"studyViewFilter\":{\"studyIds\":[\"$s\"]}}"
           hit POST /api/generic-assay-data-bin-counts/fetch "{\"genericAssayDataBinFilters\":[{\"stableId\":\"${ent:-x}\",\"profileType\":\"${mp#"${s}_"}\"}],\"studyViewFilter\":{\"studyIds\":[\"$s\"]}}"
           [ -n "$ent" ] && hit GET "/api/generic-assay-data/$mp/generic-assay/$ent"
+          [ -n "$ent" ] && hit GET "/api/generic-assay-meta/generic-assay/$ent"
+          ;;
+        GENESET_SCORE)
+          local gs
+          gs=$(get "/api/genesets" '.[0].genesetId // empty')
+          hit POST "/api/geneset-hierarchy/fetch?geneticProfileId=$mp&sampleListId=$sl" ""
+          hit POST "/api/genetic-profiles/$mp/geneset-genetic-data/fetch" "{\"sampleListId\":\"$sl\"}"
+          hit POST "/api/genesets/${gs:-x}/expression-correlation/fetch?geneticProfileId=$mp" ""
+          hit POST "/api/molecular-profiles/co-expressions/fetch?molecularProfileIdA=$mp&molecularProfileIdB=$mp" "{\"genesetId\":\"${gs:-x}\",\"sampleListId\":\"$sl\"}"
           ;;
         *)
           hit POST "/api/molecular-profiles/$mp/molecular-data/fetch" "{\"sampleListId\":\"$sl\",\"entrezGeneIds\":$genes}"
+          hit GET "/api/molecular-profiles/$mp/molecular-data?sampleListId=$sl&entrezGeneId=7157"
+          hit POST "/api/molecular-profiles/co-expressions/fetch?molecularProfileIdA=$mp&molecularProfileIdB=$mp" "{\"entrezGeneId\":7157,\"sampleListId\":\"$sl\"}"
           ;;
       esac
     done
   done
 }
+
+if [ -n "${API_URL:-}" ]; then
+  BASE=$API_URL
+  exercise
+  for f in "${CASE_FAILS[@]}"; do echo "  fail: $f"; done
+  printf '%s: %d endpoints, %d failures\n' "$API_URL" "$CASE_HITS" "${#CASE_FAILS[@]}"
+  [ ${#CASE_FAILS[@]} -eq 0 ] && echo PASS || { echo FAIL; exit 1; }
+  exit 0
+fi
 
 TOTAL_FAILS=0
 SUMMARY=()
@@ -270,8 +301,8 @@ for spec in "${CASES[@]}"; do
   exercise
   kill "$API_PID" 2>/dev/null; wait "$API_PID" 2>/dev/null; API_PID=""
 
-  SUMMARY+=("$(printf '%-10s %4d endpoints, %3d 5xx' "$name" "$CASE_HITS" "${#CASE_FAILS[@]}")")
-  for f in "${CASE_FAILS[@]}"; do echo "  5xx: $f"; done
+  SUMMARY+=("$(printf '%-10s %4d endpoints, %3d failures' "$name" "$CASE_HITS" "${#CASE_FAILS[@]}")")
+  for f in "${CASE_FAILS[@]}"; do echo "  fail: $f"; done
   TOTAL_FAILS=$((TOTAL_FAILS + ${#CASE_FAILS[@]}))
   if [ "${KEEP_DBS:-}" != 1 ]; then
     chq "DROP DATABASE IF EXISTS \`$raw\`" >/dev/null

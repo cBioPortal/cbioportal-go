@@ -194,7 +194,7 @@ type geneCountRow struct {
 }
 
 type AlterationCountByGene struct {
-	EntrezGeneID          *int64 `json:"entrezGeneId"`
+	EntrezGeneID          *int64 `json:"entrezGeneId,omitempty"`
 	HugoGeneSymbol        string `json:"hugoGeneSymbol"`
 	Alteration            *int64 `json:"alteration,omitempty"`
 	NumberOfAlteredCases  uint64 `json:"numberOfAlteredCases"`
@@ -238,9 +238,9 @@ type svRow struct {
 
 type AlterationCountByStructuralVariant struct {
 	Gene1HugoGeneSymbol   string   `json:"gene1HugoGeneSymbol"`
-	Gene1EntrezGeneID     *int64   `json:"gene1EntrezGeneId"`
+	Gene1EntrezGeneID     *int64   `json:"gene1EntrezGeneId,omitempty"`
 	Gene2HugoGeneSymbol   string   `json:"gene2HugoGeneSymbol"`
-	Gene2EntrezGeneID     *int64   `json:"gene2EntrezGeneId"`
+	Gene2EntrezGeneID     *int64   `json:"gene2EntrezGeneId,omitempty"`
 	HugoGeneSymbols       []string `json:"hugoGeneSymbols"`
 	EntrezGeneIDs         []int64  `json:"entrezGeneIds"`
 	NumberOfAlteredCases  uint64   `json:"numberOfAlteredCases"`

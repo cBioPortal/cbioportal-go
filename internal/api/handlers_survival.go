@@ -243,13 +243,14 @@ type ClinicalEventData struct {
 }
 
 // ClinicalEvent mirrors the generated client's ClinicalEvent interface. Timeline
-// events are patient-level; start/end days are null when the source date is blank.
+// events are patient-level; start/end days are omitted when the source date is
+// blank, as Java's NON_NULL serialization omits the null Integer.
 type ClinicalEvent struct {
 	StudyID                         string              `json:"studyId"`
 	PatientID                       string              `json:"patientId"`
 	EventType                       string              `json:"eventType"`
-	StartNumberOfDaysSinceDiagnosis *int64              `json:"startNumberOfDaysSinceDiagnosis"`
-	EndNumberOfDaysSinceDiagnosis   *int64              `json:"endNumberOfDaysSinceDiagnosis"`
+	StartNumberOfDaysSinceDiagnosis *int64              `json:"startNumberOfDaysSinceDiagnosis,omitempty"`
+	EndNumberOfDaysSinceDiagnosis   *int64              `json:"endNumberOfDaysSinceDiagnosis,omitempty"`
 	Attributes                      []ClinicalEventData `json:"attributes"`
 	UniquePatientKey                string              `json:"uniquePatientKey"`
 	UniqueSampleKey                 string              `json:"uniqueSampleKey,omitempty"`
@@ -289,17 +290,13 @@ var timelineFixedCols = map[string]bool{
 }
 
 // timelineSelect selects timeline events, turning every other staged column
-// into an attribute keyed by its upper-cased header.
+// into an attribute keyed by its upper-cased header. Without staged timeline
+// data it selects no events.
 func (s *State) timelineSelect() string {
-	type col struct {
-		Name string `json:"name"`
-	}
-	cols, _ := ch.Query[col](s.CH,
-		"SELECT name FROM system.columns WHERE database = 'cbioportal_raw' AND table = 'timeline' ORDER BY position")
 	var kv []string
-	for _, c := range cols {
-		if !timelineFixedCols[c.Name] {
-			kv = append(kv, fmt.Sprintf("('%s', toString(`%s`))", sqlLit(strings.ToUpper(c.Name)), c.Name))
+	for _, c := range s.rawColumns("timeline") {
+		if !timelineFixedCols[c] {
+			kv = append(kv, fmt.Sprintf("('%s', toString(`%s`))", sqlLit(strings.ToUpper(c)), c))
 		}
 	}
 	attrs := "[]"
@@ -308,7 +305,7 @@ func (s *State) timelineSelect() string {
 	}
 	return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
 		"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " + attrs +
-		" AS attrs FROM cbioportal_raw.timeline"
+		" AS attrs FROM " + s.rawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
 }
 
 // ClinicalEventMeta is an event type with the distinct (lower-cased)

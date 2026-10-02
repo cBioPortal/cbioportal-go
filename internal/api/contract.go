@@ -186,12 +186,21 @@ func checkParams(params []param, q map[string][]string) string {
 // Bodies that are not arrays are left to the handler (readBody).
 func listBody(name string) func([]byte) string {
 	return func(raw []byte) string {
-		var items []json.RawMessage
-		if json.Unmarshal(raw, &items) == nil && items != nil && len(items) == 0 {
+		if emptyJSONArray(raw) && json.Valid(raw) {
 			return msgListSize(name)
 		}
 		return ""
 	}
+}
+
+// emptyJSONArray reports whether b, ignoring JSON whitespace, is [].
+func emptyJSONArray(b []byte) bool {
+	i := skipSpace(b, 0)
+	if i >= len(b) || b[i] != '[' {
+		return false
+	}
+	i = skipSpace(b, i+1)
+	return i < len(b) && b[i] == ']' && skipSpace(b, i+1) == len(b)
 }
 
 // sampleFilterBody validates SampleFilter: each present list holds at least
@@ -209,8 +218,7 @@ func sampleFilterBody(raw []byte) string {
 			continue
 		}
 		present++
-		var items []json.RawMessage
-		if json.Unmarshal(v, &items) == nil && len(items) == 0 {
+		if emptyJSONArray(v) {
 			return msgListSize(k)
 		}
 	}
@@ -511,8 +519,11 @@ func (s *State) reshape(body []byte, keep []string, shaped bool, nest string) ([
 		studies = s.legacyStudies()
 	}
 	var out bytes.Buffer
+	out.Grow(len(body))
+	var fields []objectField
 	writeObject := func(obj []byte) bool {
-		fields, ok := objectFields(obj)
+		var ok bool
+		fields, ok = objectFields(obj, fields[:0])
 		if !ok {
 			return false
 		}
@@ -520,10 +531,10 @@ func (s *State) reshape(body []byte, keep []string, shaped bool, nest string) ([
 		n := 0
 		studyID := ""
 		for _, f := range fields {
-			if f.key == "studyId" {
-				json.Unmarshal(f.val, &studyID)
+			if nest != "" && string(f.key) == "studyId" {
+				studyID = jsonStringValue(f.val)
 			}
-			if shaped && !kept[f.key] {
+			if shaped && !kept[string(f.key)] {
 				continue
 			}
 			if n > 0 {
@@ -582,16 +593,15 @@ func (s *State) reshape(body []byte, keep []string, shaped bool, nest string) ([
 // objectField is one member of a JSON object: its decoded key, the raw
 // (quoted) key and the raw value.
 type objectField struct {
-	key      string
-	raw, val []byte
+	key, raw, val []byte
 }
 
-// objectFields splits a JSON object into its members.
-func objectFields(b []byte) ([]objectField, bool) {
+// objectFields splits a JSON object into its members, appending them to
+// fields (which callers may reuse between objects).
+func objectFields(b []byte, fields []objectField) ([]objectField, bool) {
 	if len(b) < 2 || b[0] != '{' {
 		return nil, false
 	}
-	var fields []objectField
 	i := skipSpace(b, 1)
 	for i < len(b) && b[i] != '}' {
 		if b[i] != '"' {
@@ -599,9 +609,16 @@ func objectFields(b []byte) ([]objectField, bool) {
 		}
 		kend := skipValue(b, i)
 		raw := b[i:kend]
-		var key string
-		if json.Unmarshal(raw, &key) != nil {
+		if len(raw) < 2 || raw[len(raw)-1] != '"' {
 			return nil, false
+		}
+		key := raw[1 : len(raw)-1]
+		if bytes.IndexByte(key, '\\') >= 0 {
+			var k string
+			if json.Unmarshal(raw, &k) != nil {
+				return nil, false
+			}
+			key = []byte(k)
 		}
 		i = skipSpace(b, kend)
 		if i >= len(b) || b[i] != ':' {
@@ -619,6 +636,17 @@ func objectFields(b []byte) ([]objectField, bool) {
 		}
 	}
 	return fields, true
+}
+
+// jsonStringValue returns the string a raw JSON value holds, or "" when it is
+// not a string.
+func jsonStringValue(v []byte) string {
+	if len(v) >= 2 && v[0] == '"' && v[len(v)-1] == '"' && bytes.IndexByte(v, '\\') < 0 {
+		return string(v[1 : len(v)-1])
+	}
+	var s string
+	json.Unmarshal(v, &s)
+	return s
 }
 
 func skipSpace(b []byte, i int) int {
@@ -663,8 +691,11 @@ func skipValue(b []byte, i int) int {
 		return len(b)
 	default:
 		j := i
-		for j < len(b) && !strings.ContainsRune(",}] \n\t\r", rune(b[j])) {
-			j++
+		for ; j < len(b); j++ {
+			switch b[j] {
+			case ',', '}', ']', ' ', '\n', '\t', '\r':
+				return j
+			}
 		}
 		return j
 	}

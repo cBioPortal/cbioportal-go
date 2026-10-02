@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,4 +65,48 @@ func cachedQuery[T any](s *State, sql string) ([]T, error) {
 	s.meta.entries[sql] = rows
 	s.meta.mu.Unlock()
 	return slices.Clone(rows), nil
+}
+
+// rawColumns lists a raw staging table's columns in file order, or none when
+// no study staged that table. Staging tables exist only for the data types
+// some ingested study has, and their columns follow its files.
+func (s *State) rawColumns(table string) []string {
+	type col struct {
+		Name string `json:"name"`
+	}
+	cols, err := cachedQuery[col](s, fmt.Sprintf(
+		"SELECT name FROM system.columns WHERE database = 'cbioportal_raw' AND table = '%s' ORDER BY position", sqlLit(table)))
+	if err != nil {
+		return nil
+	}
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = c.Name
+	}
+	return out
+}
+
+// rawSource returns a FROM-clause source for a raw staging table that has at
+// least the given columns: the table itself when it has them all, the table
+// with each missing column added as an empty string, or an empty relation of
+// those columns when the table is absent.
+func (s *State) rawSource(table string, cols ...string) string {
+	have := s.rawColumns(table)
+	if len(have) == 0 {
+		sel := make([]string, len(cols))
+		for i, c := range cols {
+			sel[i] = "'' AS " + c
+		}
+		return fmt.Sprintf("(SELECT %s WHERE 0)", strings.Join(sel, ", "))
+	}
+	var add []string
+	for _, c := range cols {
+		if !slices.Contains(have, c) {
+			add = append(add, "'' AS "+c)
+		}
+	}
+	if len(add) == 0 {
+		return "cbioportal_raw." + table
+	}
+	return fmt.Sprintf("(SELECT *, %s FROM cbioportal_raw.%s)", strings.Join(add, ", "), table)
 }

@@ -50,26 +50,25 @@ type GenericAssayCountSummary struct {
 	TotalCount int    `json:"totalCount"`
 }
 
-// GenericAssayBinaryEnrichment is the generic-assay-binary-enrichments element.
+// GenericAssayBinaryEnrichment is the generic-assay-binary-enrichments element
+// (Java leaves name unset, so it is not serialized).
 type GenericAssayBinaryEnrichment struct {
 	Counts                      []GenericAssayCountSummary `json:"counts"`
 	GenericEntityMetaProperties map[string]string          `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []GroupStatistics          `json:"groupsStatistics"`
-	Name                        string                     `json:"name"`
 	PValue                      float64                    `json:"pValue"`
 	QValue                      float64                    `json:"qValue"`
 	StableID                    string                     `json:"stableId"`
 }
 
 // GenericAssayCategoricalEnrichment is the generic-assay-categorical-enrichments
-// element.
+// element (Java leaves name unset, so it is not serialized).
 type GenericAssayCategoricalEnrichment struct {
-	GenericEntityMetaProperties map[string]string `json:"genericEntityMetaProperties"`
-	GroupsStatistics            []GroupStatistics `json:"groupsStatistics"`
-	Name                        string            `json:"name"`
-	PValue                      float64           `json:"pValue"`
-	QValue                      float64           `json:"qValue"`
-	StableID                    string            `json:"stableId"`
+	GenericEntityMetaProperties map[string]string            `json:"genericEntityMetaProperties"`
+	GroupsStatistics            []CategoricalGroupStatistics `json:"groupsStatistics"`
+	PValue                      float64                      `json:"pValue"`
+	QValue                      float64                      `json:"qValue"`
+	StableID                    string                       `json:"stableId"`
 }
 
 // ---------------------------------------------------------------------------
@@ -400,19 +399,6 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 		}
 	}
 	return out
-}
-
-// genericAssayBinaryEnrichmentsFetch returns a correctly-typed empty array; the
-// binary categorical value semantics are not yet modelled in the staging tables.
-func (s *State) genericAssayBinaryEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []GenericAssayBinaryEnrichment{})
-}
-
-// genericAssayCategoricalEnrichmentsFetch returns a correctly-typed empty array.
-func (s *State) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []GenericAssayCategoricalEnrichment{})
 }
 
 // copyNumberEnrichmentsFetch computes per-gene discrete copy-number enrichment

@@ -134,27 +134,30 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 	// Query entity match (profile A). genesetId identifies GENESET entities.
 	queryEntity := fmt.Sprintf("%d", f.EntrezGeneID)
 	queryMatch := fmt.Sprintf("toString(entrez_gene_id) = '%s'", sqlLit(queryEntity))
+	sourceA := s.rawSource(tableA, "study_id", "profile_stable_id", "sample_id", "value", "entrez_gene_id")
 	if f.GenesetID != "" {
 		queryEntity = f.GenesetID
 		queryMatch = fmt.Sprintf("geneset_id = '%s'", sqlLit(f.GenesetID))
+		sourceA = s.rawSource(tableA, "study_id", "profile_stable_id", "sample_id", "value", "geneset_id")
 	}
 
 	hugoCol := "hugo_symbol"
 	entityCol := "toString(entrez_gene_id)"
+	sourceB := s.rawSource(tableB, geneMatrixCols...)
 	if tableB == "geneset_score_matrix" {
 		hugoCol = "''"
 		entityCol = "geneset_id"
+		sourceB = genesetScoreSource(s)
 	}
 
-	// Push the correlation into ClickHouse: rankCorr computes Spearman per entity
-	// over the samples shared with the query gene, and HAVING applies the
-	// threshold — so only the entities above it cross the wire (dozens–hundreds),
-	// not the whole profile-B matrix (millions of rows).
+	// Push the correlation into ClickHouse (spearmanSQL) so only the entities
+	// above the threshold cross the wire (dozens–hundreds), not the whole
+	// profile-B matrix (millions of rows).
 	querySub := fmt.Sprintf(
-		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM cbioportal_raw.%s "+
+		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM %s "+
 			"WHERE study_id = '%s' AND profile_stable_id = '%s' AND %s "+
 			"AND toFloat64OrNull(value) IS NOT NULL%s",
-		tableA, sqlLit(metaA.StudyID), sqlLit(metaA.StableID), queryMatch, sampleFilter)
+		sourceA, sqlLit(metaA.StudyID), sqlLit(metaA.StableID), queryMatch, sampleFilter)
 
 	type coexpRow struct {
 		Entity string   `json:"entity"`
@@ -162,16 +165,13 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		N      int      `json:"n"`
 		SC     *float64 `json:"sc"`
 	}
-	rows, err := ch.Query[coexpRow](s.CH, fmt.Sprintf(
-		"SELECT %s AS entity, any(%s) AS hugo, toInt64(count()) AS n, "+
-			"rankCorr(toFloat64OrZero(b.value), q.qval) AS sc "+
-			"FROM cbioportal_raw.%s AS b INNER JOIN (%s) AS q USING (sample_id) "+
+	rows, err := ch.Query[coexpRow](s.CH, spearmanSQL(fmt.Sprintf(
+		"SELECT %s AS entity, %s AS hugo, toFloat64OrZero(b.value) AS x, q.qval AS y "+
+			"FROM %s AS b INNER JOIN (%s) AS q USING (sample_id) "+
 			"WHERE b.study_id = '%s' AND b.profile_stable_id = '%s' "+
-			"AND toFloat64OrNull(b.value) IS NOT NULL "+
-			"GROUP BY entity "+
-			"HAVING n > 2 AND entity != '%s' AND isNotNull(sc) AND abs(sc) >= %g",
-		entityCol, hugoCol, tableB, querySub,
-		sqlLit(metaB.StudyID), sqlLit(metaB.StableID), sqlLit(queryEntity), threshold))
+			"AND toFloat64OrNull(b.value) IS NOT NULL",
+		entityCol, hugoCol, sourceB, querySub, sqlLit(metaB.StudyID), sqlLit(metaB.StableID)),
+		fmt.Sprintf("entity != '%s'", sqlLit(queryEntity)), threshold))
 	if err != nil {
 		fail(w, err)
 		return
@@ -774,4 +774,19 @@ func percentile(values []float64, p float64) float64 {
 	lower := sorted[int(fpos)-1]
 	upper := sorted[int(fpos)]
 	return lower + d*(upper-lower)
+}
+
+// spearmanSQL computes, per entity of rows (columns entity, hugo, x, y), the
+// Spearman correlation sc of x and y over n pairs, keeping entities with
+// n > 2 that also pass keep and whose |sc| reaches threshold. An entity whose
+// x or y values are all equal has no rank correlation and is dropped before
+// it is computed (ClickHouse's rankCorr rejects such input).
+func spearmanSQL(rows, keep string, threshold float64) string {
+	return fmt.Sprintf(
+		"SELECT entity, hugo, n, arrayReduce('rankCorr', xs, ys) AS sc FROM ("+
+			"SELECT entity, any(hugo) AS hugo, toInt64(count()) AS n, groupArray(x) AS xs, groupArray(y) AS ys "+
+			"FROM (%s) GROUP BY entity "+
+			"HAVING n > 2 AND %s AND arrayMin(xs) != arrayMax(xs) AND arrayMin(ys) != arrayMax(ys)) "+
+			"WHERE abs(sc) >= %g",
+		rows, keep, threshold)
 }

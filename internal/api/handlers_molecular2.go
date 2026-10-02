@@ -520,20 +520,14 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 		entrez[i] = id.EntrezGeneID
 	}
 	genes := intListSQL(entrez)
-	// Aggregate the requested genes' mutations to (entrez, protein-position)
-	// once, then fold each requested (gene, start, end) range against that
-	// reduced set. A mutation belongs to its own entrez id, or, without one, to
-	// its Hugo symbol's reference gene; rows of neither requested kind are
-	// dropped before the join.
+	// Aggregate the requested genes' mutations (the stored records, under
+	// their resolved gene) to (entrez, protein-position) once, then fold each
+	// requested (gene, start, end) range against that reduced set.
 	sql := fmt.Sprintf(
 		"WITH mut AS ("+
-			"SELECT toInt64OrNull(if(toInt64OrNull(m.entrez_gene_id) > 0, m.entrez_gene_id, toString(g.entrez_gene_id))) AS g, "+
-			"toInt64OrNull(splitByChar('/', m.protein_position)[1]) AS p, count() AS c "+
-			"FROM (SELECT hugo_symbol, entrez_gene_id, protein_position FROM cbioportal_raw.mutation_extended "+
-			"WHERE (toInt64OrNull(entrez_gene_id) IN (%[2]s) OR upper(hugo_symbol) IN "+
-			"(SELECT upper(hugo_gene_symbol) FROM cbioportal_ref.gene WHERE entrez_gene_id IN (%[2]s))) "+
-			"AND toInt64OrNull(splitByChar('/', protein_position)[1]) IS NOT NULL) m "+
-			"LEFT JOIN cbioportal_ref.gene g ON upper(m.hugo_symbol) = upper(g.hugo_gene_symbol) "+
+			"SELECT toInt64OrNull(entrez_gene_id) AS g, "+
+			"toInt64OrNull(splitByChar('/', protein_position)[1]) AS p, count() AS c "+
+			"FROM mutation WHERE g IN (%[2]s) AND p IS NOT NULL "+
 			"GROUP BY g, p) "+
 			"SELECT ids.e AS entrezGeneId, ids.s AS proteinPosStart, ids.en AS proteinPosEnd, "+
 			"toInt64(sum(if(mut.g = ids.e AND mut.p >= ids.s AND mut.p <= ids.en, mut.c, 0))) AS count "+

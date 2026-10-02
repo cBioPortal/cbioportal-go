@@ -3,13 +3,13 @@ package api
 import "net/http"
 
 func (s *State) routes(mux *http.ServeMux) {
+	s.mux = mux
 	// Bootstrap / config
 	mux.HandleFunc("GET /config_service", s.configService)
 	mux.HandleFunc("GET /api/info", s.info)
 	mux.HandleFunc("GET /api/cancer-types", s.cancerTypes)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
-	// Catch-all: portal UI at "/", and a body-draining [] for any unmatched
-	// endpoint (Genome Nexus /proxy, features not yet implemented).
+	// Catch-all: 404 for unknown /api/ paths, the portal UI for the rest.
 	mux.HandleFunc("/", s.catchAll)
 
 	// Session service + public virtual studies
