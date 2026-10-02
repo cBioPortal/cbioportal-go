@@ -3,8 +3,6 @@ package transform
 import (
 	"fmt"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // geneMode selects which cbioportal-core importer's gene lookup a data
@@ -129,7 +127,7 @@ type geneKeySource struct {
 // symbol. mirna = 1 marks matrix lines stored through ImportTabDelimData's
 // microRNA branch, which creates no CNA events. Without a reference DB every
 // key maps to itself.
-func buildGeneKeyMap(c *ch.Client, rawDB, targetDB, refDB string, hasRef bool) error {
+func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) error {
 	resolve := func(mode geneMode, keys string) string {
 		if !hasRef {
 			return "SELECT *, toInt64OrZero(ent) AS gene_entrez, sym AS gene_hugo, toUInt8(1) AS gene_direct, toUInt8(0) AS gene_mirna FROM (" + keys + ")"

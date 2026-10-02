@@ -3,8 +3,6 @@ package transform
 import (
 	"fmt"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // sampleListSQL builds the `sample_list` view (one row per list x sample).
@@ -18,7 +16,7 @@ import (
 // AddCaseList's "<study>_all" list (every sample, category "other", name and
 // description "All cases in study"), unless a case list with that stable id
 // already exists, which is kept.
-func sampleListSQL(c *ch.Client, rawDB string) string {
+func sampleListSQL(c *client, rawDB string) string {
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
 	empty := "SELECT '' AS study_id, '' AS list_id, '' AS category, '' AS name, '' AS description, '' AS sample_id WHERE 0"
 	if !exists("clinical_sample") {
@@ -106,7 +104,7 @@ func javaIntSQL(col string) string {
 // or absent read "NA", integer fields -1, and records repeating the importer's
 // SV key (sample, both sites' gene, chromosome, position, region number and
 // transcript, event info) are stored once.
-func structuralVariantSQL(c *ch.Client, rawDB, targetDB string) string {
+func structuralVariantSQL(c *client, rawDB, targetDB string) string {
 	svc, _ := c.TableColumns("structural_variant")
 	// Absent gene columns are added as empty strings so the gene-key joins
 	// always have a column to match.

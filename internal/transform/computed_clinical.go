@@ -3,8 +3,6 @@ package transform
 import (
 	"fmt"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // computedClinicalAttributes adds the sample attributes cbioportal-core derives
@@ -19,7 +17,7 @@ import (
 //     (DaoPatient.createSampleCountClinicalData).
 //
 // Computed values replace any staged value of the same attribute and sample.
-func computedClinicalAttributes(c *ch.Client, rawDB, targetDB string, hasMutations, hasSegments bool) error {
+func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations, hasSegments bool) error {
 	var computed []string
 	if hasMutations {
 		computed = append(computed, fmt.Sprintf(
@@ -91,7 +89,7 @@ func computedClinicalAttributes(c *ch.Client, rawDB, targetDB string, hasMutatio
 
 // samplesPerPatient adds the SAMPLE_COUNT patient attribute to the
 // clinical_patient view, replacing any staged value.
-func samplesPerPatient(c *ch.Client, rawDB, targetDB string) error {
+func samplesPerPatient(c *client, rawDB, targetDB string) error {
 	computed := fmt.Sprintf(
 		"SELECT study_id, patient_id, 'SAMPLE_COUNT' AS attr_id, toString(uniqExact(sample_id)) AS attr_value "+
 			"FROM `%s`.clinical_sample WHERE sample_id != '' AND patient_id != '' GROUP BY study_id, patient_id", rawDB)

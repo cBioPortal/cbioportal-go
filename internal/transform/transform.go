@@ -19,9 +19,11 @@ type ViewCount struct {
 	Rows uint64
 }
 
-// Apply builds every applicable view in targetDB reading from rawDB, resolving
-// gene symbols against refDB when present.
-func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
+// Apply builds every view and table the API reads in targetDB from rawDB,
+// resolving gene symbols against refDB when present. Objects whose staging
+// data is absent are built empty, with the same columns (see stagingSources).
+func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
+	c := newClient(base, rawDB)
 	if _, err := c.ExecuteServerwide(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", targetDB)); err != nil {
 		return nil, err
 	}
@@ -74,11 +76,9 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		return nil
 	}
 
-	if exists("cancer_study") {
-		if err := make("cancer_study", fmt.Sprintf(
-			"SELECT study_id, name, short_name, description, type_of_cancer AS cancer_type_id, groups, pmid, citation, reference_genome, add_global_case_list = 'true' AS add_global_case_list FROM `%s`.cancer_study", rawDB)); err != nil {
-			return nil, err
-		}
+	if err := make("cancer_study", fmt.Sprintf(
+		"SELECT study_id, name, short_name, description, type_of_cancer AS cancer_type_id, groups, pmid, citation, reference_genome, add_global_case_list = 'true' AS add_global_case_list FROM `%s`.cancer_study", rawDB)); err != nil {
+		return nil, err
 	}
 	// type_of_cancer holds the study-supplied cancer types (cbioportal-core
 	// ImportTypesOfCancers: id and parent lower-cased, short name = the id as
@@ -94,95 +94,58 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	if err := make("type_of_cancer", tocSQL); err != nil {
 		return nil, err
 	}
-	if exists("clinical_attribute_meta") {
-		if err := make("clinical_attribute_meta", fmt.Sprintf(
-			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)); err != nil {
+	for _, v := range []view{
+		{"clinical_attribute_meta", fmt.Sprintf(
+			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)},
+		{"molecular_profile", fmt.Sprintf(
+			"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type FROM `%s`.genetic_profile", rawDB)},
+		{"sample_list", sampleListSQL(c, rawDB)},
+		{"gene_panel", genePanelSQL(rawDB, refDB, hasRef)},
+		{"patient", fmt.Sprintf(
+			"SELECT DISTINCT study_id, patient_id FROM `%s`.clinical_patient WHERE patient_id != ''", rawDB)},
+		{"sample", fmt.Sprintf(
+			"SELECT DISTINCT study_id, sample_id, patient_id FROM `%s`.clinical_sample WHERE sample_id != ''", rawDB)},
+		{"mutation", mutationSQL(c, rawDB, targetDB)},
+		{"structural_variant", structuralVariantSQL(c, rawDB, targetDB)},
+	} {
+		if err := make(v.name, v.sql); err != nil {
 			return nil, err
 		}
 	}
-	if exists("genetic_profile") {
-		if err := make("molecular_profile", fmt.Sprintf(
-			"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type FROM `%s`.genetic_profile", rawDB)); err != nil {
-			return nil, err
-		}
-	}
-	if exists("sample_list") || exists("clinical_sample") {
-		if err := make("sample_list", sampleListSQL(c, rawDB)); err != nil {
-			return nil, err
-		}
-	}
-	if exists("gene_panel") {
-		if err := make("gene_panel", genePanelSQL(rawDB, refDB, hasRef)); err != nil {
-			return nil, err
-		}
-	}
-	if exists("clinical_patient") {
-		if err := make("patient", fmt.Sprintf(
-			"SELECT DISTINCT study_id, patient_id FROM `%s`.clinical_patient WHERE patient_id != ''", rawDB)); err != nil {
-			return nil, err
-		}
-	}
-	if exists("clinical_sample") {
-		if err := make("sample", fmt.Sprintf(
-			"SELECT DISTINCT study_id, sample_id, patient_id FROM `%s`.clinical_sample WHERE sample_id != ''", rawDB)); err != nil {
-			return nil, err
-		}
-	}
-	if exists("mutation_extended") {
-		if err := make("mutation", mutationSQL(c, rawDB, targetDB)); err != nil {
-			return nil, err
-		}
-	}
-	if exists("structural_variant") {
-		if err := make("structural_variant", structuralVariantSQL(c, rawDB, targetDB)); err != nil {
-			return nil, err
-		}
-	}
+	// Discrete CNA comes from the wide matrices and the long files; with
+	// neither staged, the long-file stand-in yields the empty view.
 	cnaMatrix, cnaLong := exists("cna_matrix"), exists("cna_discrete_long")
-	if cnaMatrix || cnaLong {
-		if err := make("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong)); err != nil {
-			return nil, err
-		}
+	if err := make("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong || !cnaMatrix)); err != nil {
+		return nil, err
 	}
-	if exists("cna_seg") {
-		if err := make("seg", fmt.Sprintf(
-			"SELECT study_id, id AS sample_id, chrom, loc_start AS start, loc_end AS end, num_mark AS num_probes, seg_mean AS segment_mean FROM `%s`.cna_seg", rawDB)); err != nil {
-			return nil, err
-		}
+	if err := make("seg", fmt.Sprintf(
+		"SELECT study_id, id AS sample_id, chrom, loc_start AS start, loc_end AS end, num_mark AS num_probes, seg_mean AS segment_mean FROM `%s`.cna_seg", rawDB)); err != nil {
+		return nil, err
 	}
-	if exists("clinical_sample") {
-		if err := clinicalLong(c, rawDB, targetDB, "clinical_sample", "sample_id"); err != nil {
-			return nil, err
-		}
-		created = append(created, "clinical_sample")
+	if err := clinicalLong(c, rawDB, targetDB, "clinical_sample", "sample_id"); err != nil {
+		return nil, err
 	}
-	if exists("clinical_patient") {
-		if err := clinicalLong(c, rawDB, targetDB, "clinical_patient", "patient_id"); err != nil {
-			return nil, err
-		}
-		created = append(created, "clinical_patient")
+	created = append(created, "clinical_sample")
+	if err := clinicalLong(c, rawDB, targetDB, "clinical_patient", "patient_id"); err != nil {
+		return nil, err
 	}
+	created = append(created, "clinical_patient")
 
 	// sample_profile is materialized rather than a view: it is small, read on
 	// every study-view and alteration query, and expensive to derive (it scans
 	// every profile's staging table), like prod's own sample_profile table.
-	hasSampleProfile := false
-	if sql, ok := sampleProfileSQL(c, rawDB, targetDB); ok {
-		engine, _ := c.Execute(fmt.Sprintf(
-			"SELECT engine FROM system.tables WHERE database = '%s' AND name = 'sample_profile' FORMAT TabSeparated", targetDB))
-		if strings.TrimSpace(engine) == "View" {
-			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`sample_profile`", targetDB)); err != nil {
-				return nil, err
-			}
+	spSQL, hasSampleProfile := sampleProfileSQL(c, rawDB, targetDB)
+	if engineOf("sample_profile") == "View" {
+		if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`sample_profile`", targetDB)); err != nil {
+			return nil, err
 		}
-		if _, err := c.Execute(fmt.Sprintf(
-			"CREATE OR REPLACE TABLE `%s`.`sample_profile` ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, sample_id) AS %s",
-			targetDB, sql)); err != nil {
-			return nil, fmt.Errorf("creating table sample_profile: %w", err)
-		}
-		created = append(created, "sample_profile")
-		hasSampleProfile = true
 	}
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE OR REPLACE TABLE `%s`.`sample_profile` ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, sample_id) AS %s",
+		targetDB, spSQL)); err != nil {
+		return nil, fmt.Errorf("creating table sample_profile: %w", err)
+	}
+	created = append(created, "sample_profile")
 	if hasSampleProfile && exists("clinical_sample") && exists("clinical_attribute_meta") {
 		if err := computedClinicalAttributes(c, rawDB, targetDB, exists("mutation_extended"), exists("cna_seg")); err != nil {
 			return nil, err
@@ -191,26 +154,18 @@ func Apply(c *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 
 	// Prod-aligned column-store `*_derived` views (built from our staging with
 	// prod's exact column names), created after the base views they read.
-	type derived struct {
-		name  string
-		guard bool
-		sql   string
-	}
 	// Ordered so every table is built after the tables it reads.
-	for _, d := range []derived{
-		{"gene_panel_to_gene_derived", exists("gene_panel"), genePanelToGeneDerivedSQL(targetDB, refDB)},
-		{"sample_to_gene_panel_derived", hasSampleProfile, sampleToGenePanelDerivedSQL(targetDB)},
-		{"sample_derived", exists("clinical_sample"), sampleDerivedSQL(rawDB, refDB, targetDB)},
-		{"clinical_data_derived", exists("clinical_sample") || exists("clinical_patient"), clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
-		{"genomic_event_derived", exists("mutation_extended") && (cnaMatrix || cnaLong) && exists("structural_variant") && hasSampleProfile, genomicEventDerivedSQL(rawDB, refDB, targetDB, hasGenomeGenes)},
-		{"genetic_alteration_derived", exists("cna_discrete_long") && exists("cna_matrix") && exists("methylation_matrix") && exists("mrna_expression_matrix"), geneticAlterationDerivedSQL(rawDB, targetDB)},
-		{"generic_assay_data_derived", exists("generic_assay_matrix"), genericAssayDataDerivedSQL(rawDB, refDB, targetDB)},
-		{"clinical_event_derived", exists("timeline"), clinicalEventDerivedSQL(rawDB, refDB)},
-		{"clinical_event_data_derived", exists("timeline"), clinicalEventDataDerivedSQL(rawDB, refDB)},
+	for _, d := range []view{
+		{"gene_panel_to_gene_derived", genePanelToGeneDerivedSQL(targetDB, refDB)},
+		{"sample_to_gene_panel_derived", sampleToGenePanelDerivedSQL(targetDB)},
+		{"sample_derived", sampleDerivedSQL(rawDB, refDB, targetDB)},
+		{"clinical_data_derived", clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
+		{"genomic_event_derived", genomicEventDerivedSQL(rawDB, refDB, targetDB, hasGenomeGenes)},
+		{"genetic_alteration_derived", geneticAlterationDerivedSQL(rawDB, targetDB)},
+		{"generic_assay_data_derived", genericAssayDataDerivedSQL(rawDB, refDB, targetDB)},
+		{"clinical_event_derived", clinicalEventDerivedSQL(rawDB, refDB)},
+		{"clinical_event_data_derived", clinicalEventDataDerivedSQL(rawDB, refDB)},
 	} {
-		if !d.guard {
-			continue
-		}
 		if err := materialize(d.name, d.sql); err != nil {
 			return nil, err
 		}
@@ -255,7 +210,7 @@ var snapshotted = []struct{ name, key string }{
 }
 
 // snapshotView replaces a view with a MergeTree table holding its rows.
-func snapshotView(c *ch.Client, db, name, orderBy string) error {
+func snapshotView(c *client, db, name, orderBy string) error {
 	tmp := "__snapshot_" + name
 	stmts := []string{
 		fmt.Sprintf("CREATE OR REPLACE TABLE `%[1]s`.`%[2]s` ENGINE = MergeTree ORDER BY %[3]s AS SELECT * FROM `%[1]s`.`%[4]s`", db, tmp, orderBy, name),
@@ -278,7 +233,7 @@ func snapshotView(c *ch.Client, db, name, orderBy string) error {
 // is non-empty, so an empty namespace declared by one study does not leak an
 // empty column onto another study's rows. tablePrefix is the table alias (e.g.
 // "m."). Returns "'{}'" when no namespace columns are present.
-func namespaceColumnsExpr(c *ch.Client, rawDB string, has map[string]bool, tablePrefix string) string {
+func namespaceColumnsExpr(c *client, rawDB string, has map[string]bool, tablePrefix string) string {
 	names := distinctNamespaces(c, rawDB)
 	var frags []string
 	for _, name := range names {
@@ -288,7 +243,7 @@ func namespaceColumnsExpr(c *ch.Client, rawDB string, has map[string]bool, table
 		}
 		prefix := strings.ToLower(name) + "_"
 		var subCols, nonEmpty []string
-		for col := range has {
+		for _, col := range sortedColumnNames(has) {
 			if strings.HasPrefix(col, prefix) && len(col) > len(prefix) {
 				sub := col[len(prefix):]
 				// Numeric values are emitted as JSON numbers, as the importer's
@@ -316,7 +271,7 @@ func namespaceColumnsExpr(c *ch.Client, rawDB string, has map[string]bool, table
 
 // distinctNamespaces returns the distinct namespace names declared across all
 // molecular profiles (the comma-separated `namespaces` meta field).
-func distinctNamespaces(c *ch.Client, rawDB string) []string {
+func distinctNamespaces(c *client, rawDB string) []string {
 	if !hasColumn(c, rawDB, "genetic_profile", "namespaces") {
 		return nil
 	}
@@ -335,7 +290,7 @@ func distinctNamespaces(c *ch.Client, rawDB string) []string {
 }
 
 // hasColumn reports whether a staging table has a column (schema evolution safe).
-func hasColumn(c *ch.Client, rawDB, table, col string) bool {
+func hasColumn(c *client, rawDB, table, col string) bool {
 	text, _ := c.Execute(fmt.Sprintf(
 		"SELECT count() FROM system.columns WHERE database = '%s' AND table = '%s' AND name = '%s' FORMAT TabSeparated", rawDB, table, col))
 	return strings.TrimSpace(text) == "1"
@@ -345,7 +300,7 @@ func hasColumn(c *ch.Client, rawDB, table, col string) bool {
 // stores — gene resolved through gene_key_map (unresolved records are skipped,
 // hugo_symbol / entrez_gene_id are the reference gene's) — that pass the default
 // MutationFilter.
-func mutationSQL(c *ch.Client, rawDB, targetDB string) string {
+func mutationSQL(c *client, rawDB, targetDB string) string {
 	entrez := "toString(gk.resolved_entrez_gene_id)"
 	join := geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id")
 	// Custom driver annotations (cbp_driver*): projected as normalized columns so
@@ -412,7 +367,7 @@ func mutationSQL(c *ch.Client, rawDB, targetDB string) string {
 // and sample). Genes are resolved through gene_key_map; unresolved lines are
 // skipped, as are matrix lines stored through the microRNA branch, which
 // ImportTabDelimData keeps out of cna_event.
-func cnaSQL(c *ch.Client, rawDB, targetDB string, fromMatrix, fromLong bool) string {
+func cnaSQL(c *client, rawDB, targetDB string, fromMatrix, fromLong bool) string {
 	const levels = "('-2', '-1', '0', '1', '2')"
 	var parts []string
 	if fromMatrix {
@@ -458,7 +413,7 @@ func missingClinicalValue(col string) string {
 		col)
 }
 
-func clinicalLong(c *ch.Client, rawDB, targetDB, srcTable, idCol string) error {
+func clinicalLong(c *client, rawDB, targetDB, srcTable, idCol string) error {
 	sel, err := clinicalLongSQL(c, rawDB, srcTable, idCol)
 	if err != nil {
 		return err
@@ -469,7 +424,7 @@ func clinicalLong(c *ch.Client, rawDB, targetDB, srcTable, idCol string) error {
 
 // clinicalLongSQL unpivots a wide clinical staging table into
 // (study_id, <id>, attr_id, attr_value) rows, dropping missing values.
-func clinicalLongSQL(c *ch.Client, rawDB, srcTable, idCol string) (string, error) {
+func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 	cols, err := c.TableColumns(srcTable)
 	if err != nil {
 		return "", err

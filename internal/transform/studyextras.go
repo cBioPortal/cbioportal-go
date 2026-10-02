@@ -3,8 +3,6 @@ package transform
 import (
 	"fmt"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // view is a named view definition.
@@ -18,7 +16,7 @@ type view struct {
 // their genes, MutSig genes, and study tags. Every view is always created —
 // over an empty, correctly-typed SELECT when the study files were never
 // ingested — so the API can query them unconditionally.
-func studyExtraViews(c *ch.Client, rawDB, targetDB, refDB string, hasRef bool, exists func(string) bool) []view {
+func studyExtraViews(c *client, rawDB, targetDB, refDB string, hasRef bool, exists func(string) bool) []view {
 	trim := func(col string) string { return "trimBoth(`" + col + "`)" }
 	var out []view
 

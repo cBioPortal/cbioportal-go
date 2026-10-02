@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // mutationFilterSQL is cBioPortal's default MutationFilter (no
@@ -54,11 +52,12 @@ func sanitizeIdentSQL(expr string) string {
 // Header ids come from the ingest-captured `profile_sample` staging table; for
 // raw databases ingested before it existed, the distinct sample ids of each
 // matrix staging table stand in for the header.
-func sampleProfileSQL(c *ch.Client, rawDB, targetDB string) (string, bool) {
+//
+// The SQL is always valid; profiled reports whether any sample can be
+// profiled at all (profiles, clinical samples and a membership source staged).
+func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled bool) {
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
-	if !exists("genetic_profile") || !exists("clinical_sample") {
-		return "", false
-	}
+	profiled = exists("genetic_profile") && exists("clinical_sample")
 	gpCols, _ := c.TableColumns("genetic_profile")
 	gpCol := func(name string) string {
 		if gpCols[name] {
@@ -172,7 +171,8 @@ func sampleProfileSQL(c *ch.Client, rawDB, targetDB string) (string, bool) {
 					"WHERE (d.study_id, d.profile_stable_id) IN %s", decl, samples, patientLevel))
 	}
 	if len(sources) == 0 {
-		return "", false
+		profiled = false
+		sources = append(sources, "SELECT '' AS study_id, '' AS sample_id, '' AS profile_stable_id, '' AS panel, toUInt8(1) AS prio WHERE 0")
 	}
 
 	base := fmt.Sprintf(
@@ -186,7 +186,7 @@ func sampleProfileSQL(c *ch.Client, rawDB, targetDB string) (string, bool) {
 		gpCol("gene_panel"), strings.Join(sources, " UNION ALL "), rawDB, samples)
 
 	if !exists("sample_list") {
-		return base, true
+		return base, profiled
 	}
 	missing := fmt.Sprintf(
 		"SELECT sl.study_id AS study_id, sl.sample_id AS sample_id, gp.profile_stable_id AS profile_stable_id, "+
@@ -197,5 +197,5 @@ func sampleProfileSQL(c *ch.Client, rawDB, targetDB string) (string, bool) {
 			"INNER JOIN %[2]s s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id "+
 			"WHERE (sl.study_id, sl.sample_id) NOT IN (SELECT study_id, sample_id FROM base WHERE alteration_type = 'MUTATION_EXTENDED')",
 		rawDB, samples)
-	return "WITH base AS (" + base + ") SELECT * FROM base UNION ALL " + missing, true
+	return "WITH base AS (" + base + ") SELECT * FROM base UNION ALL " + missing, profiled
 }
