@@ -190,14 +190,14 @@ on every push and pull request. The full frontend e2e suite
 
 ## Dependencies
 
-Standard library by default: HTTP serving and routing, JSON, gzip, the
-OncoKB reverse proxy and profiling all come from it, so builds are a single
-`go build` with no supply-chain or upgrade churn. A third-party dependency is
-added only for a measured payoff that is hard to get otherwise — the likely
-candidate is a native-protocol ClickHouse driver, if profiling shows JSON
-transfer and decoding dominate large responses. Statistics stay hand-ported:
+Standard library first: HTTP serving and routing, JSON, gzip, the OncoKB
+reverse proxy and profiling all come from it, so a build is a single
+`go build`. Official, well-maintained dependencies (vendor libraries such as
+ClickHouse's Go driver, Go-team `golang.org/x/...` packages) are fine when they
+earn their place and bring few transitive dependencies; community packages
+for what the stdlib already covers are avoided. Statistics stay hand-ported:
 results must match the Java backend (commons-math, Datumbox) to the last
-digit, which general-purpose libraries don't.
+digit. CI runs `govulncheck` on every push.
 
 ## Notes learned porting
 

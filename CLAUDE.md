@@ -49,11 +49,13 @@ full e2e weekly/on demand.
 
 ## Dependencies
 
-Standard library by default. A third-party dependency needs a measured
-payoff that is hard to get otherwise (e.g. a native-protocol ClickHouse
-driver if profiling shows JSON transfer/decoding dominates large responses).
-No routers, ORMs, validation or stats libraries: the stdlib covers routing
-and HTTP, and exact Java parity requires hand ports of the statistics anyway.
+Standard library first. Official, well-maintained dependencies are fine when
+they earn their place — vendor libraries (e.g. ClickHouse's own Go driver)
+and Go-team `golang.org/x/...` packages — provided they bring few transitive
+dependencies. Avoid bloat and unmaintained or community-only packages for
+things the stdlib already covers (routers, ORMs, validation, logging).
+Statistics stay hand-ported: exact Java parity requires it. CI runs
+`govulncheck` on every push.
 
 ## GitHub
 
