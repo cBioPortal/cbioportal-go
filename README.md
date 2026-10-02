@@ -4,7 +4,7 @@
 
 A Go reimplementation of the cBioPortal backend: the study importer and the
 REST API, backed by ClickHouse. The unmodified cBioPortal web frontend runs on
-top of it. Go standard library only — no third-party Go dependencies.
+top of it. Built on the Go standard library (see [Dependencies](#dependencies)).
 
 ## How it fits together
 
@@ -187,6 +187,17 @@ CI (`.github/workflows/ci.yml`) runs gofmt, vet and the unit tests, then the
 contract tests against a ClickHouse service loaded with the fixture studies,
 on every push and pull request. The full frontend e2e suite
 (`.github/workflows/e2e.yml`) runs weekly and on demand.
+
+## Dependencies
+
+Standard library by default: HTTP serving and routing, JSON, gzip, the
+OncoKB reverse proxy and profiling all come from it, so builds are a single
+`go build` with no supply-chain or upgrade churn. A third-party dependency is
+added only for a measured payoff that is hard to get otherwise — the likely
+candidate is a native-protocol ClickHouse driver, if profiling shows JSON
+transfer and decoding dominate large responses. Statistics stay hand-ported:
+results must match the Java backend (commons-math, Datumbox) to the last
+digit, which general-purpose libraries don't.
 
 ## Notes learned porting
 
