@@ -198,3 +198,7 @@ on every push and pull request. The full frontend e2e suite
 - An `io.Reader` that returns one line per `Read` makes the HTTP transport do
   tiny writes; `BodyReader.Read` fills the whole buffer (12× faster on the seg
   file).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
