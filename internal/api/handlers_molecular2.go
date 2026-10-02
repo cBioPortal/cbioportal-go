@@ -521,16 +521,19 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 	}
 	genes := intListSQL(entrez)
 	// Aggregate the requested genes' mutations (the stored records, under
-	// their resolved gene) to (entrez, protein-position) once, then fold each
-	// requested (gene, start, end) range against that reduced set.
+	// their resolved gene) to (entrez, protein start, protein end) once, then
+	// count, per requested (gene, start, end), the mutations lying within it
+	// (MutationMapper.getMutationCountByPosition). A protein position is
+	// "start[-end][/length]"; a single position is both start and end.
 	sql := fmt.Sprintf(
 		"WITH mut AS ("+
-			"SELECT toInt64OrNull(entrez_gene_id) AS g, "+
-			"toInt64OrNull(splitByChar('/', protein_position)[1]) AS p, count() AS c "+
-			"FROM mutation WHERE g IN (%[2]s) AND p IS NOT NULL "+
-			"GROUP BY g, p) "+
+			"SELECT toInt64OrNull(entrez_gene_id) AS g, splitByChar('/', protein_position)[1] AS r, "+
+			"toInt64OrNull(extract(r, '^(-?[0-9]+)')) AS ps, "+
+			"if(match(r, '^-?[0-9]+-'), toInt64OrNull(extract(r, '^-?[0-9]+-(-?[0-9]+)')), ps) AS pe, count() AS c "+
+			"FROM mutation WHERE g IN (%[2]s) AND ps IS NOT NULL AND pe IS NOT NULL "+
+			"GROUP BY g, r, ps, pe) "+
 			"SELECT ids.e AS entrezGeneId, ids.s AS proteinPosStart, ids.en AS proteinPosEnd, "+
-			"toInt64(sum(if(mut.g = ids.e AND mut.p >= ids.s AND mut.p <= ids.en, mut.c, 0))) AS count "+
+			"toInt64(sum(if(mut.g = ids.e AND mut.ps >= ids.s AND mut.pe <= ids.en, mut.c, 0))) AS count "+
 			"FROM (SELECT * FROM values('e Int64, s Int64, en Int64', %[1]s)) ids "+
 			"CROSS JOIN mut GROUP BY entrezGeneId, proteinPosStart, proteinPosEnd",
 		strings.Join(valTuples, ", "), genes)

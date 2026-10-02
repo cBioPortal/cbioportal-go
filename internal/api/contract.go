@@ -463,8 +463,8 @@ type legacyStudy struct {
 	Name            string `json:"name"`
 	Description     string `json:"description"`
 	PublicStudy     bool   `json:"publicStudy"`
-	Pmid            string `json:"pmid"`
-	Citation        string `json:"citation"`
+	Pmid            string `json:"pmid,omitempty"`
+	Citation        string `json:"citation,omitempty"`
 	Groups          string `json:"groups"`
 	Status          int    `json:"status"`
 	ImportDate      string `json:"importDate,omitempty"`
@@ -483,13 +483,14 @@ func (s *State) legacyStudies() map[string]json.RawMessage {
 		Citation        string `json:"citation"`
 		Groups          string `json:"groups"`
 		ReferenceGenome string `json:"referenceGenome"`
+		Public          int    `json:"public"`
 	}
 	out := map[string]json.RawMessage{}
 	if s.CH == nil {
 		return out
 	}
 	rows, err := cachedQuery[row](s, "SELECT study_id AS studyId, cancer_type_id AS cancerTypeId, name, description, "+
-		"pmid, citation, groups, reference_genome AS referenceGenome FROM cancer_study")
+		"pmid, citation, groups, reference_genome AS referenceGenome, "+s.studyPublicSQL("")+" AS public FROM cancer_study")
 	if err != nil {
 		return out
 	}
@@ -497,7 +498,7 @@ func (s *State) legacyStudies() map[string]json.RawMessage {
 	for _, r := range rows {
 		b, _ := json.Marshal(legacyStudy{
 			StudyID: r.StudyID, CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description,
-			PublicStudy: strings.Contains(r.Groups, "PUBLIC"), Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups,
+			PublicStudy: r.Public != 0, Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups,
 			ImportDate: dates[r.StudyID], ReferenceGenome: referenceGenome(r.ReferenceGenome), ReadPermission: true,
 		})
 		out[r.StudyID] = b

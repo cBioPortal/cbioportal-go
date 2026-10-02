@@ -156,7 +156,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		parts = append(parts, fmt.Sprintf(
 			"SELECT %s, toUInt32(%d) AS grp, "+
 				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v "+
-				"FROM (SELECT *, toFloat64OrNull(value) AS x FROM cbioportal_raw.%s "+
+				"FROM (SELECT *, toFloat64OrNull("+javaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
 				"WHERE (study_id, profile_stable_id, sample_id) IN (%s)) WHERE isFinite(x)",
 			key, gi, table, tripleIn(triples)))
 	}

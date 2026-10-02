@@ -13,31 +13,47 @@ import (
 // ---------- Molecular profiles ----------
 
 type mpRow struct {
-	MolecularProfileID      string `json:"molecularProfileId"`
-	StudyID                 string `json:"studyId"`
-	MolecularAlterationType string `json:"molecularAlterationType"`
-	Datatype                string `json:"datatype"`
-	Name                    string `json:"name"`
-	Description             string `json:"description"`
-	ShowFlag                int    `json:"showFlag"`
-	GenericAssayType        string `json:"genericAssayType"`
+	MolecularProfileID      string   `json:"molecularProfileId"`
+	StudyID                 string   `json:"studyId"`
+	MolecularAlterationType string   `json:"molecularAlterationType"`
+	Datatype                string   `json:"datatype"`
+	Name                    string   `json:"name"`
+	Description             string   `json:"description"`
+	ShowFlag                int      `json:"showFlag"`
+	GenericAssayType        string   `json:"genericAssayType"`
+	PivotThreshold          *float64 `json:"pivotThreshold"`
+	SortOrder               *string  `json:"sortOrder"`
+	PatientLevel            int      `json:"patientLevel"`
 }
 
 type MolecularProfile struct {
-	MolecularProfileID       string `json:"molecularProfileId"`
-	StudyID                  string `json:"studyId"`
-	MolecularAlterationType  string `json:"molecularAlterationType"`
-	Datatype                 string `json:"datatype"`
-	Name                     string `json:"name"`
-	Description              string `json:"description"`
-	ShowProfileInAnalysisTab bool   `json:"showProfileInAnalysisTab"`
-	PatientLevel             bool   `json:"patientLevel"`
-	GenericAssayType         string `json:"genericAssayType,omitempty"`
+	MolecularProfileID       string   `json:"molecularProfileId"`
+	StudyID                  string   `json:"studyId"`
+	MolecularAlterationType  string   `json:"molecularAlterationType"`
+	Datatype                 string   `json:"datatype"`
+	Name                     string   `json:"name"`
+	Description              string   `json:"description"`
+	ShowProfileInAnalysisTab bool     `json:"showProfileInAnalysisTab"`
+	PatientLevel             bool     `json:"patientLevel"`
+	GenericAssayType         string   `json:"genericAssayType,omitempty"`
+	PivotThreshold           *float64 `json:"pivotThreshold,omitempty"`
+	SortOrder                *string  `json:"sortOrder,omitempty"`
 }
 
-const mpSelect = "SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, " +
+const mpSelectTmpl = "SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, " +
 	"molecular_alteration_type AS molecularAlterationType, datatype, name, description, " +
-	"toUInt8(show_profile_in_analysis_tab) AS showFlag, generic_assay_type AS genericAssayType FROM molecular_profile"
+	"toUInt8(show_profile_in_analysis_tab) AS showFlag, generic_assay_type AS genericAssayType{extra} FROM molecular_profile"
+
+// mpSelect reads the molecular profiles, with the generic-assay pivot
+// threshold, sort order and patient level where the portal database carries
+// them (built from a production clone).
+func (s *State) mpSelect() string {
+	extra := ""
+	if s.modelHasColumn("molecular_profile", "sort_order") {
+		extra = ", pivot_threshold AS pivotThreshold, sort_order AS sortOrder, toUInt8(patient_level) AS patientLevel"
+	}
+	return strings.Replace(mpSelectTmpl, "{extra}", extra, 1)
+}
 
 func toMP(r mpRow) MolecularProfile {
 	// DISCRETE_LONG is our internal file-layout marker (routes to cna_discrete_long);
@@ -51,12 +67,13 @@ func toMP(r mpRow) MolecularProfile {
 	return MolecularProfile{
 		MolecularProfileID: r.MolecularProfileID, StudyID: r.StudyID, MolecularAlterationType: r.MolecularAlterationType,
 		Datatype: datatype, Name: r.Name, Description: r.Description, ShowProfileInAnalysisTab: r.ShowFlag != 0,
-		GenericAssayType: r.GenericAssayType,
+		GenericAssayType: r.GenericAssayType, PivotThreshold: r.PivotThreshold, SortOrder: r.SortOrder,
+		PatientLevel: r.PatientLevel != 0,
 	}
 }
 
 func (s *State) mpQuery(w http.ResponseWriter, where string) {
-	sql := mpSelect
+	sql := s.mpSelect()
 	if where != "" {
 		sql += " WHERE " + where
 	}
@@ -79,7 +96,7 @@ func (s *State) studyMolecularProfiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) molecularProfile(w http.ResponseWriter, r *http.Request) {
-	sql := fmt.Sprintf("%s WHERE molecular_profile_id = '%s'", mpSelect, sqlLit(r.PathValue("id")))
+	sql := fmt.Sprintf("%s WHERE molecular_profile_id = '%s'", s.mpSelect(), sqlLit(r.PathValue("id")))
 	rows, err := ch.Query[mpRow](s.CH, sql)
 	if err != nil {
 		fail(w, err)

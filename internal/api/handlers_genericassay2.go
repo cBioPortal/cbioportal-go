@@ -73,7 +73,8 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		P uint8 `json:"p"`
 	}
 	lv, _ := ch.Query[lvl](s.CH, fmt.Sprintf(
-		"SELECT toUInt8(max(patient_level)) AS p FROM generic_assay_data_derived WHERE profile_stable_id IN (%s)", orEmpty(profiles)))
+		"SELECT toUInt8(max(patient_level)) AS p FROM generic_assay_data_derived WHERE profile_type = '%s' AND profile_stable_id IN (%s)",
+		sqlLit(profileType), orEmpty(profiles)))
 	unit := "sample_unique_id"
 	if len(lv) > 0 && lv[0].P == 1 {
 		unit = "patient_unique_id"
@@ -191,22 +192,15 @@ func (s *State) genericAssayDataInProfileGet(w http.ResponseWriter, r *http.Requ
 // ---------- Single-entity metadata GETs ----------
 
 // genericAssayMetasWhere returns distinct entity metadata rows matching the
-// given WHERE clause over the generic-assay matrix.
+// given WHERE clause, ordered by entity stable id.
 func (s *State) genericAssayMetasWhere(where string) ([]GenericAssayMeta, error) {
-	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
-		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
-			"FROM %s WHERE %s GROUP BY entity_stable_id ORDER BY entity_stable_id", genericAssaySource(s), where))
+	props, err := s.genericAssayMetaProperties(where)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]GenericAssayMeta, len(rows))
-	for i, rw := range rows {
-		out[i] = GenericAssayMeta{
-			EntityType: "GENERIC_ASSAY", StableID: rw.StableID,
-			GenericEntityMetaProperties: map[string]string{
-				"NAME": rw.Name, "DESCRIPTION": rw.Description, "URL": rw.URL,
-			},
-		}
+	out := make([]GenericAssayMeta, 0, len(props))
+	for _, stable := range sortedKeys(props) {
+		out = append(out, GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: stable, GenericEntityMetaProperties: props[stable]})
 	}
 	return out, nil
 }

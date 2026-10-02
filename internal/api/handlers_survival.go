@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -290,11 +291,19 @@ var timelineFixedCols = map[string]bool{
 }
 
 // timelineSelect selects timeline events, turning every other staged column
-// into an attribute keyed by its upper-cased header. Without staged timeline
-// data it selects no events.
+// into an attribute keyed by its upper-cased header; a timeline built from a
+// production clone carries the attributes as (KEY, value) pairs in its
+// event_attributes column instead. Without staged timeline data it selects
+// no events.
 func (s *State) timelineSelect() string {
+	cols := s.rawColumns("timeline")
+	if slices.Contains(cols, "event_attributes") {
+		return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
+			"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " +
+			"event_attributes AS attrs FROM cbioportal_raw.timeline"
+	}
 	var kv []string
-	for _, c := range s.rawColumns("timeline") {
+	for _, c := range cols {
 		if !timelineFixedCols[c] {
 			kv = append(kv, fmt.Sprintf("('%s', toString(`%s`))", sqlLit(strings.ToUpper(c)), c))
 		}

@@ -44,7 +44,10 @@ func (s *State) genericAssayRows(mpid string, entityIDs, sampleIDs []string, sam
 	if !ok || !strings.EqualFold(meta.AlterationType, "GENERIC_ASSAY") {
 		return []GenericAssayData{}, nil
 	}
-	where := fmt.Sprintf("m.study_id = '%s' AND m.profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
+	// Cells without a value (empty or NA) are left out, as the Java
+	// controllers filter them; values read as the Java mapper truncates them.
+	where := fmt.Sprintf("m.study_id = '%s' AND m.profile_stable_id = '%s' AND m.value NOT IN ('', 'NA')",
+		sqlLit(meta.StudyID), sqlLit(meta.StableID))
 	if len(entityIDs) > 0 {
 		where += fmt.Sprintf(" AND m.entity_stable_id IN (%s)", inList(entityIDs))
 	}
@@ -54,7 +57,7 @@ func (s *State) genericAssayRows(mpid string, entityIDs, sampleIDs []string, sam
 		where += fmt.Sprintf(" AND m.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(sampleListID))
 	}
 	rows, err := ch.Query[genericAssayMatrixRow](s.CH, fmt.Sprintf(
-		"SELECT m.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, m.value AS value "+
+		"SELECT m.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, "+javaTruncatedValueSQL("m.value")+" AS value "+
 			"FROM %s m "+
 			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
 			"WHERE %s", genericAssaySource(s), where))
@@ -184,9 +187,32 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// genericAssayMetaProperties returns the NAME/DESCRIPTION/URL properties of
-// the generic assay entities matching where, keyed by entity stable id.
+// genericAssayMetaProperties returns the meta properties of the generic
+// assay entities matching where (over study_id, profile_stable_id and
+// entity_stable_id), keyed by entity stable id: every stored property where
+// the raw database has the entity tables of a production clone, else the
+// NAME / DESCRIPTION / URL columns of the staged matrix.
 func (s *State) genericAssayMetaProperties(where string) (map[string]map[string]string, error) {
+	if len(s.rawColumns("generic_assay_entity_meta")) > 0 {
+		type propRow struct {
+			StableID string            `json:"stableId"`
+			Props    map[string]string `json:"props"`
+		}
+		rows, err := ch.Query[propRow](s.CH, fmt.Sprintf(
+			"SELECT entity_stable_id AS stableId, properties AS props FROM cbioportal_raw.generic_assay_entity_meta "+
+				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where))
+		if err != nil {
+			return nil, err
+		}
+		out := make(map[string]map[string]string, len(rows))
+		for _, r := range rows {
+			if r.Props == nil {
+				r.Props = map[string]string{}
+			}
+			out[r.StableID] = r.Props
+		}
+		return out, nil
+	}
 	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
 			"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where))

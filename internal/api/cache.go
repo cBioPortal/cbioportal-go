@@ -86,6 +86,17 @@ func (s *State) rawColumns(table string) []string {
 	return out
 }
 
+// modelHasColumn reports whether a table of the portal database has a column.
+func (s *State) modelHasColumn(table, column string) bool {
+	type row struct {
+		N uint64 `json:"n"`
+	}
+	rows, err := cachedQuery[row](s, fmt.Sprintf(
+		"SELECT count() AS n FROM system.columns WHERE database = currentDatabase() AND table = '%s' AND name = '%s'",
+		sqlLit(table), sqlLit(column)))
+	return err == nil && len(rows) == 1 && rows[0].N > 0
+}
+
 // rawSource returns a FROM-clause source for a raw staging table that has at
 // least the given columns: the table itself when it has them all, the table
 // with each missing column added as an empty string, or an empty relation of

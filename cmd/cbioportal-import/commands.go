@@ -80,9 +80,21 @@ reference_data/gene_panels) into the raw database.`,
 		short: "build the portal database's tables from the raw and reference databases",
 		long: `Transform rebuilds every derived table and view of the portal database
 from the staged studies (--raw-db) and the reference data (--ref-db), and
-prints the row count of each. The API serves the portal database (--db).`,
-		examples: []string{"transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref"},
-		setup:    setupTransform,
+prints the row count of each. The API serves the portal database (--db).
+
+With --from-prod, --ref-db is instead a clone of a cBioPortal production
+ClickHouse database (cbioportal-core's schema plus its *_derived tables, e.g.
+cloned with CREATE TABLE ... CLONE AS) and serves as the reference database
+too: the portal database is built from it, mostly as views over the clone,
+and --raw-db receives the staging-shaped views the API reads (molecular
+matrices, timeline, generic assay entities). Nothing is read from staged
+studies. Serve the result with the API's -db, -raw-db and -ref-db set to the
+same three databases.`,
+		examples: []string{
+			"transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref",
+			"transform --from-prod --ref-db mirror_ref --raw-db mirror_raw --db mirror",
+		},
+		setup: setupTransform,
 	},
 }
 
@@ -183,8 +195,25 @@ func setupTransform(fs *flag.FlagSet) func([]string, io.Writer) error {
 	url := urlFlag(fs)
 	rawDB := fs.String("raw-db", "cbioportal_raw", "raw staging `database` to read")
 	db := fs.String("db", "cbioportal", "portal `database` to build; the API serves it with -db")
-	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference `database` to read")
+	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference `database` to read (with -from-prod: the production clone)")
+	fromProd := fs.Bool("from-prod", false, "build from a clone of a cBioPortal production database (-ref-db) instead of staged studies")
 	return func(_ []string, w io.Writer) error {
+		if *fromProd {
+			start := time.Now()
+			counts, err := transform.ApplyFromProd(ch.New(*url, *refDB), *refDB, *rawDB, *db)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "objects built from production clone `%s` in %.0fs:\n", *refDB, time.Since(start).Seconds())
+			for _, vc := range counts {
+				if name, ok := strings.CutSuffix(vc.Name, " (view)"); ok {
+					fmt.Fprintf(w, "  %-64s view\n", name)
+					continue
+				}
+				fmt.Fprintf(w, "  %-64s %12d rows\n", vc.Name, vc.Rows)
+			}
+			return nil
+		}
 		counts, err := transform.Apply(ch.New(*url, *rawDB), *rawDB, *db, *refDB)
 		if err != nil {
 			return err

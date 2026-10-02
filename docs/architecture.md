@@ -24,6 +24,9 @@
   tables with SQL, applying cbioportal-core's import rules (gene resolution,
   case lists, mutation filtering, computed clinical attributes). Every table the
   API reads exists for any mix of data types, empty when the data is absent.
+  `transform --from-prod` builds the same objects from a clone of cBioPortal's
+  production ClickHouse database instead, mostly as views over its `*_derived`
+  tables (see [Deployment](deployment.md#mirroring-production)).
 - **The API** answers the cBioPortal REST API from those tables and serves the
   frontend build on the same origin. The Java backend
   ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal)) and

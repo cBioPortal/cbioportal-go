@@ -220,7 +220,10 @@ func resolvedEntrezSQL(table, src string, meta profileMeta, where string, entrez
 			table, sqlLit(meta.StudyID), sqlLit(meta.StableID))
 		if len(entrez) > 0 {
 			keyFilter += fmt.Sprintf(" AND resolved_entrez_gene_id IN (%s)", idList)
-			where += fmt.Sprintf(" AND (hugo_symbol, entrez_gene_id) IN (SELECT hugo_symbol, entrez_gene_id FROM gene_key_map WHERE %s)", keyFilter)
+			// The symbol condition alone is implied by the pair; it lets a
+			// matrix sorted by symbol skip the other genes.
+			where += fmt.Sprintf(" AND hugo_symbol IN (SELECT hugo_symbol FROM gene_key_map WHERE %[1]s) "+
+				"AND (hugo_symbol, entrez_gene_id) IN (SELECT hugo_symbol, entrez_gene_id FROM gene_key_map WHERE %[1]s)", keyFilter)
 		}
 		return fmt.Sprintf("SELECT t.*, gk.resolved_entrez_gene_id AS entrez FROM (SELECT * FROM %s WHERE %s) t "+
 			"INNER JOIN (SELECT * FROM gene_key_map WHERE %s) gk "+

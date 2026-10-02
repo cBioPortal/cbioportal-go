@@ -63,8 +63,8 @@ type studySummary struct {
 	Name            string `json:"name"`
 	Description     string `json:"description"`
 	PublicStudy     bool   `json:"publicStudy"`
-	Pmid            string `json:"pmid"`
-	Citation        string `json:"citation"`
+	Pmid            string `json:"pmid,omitempty"`
+	Citation        string `json:"citation,omitempty"`
 	Groups          string `json:"groups"`
 	Status          int    `json:"status"`
 	ImportDate      string `json:"importDate,omitempty"`
@@ -97,8 +97,9 @@ type ResourceCount struct {
 	PatientCount          int64  `json:"patientCount"`
 }
 
-// studyCountCols / studyCountJoins add the per-data-type counts of the
-// column-store CancerStudyMapper.
+// studyCountCols / studyCountJoins add the counts of the column-store
+// CancerStudyMapper: the members of the standard case lists (allSampleCount
+// is the `_all` list), treated patients and samples with structural variants.
 const studyCountCols = "toInt64(ifNull(lc.seq, 0)) AS sequencedSampleCount, toInt64(ifNull(lc.cna, 0)) AS cnaSampleCount, " +
 	"toInt64(ifNull(lc.rnaseq, 0)) AS mrnaRnaSeqSampleCount, toInt64(ifNull(lc.rnaseqv2, 0)) AS mrnaRnaSeqV2SampleCount, " +
 	"toInt64(ifNull(lc.microarray, 0)) AS mrnaMicroarraySampleCount, toInt64(ifNull(lc.mirna, 0)) AS miRnaSampleCount, " +
@@ -106,7 +107,7 @@ const studyCountCols = "toInt64(ifNull(lc.seq, 0)) AS sequencedSampleCount, toIn
 	"toInt64(ifNull(lc.ms, 0)) AS massSpectrometrySampleCount, toInt64(ifNull(lc.complete, 0)) AS completeSampleCount, " +
 	"toInt64(ifNull(tr.n, 0)) AS treatmentCount, toInt64(ifNull(sv.n, 0)) AS structuralVariantCount "
 
-const studyCountJoins = "LEFT JOIN (SELECT study_id, " +
+const studyCountJoins = "LEFT JOIN (SELECT study_id, countIf(list_id = concat(study_id, '_all')) AS all_samples, " +
 	"countIf(list_id = concat(study_id, '_sequenced')) AS seq, countIf(list_id = concat(study_id, '_cna')) AS cna, " +
 	"countIf(list_id = concat(study_id, '_rna_seq_mrna')) AS rnaseq, countIf(list_id = concat(study_id, '_rna_seq_v2_mrna')) AS rnaseqv2, " +
 	"countIf(list_id = concat(study_id, '_mrna')) AS microarray, countIf(list_id = concat(study_id, '_microrna')) AS mirna, " +
@@ -118,17 +119,32 @@ const studyCountJoins = "LEFT JOIN (SELECT study_id, " +
 	"LEFT JOIN (SELECT cancer_study_identifier AS study_id, uniqExact(sample_unique_id) AS n FROM genomic_event_derived " +
 	"WHERE variant_type = 'structural_variant' GROUP BY cancer_study_identifier) sv ON c.study_id = sv.study_id "
 
-const studySelect = "SELECT c.study_id AS studyId, c.cancer_type_id AS cancerTypeId, " +
+const studySelectTmpl = "SELECT c.study_id AS studyId, c.cancer_type_id AS cancerTypeId, " +
 	"c.name AS name, c.description AS description, c.pmid AS pmid, c.citation AS citation, " +
 	"c.groups AS groups, c.reference_genome AS referenceGenome, " +
-	"toInt64(ifNull(sc.cnt, 0)) AS allSampleCount, " +
-	"toUInt8(position(c.groups, 'PUBLIC') > 0) AS publicFlag, " +
+	"toInt64(ifNull(lc.all_samples, 0)) AS allSampleCount, " +
+	"{public} AS publicFlag, " +
 	"ifNull(t.name, '') AS cancerTypeName, ifNull(t.dedicated_color, '') AS cancerTypeColor, ifNull(t.parent, '') AS cancerTypeParent, " +
 	"ifNull(t.short_name, '') AS cancerTypeShort, " +
 	studyCountCols +
-	"FROM cancer_study c LEFT JOIN (SELECT study_id, count() AS cnt FROM sample GROUP BY study_id) sc " +
-	"ON c.study_id = sc.study_id " + studyCountJoins +
+	"FROM cancer_study c " + studyCountJoins +
 	"LEFT JOIN (" + cancerTypesSQL + ") t ON c.cancer_type_id = t.type_of_cancer_id"
+
+// studySelect reads the studies with their counts and cancer type. A study is
+// public when the portal cancer_study says so (public_study, built from a
+// production clone), else when its groups include PUBLIC.
+func (s *State) studySelect() string {
+	return strings.Replace(studySelectTmpl, "{public}", s.studyPublicSQL("c."), 1)
+}
+
+// studyPublicSQL is the UInt8 public flag of a cancer_study row (alias is
+// the table alias with its dot, or empty).
+func (s *State) studyPublicSQL(alias string) string {
+	if s.modelHasColumn("cancer_study", "public_study") {
+		return "toUInt8(" + alias + "public_study)"
+	}
+	return "toUInt8(position(" + alias + "groups, 'PUBLIC') > 0)"
+}
 
 // studyShape selects the parts of a study a response carries.
 type studyShape struct {
@@ -208,7 +224,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []CancerStudy{})
 		return
 	}
-	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", studySelect, where, order))
+	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", s.studySelect(), where, order))
 	if err != nil {
 		fail(w, err)
 		return
@@ -233,7 +249,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 // .getStudy): the DETAILED study with its resource counts.
 func (s *State) study(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("studyId")
-	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE c.study_id = '%s'", studySelect, sqlLit(id)))
+	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE c.study_id = '%s'", s.studySelect(), sqlLit(id)))
 	if err != nil {
 		fail(w, err)
 		return
@@ -255,7 +271,7 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []CancerStudy{})
 		return
 	}
-	sql := fmt.Sprintf("%s WHERE c.study_id IN (%s) ORDER BY c.study_id", studySelect, inList(ids))
+	sql := fmt.Sprintf("%s WHERE c.study_id IN (%s) ORDER BY c.study_id", s.studySelect(), inList(ids))
 	rows, err := cachedQuery[studyRow](s, sql)
 	if err != nil {
 		fail(w, err)
@@ -274,9 +290,11 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-// studyImportDates maps each study to the time its study row was loaded (the
-// raw cancer_study part it lives in), formatted as Java's importDate. Studies
-// are absent when the raw database is not reachable.
+// studyImportDates maps each study to its import time, formatted as Java's
+// importDate: the portal cancer_study's import_date where the database
+// carries one (built from a production clone), else the time its study row
+// was loaded (the raw cancer_study part it lives in). Studies are absent when
+// the raw database is not reachable.
 func (s *State) studyImportDates() map[string]string {
 	type row struct {
 		StudyID    string `json:"studyId"`
@@ -286,12 +304,17 @@ func (s *State) studyImportDates() map[string]string {
 	if s.CH == nil {
 		return out
 	}
-	rows, err := cachedQuery[row](s, "SELECT c.study_id AS studyId, "+
-		"formatDateTime(max(p.modification_time), '%Y-%m-%d %H:%i:%S') AS importDate "+
-		"FROM (SELECT study_id, _part FROM cbioportal_raw.cancer_study) c "+
-		"JOIN (SELECT name, modification_time FROM system.parts "+
-		"WHERE database = 'cbioportal_raw' AND table = 'cancer_study' AND active) p ON p.name = c._part "+
-		"GROUP BY c.study_id")
+	sql := "SELECT c.study_id AS studyId, " +
+		"formatDateTime(max(p.modification_time), '%Y-%m-%d %H:%i:%S') AS importDate " +
+		"FROM (SELECT study_id, _part FROM cbioportal_raw.cancer_study) c " +
+		"JOIN (SELECT name, modification_time FROM system.parts " +
+		"WHERE database = 'cbioportal_raw' AND table = 'cancer_study' AND active) p ON p.name = c._part " +
+		"GROUP BY c.study_id"
+	if s.modelHasColumn("cancer_study", "import_date") {
+		sql = "SELECT study_id AS studyId, formatDateTime(import_date, '%Y-%m-%d %H:%i:%S') AS importDate " +
+			"FROM cancer_study WHERE import_date IS NOT NULL"
+	}
+	rows, err := cachedQuery[row](s, sql)
 	if err != nil {
 		return out
 	}

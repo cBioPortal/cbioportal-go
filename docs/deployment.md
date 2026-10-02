@@ -53,12 +53,66 @@ It copies the studies' staging rows (plus the shared gene panels) into
 databases must exist; the user needs SELECT, INSERT, ALTER, CREATE TABLE,
 CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on them.
 
-### Planned: mirroring production
+### Mirroring production
 
-A daily job will clone the live production color
-(`cbioportal_public_<color>`, read from
-`publicdb_update_management_database.update_status`) with zero-copy
-`CREATE TABLE … CLONE AS` into the inactive color, build the portal database
-from production's schema, and flip `cbioportal-go-active` — the same pattern as
-the LibreChat clone job. The preview then serves exactly www.cbioportal.org's
-data.
+[`deploy/mirror-prod.sh`](../deploy/mirror-prod.sh) is the daily job that
+makes the preview serve exactly www.cbioportal.org's data, the same pattern as
+the LibreChat clone job:
+
+1. read the live production color from
+   `publicdb_update_management_database.update_status`;
+2. empty the inactive Go color and zero-copy `CREATE TABLE … CLONE AS` every
+   table of `cbioportal_public_<color>` (minus auth / credential tables) into
+   `<prefix>_<color>_ref` (~20 s);
+3. build the portal database from the clone:
+
+   ```bash
+   cbioportal-import transform --from-prod \
+     --ref-db <prefix>_<color>_ref --raw-db <prefix>_<color>_raw --db <prefix>_<color>
+   ```
+
+4. hand `CBIOPORTAL_DB` / `CBIOPORTAL_RAW_DB` / `CBIOPORTAL_REF_DB` to the
+   step that flips `cbioportal-go-active`. The API serves the three databases
+   unchanged (`-db`, `-raw-db`, `-ref-db`).
+
+`transform --from-prod` reads nothing from staged studies; it takes
+production's schema (cbioportal-core's tables migrated to ClickHouse plus the
+`*_derived` tables) and builds every object the API reads, with the shapes
+and meaning the datahub transform gives them. It takes about a minute on
+ClickHouse Cloud and copies little:
+
+- **Views over the clone (no copy):** `sample_derived`,
+  `clinical_data_derived` (blank cells left out, as the datahub transform
+  stores only values), `genomic_event_derived`, `genetic_alteration_derived`
+  (10 billion rows), `generic_assay_data_derived` (3.8 billion),
+  `sample_to_gene_panel_derived`, `gene_panel_to_gene_derived`,
+  `clinical_event_derived`, `clinical_event_data_derived`; the discrete
+  copy-number levels −1/0/1 of `cna`; `gene_key_map`; and in the raw database
+  the per-gene matrices the molecular-data, co-expression and enrichment
+  endpoints read (`cna_matrix`, `mrna_expression_matrix`,
+  `methylation_matrix`, `protein_level_matrix` over
+  genetic_alteration_derived; `generic_assay_matrix` over
+  generic_assay_data_derived) plus `genetic_profile` and the generic assay
+  entity tables. The API's study / profile / gene filters reach the sort keys
+  of the derived tables through these views.
+- **Materialized from the normalized tables** (tens of millions of rows at
+  most, sorted for the API's filters): studies, profiles, case lists,
+  patients, samples, long-form clinical data, `sample_profile`, mutations
+  (from `mutation_derived`), AMP/HOMDEL events with their driver annotations
+  (`cna_event`), structural variants, segments, gene panels, GISTIC, MutSig,
+  resources, and the timeline (`clinical_event` with its attributes).
+
+The clone also serves as the reference database (genes, aliases, cancer
+types, reference genomes). A few API responses read production-only columns
+when the portal database has them: a study's `public` flag and import date,
+and a generic-assay profile's pivot threshold, sort order and patient level.
+
+Known differences from www.cbioportal.org on the mirror are those of the API
+itself, not of the data: www's newer Java version returns slimmer
+`filtered-samples` / `clinical-data-table` records, a different
+co-expression response and no `qValue` / `cytoband` in expression
+enrichments; www's study list attaches resource definitions of other studies
+that share a resource id, and its legacy `studies/fetch` reports
+`allSampleCount: 1`. Expression enrichments of a TCGA PanCancer study take a
+few seconds, since genetic_alteration_derived is sorted by gene before
+profile.
