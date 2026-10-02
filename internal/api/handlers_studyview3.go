@@ -380,7 +380,7 @@ func invChiSquare(pValue float64, df int) float64 {
 	for stats.ChiSquareCDF(hi, d) < target && hi < 1e12 {
 		hi *= 2
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		mid := (lo + hi) / 2
 		if stats.ChiSquareCDF(mid, d) < target {
 			lo = mid
@@ -403,7 +403,7 @@ func chiSquareContingency(table [][]float64) (float64, float64) {
 	colT := make([]float64, cols)
 	total := 0.0
 	for i := range table {
-		for j := 0; j < cols; j++ {
+		for j := range cols {
 			rowT[i] += table[i][j]
 			colT[j] += table[i][j]
 			total += table[i][j]
@@ -414,7 +414,7 @@ func chiSquareContingency(table [][]float64) (float64, float64) {
 	}
 	chi := 0.0
 	for i := range table {
-		for j := 0; j < cols; j++ {
+		for j := range cols {
 			exp := rowT[i] * colT[j] / total
 			if exp > 0 {
 				diff := table[i][j] - exp

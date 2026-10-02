@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"reflect"
@@ -116,9 +117,7 @@ func af(over map[string]any) map[string]any {
 		"includeGermline": true, "includeSomatic": true, "includeUnknownStatus": true,
 		"includeUnknownTier": true, "tiersBooleanMap": allTiers,
 	}
-	for k, v := range over {
-		m[k] = v
-	}
+	maps.Copy(m, over)
 	return m
 }
 

@@ -182,16 +182,16 @@ var FrontendProperties = []FrontendPropertyDef{
 // specialFrontendNames lists frontend property names that require special
 // processing (matching the Java switch statement).
 var specialFrontendNames = map[string]bool{
-	"frontendConfigOverride":                     true, // readFile
-	"query_sets_of_genes":                        true, // readFile
+	"frontendConfigOverride":                           true, // readFile
+	"query_sets_of_genes":                              true, // readFile
 	"skin_patient_view_custom_sample_type_colors_json": true, // readFile
-	"oncoprint_clinical_tracks_config_json":      true, // readFile
-	"download_custom_buttons_json":               true, // readFile
-	"oncoprintOncoKbHotspotsDefault":             true, // enableOncoKBandHotspotsParamValue
-	"oncoKbTokenDefined":                         true, // non-empty check -> bool string
-	"sessionServiceEnabled":                      true, // non-empty check -> bool string
-	"frontendUrl":                                true, // URL normalization
-	"mskWholeSlideViewerToken":                   true, // set at runtime, not from props
+	"oncoprint_clinical_tracks_config_json":            true, // readFile
+	"download_custom_buttons_json":                     true, // readFile
+	"oncoprintOncoKbHotspotsDefault":                   true, // enableOncoKBandHotspotsParamValue
+	"oncoKbTokenDefined":                               true, // non-empty check -> bool string
+	"sessionServiceEnabled":                            true, // non-empty check -> bool string
+	"frontendUrl":                                      true, // URL normalization
+	"mskWholeSlideViewerToken":                         true, // set at runtime, not from props
 }
 
 // ParseApplicationProperties reads a Java-style application.properties file.
@@ -331,8 +331,8 @@ func normalizeFrontendURL(val string) string {
 // /config_service endpoint returns, matching the Java backend behavior.
 // appProps is the parsed application.properties map. baseURL is the
 // server's base URL to include as "base_url".
-func BuildFrontendConfig(appProps map[string]string, baseURL string) map[string]interface{} {
-	result := make(map[string]interface{}, len(FrontendProperties)+3)
+func BuildFrontendConfig(appProps map[string]string, baseURL string) map[string]any {
+	result := make(map[string]any, len(FrontendProperties)+3)
 
 	for _, prop := range FrontendProperties {
 		val, ok := appProps[prop.PropertyName]

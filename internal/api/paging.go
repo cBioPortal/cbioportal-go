@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -39,9 +40,7 @@ func pageList(next http.Handler) http.Handler {
 
 		rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
 		next.ServeHTTP(rec, r2)
-		for k, v := range rec.header {
-			w.Header()[k] = v
-		}
+		maps.Copy(w.Header(), rec.header)
 		var items []json.RawMessage
 		if rec.status != http.StatusOK || json.Unmarshal(rec.body.Bytes(), &items) != nil {
 			w.WriteHeader(rec.status)

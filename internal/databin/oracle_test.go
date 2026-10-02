@@ -103,7 +103,7 @@ func parseOracleScenarios(t *testing.T, mock map[string][]string) []oracleCase {
 		case "FMOCKIDX":
 			key, idx, _ := strings.Cut(v, "\t")
 			if idx != "" {
-				for _, s := range strings.Split(idx, ",") {
+				for s := range strings.SplitSeq(idx, ",") {
 					i, err := strconv.Atoi(s)
 					if err != nil {
 						t.Fatal(err)

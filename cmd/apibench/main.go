@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -84,7 +85,7 @@ func main() {
 			}
 		}
 		if len(times) > 0 {
-			sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+			slices.Sort(times)
 			res.median = times[len(times)/2]
 		}
 		results = append(results, res)

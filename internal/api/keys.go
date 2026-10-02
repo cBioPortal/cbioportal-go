@@ -19,9 +19,9 @@ func decodeUniqueKey(key string) (studyID, id string, ok bool) {
 		return "", "", false
 	}
 	s := string(b)
-	i := strings.IndexByte(s, ':')
-	if i < 0 {
+	before, after, ok := strings.Cut(s, ":")
+	if !ok {
 		return "", "", false
 	}
-	return s[:i], s[i+1:], true
+	return before, after, true
 }

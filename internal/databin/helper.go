@@ -3,6 +3,7 @@ package databin
 import (
 	"math"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -493,11 +494,8 @@ func convertToDistinctBins(bins []*dataBin, numericalValues []Decimal, rangeValu
 			}
 		}
 		rangeCount := 0
-		for _, rv := range rangeValues {
-			if r.encloses(rv) {
-				rangeCount++
-				break
-			}
+		if slices.ContainsFunc(rangeValues, r.encloses) {
+			rangeCount++
 		}
 		if rangeCount == 0 && len(values) == 1 && areAllIntegers(values) {
 			v := values[0]

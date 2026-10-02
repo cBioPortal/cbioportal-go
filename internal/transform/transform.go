@@ -7,6 +7,7 @@ package transform
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -374,7 +375,7 @@ func distinctNamespaces(c *ch.Client, rawDB string) []string {
 		"SELECT DISTINCT arrayJoin(splitByChar(',', namespaces)) AS n FROM `%s`.genetic_profile WHERE namespaces != '' ORDER BY n FORMAT TabSeparated", rawDB))
 	seen := map[string]bool{}
 	var out []string
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
 		n := strings.TrimSpace(line)
 		if n != "" && !seen[n] {
 			seen[n] = true
@@ -555,8 +556,8 @@ func proteinChangeSQL(has map[string]bool) string {
 		}
 	}
 	expr := "'MUTATED'"
-	for i := len(cands) - 1; i >= 0; i-- {
-		expr = fmt.Sprintf("if(%s, %s, %s)", valid(cands[i]), cands[i], expr)
+	for _, cand := range slices.Backward(cands) {
+		expr = fmt.Sprintf("if(%s, %s, %s)", valid(cand), cand, expr)
 	}
 	return fmt.Sprintf("if(lower(m.variant_classification) = '5''flank', 'Promoter', "+
 		"if(startsWith(%[1]s, 'p.'), substring(%[1]s, 3), %[1]s))", expr)

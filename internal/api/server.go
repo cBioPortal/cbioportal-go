@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -152,9 +153,7 @@ func metaProjection(next http.Handler) http.Handler {
 		}
 		rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
-		for k, v := range rec.header {
-			w.Header()[k] = v
-		}
+		maps.Copy(w.Header(), rec.header)
 		if rec.header.Get("total-count") == "" && rec.status == http.StatusOK {
 			var items []struct {
 				UniqueSampleKey string `json:"uniqueSampleKey"`

@@ -2,6 +2,7 @@ package config
 
 import (
 	_ "embed"
+	"maps"
 	"strings"
 	"sync"
 )
@@ -18,16 +19,12 @@ var (
 // names → values), built from the embedded default properties and merged with
 // the given base URL. An optional override map (e.g. from an external
 // application.properties) takes precedence over the embedded defaults.
-func FrontendConfig(baseURL string, overrides map[string]string) map[string]interface{} {
+func FrontendConfig(baseURL string, overrides map[string]string) map[string]any {
 	frontendOnce.Do(func() {
 		frontendBase = ParseApplicationProperties(strings.NewReader(defaultProperties))
 	})
 	props := make(map[string]string, len(frontendBase)+len(overrides))
-	for k, v := range frontendBase {
-		props[k] = v
-	}
-	for k, v := range overrides {
-		props[k] = v
-	}
+	maps.Copy(props, frontendBase)
+	maps.Copy(props, overrides)
 	return BuildFrontendConfig(props, baseURL)
 }

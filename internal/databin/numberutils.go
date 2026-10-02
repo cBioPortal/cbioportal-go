@@ -1,5 +1,7 @@
 package databin
 
+import "slices"
+
 // isCreatable mirrors org.apache.commons.lang3.math.NumberUtils.isCreatable
 // (commons-lang3 3.17): it accepts decimal, scientific, hexadecimal ("0x1F")
 // and octal ("017") literals and Java type suffixes ("5L", "1.5f", "2d").
@@ -95,12 +97,7 @@ func isCreatable(str string) bool {
 }
 
 func containsRune(chars []rune, r rune) bool {
-	for _, c := range chars {
-		if c == r {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(chars, r)
 }
 
 func isHex(c rune) bool {

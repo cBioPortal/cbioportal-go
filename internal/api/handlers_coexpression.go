@@ -52,13 +52,13 @@ func pearson(a, b []float64) float64 {
 		return math.NaN()
 	}
 	var sa, sb float64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		sa += a[i]
 		sb += b[i]
 	}
 	ma, mb := sa/float64(n), sb/float64(n)
 	var num, da, db float64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		xa, xb := a[i]-ma, b[i]-mb
 		num += xa * xb
 		da += xa * xa
@@ -375,8 +375,8 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 
 	bins := make([]DensityPlotBin, xBins*yBins)
 	filled := make([]bool, xBins*yBins)
-	for i := 0; i < xBins; i++ {
-		for j := 0; j < yBins; j++ {
+	for i := range xBins {
+		for j := range yBins {
 			b := &bins[i*yBins+j]
 			b.BinX = xStart + float64(i)*xInterval
 			b.BinY = yStart + float64(j)*yInterval

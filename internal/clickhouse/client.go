@@ -149,7 +149,7 @@ func (c *Client) TableColumns(table string) (map[string]bool, error) {
 		return nil, err
 	}
 	cols := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
 		if line != "" {
 			cols[line] = true
 		}

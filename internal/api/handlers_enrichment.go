@@ -32,8 +32,8 @@ func (g casesGroup) pairs() [][2]string {
 // molecularProfileStudy strips a known molecular-profile suffix to get the study.
 func molecularProfileStudy(mpid string) string {
 	for _, suf := range []string{"_mutations", "_gistic", "_cna", "_structural_variants", "_log2CNA"} {
-		if strings.HasSuffix(mpid, suf) {
-			return strings.TrimSuffix(mpid, suf)
+		if before, ok := strings.CutSuffix(mpid, suf); ok {
+			return before
 		}
 	}
 	// fall back: strip after the last underscore-delimited profile token isn't

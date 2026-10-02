@@ -280,7 +280,7 @@ func KruskalWallisTest(groups [][]float64) float64 {
 	// H statistic
 	N := float64(n)
 	h := 0.0
-	for gi := 0; gi < k; gi++ {
+	for gi := range k {
 		ni := float64(groupN[gi])
 		if ni == 0 {
 			continue

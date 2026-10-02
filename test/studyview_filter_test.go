@@ -1,5 +1,7 @@
 package contract
 
+import "maps"
+
 import "testing"
 
 // Study-view filter contracts: every StudyViewFilter sub-filter narrows the
@@ -14,9 +16,7 @@ func filteredCount(t *testing.T, filter map[string]any) int {
 
 func es0(extra map[string]any) map[string]any {
 	f := map[string]any{"studyIds": []string{"study_es_0"}}
-	for k, v := range extra {
-		f[k] = v
-	}
+	maps.Copy(f, extra)
 	return f
 }
 

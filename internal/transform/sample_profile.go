@@ -136,7 +136,7 @@ func sampleProfileSQL(c *ch.Client, rawDB string) (string, bool) {
 		tables, _ := c.Execute(fmt.Sprintf(
 			"SELECT name FROM system.tables WHERE database = '%s' AND endsWith(name, '_matrix') "+
 				"AND name != 'gene_panel_matrix' ORDER BY name FORMAT TabSeparated", rawDB))
-		for _, t := range strings.Fields(tables) {
+		for t := range strings.FieldsSeq(tables) {
 			declared = append(declared, fmt.Sprintf(
 				"SELECT DISTINCT study_id, sample_id AS id, profile_stable_id FROM `%s`.`%s`", rawDB, t))
 		}

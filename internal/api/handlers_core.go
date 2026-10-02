@@ -140,7 +140,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	where := "1 = 1"
 	if kw := strings.TrimSpace(q.Get("keyword")); kw != "" {
 		var ands []string
-		for _, term := range strings.Fields(kw) {
+		for term := range strings.FieldsSeq(kw) {
 			t := sqlLit(term)
 			ands = append(ands, fmt.Sprintf("(c.name ILIKE '%%%[1]s%%' OR c.study_id ILIKE '%%%[1]s%%' OR "+
 				"ifNull(t.name, '') ILIKE '%%%[1]s%%' OR c.cancer_type_id ILIKE '%%%[1]s%%')", t))
@@ -169,14 +169,8 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	}
 	if size, err := strconv.Atoi(q.Get("pageSize")); err == nil && size >= 0 {
 		page, _ := strconv.Atoi(q.Get("pageNumber"))
-		start := page * size
-		if start > len(rows) {
-			start = len(rows)
-		}
-		end := start + size
-		if end > len(rows) {
-			end = len(rows)
-		}
+		start := min(page*size, len(rows))
+		end := min(start+size, len(rows))
 		rows = rows[start:end]
 	}
 	out := make([]CancerStudy, len(rows))

@@ -243,7 +243,7 @@ func proteinPositions(position, change string) (*int64, *int64) {
 		}
 		return out
 	}
-	if p := strings.SplitN(position, "/", 2)[0]; p != "" {
+	if p, _, _ := strings.Cut(position, "/"); p != "" {
 		if n := parse(p); len(n) > 0 {
 			start, end := n[0], n[len(n)-1]
 			return &start, &end

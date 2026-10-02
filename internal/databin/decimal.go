@@ -362,7 +362,7 @@ func mulPow10Int64(v int64, n int64) (int64, bool) {
 		return 0, false
 	}
 	p := uint64(1)
-	for i := int64(0); i < n; i++ {
+	for range n {
 		p *= 10
 	}
 	neg := v < 0
