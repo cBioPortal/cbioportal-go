@@ -57,6 +57,7 @@ func main() {
 	client.SetDatabaseAliases(v["raw-db"], v["ref-db"])
 	state := api.NewState(client)
 	state.Props = props
+	state.PropsReplaceDefaults = cfg.values["portal-properties"] != ""
 	handler := api.NewRouter(state)
 
 	addr := "0.0.0.0:" + v["port"]

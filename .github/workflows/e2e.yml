@@ -60,7 +60,7 @@ jobs:
           go build -o bin/cbioportal-api ./cmd/cbioportal-api
           FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=sessions.json \
             PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw \
-            nohup bin/cbioportal-api > api.log 2>&1 &
+            nohup bin/cbioportal-api --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties > api.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
           cat api.log; exit 1
       - name: Run e2e

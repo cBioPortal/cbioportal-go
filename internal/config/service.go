@@ -16,15 +16,19 @@ var (
 )
 
 // FrontendConfig returns the /config_service property map (frontend property
-// names → values), built from the embedded default properties and merged with
-// the given base URL. An optional override map (e.g. from an external
-// application.properties) takes precedence over the embedded defaults.
-func FrontendConfig(baseURL string, overrides map[string]string) map[string]any {
+// names → values) for the given portal properties. As in the Java portal, a
+// properties file replaces the stock defaults (the embedded
+// application.properties.EXAMPLE) rather than adding to them: with
+// replaceDefaults, keys the properties don't set fall back to the code-level
+// defaults only.
+func FrontendConfig(baseURL string, props map[string]string, replaceDefaults bool) map[string]any {
 	frontendOnce.Do(func() {
 		frontendBase = ParseApplicationProperties(strings.NewReader(defaultProperties))
 	})
-	props := make(map[string]string, len(frontendBase)+len(overrides))
-	maps.Copy(props, frontendBase)
-	maps.Copy(props, overrides)
-	return BuildFrontendConfig(props, baseURL)
+	merged := make(map[string]string, len(frontendBase)+len(props))
+	if !replaceDefaults {
+		maps.Copy(merged, frontendBase)
+	}
+	maps.Copy(merged, props)
+	return BuildFrontendConfig(merged, baseURL)
 }

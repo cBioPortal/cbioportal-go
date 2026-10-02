@@ -35,8 +35,11 @@ type State struct {
 	// path from a known one requested with an unsupported method.
 	mux *http.ServeMux
 	// Props are the portal properties (skin.*, priority_studies, …) the
-	// frontend configuration is built from, over the embedded defaults.
-	Props map[string]string
+	// frontend configuration is built from. PropsReplaceDefaults is set when
+	// they come from a properties file, which replaces the stock defaults as
+	// a mounted application.properties does for the Java portal.
+	Props                map[string]string
+	PropsReplaceDefaults bool
 }
 
 // NewState loads the session store (SESSION_STORE_FILE, if set) at startup.

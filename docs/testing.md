@@ -18,7 +18,8 @@ Three tiers, fastest first:
    git clone https://github.com/cBioPortal/cbioportal-test
    test/setup_test_db.sh cbioportal-test seed-cbioportal_hg19_hg38_v2.14.5.sql.gz
    AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=.sessions.json \
-     PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api
+     PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api \
+     --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties
    make contract
    ```
 3. **Frontend e2e** — `test/run_e2e.sh [WORKERS] [spec...]` drives the
@@ -35,7 +36,8 @@ Three tiers, fastest first:
    (cd frontend/end-to-end-test-playwright && pnpm install --frozen-lockfile --ignore-workspace)
    FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY \
      SESSION_STORE_FILE=.sessions.json PORT=18090 CBIOPORTAL_DB=cbioportal_e2e \
-     CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api
+     CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api \
+     --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties
    test/run_e2e.sh 3 tests/local/annotation-filter-menu.spec.ts
    ```
 

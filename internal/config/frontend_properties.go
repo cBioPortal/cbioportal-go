@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -149,6 +150,7 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"session.service.url", "sessionServiceEnabled", strPtr("")},
 	{"frontend.url", "frontendUrl", nil},
 	{"skin.hide_download_controls", "skin_hide_download_controls", strPtr("show")},
+	{"skin.hide_clinical_data_tab_study_view", "skin_hide_clinical_data_tab_study_view", strPtr("false")},
 	{"study_download_url", "study_download_url", strPtr("https://datahub.assets.cbioportal.org/")},
 	{"enable_cross_study_expression", "enable_cross_study_expression", strPtr("")},
 	{"studyview.max_samples_selected", "studyview_max_samples_selected", nil},
@@ -196,7 +198,7 @@ var specialFrontendNames = map[string]bool{
 
 // ParseApplicationProperties reads a Java-style application.properties file.
 // Supports # comments, blank lines, key=value and key: value formats,
-// and backslash line continuations.
+// backslash line continuations, and java.util.Properties escapes.
 func ParseApplicationProperties(r io.Reader) map[string]string {
 	props := make(map[string]string)
 	scanner := bufio.NewScanner(r)
@@ -214,7 +216,7 @@ func ParseApplicationProperties(r io.Reader) map[string]string {
 				currentVal.WriteString(trimmed[:len(trimmed)-1])
 			} else {
 				currentVal.WriteString(trimmed)
-				props[currentKey] = currentVal.String()
+				props[currentKey] = unescapeProperty(currentVal.String())
 				continuing = false
 			}
 			continue
@@ -241,11 +243,11 @@ func ParseApplicationProperties(r io.Reader) map[string]string {
 
 		if sepIdx < 0 {
 			// Key with no value
-			props[trimmed] = ""
+			props[unescapeProperty(trimmed)] = ""
 			continue
 		}
 
-		key := strings.TrimSpace(trimmed[:sepIdx])
+		key := unescapeProperty(strings.TrimSpace(trimmed[:sepIdx]))
 		val := strings.TrimSpace(trimmed[sepIdx+1:])
 
 		if strings.HasSuffix(val, `\`) {
@@ -256,15 +258,53 @@ func ParseApplicationProperties(r io.Reader) map[string]string {
 			continue
 		}
 
-		props[key] = val
+		props[key] = unescapeProperty(val)
 	}
 
 	// Handle case where file ends mid-continuation
 	if continuing {
-		props[currentKey] = currentVal.String()
+		props[currentKey] = unescapeProperty(currentVal.String())
 	}
 
 	return props
+}
+
+// unescapeProperty applies java.util.Properties escapes: \t, \n, \r, \f and
+// \uXXXX; any other escaped character stands for itself (\\, \=, \:, \#).
+func unescapeProperty(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 == len(s) {
+			b.WriteByte(s[i])
+			continue
+		}
+		i++
+		switch c := s[i]; c {
+		case 't':
+			b.WriteByte('\t')
+		case 'n':
+			b.WriteByte('\n')
+		case 'r':
+			b.WriteByte('\r')
+		case 'f':
+			b.WriteByte('\f')
+		case 'u':
+			if i+4 < len(s) {
+				if r, err := strconv.ParseUint(s[i+1:i+5], 16, 32); err == nil {
+					b.WriteRune(rune(r))
+					i += 4
+					continue
+				}
+			}
+			b.WriteByte(c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // ParseApplicationPropertiesFile reads properties from a file path.

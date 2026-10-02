@@ -30,9 +30,23 @@ func TestLoadPortalProperties(t *testing.T) {
 }
 
 func TestFrontendConfigOverrides(t *testing.T) {
-	cfg := FrontendConfig("/", map[string]string{"skin.title": "Go preview"})
+	cfg := FrontendConfig("/", map[string]string{"skin.title": "Go preview"}, false)
 	if cfg["skin_title"] != "Go preview" {
 		t.Errorf("skin_title = %v", cfg["skin_title"])
+	}
+	// Without a properties file the stock defaults apply.
+	if cfg["skin_show_about_tab"] != true {
+		t.Errorf("skin_show_about_tab = %v, want the stock default true", cfg["skin_show_about_tab"])
+	}
+}
+
+func TestPropertiesFileReplacesDefaults(t *testing.T) {
+	cfg := FrontendConfig("/", map[string]string{"skin.title": "From file"}, true)
+	if cfg["skin_title"] != "From file" {
+		t.Errorf("skin_title = %v", cfg["skin_title"])
+	}
+	if cfg["skin_show_about_tab"] == true {
+		t.Errorf("skin_show_about_tab = true: stock defaults leaked past a properties file")
 	}
 }
 
@@ -61,5 +75,21 @@ func TestClassifyProperties(t *testing.T) {
 	}
 	if got := PropertiesSummary(nil, 10); got != "portal properties: none set (built-in defaults)" {
 		t.Errorf("empty summary = %q", got)
+	}
+}
+
+func TestPropertyEscapes(t *testing.T) {
+	props := ParseApplicationProperties(strings.NewReader(`a=one\ntwo
+b=tab\there
+c=back\\slash
+d=café
+key\=x=y
+e=plain
+`))
+	want := map[string]string{"a": "one\ntwo", "b": "tab\there", "c": `back\slash`, "d": "café", "key=x": "y", "e": "plain"}
+	for k, v := range want {
+		if props[k] != v {
+			t.Errorf("%q = %q, want %q", k, props[k], v)
+		}
 	}
 }
