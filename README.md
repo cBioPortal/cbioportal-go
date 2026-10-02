@@ -117,6 +117,56 @@ All settings are environment variables; only `CBIOPORTAL_DB` is usually needed.
 | `AUTH_ENABLED`, `AUTH_JWT_SECRET` | HS256 bearer-token auth |
 | `AUTH_DEFAULT_USER` | single-user development login for requests without a token |
 | `PUBLISHER_API_KEY` | key required by `/api/public_virtual_studies` publish/unpublish |
+| `SITE_BANNER`, `SITE_BANNER_LINK` | show a notice bar (and link) at the top of every portal page, e.g. for a preview deployment |
+
+## Deployment
+
+go.cbioportal.org runs the image `docker.io/inodb/cbioportal-go`
+(`latest` and `sha-<7-char commit>`, linux/amd64 and linux/arm64), built and
+pushed by `.github/workflows/docker.yml` on every push to `main`. The
+[Dockerfile](Dockerfile) builds the frontend once on the build platform and
+cross-compiles the Go binaries, so the arm64 image needs no emulation for the
+heavy steps. The image (alpine, non-root uid 10001, `WORKDIR /app`, port 8080)
+contains `/usr/local/bin/cbioportal-api` (the default command),
+`/usr/local/bin/cbioportal-import`, the built frontend in `/app/frontend` and
+the import job in `/app/deploy`.
+
+```bash
+docker build -t inodb/cbioportal-go:dev \
+  --build-arg FRONTEND_COMMIT=$(git -C frontend rev-parse HEAD) .
+docker run --rm --network host -e PORT=8080 -e CBIOPORTAL_DB=cbioportal inodb/cbioportal-go:dev
+```
+
+The API container is configured with the variables under
+[API configuration](#api-configuration): `PORT=8080`,
+`FRONTEND_DIR=/app/frontend`, `CLICKHOUSE_URL` / `CLICKHOUSE_USER` /
+`CLICKHOUSE_PASSWORD`, `CBIOPORTAL_DB` / `CBIOPORTAL_RAW_DB` /
+`CBIOPORTAL_REF_DB` and `SESSION_STORE_FILE` on a persistent volume. Health
+check: `GET /health`.
+
+**Daily import (blue/green).** [`deploy/import-datahub.sh`](deploy/import-datahub.sh)
+rebuilds the color the API is *not* serving — databases
+`${DB_PREFIX}_<color>`, `_raw` and `_ref`, which must already exist (the job
+only drops and creates tables and views in them). It empties them, shallow-clones
+[cBioPortal/datahub](https://github.com/cBioPortal/datahub) without LFS
+content, loads the newest `seedDB/seed-*.sql.gz` and the gene panels, then
+downloads, ingests and deletes each study in
+[`deploy/datahub-studies.txt`](deploy/datahub-studies.txt) one at a time. A
+failing study is logged and skipped; the job fails if more than
+`MAX_FAILED_PCT` (25%) fail, or if the transform or the sanity check (row
+counts plus a throwaway API process answering `/api/studies`) fails. On success
+it writes `$WORKDIR/state.env` (`CBIOPORTAL_DB=…`, `CBIOPORTAL_RAW_DB=…`,
+`CBIOPORTAL_REF_DB=…`), from which the next step switches the API over. Inputs:
+`CLICKHOUSE_URL/USER/PASSWORD`, `DB_PREFIX`, `ACTIVE_DB` (the database served
+now; empty builds blue), `WORKDIR`, `DATAHUB_REPO`, `DATAHUB_REF`,
+`STUDIES_FILE`. The ClickHouse user needs SELECT, INSERT, ALTER, CREATE TABLE,
+CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on the six databases (no
+CREATE/DROP DATABASE).
+
+The Kubernetes manifests (Deployment, CronJob, ConfigMap
+`cbioportal-go-active`) live in
+[knowledgesystems-k8s-deployment](https://github.com/knowledgesystems/knowledgesystems-k8s-deployment/tree/go-cbioportal-org),
+branch `go-cbioportal-org`.
 
 ## Code layout
 

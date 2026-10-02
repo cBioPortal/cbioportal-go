@@ -8,6 +8,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"maps"
 	"net/http"
@@ -222,6 +223,7 @@ func withFrontendConfig(page []byte, host string) []byte {
 	} else {
 		page = append(script, page...)
 	}
+	page = withSiteBanner(page, os.Getenv("SITE_BANNER"), os.Getenv("SITE_BANNER_LINK"))
 	// An element after #reactRoot keeps it from being the body's last child:
 	// otherwise every node the frontend appends to the body to measure text
 	// flips :last-child matching and restyles the whole app.
@@ -229,6 +231,33 @@ func withFrontendConfig(page []byte, host string) []byte {
 		page = append(append(append([]byte{}, page[:i]...), "<script></script>"...), page[i:]...)
 	}
 	return page
+}
+
+// withSiteBanner puts a notice bar (e.g. "experimental preview") at the top
+// of the page body, above the app, when text is set; link, if set, is
+// appended as a link. It is part of the document flow, so it never covers the
+// portal header.
+func withSiteBanner(page []byte, text, link string) []byte {
+	if text == "" {
+		return page
+	}
+	i := bytes.Index(page, []byte("<body"))
+	if i < 0 {
+		return page
+	}
+	j := bytes.IndexByte(page[i:], '>')
+	if j < 0 {
+		return page
+	}
+	at := i + j + 1
+	banner := `<div id="site-banner" style="background:#fcf8e3;border-bottom:1px solid #faebcc;color:#8a6d3b;` +
+		`padding:6px 12px;text-align:center;font-size:13px;line-height:1.4">` + html.EscapeString(text)
+	if link != "" {
+		banner += ` <a href="` + html.EscapeString(link) + `" style="color:#66512c;text-decoration:underline">` +
+			html.EscapeString(link) + `</a>`
+	}
+	banner += `</div>`
+	return append(append(append([]byte{}, page[:at]...), banner...), page[at:]...)
 }
 
 // devModeScript mirrors the Java portal page (index.html + load-frontend.js):
