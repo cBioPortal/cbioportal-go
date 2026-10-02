@@ -70,6 +70,29 @@ make help       # all targets
 CI runs lint, unit and contract tests on every push; the full e2e suite runs
 weekly.
 
+## TODO for a full reimplementation
+
+- **Authentication.** Only an optional single-user development login exists.
+  Needed: OAuth2/OIDC sign-in (Google and Microsoft, as on www), SAML/Keycloak
+  for private portals, and data access tokens for API clients.
+- **Authorization.** Per-study access from study groups and user roles, so
+  `readPermission` and every endpoint honour it (today all studies are
+  readable).
+- **Session service.** Sessions (virtual studies, groups, custom data,
+  settings) live in a JSON file in one process. Needed: a durable shared store,
+  or compatibility with cBioPortal's session service so sessions — and links —
+  carry over from existing portals; per-user saved studies once login exists.
+- **Importer coverage.** Tested on a handful of studies; needs validation
+  against all of datahub and cbioportal-core's validator rules.
+- **API parity.** Remaining Java endpoints and differences (study export
+  `.zip`, URL shortener, MatchMiner, newer column-store response shapes); the
+  API still reads the staging database for a few per-gene matrices.
+- **Performance.** Whole-profile reads of large studies (expression
+  enrichments, co-expression on TCGA PanCancer), RowBinary decoding for large
+  responses, projections applied in the handlers instead of a middleware.
+- **Tests.** One e2e test needs upstream CI's Keycloak login step to pass (see
+  [Testing](docs/testing.md)).
+
 ## Documentation
 
 - [Configuration](docs/configuration.md) — command-line flags, environment
