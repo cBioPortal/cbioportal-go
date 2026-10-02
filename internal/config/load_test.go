@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,5 +33,33 @@ func TestFrontendConfigOverrides(t *testing.T) {
 	cfg := FrontendConfig("/", map[string]string{"skin.title": "Go preview"})
 	if cfg["skin_title"] != "Go preview" {
 		t.Errorf("skin_title = %v", cfg["skin_title"])
+	}
+}
+
+func TestClassifyProperties(t *testing.T) {
+	props := map[string]string{
+		"skin.title":                 "x",
+		"priority_studies":           "y",
+		"spring.datasource.password": "secret",
+		"db.user":                    "cbio",
+	}
+	used, ignored := ClassifyProperties(props)
+	if strings.Join(used, ",") != "priority_studies,skin.title" {
+		t.Errorf("used = %v", used)
+	}
+	if strings.Join(ignored, ",") != "db.user,spring.datasource.password" {
+		t.Errorf("ignored = %v", ignored)
+	}
+
+	summary := PropertiesSummary(props, 1)
+	want := "portal properties: 2 used (priority_studies, … 1 more), 2 ignored (not used by this server: db.user, … 1 more)"
+	if summary != want {
+		t.Errorf("summary = %q, want %q", summary, want)
+	}
+	if strings.Contains(PropertiesSummary(props, 10), "secret") {
+		t.Error("summary leaks a property value")
+	}
+	if got := PropertiesSummary(nil, 10); got != "portal properties: none set (built-in defaults)" {
+		t.Errorf("empty summary = %q", got)
 	}
 }

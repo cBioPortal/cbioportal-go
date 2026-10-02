@@ -4,195 +4,214 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
-	"time"
+	"text/tabwriter"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/ingest"
-	"github.com/inodb/cbioportal-go/internal/parser"
-	"github.com/inodb/cbioportal-go/internal/reference"
-	"github.com/inodb/cbioportal-go/internal/transform"
+	"github.com/inodb/cbioportal-go/internal/buildinfo"
 )
 
+const name = "cbioportal-import"
+
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-	}
-	switch os.Args[1] {
-	case "plan":
-		cmdPlan(os.Args[2:])
-	case "ingest":
-		cmdIngest(os.Args[2:])
-	case "ingest-case-lists":
-		cmdIngestCaseLists(os.Args[2:])
-	case "transform":
-		cmdTransform(os.Args[2:])
-	case "load-reference":
-		cmdLoadReference(os.Args[2:])
-	case "load-gene-panels":
-		cmdLoadGenePanels(os.Args[2:])
-	default:
-		usage()
-	}
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: cbioportal-import <plan|ingest|ingest-case-lists|transform|load-reference|load-gene-panels> [args]")
-	os.Exit(2)
-}
-
-func fatal(err error) {
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+// run executes one command line and returns the exit status: 0 on success,
+// 1 when the command fails, 2 for a malformed command line.
+func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 {
+		printOverview(stderr)
+		return 2
 	}
+	switch args[0] {
+	case "help", "-h", "-help", "--help":
+		if len(args) < 2 || args[0] != "help" {
+			printOverview(stdout)
+			return 0
+		}
+		if args[1] == "version" {
+			fmt.Fprintf(stdout, "Usage: %s version\n\nPrint the version of %s.\n", name, name)
+			return 0
+		}
+		cmd := lookup(args[1])
+		if cmd == nil {
+			fmt.Fprintf(stderr, "%s: help: unknown command %q\n\n", name, args[1])
+			printOverview(stderr)
+			return 2
+		}
+		fs, _ := cmd.flagSet()
+		printCommandUsage(stdout, cmd, fs)
+		return 0
+	case "version", "-version", "--version":
+		fmt.Fprintln(stdout, buildinfo.String(name))
+		return 0
+	}
+
+	cmd := lookup(args[0])
+	if cmd == nil {
+		if strings.HasPrefix(args[0], "-") {
+			fmt.Fprintf(stderr, "%s: flag %s given before a command\n\n", name, args[0])
+		} else {
+			fmt.Fprintf(stderr, "%s: unknown command %q\n\n", name, args[0])
+		}
+		printOverview(stderr)
+		return 2
+	}
+	fs, exec := cmd.flagSet()
+	usageErr := func(err error) int {
+		fmt.Fprintf(stderr, "%s: %s: %v\nRun '%s help %s' for usage.\n", name, cmd.name, err, name, cmd.name)
+		return 2
+	}
+	if err := fs.Parse(reorder(args[1:], fs)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			printCommandUsage(stdout, cmd, fs)
+			return 0
+		}
+		return usageErr(err)
+	}
+	if err := cmd.checkArgs(fs.Args()); err != nil {
+		return usageErr(err)
+	}
+	if err := exec(fs.Args(), stdout); err != nil {
+		fmt.Fprintf(stderr, "%s: %s: %v\n", name, cmd.name, err)
+		return 1
+	}
+	return 0
 }
 
-// reorder moves flag arguments (and their values) ahead of positional args, so
-// `ingest <dir> --db X` works despite the stdlib flag package stopping at the
-// first positional. All flags here take a value.
-func reorder(args []string) []string {
+func lookup(name string) *command {
+	for i := range commands {
+		if commands[i].name == name {
+			return &commands[i]
+		}
+	}
+	return nil
+}
+
+// flagSet returns the command's flags and the function that runs it with
+// the parsed flags and positional arguments.
+func (c *command) flagSet() (*flag.FlagSet, func([]string, io.Writer) error) {
+	fs := flag.NewFlagSet(c.name, flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	return fs, c.setup(fs)
+}
+
+func (c *command) checkArgs(args []string) error {
+	switch {
+	case len(args) < c.minArgs:
+		return fmt.Errorf("missing %s", c.args)
+	case c.maxArgs >= 0 && len(args) > c.maxArgs:
+		return fmt.Errorf("unexpected argument %q", args[c.maxArgs])
+	}
+	return nil
+}
+
+// reorder moves flags (and their values) ahead of positional arguments, so
+// `ingest <dir> --db X` works although the flag package stops at the first
+// positional. A flag consumes the following argument as its value only if fs
+// defines it as non-boolean and it is not written -name=value; everything
+// after "--" is positional.
+func reorder(args []string, fs *flag.FlagSet) []string {
 	var flags, pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		if strings.HasPrefix(a, "-") {
-			flags = append(flags, a)
-			if !strings.Contains(a, "=") && i+1 < len(args) {
-				i++
-				flags = append(flags, args[i])
-			}
-		} else {
+		if a == "--" {
+			pos = append(pos, args[i+1:]...)
+			break
+		}
+		if !strings.HasPrefix(a, "-") || a == "-" {
 			pos = append(pos, a)
+			continue
+		}
+		flags = append(flags, a)
+		body := strings.TrimPrefix(strings.TrimPrefix(a, "-"), "-")
+		name, _, hasValue := strings.Cut(body, "=")
+		f := fs.Lookup(name)
+		if f != nil && !hasValue && !isBoolFlag(f) {
+			if i+1 == len(args) {
+				// A value flag at the very end has no value: leave it last
+				// so that fs.Parse reports it.
+				return flags
+			}
+			i++
+			flags = append(flags, args[i])
 		}
 	}
-	return append(flags, pos...)
-}
-
-func cmdPlan(args []string) {
-	fs := flag.NewFlagSet("plan", flag.ExitOnError)
-	fs.Parse(reorder(args))
-	s, err := parser.Scan(fs.Arg(0))
-	fatal(err)
-	fmt.Printf("study: %s\n%d data files:\n", s.StudyID, len(s.Files))
-	for _, f := range s.Files {
-		fmt.Printf("  %-24s %-18s %-11s -> %s\n", f.AlterationType, f.Datatype, f.Layout, f.StageSlug)
+	if len(pos) == 0 {
+		return flags
 	}
+	return append(append(flags, "--"), pos...)
 }
 
-func cmdIngest(args []string) {
-	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
-	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
-	db := fs.String("db", "cbioportal_raw", "target database")
-	fs.Parse(reorder(args))
+func isBoolFlag(f *flag.Flag) bool {
+	b, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && b.IsBoolFlag()
+}
 
-	s, err := parser.Scan(fs.Arg(0))
-	fatal(err)
-	fmt.Printf("ingesting study=%s files=%d\n", s.StudyID, len(s.Files))
-	c := ch.New(*url, *db)
-	start := time.Now()
-	stats, err := ingest.IngestStudy(c, s)
-	fatal(err)
-	elapsed := time.Since(start).Seconds()
+func printOverview(w io.Writer) {
+	fmt.Fprintf(w, `%[1]s loads cBioPortal studies in datahub format into ClickHouse.
 
-	fmt.Printf("\n%-24s %10s %9s %8s %8s %9s\n", "file", "rows", "MB", "s", "MB/s", "krows/s")
-	fmt.Println(dashes(72))
-	var totalRows uint64
-	var totalBytes int64
-	var mismatch int
-	for _, st := range stats {
-		flag := ""
-		if st.RowsLoaded != st.RowsExpected {
-			mismatch++
-			flag = " !"
+Usage:
+  %[1]s <command> [arguments] [flags]
+
+Commands:
+`, name)
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, c := range commands {
+		fmt.Fprintf(tw, "  %s\t%s\n", c.name, c.short)
+	}
+	fmt.Fprintf(tw, "  version\tprint the version\n")
+	fmt.Fprintf(tw, "  help\tshow help for a command\n")
+	tw.Flush()
+	fmt.Fprintf(w, `
+A typical import (each step's --db is the next step's input):
+  %[1]s load-reference seed-cbioportal_hg19_hg38_v2.14.5.sql.gz --db cbioportal_ref
+  %[1]s ingest datahub/public/acbc_mskcc_2015 --db cbioportal_raw
+  %[1]s transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
+
+%[2]s
+Flags may come before or after the arguments.
+Run '%[1]s help <command>' for a command's flags and examples.
+`, name, environmentHelp)
+}
+
+const environmentHelp = `Environment:
+  CLICKHOUSE_URL       default for --url (http://localhost:18123)
+  CLICKHOUSE_USER      ClickHouse user (unset: the default user)
+  CLICKHOUSE_PASSWORD  ClickHouse password; credentials are read from the
+                       environment only, so they stay out of the process list
+`
+
+func printCommandUsage(w io.Writer, c *command, fs *flag.FlagSet) {
+	synopsis := c.name
+	if c.args != "" {
+		synopsis += " " + c.args
+	}
+	hasFlags := false
+	fs.VisitAll(func(*flag.Flag) { hasFlags = true })
+	if hasFlags {
+		synopsis += " [flags]"
+	}
+	fmt.Fprintf(w, "Usage: %s %s\n\n%s\n", name, synopsis, c.long)
+	if hasFlags {
+		fmt.Fprintln(w, "\nFlags:")
+		fs.SetOutput(w)
+		fs.PrintDefaults()
+		fs.SetOutput(io.Discard)
+	}
+	if len(c.examples) > 0 {
+		fmt.Fprintln(w, "\nExamples:")
+		for _, e := range c.examples {
+			fmt.Fprintf(w, "  %s %s\n", name, e)
 		}
-		fmt.Printf("%-24s %10d %9.1f %8.2f %8.0f %9.1f%s\n",
-			st.SourceFile, st.RowsLoaded, float64(st.Bytes)/1e6, st.Secs, st.MBPerS(), st.RowsPerS()/1000, flag)
-		totalRows += st.RowsLoaded
-		totalBytes += st.Bytes
 	}
-	fmt.Println(dashes(72))
-	mb := float64(totalBytes) / 1e6
-	mbps, krps := 0.0, 0.0
-	if elapsed > 0 {
-		mbps = mb / elapsed
-		krps = float64(totalRows) / elapsed / 1000
+	if fs.Lookup("url") != nil {
+		fmt.Fprintf(w, "\n%s", environmentHelp)
 	}
-	fmt.Printf("TOTAL: %d rows, %.1f MB in %.2fs  =>  %.0f MB/s, %.0f krows/s\n", totalRows, mb, elapsed, mbps, krps)
-	if mismatch > 0 {
-		fmt.Printf("WARNING: %d file(s) had a row-count mismatch (marked !) — check TSV escaping.\n", mismatch)
-	}
-}
-
-// cmdIngestCaseLists re-stages only the case lists of one or more study
-// directories, e.g. for raw databases whose data files cannot be re-read.
-func cmdIngestCaseLists(args []string) {
-	fs := flag.NewFlagSet("ingest-case-lists", flag.ExitOnError)
-	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
-	db := fs.String("db", "cbioportal_raw", "target database")
-	fs.Parse(reorder(args))
-	c := ch.New(*url, *db)
-	for _, dir := range fs.Args() {
-		s, err := parser.Scan(dir)
-		fatal(err)
-		fatal(ingest.IngestCaseLists(c, s))
-		fmt.Printf("staged case lists of study=%s into `%s`\n", s.StudyID, *db)
-	}
-}
-
-func cmdTransform(args []string) {
-	fs := flag.NewFlagSet("transform", flag.ExitOnError)
-	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
-	rawDB := fs.String("raw-db", "cbioportal_raw", "raw staging database")
-	db := fs.String("db", "cbioportal", "target database for views")
-	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference database")
-	fs.Parse(reorder(args))
-
-	c := ch.New(*url, *rawDB)
-	counts, err := transform.Apply(c, *rawDB, *db, *refDB)
-	fatal(err)
-	fmt.Printf("transform views in `%s` (over `%s`):\n", *db, *rawDB)
-	for _, vc := range counts {
-		fmt.Printf("  %-20s %12d rows\n", vc.Name, vc.Rows)
-	}
-}
-
-func cmdLoadReference(args []string) {
-	fs := flag.NewFlagSet("load-reference", flag.ExitOnError)
-	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
-	db := fs.String("db", "cbioportal_ref", "reference database")
-	fs.Parse(reorder(args))
-	c := ch.New(*url, *db)
-	genes, aliases, err := reference.LoadReference(c, fs.Arg(0))
-	fatal(err)
-	fmt.Printf("loaded %d genes and %d aliases into `%s`\n", genes, aliases, *db)
-}
-
-func cmdLoadGenePanels(args []string) {
-	fs := flag.NewFlagSet("load-gene-panels", flag.ExitOnError)
-	url := fs.String("url", clickhouseURL(), "ClickHouse HTTP endpoint (default from CLICKHOUSE_URL)")
-	db := fs.String("db", "cbioportal_raw", "raw staging database")
-	fs.Parse(reorder(args))
-	c := ch.New(*url, *db)
-	panels, genes, err := ingest.LoadGenePanelsDir(c, fs.Arg(0))
-	fatal(err)
-	fmt.Printf("loaded %d gene panels (%d genes) into `%s`\n", panels, genes, *db)
-}
-
-func dashes(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = '-'
-	}
-	return string(b)
-}
-
-// clickhouseURL is the default --url: CLICKHOUSE_URL, else a local server.
-func clickhouseURL() string {
-	if u := os.Getenv("CLICKHOUSE_URL"); u != "" {
-		return u
-	}
-	return "http://localhost:18123"
 }

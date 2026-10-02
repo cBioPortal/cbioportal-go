@@ -24,7 +24,7 @@ type ViewCount struct {
 // data is absent are built empty, with the same columns (see stagingSources).
 func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	c := newClient(base, rawDB)
-	if _, err := c.ExecuteServerwide(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", targetDB)); err != nil {
+	if err := c.EnsureDatabase(targetDB); err != nil {
 		return nil, err
 	}
 	hasRefText, _ := c.Execute(fmt.Sprintf(

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -29,4 +30,49 @@ func LoadPortalProperties(file string, args []string) (map[string]string, error)
 		props[key] = value
 	}
 	return props, nil
+}
+
+// ClassifyProperties splits the keys of props into those this server uses
+// (the frontend properties served by /config_service) and those it ignores,
+// such as the Java backend's spring.datasource.* or db.* settings in a
+// reused application.properties. Both lists are sorted.
+func ClassifyProperties(props map[string]string) (used, ignored []string) {
+	known := make(map[string]bool, len(FrontendProperties))
+	for _, p := range FrontendProperties {
+		known[p.PropertyName] = true
+	}
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		if known[k] {
+			used = append(used, k)
+		} else {
+			ignored = append(ignored, k)
+		}
+	}
+	return used, ignored
+}
+
+// PropertiesSummary is a one-line account of which portal properties take
+// effect, naming at most max keys per list. It never includes values, which
+// may hold passwords.
+func PropertiesSummary(props map[string]string, max int) string {
+	if len(props) == 0 {
+		return "portal properties: none set (built-in defaults)"
+	}
+	used, ignored := ClassifyProperties(props)
+	s := fmt.Sprintf("portal properties: %d used", len(used))
+	if len(used) > 0 {
+		s += " (" + abbreviate(used, max) + ")"
+	}
+	s += fmt.Sprintf(", %d ignored", len(ignored))
+	if len(ignored) > 0 {
+		s += " (not used by this server: " + abbreviate(ignored, max) + ")"
+	}
+	return s
+}
+
+func abbreviate(keys []string, max int) string {
+	if len(keys) <= max {
+		return strings.Join(keys, ", ")
+	}
+	return strings.Join(keys[:max], ", ") + fmt.Sprintf(", … %d more", len(keys)-max)
 }

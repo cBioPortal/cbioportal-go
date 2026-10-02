@@ -156,8 +156,22 @@ func (c *Client) DeleteWhere(table, where string) {
 		c.database, table, where))
 }
 
+// CreateDatabase creates the client's database if it does not exist.
 func (c *Client) CreateDatabase() error {
-	_, err := c.ExecuteServerwide(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", c.database))
+	return c.EnsureDatabase(c.database)
+}
+
+// EnsureDatabase creates database name unless it already exists. Existing
+// databases are left alone without issuing CREATE DATABASE, so a user granted
+// only table-level privileges on pre-provisioned databases can run imports.
+func (c *Client) EnsureDatabase(name string) error {
+	out, err := c.ExecuteServerwide(fmt.Sprintf(
+		"SELECT count() FROM system.databases WHERE name = '%s' FORMAT TabSeparated",
+		strings.ReplaceAll(name, "'", "\\'")))
+	if err == nil && strings.TrimSpace(out) == "1" {
+		return nil
+	}
+	_, err = c.ExecuteServerwide(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name))
 	return err
 }
 

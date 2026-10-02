@@ -1,0 +1,224 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"time"
+
+	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	"github.com/inodb/cbioportal-go/internal/ingest"
+	"github.com/inodb/cbioportal-go/internal/parser"
+	"github.com/inodb/cbioportal-go/internal/reference"
+	"github.com/inodb/cbioportal-go/internal/transform"
+)
+
+// command is one subcommand. setup registers its flags on fs and returns the
+// function that runs it once fs is parsed.
+type command struct {
+	name     string
+	args     string // positional arguments in the usage line
+	minArgs  int
+	maxArgs  int // -1: no limit
+	short    string
+	long     string
+	examples []string
+	setup    func(fs *flag.FlagSet) func(args []string, w io.Writer) error
+}
+
+var commands = []command{
+	{
+		name: "plan", args: "<study-dir>", minArgs: 1, maxArgs: 1,
+		short: "list a study's data files and the staging tables they load into",
+		long: `Plan reads the meta files of a study directory and lists each data file
+with its alteration type, datatype, layout and staging table, without
+connecting to ClickHouse.`,
+		examples: []string{"plan datahub/public/acbc_mskcc_2015"},
+		setup:    func(fs *flag.FlagSet) func([]string, io.Writer) error { return runPlan },
+	},
+	{
+		name: "ingest", args: "<study-dir>", minArgs: 1, maxArgs: 1,
+		short: "stage a study's data files in the raw database",
+		long: `Ingest streams every data file of a study directory, as is, into staging
+tables of the raw database, replacing that study's earlier rows. Run
+transform afterwards to make the study queryable.`,
+		examples: []string{
+			"ingest datahub/public/acbc_mskcc_2015 --db cbioportal_raw",
+			"ingest --url https://<host>:8443 --db cbioportal_raw datahub/public/msk_impact_2017",
+		},
+		setup: setupIngest,
+	},
+	{
+		name: "ingest-case-lists", args: "<study-dir>...", minArgs: 1, maxArgs: -1,
+		short: "restage only the case lists of one or more studies",
+		long: `Ingest-case-lists restages only the case_lists/ directory of each study,
+e.g. for raw databases whose data files cannot be re-read.`,
+		examples: []string{"ingest-case-lists datahub/public/study_a datahub/public/study_b --db cbioportal_raw"},
+		setup:    setupIngestCaseLists,
+	},
+	{
+		name: "load-reference", args: "<seed.sql.gz>", minArgs: 1, maxArgs: 1,
+		short: "load genes, gene aliases and cancer types from a seed dump",
+		long: `Load-reference loads the genes, gene aliases and cancer types of a
+cBioPortal seed dump (datahub seedDB/seed-*.sql.gz) into the reference
+database. It is needed once, before the first transform.`,
+		examples: []string{"load-reference seed-cbioportal_hg19_hg38_v2.14.5.sql.gz --db cbioportal_ref"},
+		setup:    setupLoadReference,
+	},
+	{
+		name: "load-gene-panels", args: "<panels-dir>", minArgs: 1, maxArgs: 1,
+		short: "load gene panel definitions into the raw database",
+		long: `Load-gene-panels loads every gene panel file of a directory (datahub
+reference_data/gene_panels) into the raw database.`,
+		examples: []string{"load-gene-panels datahub/reference_data/gene_panels --db cbioportal_raw"},
+		setup:    setupLoadGenePanels,
+	},
+	{
+		name: "transform", minArgs: 0, maxArgs: 0,
+		short: "build the portal database's tables from the raw and reference databases",
+		long: `Transform rebuilds every derived table and view of the portal database
+from the staged studies (--raw-db) and the reference data (--ref-db), and
+prints the row count of each. The API serves the portal database (--db).`,
+		examples: []string{"transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref"},
+		setup:    setupTransform,
+	},
+}
+
+// urlFlag registers the ClickHouse endpoint flag shared by every command
+// that connects to ClickHouse.
+func urlFlag(fs *flag.FlagSet) *string {
+	return fs.String("url", clickhouseURL(), "ClickHouse HTTP `endpoint`; defaults to $CLICKHOUSE_URL if set")
+}
+
+// clickhouseURL is the default --url: CLICKHOUSE_URL, else a local server.
+func clickhouseURL() string {
+	if u := os.Getenv("CLICKHOUSE_URL"); u != "" {
+		return u
+	}
+	return "http://localhost:18123"
+}
+
+func runPlan(args []string, w io.Writer) error {
+	s, err := parser.Scan(args[0])
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "study: %s\n%d data files:\n", s.StudyID, len(s.Files))
+	for _, f := range s.Files {
+		fmt.Fprintf(w, "  %-24s %-18s %-11s -> %s\n", f.AlterationType, f.Datatype, f.Layout, f.StageSlug)
+	}
+	return nil
+}
+
+func setupIngest(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	db := fs.String("db", "cbioportal_raw", "raw staging `database` to load into")
+	return func(args []string, w io.Writer) error {
+		s, err := parser.Scan(args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "ingesting study=%s files=%d\n", s.StudyID, len(s.Files))
+		start := time.Now()
+		stats, err := ingest.IngestStudy(ch.New(*url, *db), s)
+		if err != nil {
+			return err
+		}
+		elapsed := time.Since(start).Seconds()
+
+		rule := strings.Repeat("-", 72)
+		fmt.Fprintf(w, "\n%-24s %10s %9s %8s %8s %9s\n", "file", "rows", "MB", "s", "MB/s", "krows/s")
+		fmt.Fprintln(w, rule)
+		var totalRows uint64
+		var totalBytes int64
+		var mismatch int
+		for _, st := range stats {
+			mark := ""
+			if st.RowsLoaded != st.RowsExpected {
+				mismatch++
+				mark = " !"
+			}
+			fmt.Fprintf(w, "%-24s %10d %9.1f %8.2f %8.0f %9.1f%s\n",
+				st.SourceFile, st.RowsLoaded, float64(st.Bytes)/1e6, st.Secs, st.MBPerS(), st.RowsPerS()/1000, mark)
+			totalRows += st.RowsLoaded
+			totalBytes += st.Bytes
+		}
+		fmt.Fprintln(w, rule)
+		mb := float64(totalBytes) / 1e6
+		mbps, krps := 0.0, 0.0
+		if elapsed > 0 {
+			mbps = mb / elapsed
+			krps = float64(totalRows) / elapsed / 1000
+		}
+		fmt.Fprintf(w, "TOTAL: %d rows, %.1f MB in %.2fs  =>  %.0f MB/s, %.0f krows/s\n", totalRows, mb, elapsed, mbps, krps)
+		if mismatch > 0 {
+			fmt.Fprintf(w, "WARNING: %d file(s) had a row-count mismatch (marked !) — check TSV escaping.\n", mismatch)
+		}
+		return nil
+	}
+}
+
+func setupIngestCaseLists(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	db := fs.String("db", "cbioportal_raw", "raw staging `database` to load into")
+	return func(args []string, w io.Writer) error {
+		c := ch.New(*url, *db)
+		for _, dir := range args {
+			s, err := parser.Scan(dir)
+			if err != nil {
+				return err
+			}
+			if err := ingest.IngestCaseLists(c, s); err != nil {
+				return fmt.Errorf("study %s: %w", s.StudyID, err)
+			}
+			fmt.Fprintf(w, "staged case lists of study=%s into `%s`\n", s.StudyID, *db)
+		}
+		return nil
+	}
+}
+
+func setupTransform(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	rawDB := fs.String("raw-db", "cbioportal_raw", "raw staging `database` to read")
+	db := fs.String("db", "cbioportal", "portal `database` to build; the API serves it with -db")
+	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference `database` to read")
+	return func(_ []string, w io.Writer) error {
+		counts, err := transform.Apply(ch.New(*url, *rawDB), *rawDB, *db, *refDB)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "transform views in `%s` (over `%s`):\n", *db, *rawDB)
+		for _, vc := range counts {
+			fmt.Fprintf(w, "  %-20s %12d rows\n", vc.Name, vc.Rows)
+		}
+		return nil
+	}
+}
+
+func setupLoadReference(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	db := fs.String("db", "cbioportal_ref", "reference `database` to load into")
+	return func(args []string, w io.Writer) error {
+		genes, aliases, err := reference.LoadReference(ch.New(*url, *db), args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "loaded %d genes and %d aliases into `%s`\n", genes, aliases, *db)
+		return nil
+	}
+}
+
+func setupLoadGenePanels(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	db := fs.String("db", "cbioportal_raw", "raw staging `database` to load into")
+	return func(args []string, w io.Writer) error {
+		panels, genes, err := ingest.LoadGenePanelsDir(ch.New(*url, *db), args[0])
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "loaded %d gene panels (%d genes) into `%s`\n", panels, genes, *db)
+		return nil
+	}
+}
