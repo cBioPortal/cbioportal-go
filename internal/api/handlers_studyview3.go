@@ -340,8 +340,18 @@ func compactSampleScope(ids []identifier) string {
 
 // ---------- Clinical data table (study-view Clinical tab) ----------
 
+// tableClinicalData is a clinical-table cell as LegacyClinicalDataMapper
+// .toDtoForTable writes it: no unique keys, no attribute metadata.
+type tableClinicalData struct {
+	SampleID            string `json:"sampleId"`
+	PatientID           string `json:"patientId"`
+	StudyID             string `json:"studyId"`
+	ClinicalAttributeID string `json:"clinicalAttributeId"`
+	Value               string `json:"value"`
+}
+
 type sampleClinicalDataCollection struct {
-	ByUniqueSampleKey map[string][]ClinicalData `json:"byUniqueSampleKey"`
+	ByUniqueSampleKey map[string][]tableClinicalData `json:"byUniqueSampleKey"`
 }
 
 func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
@@ -364,15 +374,17 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		dir = "DESC"
 	}
 
-	empty := sampleClinicalDataCollection{ByUniqueSampleKey: map[string][]ClinicalData{}}
+	empty := sampleClinicalDataCollection{ByUniqueSampleKey: map[string][]tableClinicalData{}}
 
 	inner := fmt.Sprintf("SELECT study_id, sample_id, patient_id FROM sample WHERE %s", s.sampleScope(f))
-	if searchTerm != "" {
+	if strings.TrimSpace(searchTerm) != "" {
+		// ClinicalDataMapper.searchedAttributeData: a case-sensitive LIKE on
+		// the sample and patient ids and attribute values.
 		like := "'%" + sqlLit(searchTerm) + "%'"
 		inner += fmt.Sprintf(
-			" AND (sample_id ILIKE %s OR patient_id ILIKE %s"+
-				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM clinical_sample WHERE attr_value ILIKE %s)"+
-				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM clinical_patient WHERE attr_value ILIKE %s))",
+			" AND (sample_id LIKE %s OR patient_id LIKE %s"+
+				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM clinical_sample WHERE attr_value LIKE %s)"+
+				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM clinical_patient WHERE attr_value LIKE %s))",
 			like, like, like, like)
 	}
 
@@ -403,16 +415,22 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM (%s) "+
 				"ORDER BY patient_id %s, sample_id ASC LIMIT %d OFFSET %d", inner, dir, pageSize, offset)
 	default:
+		// Samples without the attribute sort last; NUMBER attributes sort
+		// numerically (non-numbers as missing), as ClinicalDataMapper does.
 		view, keyCol := "clinical_sample", "sample_id"
 		if s.attrIsPatientLevel(f.studyIDs(), sortBy) {
 			view, keyCol = "clinical_patient", "patient_id"
 		}
+		sortExpr := "v.sortval"
+		if s.attrIsNumber(f.studyIDs(), sortBy) {
+			sortExpr = "toFloat64OrNull(v.sortval)"
+		}
 		pageSQL = fmt.Sprintf(
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM (%s) AS s "+
-				"LEFT JOIN (SELECT study_id, %s, any(attr_value) AS sortval FROM %s WHERE attr_id = '%s' GROUP BY study_id, %s) AS v "+
+				"LEFT JOIN (SELECT study_id, %s, any(attr_value) AS sortval, 1 AS present FROM %s WHERE attr_id = '%s' GROUP BY study_id, %s) AS v "+
 				"ON s.study_id = v.study_id AND s.%s = v.%s "+
-				"ORDER BY sortval %s, sample_id ASC LIMIT %d OFFSET %d",
-			inner, keyCol, view, sqlLit(sortBy), keyCol, keyCol, keyCol, dir, pageSize, offset)
+				"ORDER BY if(v.present = 1, %s, NULL) %s NULLS LAST, sample_id ASC LIMIT %d OFFSET %d",
+			inner, keyCol, view, sqlLit(sortBy), keyCol, keyCol, keyCol, sortExpr, dir, pageSize, offset)
 	}
 
 	pageRows, err := ch.Query[idRow](s.CH, pageSQL)
@@ -429,10 +447,9 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	patientSet := map[string]bool{}
 	var patientPairs [][2]string
 	patientToSamples := map[string][]idRow{}
-	byKey := map[string][]ClinicalData{}
+	byKey := map[string][]tableClinicalData{}
 	for _, pr := range pageRows {
 		samplePairs = append(samplePairs, [2]string{pr.StudyID, pr.SampleID})
-		byKey[uniqueKey(pr.StudyID, pr.SampleID)] = []ClinicalData{}
 		pk := pr.StudyID + "\x00" + pr.PatientID
 		patientToSamples[pk] = append(patientToSamples[pk], pr)
 		if !patientSet[pk] {
@@ -452,11 +469,9 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	for _, cr := range sampleData {
 		patientID := sampleToPatient[cr.StudyID+"\x00"+cr.ID]
 		key := uniqueKey(cr.StudyID, cr.ID)
-		byKey[key] = append(byKey[key], ClinicalData{
+		byKey[key] = append(byKey[key], tableClinicalData{
 			ClinicalAttributeID: cr.ClinicalAttributeID, Value: cr.Value,
 			SampleID: cr.ID, PatientID: patientID, StudyID: cr.StudyID,
-			UniqueSampleKey: key, UniquePatientKey: uniqueKey(cr.StudyID, patientID),
-			PatientAttribute: false,
 		})
 	}
 
@@ -468,11 +483,9 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		for _, cr := range patientData {
 			for _, sm := range patientToSamples[cr.StudyID+"\x00"+cr.ID] {
 				key := uniqueKey(sm.StudyID, sm.SampleID)
-				byKey[key] = append(byKey[key], ClinicalData{
+				byKey[key] = append(byKey[key], tableClinicalData{
 					ClinicalAttributeID: cr.ClinicalAttributeID, Value: cr.Value,
 					SampleID: sm.SampleID, PatientID: sm.PatientID, StudyID: sm.StudyID,
-					UniqueSampleKey: key, UniquePatientKey: uniqueKey(sm.StudyID, sm.PatientID),
-					PatientAttribute: true,
 				})
 			}
 		}
@@ -494,6 +507,21 @@ func (s *State) attrIsPatientLevel(studyIDs []string, attrID string) bool {
 		"SELECT max(patient_attribute) AS flag FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id = '%s'",
 		inList(studyIDs), sqlLit(attrID)))
 	return len(rows) > 0 && rows[0].Flag != 0
+}
+
+// attrIsNumber reports whether a clinical attribute has the NUMBER datatype
+// in any of the given studies.
+func (s *State) attrIsNumber(studyIDs []string, attrID string) bool {
+	if len(studyIDs) == 0 || attrID == "" {
+		return false
+	}
+	type r struct {
+		N uint64 `json:"n"`
+	}
+	rows, _ := ch.Query[r](s.CH, fmt.Sprintf(
+		"SELECT count() AS n FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id = '%s' AND datatype = 'NUMBER'",
+		inList(studyIDs), sqlLit(attrID)))
+	return len(rows) > 0 && rows[0].N > 0
 }
 
 // customDataCountsFetch counts the values of user-defined (custom chart) data

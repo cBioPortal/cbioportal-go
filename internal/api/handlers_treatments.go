@@ -96,7 +96,7 @@ type ClinicalEventSample struct {
 	PatientID string `json:"patientId"`
 	SampleID  string `json:"sampleId"`
 	StudyID   string `json:"studyId"`
-	TimeTaken int    `json:"timeTaken"`
+	TimeTaken *int   `json:"timeTaken,omitempty"`
 }
 
 type SampleTreatmentRow struct {
@@ -113,11 +113,47 @@ type SampleTreatmentReport struct {
 
 // treatmentEvents selects the AGENT treatment events of the filtered patients.
 func (s *State) treatmentEvents(f studyViewFilter) string {
+	return s.treatmentEventsByTier(f, treatmentTiers["Agent"])
+}
+
+// treatmentTier is a ClinicalEventKeyCode: the event key a treatment tier
+// reads, and the pattern its values are split on (AgentTarget lists several
+// targets per event).
+type treatmentTier struct{ key, split string }
+
+var treatmentTiers = map[string]treatmentTier{
+	"Agent":       {key: "AGENT"},
+	"AgentClass":  {key: "AGENT_CLASS"},
+	"AgentTarget": {key: "AGENT_TARGET", split: ", *"},
+}
+
+// tierParam reads the `tier` request parameter (default Agent); an unknown
+// tier is Spring's 400 type mismatch.
+func tierParam(w http.ResponseWriter, r *http.Request) (treatmentTier, bool) {
+	name := r.URL.Query().Get("tier")
+	if name == "" {
+		name = "Agent"
+	}
+	t, ok := treatmentTiers[name]
+	if !ok {
+		readBody(r, nil)
+		writeError(w, http.StatusBadRequest, msgEnumMismatch("org.cbioportal.legacy.model.ClinicalEventKeyCode", name))
+	}
+	return t, ok
+}
+
+// treatmentEventsByTier selects the treatment events of the filtered
+// patients for one tier, one row per (split) treatment value.
+func (s *State) treatmentEventsByTier(f studyViewFilter, tier treatmentTier) string {
+	value := "value"
+	if tier.split != "" {
+		value = fmt.Sprintf("arrayJoin(splitByRegexp('%s', value))", sqlLit(tier.split))
+	}
 	return fmt.Sprintf(
-		"SELECT patient_unique_id, value, start_date FROM clinical_event_data_derived "+
-			"WHERE cancer_study_identifier IN (%s) AND lower(event_type) = 'treatment' AND key = 'AGENT' "+
+		"SELECT patient_unique_id, %s AS value, start_date FROM clinical_event_data_derived "+
+			"WHERE cancer_study_identifier IN (%s) AND lower(event_type) = 'treatment' AND key = '%s' "+
 			"AND patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s)",
-		orEmpty(f.studyIDs()), s.filterWhere(f))
+		value, orEmpty(f.studyIDs()), sqlLit(tier.key), s.filterWhere(f))
 }
 
 func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
@@ -154,8 +190,12 @@ func (s *State) patientTreatmentCountsFetch(w http.ResponseWriter, r *http.Reque
 // sampleTreatmentRows pairs every filtered sample's acquisition time with the
 // first dose of each treatment its patient received: Pre when the sample was
 // taken on or before that dose, Post otherwise.
-func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool) []SampleTreatmentRow {
+func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treatmentTier) []SampleTreatmentRow {
 	studyIn := orEmpty(f.studyIDs())
+	value := "value"
+	if tier.split != "" {
+		value = fmt.Sprintf("arrayJoin(splitByRegexp('%s', value))", sqlLit(tier.split))
+	}
 	type row struct {
 		Treatment string `json:"treatment"`
 		SampleID  string `json:"sampleId"`
@@ -171,19 +211,20 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool) []SampleTr
 			"FROM clinical_event_data_derived WHERE cancer_study_identifier IN (%[1]s) "+
 			"AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN') AND key = 'SAMPLE_ID' "+
 			"GROUP BY patient_unique_id, value, cancer_study_identifier) ced "+
-			"INNER JOIN (SELECT patient_unique_id, value AS treatment, min(start_date) AS treatment_time_taken "+
-			"FROM clinical_event_data_derived WHERE cancer_study_identifier IN (%[1]s) "+
-			"AND lower(event_type) = 'treatment' AND key = 'AGENT' GROUP BY patient_unique_id, value) t "+
+			"INNER JOIN (SELECT patient_unique_id, treatment, min(start_date) AS treatment_time_taken "+
+			"FROM (SELECT patient_unique_id, %[3]s AS treatment, start_date FROM clinical_event_data_derived "+
+			"WHERE cancer_study_identifier IN (%[1]s) AND lower(event_type) = 'treatment' AND key = '%[4]s') "+
+			"GROUP BY patient_unique_id, treatment) t "+
 			"ON t.patient_unique_id = ced.patient_unique_id "+
 			"WHERE concat(ced.cancer_study_identifier, '_', ced.sample_id) IN (%[2]s)",
-		studyIn, s.filterSQL(f)))
+		studyIn, s.filterSQL(f), value, sqlLit(tier.key)))
 	byKey := map[string]*SampleTreatmentRow{}
 	for _, r := range rows {
 		time := "Post"
 		if r.Pre == 1 {
 			time = "Pre"
 		}
-		k := time + "\x00" + r.Treatment
+		k := r.Treatment + time
 		row, ok := byKey[k]
 		if !ok {
 			row = &SampleTreatmentRow{Time: time, Treatment: r.Treatment, Samples: []ClinicalEventSample{}}
@@ -191,8 +232,9 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool) []SampleTr
 		}
 		row.Count++
 		if detailed {
+			t := r.Time
 			row.Samples = append(row.Samples, ClinicalEventSample{
-				PatientID: strings.TrimPrefix(r.Patient, r.Study+"_"), SampleID: r.SampleID, StudyID: r.Study, TimeTaken: r.Time,
+				PatientID: strings.TrimPrefix(r.Patient, r.Study+"_"), SampleID: r.SampleID, StudyID: r.Study, TimeTaken: &t,
 			})
 		}
 	}
@@ -200,6 +242,13 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool) []SampleTr
 	for _, k := range sortedKeys(byKey) {
 		out = append(out, *byKey[k])
 	}
+	// Per treatment, the Pre row before the Post row.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Treatment != out[j].Treatment {
+			return out[i].Treatment < out[j].Treatment
+		}
+		return out[i].Time == "Pre" && out[j].Time == "Post"
+	})
 	return out
 }
 
@@ -207,7 +256,7 @@ func (s *State) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Reques
 	var f studyViewFilter
 	readBody(r, &f)
 	detailed := strings.EqualFold(r.URL.Query().Get("projection"), "DETAILED")
-	rows := s.sampleTreatmentRows(f, detailed)
+	rows := s.sampleTreatmentRows(f, detailed, treatmentTiers["Agent"])
 	type total struct {
 		N int `json:"n"`
 	}
@@ -225,8 +274,14 @@ func (s *State) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Reques
 }
 
 // treatmentsPatient serves the per-treatment patient rows (with the treated
-// patients' samples) for POST /api/treatments/patient.
+// patients' filtered samples, without acquisition times) for POST
+// /api/treatments/patient, in the order of TreatmentServiceImpl's HashMap
+// keyed by treatment.
 func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
+	tier, ok := tierParam(w, r)
+	if !ok {
+		return
+	}
 	var f studyViewFilter
 	readBody(r, &f)
 	type row struct {
@@ -239,7 +294,7 @@ func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
 		"SELECT DISTINCT t.value AS treatment, sd.patient_stable_id AS patient, sd.cancer_study_identifier AS study, "+
 			"sd.sample_stable_id AS sampleId FROM (%s) t JOIN sample_derived sd ON sd.patient_unique_id = t.patient_unique_id "+
 			"WHERE %s ORDER BY treatment, study, patient, sampleId",
-		s.treatmentEvents(f), s.filterWhere(f)))
+		s.treatmentEventsByTier(f, tier), s.filterWhere(f)))
 	type patientRow struct {
 		Treatment string                `json:"treatment"`
 		Count     int                   `json:"count"`
@@ -261,19 +316,34 @@ func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
 		pr.Samples = append(pr.Samples, ClinicalEventSample{PatientID: r.Patient, SampleID: r.SampleID, StudyID: r.Study})
 	}
 	out := make([]patientRow, 0, len(byTreatment))
-	for _, k := range sortedKeys(byTreatment) {
+	for _, k := range javaHashMapOrder(sortedKeys(byTreatment)) {
 		out = append(out, *byTreatment[k])
 	}
 	writeJSON(w, out)
 }
 
-// treatmentsSample serves the Pre/Post sample rows for POST /api/treatments/sample.
+// treatmentsSample serves the Pre/Post sample rows for POST
+// /api/treatments/sample, in the order of TreatmentServiceImpl's HashMap
+// keyed by treatment + Pre/Post.
 func (s *State) treatmentsSample(w http.ResponseWriter, r *http.Request) {
+	tier, ok := tierParam(w, r)
+	if !ok {
+		return
+	}
 	var f studyViewFilter
 	readBody(r, &f)
-	rows := s.sampleTreatmentRows(f, true)
-	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Treatment < rows[j].Treatment })
-	writeJSON(w, rows)
+	rows := s.sampleTreatmentRows(f, true, tier)
+	byKey := map[string]SampleTreatmentRow{}
+	keys := make([]string, len(rows))
+	for i, row := range rows {
+		keys[i] = row.Treatment + row.Time
+		byKey[keys[i]] = row
+	}
+	out := make([]SampleTreatmentRow, 0, len(rows))
+	for _, k := range javaHashMapOrder(keys) {
+		out = append(out, byKey[k])
+	}
+	writeJSON(w, out)
 }
 
 type ClinicalEventTypeCount struct {
