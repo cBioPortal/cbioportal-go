@@ -22,6 +22,12 @@ var (
 // replaceDefaults, keys the properties don't set fall back to the code-level
 // defaults only.
 func FrontendConfig(baseURL string, props map[string]string, replaceDefaults bool) map[string]any {
+	return BuildFrontendConfig(EffectiveProperties(props, replaceDefaults), baseURL)
+}
+
+// EffectiveProperties are the portal properties in force: props on top of
+// the stock defaults, or props alone when they replace the defaults.
+func EffectiveProperties(props map[string]string, replaceDefaults bool) map[string]string {
 	frontendOnce.Do(func() {
 		frontendBase = ParseApplicationProperties(strings.NewReader(defaultProperties))
 	})
@@ -30,5 +36,5 @@ func FrontendConfig(baseURL string, props map[string]string, replaceDefaults boo
 		maps.Copy(merged, frontendBase)
 	}
 	maps.Copy(merged, props)
-	return BuildFrontendConfig(merged, baseURL)
+	return merged
 }

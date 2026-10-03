@@ -42,7 +42,7 @@ func ClassifyProperties(props map[string]string) (used, ignored []string) {
 		known[p.PropertyName] = true
 	}
 	for _, k := range slices.Sorted(maps.Keys(props)) {
-		if known[k] {
+		if known[k] || backendProperty(k) {
 			used = append(used, k)
 		} else {
 			ignored = append(ignored, k)
@@ -75,4 +75,14 @@ func abbreviate(keys []string, max int) string {
 		return strings.Join(keys, ", ")
 	}
 	return strings.Join(keys[:max], ", ") + fmt.Sprintf(", … %d more", len(keys)-max)
+}
+
+// backendProperty reports the non-frontend properties this server reads:
+// authentication and study authorization.
+func backendProperty(k string) bool {
+	switch k {
+	case "filter_groups_by_appname", "always_show_study_group":
+		return true
+	}
+	return strings.HasPrefix(k, "spring.security.oauth2.client.")
 }

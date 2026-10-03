@@ -17,9 +17,7 @@ Three tiers, fastest first:
    ```bash
    git clone https://github.com/cBioPortal/cbioportal-test
    test/setup_test_db.sh cbioportal-test seed-cbioportal_hg19_hg38_v2.14.5.sql.gz
-   AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=.sessions.json \
-     PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api \
-     --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties
+   KEYCLOAK=false test/e2e_api.sh     # the API on :18090, anonymous
    make contract
    ```
 3. **Frontend e2e** — `test/run_e2e.sh [WORKERS] [spec...]` drives the
@@ -34,10 +32,7 @@ Three tiers, fastest first:
    git submodule update --init
    (cd frontend && pnpm install --frozen-lockfile && pnpm run buildAll)
    (cd frontend/end-to-end-test-playwright && pnpm install --frozen-lockfile --ignore-workspace)
-   FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY \
-     SESSION_STORE_FILE=.sessions.json PORT=18090 CBIOPORTAL_DB=cbioportal_e2e \
-     CBIOPORTAL_RAW_DB=cbioportal_e2e_raw bin/cbioportal-api \
-     --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties
+   test/e2e_api.sh                    # Keycloak + the API on :18090
    test/run_e2e.sh 3 tests/local/annotation-filter-menu.spec.ts
    ```
 
@@ -53,15 +48,11 @@ Three tiers, fastest first:
    with ClickHouse, expect occasional load-induced flakes above that.
    `go run ./cmd/e2ereport --fails` summarizes the last run.
 
-   Known environment gap: `patient-view.spec.ts` "toggles gene panel modal
-   from sample icon in copy number table" fails here but not in upstream CI.
-   CI logs in through Keycloak, which leaves the mouse on the login button;
-   without a login step the mouse stays at (0,0), where the tooltip first
-   renders before it is positioned, and Chrome (RenderDocument is re-enabled
-   because the LOCALDEV `--disable-features` flag replaces Playwright's
-   defaults) treats the move away as a mouseleave and closes the tooltip.
-   Not a backend issue. Leave it out with
-   `E2E_SKIP='toggles gene panel modal from sample icon in copy number' test/run_e2e.sh 3`.
+   As in upstream CI, the suite logs in through Keycloak:
+   `test/e2e_api.sh` starts it (`test/keycloak/start.sh`: Keycloak 16.1.1
+   on :8084, realm `cbio`, user `testuser` / `P@ssword1` with one role per
+   fixture study) and runs the API with `authenticate=oauth2`. Docker must
+   be available; `KEYCLOAK=false` runs the API anonymously instead.
 
 CI (`.github/workflows/ci.yml`) runs gofmt, vet and the unit tests, then the
 contract tests against a ClickHouse service loaded with the fixture studies,

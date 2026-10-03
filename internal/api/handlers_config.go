@@ -22,6 +22,9 @@ var portalHTML []byte
 func (s *State) configService(w http.ResponseWriter, r *http.Request) {
 	cfg := config.FrontendConfig("/", s.Props, s.PropsReplaceDefaults)
 	cfg["authenticationMethod"] = "noauthsessionservice"
+	if s.login != nil {
+		cfg["authenticationMethod"] = "oauth2"
+	}
 	cfg["sessionServiceEnabled"] = true
 	cfg["clickhouse_mode"] = true
 	if u, ok := GetUser(r.Context()); ok && u.Name != "" {

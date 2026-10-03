@@ -14,3 +14,5 @@
 
 # Local logs
 *.log
+test/keycloak/realm.generated.json
+.claude/

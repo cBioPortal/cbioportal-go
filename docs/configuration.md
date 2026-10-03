@@ -60,7 +60,7 @@ line the flags are usually handier.
 | `-site-banner`, `-site-banner-link` | `SITE_BANNER`, `SITE_BANNER_LINK` | | notice bar (and link) at the top of every portal page, e.g. for a preview deployment |
 | `-session-store` | `SESSION_STORE_FILE` | | persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory |
 | `-auth-enabled` | `AUTH_ENABLED` | `false` | require HS256 bearer tokens |
-| `-auth-default-user` | `AUTH_DEFAULT_USER` | | single-user development login for requests without a token |
+| `-auth-default-user` | `AUTH_DEFAULT_USER` | | single-user development login for requests without a token (not with `authenticate=oauth2`) |
 | `-portal-properties` | `PORTAL_PROPERTIES` | | portal properties file, see below |
 
 Secrets have no flag, because command-line arguments are visible to every user
@@ -127,3 +127,48 @@ Such files also hold the Java backend's own settings (`spring.datasource.*`,
 `db.*`, `security.*`, …) that this server does not use. They are
 ignored, and the startup log line lists which keys took effect and which were
 ignored — names only, never values, which can contain passwords.
+
+## Login and study authorization
+
+By default the portal is open: every study is readable and nobody logs in.
+With `authenticate=oauth2` users log in through an OpenID Connect provider
+(Keycloak in cBioPortal deployments), configured with the same properties as
+the Java portal's Spring Security OAuth2 login:
+
+```properties
+authenticate=oauth2
+spring.security.oauth2.client.registration.keycloak.client-id=cbioportal_oauth2
+spring.security.oauth2.client.registration.keycloak.client-secret=<secret>
+spring.security.oauth2.client.registration.keycloak.client-authentication-method=client_secret_post
+spring.security.oauth2.client.registration.keycloak.scope=openid,email,roles
+spring.security.oauth2.client.provider.keycloak.issuer-uri=https://keycloak.example.org/auth/realms/cbio
+spring.security.oauth2.client.provider.keycloak.user-name-attribute=email
+# where the provider puts the user's roles (default shown)
+spring.security.oauth2.client.jwt-roles-path=resource_access::cbioportal::roles
+```
+
+Keep the client secret in the properties file, not on the command line.
+`redirect-uri` defaults to `{baseUrl}/login/oauth2/code/{registrationId}`; the
+provider endpoints are discovered from `issuer-uri` (or set
+`authorization-uri`, `token-uri`, `user-info-uri` and `jwk-set-uri`).
+Behind a TLS-terminating proxy, the proxy must send `X-Forwarded-Proto`.
+
+- Pages redirect to the provider's login and return to the page asked for
+  (a form posted before the login is re-posted). `/api/**` requests without
+  a session get `401`. `/api/health` and `/api/public_virtual_studies` stay
+  open. `/logout` ends the session at the portal and the provider.
+- A user's roles name the studies they may read, as in the Java portal: a
+  study id, one of the study's `groups`, `ALL`, `ALL_TCGA` or
+  `ALL_NCI_TARGET`. With `filter_groups_by_appname=true` (the default) only
+  roles prefixed `<app.name>:` count. `always_show_study_group` (e.g.
+  `PUBLIC`) is granted to everyone.
+- Lists of studies, profiles, sample lists, patients, samples and clinical
+  attributes leave unreadable studies out
+  (`skin.home_page.show_unauthorized_studies=true` lists them on the home
+  page as not readable). Requests naming an unreadable study get `403`.
+- Sessions are kept in the server's memory for 30 minutes of inactivity; a
+  restart logs everyone out.
+
+Other `authenticate` values (`saml`, `optional_oauth2`) are not supported and
+stop the server at startup rather than serve the portal open. Data access
+tokens (`dat.method`) are not implemented yet.

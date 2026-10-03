@@ -58,6 +58,10 @@ func main() {
 	state := api.NewState(client)
 	state.Props = props
 	state.PropsReplaceDefaults = cfg.values["portal-properties"] != ""
+	if err := state.ConfigureAuth(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		os.Exit(1)
+	}
 	handler := api.NewRouter(state)
 
 	addr := "0.0.0.0:" + v["port"]

@@ -34,6 +34,7 @@ make build            # bin/cbioportal-import, bin/cbioportal-api
 make test             # unit tests, no services
 make lint             # gofmt + vet (CI)
 make contract         # contract tests against a running API (API=...)
+test/e2e_api.sh       # Keycloak + the fixture-database API on :18090
 test/run_e2e.sh 3     # frontend Playwright suite against the API on :18090
 ```
 
@@ -41,8 +42,8 @@ Test tiers, fastest first: unit → contract (`go test ./test/`, seconds) →
 e2e (full suite ~15–20 min; run single specs while iterating). The test
 databases come from `test/setup_test_db.sh` (cBioPortal's fixture studies).
 The e2e runner mirrors upstream CI (`CI=1` retries, `LOCALDEV=1`, the
-config's 120s timeout, 3 workers). Known environment gap: the patient-view
-CNA gene-panel tooltip test (README, "Known environment gap").
+config's 120s timeout, 3 workers) and logs in through Keycloak
+(`test/e2e_api.sh` starts it and the API with `authenticate=oauth2`).
 
 CI (GitHub Actions) runs lint, unit and contract tests on every push; the
 full e2e weekly/on demand.

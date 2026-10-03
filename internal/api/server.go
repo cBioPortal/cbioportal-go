@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"net/http/httputil"
@@ -20,6 +21,7 @@ import (
 	"sync"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	"github.com/inodb/cbioportal-go/internal/config"
 )
 
 type State struct {
@@ -40,6 +42,24 @@ type State struct {
 	// a mounted application.properties does for the Java portal.
 	Props                map[string]string
 	PropsReplaceDefaults bool
+	// login is the OAuth2 login (authenticate=oauth2) and access its study
+	// authorization; nil login serves every study anonymously.
+	login  *oauth2Login
+	access accessPolicy
+}
+
+// ConfigureAuth sets up the login and study authorization the portal
+// properties ask for.
+func (s *State) ConfigureAuth() error {
+	props := config.EffectiveProperties(s.Props, s.PropsReplaceDefaults)
+	cfg, err := loadOAuth2Config(props)
+	if err != nil || cfg == nil {
+		return err
+	}
+	s.login = newOAuth2Login(cfg)
+	s.access = newAccessPolicy(props)
+	log.Printf("authenticate=oauth2: login through %s (client %s)", cfg.IssuerURI, cfg.ClientID)
+	return nil
 }
 
 // NewState loads the session store (SESSION_STORE_FILE, if set) at startup.
@@ -53,12 +73,21 @@ func NewState(c *ch.Client) *State {
 	return s
 }
 
-// NewRouter builds the API handler with CORS, optional bearer-token auth
-// (disabled by default), and a body-draining catch-all.
+// NewRouter builds the API handler with CORS, the OAuth2 login and study
+// authorization (authenticate=oauth2), optional bearer-token auth (disabled
+// by default), and a body-draining catch-all.
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return cors(gzipResponse(gunzipBody(auth(loadAuthConfig(), s.extraEndpoints(s.javaContract(pageList(metaProjection(bodyErrors(mux)))))))))
+	authCfg := loadAuthConfig()
+	if s.login != nil {
+		authCfg.DefaultUser = "" // users log in
+	}
+	h := auth(authCfg, s.extraEndpoints(s.javaContract(pageList(metaProjection(bodyErrors(mux))))))
+	if s.login != nil {
+		h = s.login.middleware(s.studyAccess(s.access, h))
+	}
+	return cors(gzipResponse(gunzipBody(h)))
 }
 
 // gunzipBody transparently decompresses gzip-encoded request bodies. The

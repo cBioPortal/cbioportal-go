@@ -72,16 +72,15 @@ weekly.
 
 ## TODO for a full reimplementation
 
-- **Authentication.** Only an optional single-user development login exists.
-  Needed: OAuth2/OIDC sign-in (Google and Microsoft, as on www), SAML/Keycloak
-  for private portals, and data access tokens for API clients.
-- **Authorization.** Per-study access from study groups and user roles, so
-  `readPermission` and every endpoint honour it (today all studies are
-  readable).
+- **Authentication.** OAuth2/OpenID Connect login (`authenticate=oauth2`,
+  e.g. Keycloak) and study authorization from the user's roles work as in the
+  Java portal (see [Configuration](docs/configuration.md)). Still needed:
+  data access tokens for API clients (`dat.method`), SAML and
+  `optional_oauth2`, and sessions that survive a restart or span replicas.
 - **Session service.** Sessions (virtual studies, groups, custom data,
   settings) live in a JSON file in one process. Needed: a durable shared store,
   or compatibility with cBioPortal's session service so sessions — and links —
-  carry over from existing portals; per-user saved studies once login exists.
+  carry over from existing portals.
 - **Importer coverage.** Tested on a handful of studies; needs validation
   against all of datahub and cbioportal-core's validator rules.
 - **API parity.** Remaining Java endpoints and differences (study export
@@ -90,8 +89,6 @@ weekly.
 - **Performance.** Whole-profile reads of large studies (expression
   enrichments, co-expression on TCGA PanCancer), RowBinary decoding for large
   responses, projections applied in the handlers instead of a middleware.
-- **Tests.** One e2e test needs upstream CI's Keycloak login step to pass (see
-  [Testing](docs/testing.md)).
 
 ## Documentation
 

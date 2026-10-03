@@ -55,19 +55,15 @@ jobs:
       - name: Install Playwright
         working-directory: frontend/end-to-end-test-playwright
         run: pnpm install --frozen-lockfile --ignore-workspace && pnpm exec playwright install --with-deps chromium
+      - name: Start Keycloak
+        run: test/keycloak/start.sh
       - name: Start API
+        # Logs in through Keycloak as upstream CI's backend does.
         run: |
-          go build -o bin/cbioportal-api ./cmd/cbioportal-api
-          FRONTEND_DIR=frontend/dist AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=sessions.json \
-            PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw \
-            nohup bin/cbioportal-api --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties > api.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
+          nohup test/e2e_api.sh > api.log 2>&1 &
+          for i in $(seq 1 120); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
           cat api.log; exit 1
       - name: Run e2e
-        # The patient-view CNA tooltip test needs upstream CI's Keycloak login
-        # step (see README, "Known environment gap").
-        env:
-          E2E_SKIP: toggles gene panel modal from sample icon in copy number table
         run: test/run_e2e.sh 3
       - uses: actions/upload-artifact@v4
         if: always()

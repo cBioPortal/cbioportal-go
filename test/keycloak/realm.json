@@ -1,0 +1,73 @@
+{
+  "realm": "cbio",
+  "enabled": true,
+  "sslRequired": "none",
+  "defaultGroups": ["PUBLIC_STUDIES"],
+  "roles": {
+    "client": {
+      "cbioportal": []
+    }
+  },
+  "clients": [
+    {
+      "clientId": "cbioportal",
+      "name": "cBioPortal study roles",
+      "enabled": true,
+      "bearerOnly": true,
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "cbioportal_oauth2",
+      "name": "cBioPortal OIDC client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "client_secret",
+      "redirectUris": ["http://localhost:18090/*", "http://localhost:8080/*"],
+      "webOrigins": ["+"],
+      "attributes": {"post.logout.redirect.uris": "+"},
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": ["email", "profile"],
+      "optionalClientScopes": ["offline_access", "roles"],
+      "protocolMappers": [
+        {
+          "name": "cbioportal study roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "cbioportal",
+            "claim.name": "resource_access.cbioportal.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "PUBLIC_STUDIES",
+      "path": "/PUBLIC_STUDIES",
+      "clientRoles": {"cbioportal": []}
+    }
+  ],
+  "users": [
+    {
+      "username": "testuser",
+      "enabled": true,
+      "email": "testuser@thehyve.nl",
+      "emailVerified": true,
+      "firstName": "Test",
+      "lastName": "User",
+      "credentials": [{"type": "password", "value": "P@ssword1"}],
+      "realmRoles": ["offline_access"],
+      "groups": ["/PUBLIC_STUDIES"]
+    }
+  ]
+}

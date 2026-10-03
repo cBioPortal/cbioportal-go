@@ -52,6 +52,10 @@ func loadAuthConfig() AuthConfig {
 // (RS256) can be layered on the same middleware later.
 func auth(cfg AuthConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := GetUser(r.Context()); ok {
+			next.ServeHTTP(w, r) // logged in (authenticate=oauth2)
+			return
+		}
 		if !cfg.Enabled {
 			if cfg.DefaultUser != "" {
 				r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, User{Name: cfg.DefaultUser}))
