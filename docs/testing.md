@@ -87,7 +87,7 @@ go run ./cmd/paritydiff -a http://localhost:18091 -b https://www.cbioportal.org 
 `-dump` writes both bodies of each difference, `-refresh` refetches www. The
 exit status is non-zero when a request differs without a `known` reason.
 
-On 2026-10-03: 254 of 275 requests identical, 21 known differences, none
+On 2026-10-03: 257 of 275 requests identical, 18 known differences, none
 unexplained (216 identical and 38 differing before the fixes it prompted).
 The known differences are listed in
 [Deployment](deployment.md#mirroring-production); three of them disappear

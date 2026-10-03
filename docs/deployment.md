@@ -110,11 +110,10 @@ and a generic-assay profile's pivot threshold, sort order and patient level.
 
 Known differences from www.cbioportal.org on the mirror are those of the API
 itself, not of the data; `cmd/paritydiff` measures them (see
-[Testing](testing.md#api-parity-with-wwwcbioportalorg)). www's column-store
-co-expression endpoint returns entity ids without correlations; its study list
+[Testing](testing.md#api-parity-with-wwwcbioportalorg)). www's study list
 attaches resource definitions of other studies that share a resource id; its
-legacy `studies/fetch` reports `allSampleCount: 1`; `/api/timestamps`,
-`clinical-events-meta` and `survival-data` answer HTTP 500 there. Java returns
+legacy `studies/fetch` reports `allSampleCount: 1`; `clinical-events-meta`
+and `survival-data` answer HTTP 500 there. Java returns
 several lists in import (internal id) order — patients, clinical data,
 segments, clinical events, sample list members — which the Go model does not
 keep, so those come in id order and ties of a sorted page can differ. Where
