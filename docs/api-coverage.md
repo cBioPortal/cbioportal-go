@@ -2,7 +2,7 @@
 
 Endpoints of the Java backend ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) `master`, controllers under `org.cbioportal.legacy.web` and `org.cbioportal.application`) and their status here. Generated from the controllers' request mappings; `params` lists the projection, paging and other request parameters Java accepts.
 
-**188 endpoints** (method + path, aliases below not counted): 166 implemented, 6 stubs, 16 missing; 153 covered by contract tests (`Tested`).
+**188 endpoints** (method + path, aliases below not counted): 167 implemented, 6 stubs, 15 missing; 154 covered by tests (`Tested`).
 
 The 33 `/api/legacy/…` and `/api/not-ready-yet/…` aliases (legacy MyBatis and unfinished column-store controllers) are served by the `/api/…` handler of the same name.
 
@@ -236,7 +236,7 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | ANY | `/study/summary` |  |  | implemented |  | frontend (POST too) |
 | ANY | `/results` |  |  | implemented |  | frontend (POST too) |
 | GET | `/config_service` |  |  | implemented | yes | from portal properties |
-| GET | `/api/v2/api-docs` |  |  | missing |  | legacy OpenAPI document |
+| GET | `/api/v2/api-docs` |  |  | implemented | yes | the Java portal's legacy-api.json (Swagger 2.0), host set to the request's |
 | ANY | `/api/proxy/{path}` | String |  | missing |  | legacy generic proxy (bitly, 3dHotspots); unused by the frontend |
 | GET | `/api/proxy/bitly` |  |  | missing |  | legacy Bitly proxy; unused by the frontend |
 | ANY | `/api/matchminer/api/**` | JSONObject |  | missing |  | MatchMiner proxy (matchminer.url); MSK deployment only |

@@ -7,6 +7,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	// Bootstrap / config
 	mux.HandleFunc("GET /config_service", s.configService)
 	mux.HandleFunc("GET /api/info", s.info)
+	mux.HandleFunc("GET /api/v2/api-docs", s.legacyAPIDocs)
 	mux.HandleFunc("GET /api/cancer-types", s.cancerTypes)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	// Catch-all: 404 for unknown /api/ paths, the portal UI for the rest.
