@@ -417,8 +417,10 @@ func TDistCDF(t float64, df float64) float64 {
 	return 0.5 * ib
 }
 
-// RegularizedIncompleteBeta computes I_x(a,b) using a continued fraction
-// (Lentz's algorithm).
+// RegularizedIncompleteBeta computes I_x(a,b) as commons-math's
+// Beta.regularizedBeta does (see CommonsRegularizedBeta), which evaluates the
+// continued fraction on the side of the symmetry I_x(a,b) = 1 - I_{1-x}(b,a)
+// where it converges.
 func RegularizedIncompleteBeta(x, a, b float64) float64 {
 	if x <= 0 {
 		return 0
@@ -426,55 +428,7 @@ func RegularizedIncompleteBeta(x, a, b float64) float64 {
 	if x >= 1 {
 		return 1
 	}
-	lbeta := lgammafn(a) + lgammafn(b) - lgammafn(a+b)
-	front := math.Exp(math.Log(x)*a+math.Log(1-x)*b-lbeta) / a
-
-	const maxIter = 200
-	const epsilon = 1e-14
-
-	f := 1.0
-	c := 1.0
-	d := 1.0 - (a+b)*x/(a+1)
-	if math.Abs(d) < 1e-30 {
-		d = 1e-30
-	}
-	d = 1.0 / d
-	f = d
-
-	for i := 1; i <= maxIter; i++ {
-		m := float64(i)
-		// Even step
-		num := m * (b - m) * x / ((a + 2*m - 1) * (a + 2*m))
-		d = 1.0 + num*d
-		if math.Abs(d) < 1e-30 {
-			d = 1e-30
-		}
-		c = 1.0 + num/c
-		if math.Abs(c) < 1e-30 {
-			c = 1e-30
-		}
-		d = 1.0 / d
-		f *= c * d
-
-		// Odd step
-		num = -(a + m) * (a + b + m) * x / ((a + 2*m) * (a + 2*m + 1))
-		d = 1.0 + num*d
-		if math.Abs(d) < 1e-30 {
-			d = 1e-30
-		}
-		c = 1.0 + num/c
-		if math.Abs(c) < 1e-30 {
-			c = 1e-30
-		}
-		d = 1.0 / d
-		delta := c * d
-		f *= delta
-		if math.Abs(delta-1.0) < epsilon {
-			break
-		}
-	}
-
-	return front * f
+	return CommonsRegularizedBeta(x, a, b)
 }
 
 func lgammafn(x float64) float64 {

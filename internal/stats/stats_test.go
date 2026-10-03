@@ -256,6 +256,34 @@ func TestWelchTTest(t *testing.T) {
 	}
 }
 
+// A small t statistic with many degrees of freedom puts the incomplete beta
+// argument close to 1, where it must be evaluated through its symmetry to
+// match commons-math's TDistribution (a p-value near 1 was off by up to 0.3%).
+func TestTDistCDFSmallT(t *testing.T) {
+	for _, c := range [][2]float64{{0.01, 198.5}, {0.067, 80}, {0.3, 40}, {1.5, 12}, {3, 150}} {
+		if got, want := TDistCDF(-c[0], c[1]), cmTCdf(-c[0], c[1]); !almostEqual(got, want, 1e-12) {
+			t.Errorf("TDistCDF(-%v, %v) = %.16g, want %.16g", c[0], c[1], got, want)
+		}
+	}
+}
+
+// Large samples with nearly equal means give a p-value close to 1.
+func TestWelchTTestNearOne(t *testing.T) {
+	for _, shift := range []float64{0, 0.001, 0.01, 0.05, 0.2} {
+		var a, b []float64
+		for i := 0; i < 45; i++ {
+			a = append(a, math.Mod(float64(i)*0.37, 1)*0.1)
+			b = append(b, math.Mod(float64(i)*0.61, 1)*0.07+shift*0.1)
+		}
+		n1, m1, v1 := sampleStats(a)
+		n2, m2, v2 := sampleStats(b)
+		got, want := WelchTTest(n1, m1, v1, n2, m2, v2), CommonsTTest(a, b)
+		if !almostEqual(got, want, 1e-12) {
+			t.Errorf("shift %v: WelchTTest = %.16g, CommonsTTest = %.16g", shift, got, want)
+		}
+	}
+}
+
 func TestOneWayAnovaP(t *testing.T) {
 	// With two groups the F-test equals the pooled-variance t-test.
 	a, b := []float64{1, 2, 3, 4}, []float64{2, 4, 6, 8, 10}
