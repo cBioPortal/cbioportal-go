@@ -127,8 +127,8 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		type row struct {
 			SampleID string `json:"sampleId"`
 		}
-		rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = '%s'", sqlLit(*f.SampleListID)))
+		rows, err := ch.QueryP[row](s.CH,
+			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String}", ch.Params{"list": *f.SampleListID})
 		if err != nil {
 			fail(w, err)
 			return
@@ -167,7 +167,7 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, msgGeneNotFound(strconv.FormatInt(*f.EntrezGeneID, 10)))
 		return
 	}
-	hugo := sqlLit(genes[0].Hugo)
+	hugo := genes[0].Hugo
 	typeA := strings.TrimPrefix(profileA, metaA.StudyID+"_")
 	typeB := strings.TrimPrefix(profileB, metaB.StudyID+"_")
 	uniqueIDs := make([]string, len(sampleIDs))
@@ -179,18 +179,18 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		Corr         *float64 `json:"corr"`
 		N            int      `json:"n"`
 	}
-	rows, err := ch.Query[coexpRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[coexpRow](s.CH, fmt.Sprintf(
 		"WITH ref_values AS ("+
 			"SELECT sample_unique_id, toFloat64OrNull(alteration_value) AS ref_val FROM genetic_alteration_derived "+
-			"WHERE cancer_study_identifier = '%s' AND profile_type = '%s' AND hugo_gene_symbol = '%s' "+
+			"WHERE cancer_study_identifier = {studyA:String} AND profile_type = {typeA:String} AND hugo_gene_symbol = {hugo:String} "+
 			"AND alteration_value != '' AND alteration_value != 'NA' AND toFloat64OrNull(alteration_value) IS NOT NULL "+
-			"AND sample_unique_id IN (%s)), "+
+			"AND sample_unique_id IN {samples:Array(String)}), "+
 			"per_gene AS (SELECT g.entrez_gene_id AS entrezGeneId, count(*) AS numSamples, "+
 			"uniqExact(toFloat64OrNull(d.alteration_value)) AS exactDistinct, uniq(toFloat64OrNull(d.alteration_value)) AS approxDistinct, "+
 			"groupArray(r.ref_val) AS refValues, groupArray(toFloat64OrNull(d.alteration_value)) AS geneValues "+
 			"FROM genetic_alteration_derived d INNER JOIN ref_values r ON d.sample_unique_id = r.sample_unique_id "+
 			"INNER JOIN cbioportal_ref.gene g ON d.hugo_gene_symbol = g.hugo_gene_symbol "+
-			"WHERE d.cancer_study_identifier = '%s' AND d.profile_type = '%s' AND d.hugo_gene_symbol != '%s' "+
+			"WHERE d.cancer_study_identifier = {studyB:String} AND d.profile_type = {typeB:String} AND d.hugo_gene_symbol != {hugo:String} "+
 			"AND d.alteration_value != '' AND d.alteration_value != 'NA' AND toFloat64OrNull(d.alteration_value) IS NOT NULL "+
 			"GROUP BY g.entrez_gene_id), "+
 			"scored AS (SELECT entrezGeneId, numSamples, "+
@@ -199,8 +199,8 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 			"FROM per_gene) "+
 			"SELECT entrezGeneId, if(validNumeric AND isFinite(corr), corr, NULL) AS corr, toInt64(numSamples) AS n FROM scored "+
 			"WHERE (validNumeric AND isFinite(corr) AND abs(corr) >= %v) OR (NOT validNumeric) ORDER BY entrezGeneId",
-		sqlLit(metaA.StudyID), sqlLit(typeA), hugo, inList(uniqueIDs),
-		sqlLit(metaB.StudyID), sqlLit(typeB), hugo, threshold))
+		threshold), ch.Params{"studyA": metaA.StudyID, "typeA": typeA, "hugo": hugo, "samples": uniqueIDs,
+		"studyB": metaB.StudyID, "typeB": typeB})
 	if err != nil {
 		fail(w, err)
 		return
@@ -237,15 +237,16 @@ func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 	if attrA == "" || attrB == "" {
 		return nil
 	}
+	args := newArgs()
 	studyClause := ""
 	if studies := f.studyIDs(); len(studies) > 0 {
-		studyClause = fmt.Sprintf(" AND study_id IN (%s)", inList(studies))
+		studyClause = " AND study_id IN " + args.strs(studies)
 	}
 	attr := func(view, keyCol, attrID string) string {
-		return fmt.Sprintf("(SELECT study_id, %s, toNullable(attr_value) AS v FROM %s WHERE attr_id = '%s'%s)",
-			keyCol, view, sqlLit(attrID), studyClause)
+		return fmt.Sprintf("(SELECT study_id, %s, toNullable(attr_value) AS v FROM %s WHERE attr_id = %s%s)",
+			keyCol, view, args.str(attrID), studyClause)
 	}
-	rows, _ := ch.Query[scopedAttrRow](s.CH, fmt.Sprintf(
+	rows, _ := queryA[scopedAttrRow](s.CH, fmt.Sprintf(
 		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, sa.v AS sa, pa.v AS pa, sb.v AS sb, pb.v AS pb "+
 			"FROM (SELECT study_id, sample_id, patient_id FROM sample WHERE %s) AS s "+
 			"LEFT JOIN %s AS sa ON sa.study_id = s.study_id AND sa.sample_id = s.sample_id "+
@@ -254,9 +255,9 @@ func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 			"LEFT JOIN %s AS pb ON pb.study_id = s.study_id AND pb.patient_id = s.patient_id "+
 			"WHERE (sa IS NOT NULL OR pa IS NOT NULL) AND (sb IS NOT NULL OR pb IS NOT NULL) "+
 			"ORDER BY studyId, sampleId",
-		s.sampleScope(f),
+		s.sampleScope(args, f),
 		attr("clinical_sample", "sample_id", attrA), attr("clinical_patient", "patient_id", attrA),
-		attr("clinical_sample", "sample_id", attrB), attr("clinical_patient", "patient_id", attrB)))
+		attr("clinical_sample", "sample_id", attrB), attr("clinical_patient", "patient_id", attrB)), args)
 	return rows
 }
 
@@ -503,7 +504,8 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		K string `json:"k"`
 	}
 	inFilter := map[string]bool{}
-	keys, _ := ch.Query[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(f)+")")
+	args := newArgs()
+	keys, _ := queryA[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(args, f)+")", args)
 	for _, k := range keys {
 		inFilter[k.K] = true
 	}

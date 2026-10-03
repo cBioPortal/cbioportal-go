@@ -414,22 +414,22 @@ func (s *State) missing(kind string, v map[string]string) string {
 			return msgStudyNotFound(study)
 		}
 	case "patient":
-		if !s.rowExists(fmt.Sprintf("SELECT 1 FROM patient WHERE study_id = '%s' AND patient_id = '%s' LIMIT 1",
-			sqlLit(study), sqlLit(v["patientId"]))) {
+		if !s.rowExists("SELECT 1 FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String} LIMIT 1",
+			ch.Params{"study": study, "patient": v["patientId"]}) {
 			return msgPatientNotFound(study, v["patientId"])
 		}
 	case "sample":
-		if !s.rowExists(fmt.Sprintf("SELECT 1 FROM sample WHERE study_id = '%s' AND sample_id = '%s' LIMIT 1",
-			sqlLit(study), sqlLit(v["sampleId"]))) {
+		if !s.rowExists("SELECT 1 FROM sample WHERE study_id = {study:String} AND sample_id = {sample:String} LIMIT 1",
+			ch.Params{"study": study, "sample": v["sampleId"]}) {
 			return msgSampleNotFound(study, v["sampleId"])
 		}
 	case "sampleList":
-		if !s.rowExists(fmt.Sprintf("SELECT 1 FROM sample_list WHERE list_id = '%s' LIMIT 1", sqlLit(v["sampleListId"]))) {
+		if !s.rowExists("SELECT 1 FROM sample_list WHERE list_id = {list:String} LIMIT 1", ch.Params{"list": v["sampleListId"]}) {
 			return msgSampleListNotFound(v["sampleListId"])
 		}
 	case "profile":
-		if !s.rowExists(fmt.Sprintf("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = '%s' LIMIT 1",
-			sqlLit(v["molecularProfileId"]))) {
+		if !s.rowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1",
+			ch.Params{"profile": v["molecularProfileId"]}) {
 			return msgMolecularProfileNotFound(v["molecularProfileId"])
 		}
 	}
@@ -453,11 +453,11 @@ func (s *State) studyKnown(id string) bool {
 }
 
 // rowExists reports whether sql (a "SELECT 1 ... LIMIT 1") returns a row.
-func (s *State) rowExists(sql string) bool {
+func (s *State) rowExists(sql string, p ch.Params) bool {
 	type row struct {
 		One int `json:"one"`
 	}
-	rows, err := ch.Query[row](s.CH, strings.Replace(sql, "SELECT 1 ", "SELECT 1 AS one ", 1))
+	rows, err := ch.QueryP[row](s.CH, strings.Replace(sql, "SELECT 1 ", "SELECT 1 AS one ", 1), p)
 	return err != nil || len(rows) > 0
 }
 

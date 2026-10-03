@@ -70,7 +70,11 @@ func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
 	if s.hasGenesetRef() {
 		where := "1"
 		if ids != nil {
-			where = fmt.Sprintf("external_id IN (%s)", orEmpty(ids))
+			// A cached query: the SQL text is its cache key.
+			where = "0"
+			if len(ids) > 0 {
+				where = fmt.Sprintf("external_id IN (%s)", inList(ids))
+			}
 		}
 		rows, err := s.refGenesets(where, "external_id")
 		if err != nil {
@@ -83,14 +87,16 @@ func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
 		return out, nil
 	}
 	where := "1 = 1"
+	p := ch.Params{}
 	if ids != nil {
-		where = fmt.Sprintf("geneset_id IN (%s)", orEmpty(ids))
+		where = "geneset_id IN {ids:Array(String)}"
+		p["ids"] = ids
 	}
 	type row struct {
 		GenesetID string `json:"genesetId"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where))
+	rows, err := ch.QueryP[row](s.CH, fmt.Sprintf(
+		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where), p)
 	if err != nil {
 		return nil, err
 	}
@@ -191,12 +197,15 @@ type genesetScore struct {
 // and for each the values of every gene set (or those of genesetIds) in gene
 // set order.
 func (s *State) genesetScores(meta profileMeta, sampleIDs, genesetIDs []string) ([]genesetScore, error) {
-	where := fmt.Sprintf("m.study_id = '%s' AND m.profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
+	where := "m.study_id = {study:String} AND m.profile_stable_id = {profile:String}"
+	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID}
 	if sampleIDs != nil {
-		where += fmt.Sprintf(" AND m.sample_id IN (%s)", orEmpty(sampleIDs))
+		where += " AND m.sample_id IN {samples:Array(String)}"
+		p["samples"] = sampleIDs
 	}
 	if len(genesetIDs) > 0 {
-		where += fmt.Sprintf(" AND m.geneset_id IN (%s)", inList(genesetIDs))
+		where += " AND m.geneset_id IN {genesets:Array(String)}"
+		p["genesets"] = genesetIDs
 	}
 	order := "m.sample_id, m.geneset_id"
 	join := ""
@@ -206,10 +215,10 @@ func (s *State) genesetScores(meta profileMeta, sampleIDs, genesetIDs []string) 
 		join = "JOIN cbioportal_ref.geneset g ON g.external_id = m.geneset_id "
 		order = "m.sample_id, g.id"
 	}
-	return ch.Query[genesetScore](s.CH, fmt.Sprintf(
+	return ch.QueryP[genesetScore](s.CH, fmt.Sprintf(
 		"SELECT m.geneset_id AS genesetId, m.sample_id AS sampleId, sm.patient_id AS patientId, "+javaTruncatedValueSQL("m.value")+" AS value "+
 			"FROM %s m JOIN sample sm ON sm.study_id = m.study_id AND sm.sample_id = m.sample_id %s"+
-			"WHERE %s ORDER BY %s", genesetScoreSource(s), join, where, order))
+			"WHERE %s ORDER BY %s", genesetScoreSource(s), join, where, order), p)
 }
 
 // GenesetMolecularData is GenesetMolecularDataDTO as the controller fills it.
@@ -271,10 +280,10 @@ func (s *State) sampleListIDs(listID string) ([]string, bool) {
 	type row struct {
 		SampleID string `json:"sampleId"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = '%s' ORDER BY sample_id", sqlLit(listID)))
+	p := ch.Params{"list": listID}
+	rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String} ORDER BY sample_id", p)
 	if err != nil || len(rows) == 0 {
-		if err == nil && !s.rowExists(fmt.Sprintf("SELECT 1 FROM sample_list WHERE list_id = '%s' LIMIT 1", sqlLit(listID))) {
+		if err == nil && !s.rowExists("SELECT 1 FROM sample_list WHERE list_id = {list:String} LIMIT 1", p) {
 			return nil, false
 		}
 	}
@@ -651,13 +660,14 @@ func (s *State) genesetHierarchyFromScores(w http.ResponseWriter, meta profileMe
 		writeJSON(w, []GenesetHierarchyInfo{})
 		return
 	}
-	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s' AND sample_id IN (%s)",
-		sqlLit(meta.StudyID), sqlLit(meta.StableID), orEmpty(sampleIDs))
 	type row struct {
 		GenesetID string `json:"genesetId"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where))
+	rows, err := ch.QueryP[row](s.CH, fmt.Sprintf(
+		"SELECT DISTINCT geneset_id AS genesetId FROM %s "+
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND sample_id IN {samples:Array(String)} "+
+			"ORDER BY geneset_id", genesetScoreSource(s)),
+		ch.Params{"study": meta.StudyID, "profile": meta.StableID, "samples": sampleIDs})
 	if err != nil {
 		fail(w, err)
 		return
@@ -740,11 +750,12 @@ func (s *State) genesetMemberCorrelations(w http.ResponseWriter, meta profileMet
 			SampleID string `json:"sampleId"`
 			Value    string `json:"value"`
 		}
-		rows, err := ch.Query[exprRow](s.CH, fmt.Sprintf(
+		rows, err := ch.QueryP[exprRow](s.CH, fmt.Sprintf(
 			"SELECT toInt64OrZero(entrez_gene_id) AS entrez, sample_id AS sampleId, value FROM %s "+
-				"WHERE study_id = '%s' AND profile_stable_id = '%s' AND toInt64OrZero(entrez_gene_id) IN (%s) AND sample_id IN (%s)",
-			s.rawSource("mrna_expression_matrix", geneMatrixCols...), sqlLit(meta.StudyID), sqlLit(exprStableID),
-			strings.Join(entrez, ", "), orEmpty(sampleIDs)))
+				"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND toInt64OrZero(entrez_gene_id) IN (%s) "+
+				"AND sample_id IN {samples:Array(String)}",
+			s.rawSource("mrna_expression_matrix", geneMatrixCols...), strings.Join(entrez, ", ")),
+			ch.Params{"study": meta.StudyID, "profile": exprStableID, "samples": sampleIDs})
 		if err != nil {
 			fail(w, err)
 			return

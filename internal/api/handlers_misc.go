@@ -79,15 +79,16 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, []CopyNumberSeg{})
 		return
 	}
-	where := segSampleWhere(f.SampleIdentifiers)
+	args := newArgs()
+	where := segSampleWhere(args, f.SampleIdentifiers)
 	if f.Chromosome != "" {
-		where += fmt.Sprintf(" AND g.chrom = '%s'", sqlLit(f.Chromosome))
+		where += " AND g.chrom = " + args.str(f.Chromosome)
 	}
 	if meta {
 		type countRow struct {
 			C uint64 `json:"c"`
 		}
-		rows, err := ch.Query[countRow](s.CH, "SELECT count() AS c FROM seg g WHERE "+where)
+		rows, err := queryA[countRow](s.CH, "SELECT count() AS c FROM seg g WHERE "+where, args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -100,11 +101,11 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	body, err := s.CH.QueryStream(r.Context(),
-		"SELECT g.study_id, g.sample_id, ifNull(sp.patient_id, ''), g.chrom, toInt64OrZero(g.start) AS start, "+
-			"toInt64OrZero(g.end), toInt64OrZero(g.num_probes), toFloat64OrZero(g.segment_mean) "+
-			"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id "+
-			"WHERE "+where+" ORDER BY g.study_id, g.sample_id, g.chrom, start", "RowBinary")
+	sql := "SELECT g.study_id, g.sample_id, ifNull(sp.patient_id, ''), g.chrom, toInt64OrZero(g.start) AS start, " +
+		"toInt64OrZero(g.end), toInt64OrZero(g.num_probes), toFloat64OrZero(g.segment_mean) " +
+		"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id " +
+		"WHERE " + where + " ORDER BY g.study_id, g.sample_id, g.chrom, start"
+	body, err := s.CH.QueryStreamP(r.Context(), sql, "RowBinary", args.params(sql))
 	if err != nil {
 		fail(w, err)
 		return
@@ -119,8 +120,8 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 }
 
 // segSampleWhere restricts seg (alias g) to the identified samples, one
-// study_id = … AND sample_id IN (…) term per study.
-func segSampleWhere(ids []identifier) string {
+// study_id = … AND sample_id IN … term per study.
+func segSampleWhere(a *sqlArgs, ids []identifier) string {
 	byStudy := map[string][]string{}
 	var studies []string
 	for _, id := range ids {
@@ -131,7 +132,7 @@ func segSampleWhere(ids []identifier) string {
 	}
 	terms := make([]string, len(studies))
 	for i, st := range studies {
-		terms[i] = fmt.Sprintf("(g.study_id = '%s' AND g.sample_id IN (%s))", sqlLit(st), inList(byStudy[st]))
+		terms[i] = fmt.Sprintf("(g.study_id = %s AND g.sample_id IN %s)", a.str(st), a.strs(byStudy[st]))
 	}
 	return "(" + strings.Join(terms, " OR ") + ")"
 }
@@ -233,9 +234,8 @@ const clinAttrSelect = "SELECT study_id AS studyId, clinical_attribute_id AS cli
 	"FROM clinical_attribute_meta"
 
 func (s *State) studyClinicalAttributes(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	rows, err := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
-		"%s WHERE study_id = '%s' ORDER BY clinical_attribute_id", clinAttrSelect, sid))
+	rows, err := ch.QueryP[clinAttrRow](s.CH, clinAttrSelect+" WHERE study_id = {study:String} ORDER BY clinical_attribute_id",
+		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -248,10 +248,8 @@ func (s *State) studyClinicalAttributes(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *State) studyClinicalAttribute(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	aid := sqlLit(r.PathValue("clinicalAttributeId"))
-	rows, err := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
-		"%s WHERE study_id = '%s' AND clinical_attribute_id = '%s' LIMIT 1", clinAttrSelect, sid, aid))
+	rows, err := ch.QueryP[clinAttrRow](s.CH, clinAttrSelect+" WHERE study_id = {study:String} AND clinical_attribute_id = {attr:String} LIMIT 1",
+		ch.Params{"study": r.PathValue("studyId"), "attr": r.PathValue("clinicalAttributeId")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -281,11 +279,12 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	readBody(r, &f)
 
 	scopeFilter := studyViewFilter{}
+	args := newArgs()
 	var sampleScope string
 	switch {
 	case f.SampleListID != "":
-		sampleScope = fmt.Sprintf("(study_id, sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id = '%s')",
-			sqlLit(f.SampleListID))
+		sampleScope = "(study_id, sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id = " +
+			args.str(f.SampleListID) + ")"
 	case len(f.SampleIdentifiers) > 0:
 		scopeFilter.SampleIdentifiers = f.SampleIdentifiers
 	case len(f.StudyViewFilter.SampleIdentifiers) > 0 || len(f.StudyViewFilter.StudyIDs) > 0:
@@ -297,7 +296,7 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if sampleScope == "" {
-		sampleScope = s.sampleScope(scopeFilter)
+		sampleScope = s.sampleScope(args, scopeFilter)
 	}
 	type countRow struct {
 		AttrID string `json:"attr_id"`
@@ -314,7 +313,7 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 			"GROUP BY cp.attr_id ORDER BY attr_id", sampleScope),
 	}
 	for _, q := range queries {
-		rows, err := ch.Query[countRow](s.CH, q)
+		rows, err := queryA[countRow](s.CH, q, args)
 		if err != nil {
 			fail(w, err)
 			return

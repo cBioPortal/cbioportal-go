@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // The study-view gene tables (mutated, CNA and structural-variant genes) count
@@ -53,8 +51,12 @@ func (c GeneAlterationCount) withEventKeys() GeneAlterationCount {
 }
 
 // alterationSQL renders the alteration filter (AlterationFilterHelper semantics)
-// as predicates over genomic_event_derived for the given event kind.
-type alterationSQL struct{ af alterationFilter }
+// as predicates over genomic_event_derived for the given event kind, binding
+// request values in args.
+type alterationSQL struct {
+	af   alterationFilter
+	args *sqlArgs
+}
 
 func (a alterationSQL) driverClause() string {
 	af := a.af
@@ -95,7 +97,7 @@ func (a alterationSQL) driverClause() string {
 	default:
 		var ors []string
 		if len(tiers) > 0 {
-			ors = append(ors, fmt.Sprintf("driver_tiers_filter IN (%s)", inList(tiers)))
+			ors = append(ors, "driver_tiers_filter IN "+a.args.strs(tiers))
 		}
 		if unknownTier {
 			ors = append(ors, "driver_tiers_filter IS NULL OR lower(driver_tiers_filter) IN ('', 'na', 'unknown')")
@@ -152,12 +154,12 @@ func (a alterationSQL) mutationTypeClause() string {
 		return ""
 	}
 	if m["other"] {
-		return fmt.Sprintf("lower(mutation_type) NOT IN (%s)", inList(off))
+		return "lower(mutation_type) NOT IN " + a.args.strs(off)
 	}
 	if len(on) == 0 {
 		return "mutation_type = 'NA'"
 	}
-	return fmt.Sprintf("lower(mutation_type) IN (%s, 'na')", inList(on))
+	return "lower(mutation_type) IN " + a.args.strs(append(on, "na"))
 }
 
 func (a alterationSQL) cnaTypeClause() string {
@@ -195,17 +197,18 @@ func joinPreds(preds ...string) string {
 	return strings.Join(out, " AND ")
 }
 
-func (s *State) alterationFilterOf(f studyViewFilter) alterationSQL {
+func (s *State) alterationFilterOf(args *sqlArgs, f studyViewFilter) alterationSQL {
 	if f.AlterationFilter == nil {
-		return alterationSQL{}
+		return alterationSQL{args: args}
 	}
-	return alterationSQL{*f.AlterationFilter}
+	return alterationSQL{*f.AlterationFilter, args}
 }
 
 // geneCounts runs the per-gene event count for one variant type and attaches
 // profiled counts and matching panels.
-func (s *State) geneCounts(f studyViewFilter, variantType, alterationType, extra string, cna bool) ([]GeneAlterationCount, error) {
-	filtered := s.filterSQL(f)
+// extra may hold placeholders bound in args.
+func (s *State) geneCounts(args *sqlArgs, f studyViewFilter, variantType, alterationType, extra string, cna bool) ([]GeneAlterationCount, error) {
+	filtered := s.filterSQL(args, f)
 	groupCols := "hugo_gene_symbol, entrez_gene_id"
 	selectCNA := ""
 	if cna {
@@ -221,12 +224,12 @@ func (s *State) geneCounts(f studyViewFilter, variantType, alterationType, extra
 		OnPanel    uint64 `json:"onPanel"`
 		Total      uint64 `json:"total"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS hugo, toInt64OrNull(toString(entrez_gene_id)) AS entrez, %s"+
 			"uniqExact(sample_unique_id) AS altered, uniqExactIf(sample_unique_id, off_panel = 0) AS onPanel, count() AS total "+
 			"FROM genomic_event_derived WHERE variant_type = '%s' AND sample_unique_id IN (%s) AND %s "+
 			"GROUP BY %s ORDER BY total DESC, hugo ASC",
-		selectCNA, variantType, filtered, extra, groupCols))
+		selectCNA, variantType, filtered, extra, groupCols), args)
 	if err != nil {
 		return nil, err
 	}
@@ -253,24 +256,24 @@ func (s *State) geneCounts(f studyViewFilter, variantType, alterationType, extra
 	if len(out) == 0 {
 		return []GeneAlterationCount{}, nil
 	}
-	s.populateProfiled(f, filtered, alterationType, out)
+	s.populateProfiled(args, f, filtered, alterationType, out)
 	for i := range out {
 		out[i] = out[i].withEventKeys()
 	}
 	return out, nil
 }
 
-func (s *State) populateProfiled(f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) {
+func (s *State) populateProfiled(args *sqlArgs, f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) {
 	// First non-continuous profile of the type per study.
 	type prof struct {
 		ID    string `json:"id"`
 		Study string `json:"study"`
 	}
-	profs, _ := ch.Query[prof](s.CH, fmt.Sprintf(
+	profs, _ := queryA[prof](s.CH, fmt.Sprintf(
 		"SELECT molecular_profile_id AS id, study_id AS study FROM molecular_profile "+
-			"WHERE molecular_alteration_type = '%s' AND datatype NOT IN ('CONTINUOUS', 'LOG2-VALUE') AND study_id IN (%s) "+
+			"WHERE molecular_alteration_type = '%s' AND datatype NOT IN ('CONTINUOUS', 'LOG2-VALUE') AND study_id IN %s "+
 			"ORDER BY study_id, molecular_profile_id",
-		alterationType, orEmpty(f.studyIDs())))
+		alterationType, args.strs(f.studyIDs())), args)
 	first := map[string]string{}
 	for _, p := range profs {
 		if _, ok := first[p.Study]; !ok {
@@ -285,13 +288,13 @@ func (s *State) populateProfiled(f studyViewFilter, filtered, alterationType str
 		Gene string `json:"gene"`
 		N    uint64 `json:"n"`
 	}
-	panelCounts, _ := ch.Query[geneCount](s.CH, fmt.Sprintf(
+	panelCounts, _ := queryA[geneCount](s.CH, fmt.Sprintf(
 		"SELECT gptg.gene AS gene, sum(p.n) AS n FROM ("+
 			"SELECT gene_panel_id, count() AS n FROM sample_to_gene_panel_derived "+
-			"WHERE alteration_type = '%s' AND gene_panel_id != 'WES' AND genetic_profile_id IN (%s) "+
+			"WHERE alteration_type = '%s' AND gene_panel_id != 'WES' AND genetic_profile_id IN %s "+
 			"AND sample_unique_id IN (%s) GROUP BY gene_panel_id) p "+
 			"INNER JOIN gene_panel_to_gene_derived gptg ON p.gene_panel_id = gptg.gene_panel_id GROUP BY gptg.gene",
-		alterationType, orEmpty(profileIDs), filtered))
+		alterationType, args.strs(profileIDs), filtered), args)
 	profiled := map[string]uint64{}
 	for _, c := range panelCounts {
 		profiled[c.Gene] = c.N
@@ -299,10 +302,10 @@ func (s *State) populateProfiled(f studyViewFilter, filtered, alterationType str
 	type n struct {
 		N uint64 `json:"n"`
 	}
-	wes, _ := ch.Query[n](s.CH, fmt.Sprintf(
+	wes, _ := queryA[n](s.CH, fmt.Sprintf(
 		"SELECT uniqExact(sample_unique_id) AS n FROM sample_to_gene_panel_derived "+
 			"WHERE alteration_type = '%s' AND gene_panel_id = 'WES' AND sample_unique_id IN (%s)",
-		alterationType, filtered))
+		alterationType, filtered), args)
 	var wesCount uint64
 	if len(wes) > 0 {
 		wesCount = wes[0].N
@@ -311,17 +314,15 @@ func (s *State) populateProfiled(f studyViewFilter, filtered, alterationType str
 		Gene  string `json:"gene"`
 		Panel string `json:"panel"`
 	}
-	panels, _ := ch.Query[panel](s.CH, fmt.Sprintf(
+	genes := make([]string, len(counts))
+	for i, c := range counts {
+		genes[i] = c.HugoGeneSymbol
+	}
+	panels, _ := queryA[panel](s.CH, fmt.Sprintf(
 		"SELECT gene, gene_panel_id AS panel FROM gene_panel_to_gene_derived WHERE gene_panel_id IN "+
 			"(SELECT DISTINCT gene_panel_id FROM sample_to_gene_panel_derived WHERE alteration_type = '%s' AND sample_unique_id IN (%s)) "+
-			"AND gene IN (%s) GROUP BY gene, gene_panel_id",
-		alterationType, filtered, inList(func() []string {
-			g := make([]string, len(counts))
-			for i, c := range counts {
-				g[i] = c.HugoGeneSymbol
-			}
-			return g
-		}())))
+			"AND gene IN %s GROUP BY gene, gene_panel_id",
+		alterationType, filtered, args.strs(genes)), args)
 	matching := map[string][]string{}
 	for _, p := range panels {
 		matching[p.Gene] = append(matching[p.Gene], p.Panel)
@@ -341,8 +342,9 @@ func (s *State) populateProfiled(f studyViewFilter, filtered, alterationType str
 func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	a := s.alterationFilterOf(f)
-	out, err := s.geneCounts(f, "mutation", "MUTATION_EXTENDED",
+	args := newArgs()
+	a := s.alterationFilterOf(args, f)
+	out, err := s.geneCounts(args, f, "mutation", "MUTATION_EXTENDED",
 		joinPreds("mutation_status != 'UNCALLED'", a.mutationTypeClause(), a.driverClause(), a.statusClause()), false)
 	if err != nil {
 		fail(w, err)
@@ -354,8 +356,9 @@ func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	a := s.alterationFilterOf(f)
-	out, err := s.geneCounts(f, "cna", "COPY_NUMBER_ALTERATION", joinPreds(a.cnaTypeClause(), a.driverClause()), true)
+	args := newArgs()
+	a := s.alterationFilterOf(args, f)
+	out, err := s.geneCounts(args, f, "cna", "COPY_NUMBER_ALTERATION", joinPreds(a.cnaTypeClause(), a.driverClause()), true)
 	if err != nil {
 		fail(w, err)
 		return
@@ -366,8 +369,9 @@ func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	a := s.alterationFilterOf(f)
-	out, err := s.geneCounts(f, "structural_variant", "STRUCTURAL_VARIANT", joinPreds(a.driverClause(), a.statusClause()), false)
+	args := newArgs()
+	a := s.alterationFilterOf(args, f)
+	out, err := s.geneCounts(args, f, "structural_variant", "STRUCTURAL_VARIANT", joinPreds(a.driverClause(), a.statusClause()), false)
 	if err != nil {
 		fail(w, err)
 		return
@@ -386,12 +390,13 @@ func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http
 		Label string `json:"label"`
 		Count uint64 `json:"count"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT replaceOne(sp.molecular_profile_id, concat(sp.study_id, '_'), '') AS value, any(mp.name) AS label, count() AS count "+
 			"FROM sample_profile sp LEFT JOIN molecular_profile mp ON mp.molecular_profile_id = sp.molecular_profile_id "+
 			"WHERE concat(sp.study_id, '_', sp.sample_id) IN (%s) GROUP BY sp.molecular_profile_id, sp.study_id "+
 			"ORDER BY sp.study_id, sp.molecular_profile_id",
-		s.filterSQL(f)))
+		s.filterSQL(args, f)), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -464,8 +469,9 @@ type StructuralVariantCount struct {
 func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	a := s.alterationFilterOf(f)
-	filtered := s.filterSQL(f)
+	args := newArgs()
+	a := s.alterationFilterOf(args, f)
+	filtered := s.filterSQL(args, f)
 	type row struct {
 		Entrez1 *int64 `json:"entrez1"`
 		Hugo1   string `json:"hugo1"`
@@ -474,13 +480,13 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Altered uint64 `json:"altered"`
 		Total   uint64 `json:"total"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT site1_entrez_gene_id AS entrez1, any(site1_hugo_symbol) AS hugo1, site2_entrez_gene_id AS entrez2, "+
 			"any(site2_hugo_symbol) AS hugo2, uniqExact(study_id, sample_id) AS altered, count() AS total FROM ("+
 			"SELECT *, cbp_driver AS driver_filter, cbp_driver_tiers AS driver_tiers_filter, sv_status AS mutation_status "+
 			"FROM ("+svResolvedSQL+")) WHERE concat(study_id, '_', sample_id) IN (%s) AND %s "+
 			"GROUP BY site1_entrez_gene_id, site2_entrez_gene_id ORDER BY total DESC, hugo1, hugo2",
-		filtered, joinPreds(a.driverClause(), a.statusClause())))
+		filtered, joinPreds(a.driverClause(), a.statusClause())), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -493,9 +499,9 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 	type prof struct {
 		ID string `json:"id"`
 	}
-	profs, _ := ch.Query[prof](s.CH, fmt.Sprintf(
+	profs, _ := queryA[prof](s.CH,
 		"SELECT min(molecular_profile_id) AS id FROM molecular_profile WHERE molecular_alteration_type = 'STRUCTURAL_VARIANT' "+
-			"AND study_id IN (%s) GROUP BY study_id", orEmpty(f.studyIDs())))
+			"AND study_id IN "+args.strs(f.studyIDs())+" GROUP BY study_id", args)
 	profileIDs := make([]string, len(profs))
 	for i, p := range profs {
 		profileIDs[i] = p.ID
@@ -504,10 +510,10 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Panel string `json:"panel"`
 		N     uint64 `json:"n"`
 	}
-	panelCounts, _ := ch.Query[panelCount](s.CH, fmt.Sprintf(
+	panelCounts, _ := queryA[panelCount](s.CH, fmt.Sprintf(
 		"SELECT gene_panel_id AS panel, count() AS n FROM sample_to_gene_panel_derived "+
-			"WHERE alteration_type = 'STRUCTURAL_VARIANT' AND gene_panel_id != 'WES' AND genetic_profile_id IN (%s) "+
-			"AND sample_unique_id IN (%s) GROUP BY gene_panel_id", orEmpty(profileIDs), filtered))
+			"WHERE alteration_type = 'STRUCTURAL_VARIANT' AND gene_panel_id != 'WES' AND genetic_profile_id IN %s "+
+			"AND sample_unique_id IN (%s) GROUP BY gene_panel_id", args.strs(profileIDs), filtered), args)
 	perPanel := map[string]uint64{}
 	var panelIDs []string
 	for _, p := range panelCounts {
@@ -518,10 +524,10 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		N uint64 `json:"n"`
 	}
 	var wesCount uint64
-	if wes, _ := ch.Query[n](s.CH, fmt.Sprintf(
+	if wes, _ := queryA[n](s.CH, fmt.Sprintf(
 		"SELECT uniqExact(sample_unique_id) AS n FROM sample_to_gene_panel_derived "+
 			"WHERE alteration_type = 'STRUCTURAL_VARIANT' AND gene_panel_id = 'WES' AND sample_unique_id IN (%s)",
-		filtered)); len(wes) > 0 {
+		filtered), args); len(wes) > 0 {
 		wesCount = wes[0].N
 	}
 	genes := map[string]bool{}
@@ -532,9 +538,9 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Gene  string `json:"gene"`
 		Panel string `json:"panel"`
 	}
-	panelGenes, _ := ch.Query[panelGene](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT gene, gene_panel_id AS panel FROM gene_panel_to_gene_derived WHERE gene_panel_id IN (%s) AND gene IN (%s)",
-		orEmpty(panelIDs), orEmpty(sortedKeys(genes))))
+	panelGenes, _ := queryA[panelGene](s.CH, fmt.Sprintf(
+		"SELECT DISTINCT gene, gene_panel_id AS panel FROM gene_panel_to_gene_derived WHERE gene_panel_id IN %s AND gene IN %s",
+		args.strs(panelIDs), args.strs(sortedKeys(genes))), args)
 	panelsOf := map[string][]string{}
 	for _, pg := range panelGenes {
 		panelsOf[pg.Gene] = append(panelsOf[pg.Gene], pg.Panel)

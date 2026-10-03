@@ -161,9 +161,9 @@ func (s *State) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 	}
 	patientOf := map[string]string{}
 	if len(all) > 0 {
-		rows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
-			"SELECT sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id = '%s' AND sample_id IN (%s)",
-			sqlLit(studyID), inList(all)))
+		rows, _ := ch.QueryP[idRow](s.CH,
+			"SELECT sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id = {study:String} AND sample_id IN {ids:Array(String)}",
+			ch.Params{"study": studyID, "ids": all})
 		for _, r := range rows {
 			patientOf[r.SampleID] = "p:" + r.PatientID
 		}
@@ -197,12 +197,12 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 	}
 	samplesOf := map[string][]idRow{}
 	if len(all) > 0 {
-		rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
+		rows, err := ch.QueryP[idRow](s.CH, fmt.Sprintf(
 			"SELECT sample_id AS sampleId, patient_id AS patientId FROM sample "+
-				"WHERE study_id = '%s' AND %s IN (%s) "+
-				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE molecular_profile_id = '%s') "+
-				"ORDER BY sample_id",
-			sqlLit(studyID), idCol, inList(all), sqlLit(profileID)))
+				"WHERE study_id = {study:String} AND %s IN {ids:Array(String)} "+
+				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE molecular_profile_id = {profile:String}) "+
+				"ORDER BY sample_id", idCol),
+			ch.Params{"study": studyID, "ids": all, "profile": profileID})
 		if err != nil {
 			return nil, err
 		}
@@ -233,13 +233,14 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 // entity and group, the (Java-truncated) values at the group's matrix keys,
 // with the empty string for a cell without a stored value.
 func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, gaGroupValues, error) {
-	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
+	args := newArgs()
+	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
 	type entityRow struct {
 		E string `json:"e"`
 	}
-	ents, err := ch.Query[entityRow](s.CH, fmt.Sprintf(
+	ents, err := queryA[entityRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS e FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
-			"GROUP BY entity_stable_id ORDER BY min((_part, _part_offset)), entity_stable_id", where))
+			"GROUP BY entity_stable_id ORDER BY min((_part, _part_offset)), entity_stable_id", where), args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -253,11 +254,11 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 		if len(k) == 0 {
 			continue
 		}
-		list := inList(k)
+		list := args.strs(k)
 		parts = append(parts, fmt.Sprintf(
-			"SELECT e, toUInt32(%d) AS grp, arrayMap(k -> m[k], [%s]) AS vs FROM ("+
+			"SELECT e, toUInt32(%d) AS grp, arrayMap(k -> m[k], %s) AS vs FROM ("+
 				"SELECT entity_stable_id AS e, mapFromArrays(groupArray(sample_id), groupArray(%s)) AS m "+
-				"FROM cbioportal_raw.generic_assay_matrix WHERE %s AND sample_id IN (%s) GROUP BY e)",
+				"FROM cbioportal_raw.generic_assay_matrix WHERE %s AND sample_id IN %s GROUP BY e)",
 			gi, list, javaTruncatedValueSQL("trimBoth(value)"), where, list))
 	}
 	values := gaGroupValues{}
@@ -269,7 +270,7 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 		Grp uint32   `json:"grp"`
 		Vs  []string `json:"vs"`
 	}
-	rows, err := ch.Query[seqRow](s.CH, strings.Join(parts, " UNION ALL "))
+	rows, err := queryA[seqRow](s.CH, strings.Join(parts, " UNION ALL "), args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -287,8 +288,9 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 // gaMetaProperties returns the generic entity meta properties of the
 // profile's entities.
 func (s *State) gaMetaProperties(meta profileMeta) map[string]map[string]string {
+	args := newArgs()
 	props, _ := s.genericAssayMetaProperties(fmt.Sprintf(
-		"study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID)))
+		"study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID)), args)
 	return props
 }
 

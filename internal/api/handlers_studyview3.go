@@ -78,18 +78,19 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	// Each group's samples as a predicate over the sample view. Every query
 	// below spells each group's sample list once (as the group_samples CTE) and
 	// resolves the groups' samples and patients inside ClickHouse.
+	args := newArgs()
 	var groupSelects []string
 	for gi, g := range f.Groups {
 		groupSelects = append(groupSelects, fmt.Sprintf(
 			"SELECT toUInt32(%d) AS grp, study_id, sample_id, patient_id FROM sample WHERE %s",
-			gi, compactSampleScope(g.SampleIdentifiers)))
+			gi, compactSampleScope(args, g.SampleIdentifiers)))
 	}
 	withGroups := "WITH group_samples AS (" + strings.Join(groupSelects, " UNION ALL ") + ") "
 
 	type groupRow struct {
 		Grp uint32 `json:"grp"`
 	}
-	present, err := ch.Query[groupRow](s.CH, withGroups+"SELECT DISTINCT grp FROM group_samples ORDER BY grp")
+	present, err := queryA[groupRow](s.CH, withGroups+"SELECT DISTINCT grp FROM group_samples ORDER BY grp", args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -104,11 +105,11 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		testName = "Wilcoxon Test"
 	}
 
-	attrRows, err := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
+	attrRows, err := queryA[clinAttrRow](s.CH, fmt.Sprintf(
 		"%sSELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta "+
 			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples) ORDER BY study_id, clinical_attribute_id",
-		withGroups))
+		withGroups), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -176,24 +177,24 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM group_samples g "+
 					"INNER JOIN clinical_sample c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
-					"WHERE c.attr_id IN (%s) AND %s",
-				valueOf("c.attr_value"), inList(sampleIDs), cond("c.attr_value")))
+					"WHERE c.attr_id IN %s AND %s",
+				valueOf("c.attr_value"), args.strs(sampleIDs), cond("c.attr_value")))
 		}
 		groupPatients := "(SELECT DISTINCT grp, study_id, patient_id FROM group_samples)"
 		if p := ids[levelPatient]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
 					"INNER JOIN clinical_patient c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
-					"WHERE c.attr_id IN (%s) AND %s",
-				valueOf("c.attr_value"), groupPatients, inList(p), cond("c.attr_value")))
+					"WHERE c.attr_id IN %s AND %s",
+				valueOf("c.attr_value"), groupPatients, args.strs(p), cond("c.attr_value")))
 		}
 		if p := ids[levelConflicting]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
 					"INNER JOIN sample s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
 					"INNER JOIN clinical_patient c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
-					"WHERE c.attr_id IN (%s) AND %s",
-				valueOf("c.attr_value"), groupPatients, inList(p), cond("c.attr_value")))
+					"WHERE c.attr_id IN %s AND %s",
+				valueOf("c.attr_value"), groupPatients, args.strs(p), cond("c.attr_value")))
 		}
 		return strings.Join(parts, " UNION ALL ")
 	}
@@ -211,9 +212,9 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		catData[gi] = map[string]map[string]uint64{}
 	}
 	if len(categorical) > 0 {
-		rows, err := ch.Query[catRow](s.CH, fmt.Sprintf(
+		rows, err := queryA[catRow](s.CH, fmt.Sprintf(
 			"%sSELECT attr_id, grp, v AS value, count() AS c FROM (%s) GROUP BY attr_id, grp, v ORDER BY attr_id, grp, v",
-			withGroups, groupValues(func(col string) string { return col }, naFilter, idsByLevel(categorical))))
+			withGroups, groupValues(func(col string) string { return col }, naFilter, idsByLevel(categorical))), args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -278,13 +279,13 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	numRanks := map[string][]rankRow{}
 	if len(numeric) > 0 {
-		rows, err := ch.Query[rankRow](s.CH, fmt.Sprintf(
+		rows, err := queryA[rankRow](s.CH, fmt.Sprintf(
 			"%sSELECT attr_id, grp, count() AS n, sum(r) AS rs, sum(t * t - 1) AS ts, any(nd) AS nd FROM ("+
 				"SELECT attr_id, grp, rank() OVER (PARTITION BY attr_id ORDER BY v) + (count() OVER (PARTITION BY attr_id, v) - 1) / 2 AS r, "+
 				"toFloat64(count() OVER (PARTITION BY attr_id, v)) AS t, uniqExact(v) OVER (PARTITION BY attr_id) AS nd FROM (%s)"+
 				") GROUP BY attr_id, grp ORDER BY attr_id, grp",
 			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
-				func(col string) string { return "toFloat64OrNull(" + col + ") IS NOT NULL" }, idsByLevel(numeric))))
+				func(col string) string { return "toFloat64OrNull(" + col + ") IS NOT NULL" }, idsByLevel(numeric))), args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -321,9 +322,9 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 }
 
 // compactSampleScope is a predicate over the sample view selecting the given
-// samples, written per study as sample_id IN (...) to keep large groups well
-// under ClickHouse's max_query_size.
-func compactSampleScope(ids []identifier) string {
+// samples, written per study as sample_id IN <ids> so a study's sample ids
+// are bound once rather than as (study, sample) pairs.
+func compactSampleScope(a *sqlArgs, ids []identifier) string {
 	byStudy := map[string][]string{}
 	for _, id := range ids {
 		byStudy[id.StudyID] = append(byStudy[id.StudyID], id.id())
@@ -333,7 +334,7 @@ func compactSampleScope(ids []identifier) string {
 	}
 	var ors []string
 	for _, st := range sortedKeys(byStudy) {
-		ors = append(ors, fmt.Sprintf("(study_id = '%s' AND sample_id IN (%s))", sqlLit(st), inList(byStudy[st])))
+		ors = append(ors, fmt.Sprintf("(study_id = %s AND sample_id IN %s)", a.str(st), a.strs(byStudy[st])))
 	}
 	return strings.Join(ors, " OR ")
 }
@@ -381,11 +382,12 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	empty := sampleClinicalDataCollection{ByUniqueSampleKey: map[string][]tableClinicalData{}}
 
-	inner := fmt.Sprintf("SELECT study_id, sample_id, patient_id FROM sample WHERE %s", s.sampleScope(f))
+	args := newArgs()
+	inner := fmt.Sprintf("SELECT study_id, sample_id, patient_id FROM sample WHERE %s", s.sampleScope(args, f))
 	if strings.TrimSpace(searchTerm) != "" {
 		// ClinicalDataMapper.searchedAttributeData: a case-sensitive LIKE on
 		// the sample and patient ids and attribute values.
-		like := "'%" + sqlLit(searchTerm) + "%'"
+		like := args.str("%" + searchTerm + "%")
 		inner += fmt.Sprintf(
 			" AND (sample_id LIKE %s OR patient_id LIKE %s"+
 				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM clinical_sample WHERE attr_value LIKE %s)"+
@@ -398,7 +400,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		N uint64 `json:"n"`
 	}
 	total := uint64(0)
-	if cr, _ := ch.Query[countRow](s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s)", inner)); len(cr) > 0 {
+	if cr, _ := queryA[countRow](s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s)", inner), args); len(cr) > 0 {
 		total = cr[0].N
 	}
 	w.Header().Set("total-count", strconv.FormatUint(total, 10))
@@ -432,13 +434,13 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		pageSQL = fmt.Sprintf(
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM (%s) AS s "+
-				"LEFT JOIN (SELECT study_id, %s, any(attr_value) AS sortval, 1 AS present FROM %s WHERE attr_id = '%s' GROUP BY study_id, %s) AS v "+
+				"LEFT JOIN (SELECT study_id, %s, any(attr_value) AS sortval, 1 AS present FROM %s WHERE attr_id = %s GROUP BY study_id, %s) AS v "+
 				"ON s.study_id = v.study_id AND s.%s = v.%s "+
 				"ORDER BY if(v.present = 1, %s, NULL) %s NULLS LAST, sample_id ASC LIMIT %d OFFSET %d",
-			inner, keyCol, view, sqlLit(sortBy), keyCol, keyCol, keyCol, sortExpr, dir, pageSize, offset)
+			inner, keyCol, view, args.str(sortBy), keyCol, keyCol, keyCol, sortExpr, dir, pageSize, offset)
 	}
 
-	pageRows, err := ch.Query[idRow](s.CH, pageSQL)
+	pageRows, err := queryA[idRow](s.CH, pageSQL, args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -464,9 +466,10 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sample-level clinical data for the page.
-	sampleData, _ := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
+	sampleData, _ := ch.QueryP[clinicalRow](s.CH,
 		"SELECT study_id AS studyId, sample_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-			"FROM clinical_sample WHERE (study_id, sample_id) IN (%s) ORDER BY attr_id", tupleIn(samplePairs)))
+			"FROM clinical_sample WHERE (study_id, sample_id) IN {ids:Array(Tuple(String, String))} ORDER BY attr_id",
+		ch.Params{"ids": samplePairs})
 	sampleToPatient := map[string]string{}
 	for _, pr := range pageRows {
 		sampleToPatient[pr.StudyID+"\x00"+pr.SampleID] = pr.PatientID
@@ -482,9 +485,10 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	// Patient-level clinical data, mapped onto each of the patient's page samples.
 	if len(patientPairs) > 0 {
-		patientData, _ := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
+		patientData, _ := ch.QueryP[clinicalRow](s.CH,
 			"SELECT study_id AS studyId, patient_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-				"FROM clinical_patient WHERE (study_id, patient_id) IN (%s) ORDER BY attr_id", tupleIn(patientPairs)))
+				"FROM clinical_patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY attr_id",
+			ch.Params{"ids": patientPairs})
 		for _, cr := range patientData {
 			for _, sm := range patientToSamples[cr.StudyID+"\x00"+cr.ID] {
 				key := uniqueKey(sm.StudyID, sm.SampleID)
@@ -508,9 +512,10 @@ func (s *State) attrIsPatientLevel(studyIDs []string, attrID string) bool {
 	type r struct {
 		Flag uint8 `json:"flag"`
 	}
-	rows, _ := ch.Query[r](s.CH, fmt.Sprintf(
-		"SELECT max(patient_attribute) AS flag FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id = '%s'",
-		inList(studyIDs), sqlLit(attrID)))
+	rows, _ := ch.QueryP[r](s.CH,
+		"SELECT max(patient_attribute) AS flag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
+			"AND clinical_attribute_id = {attr:String}",
+		ch.Params{"studies": studyIDs, "attr": attrID})
 	return len(rows) > 0 && rows[0].Flag != 0
 }
 
@@ -523,9 +528,10 @@ func (s *State) attrIsNumber(studyIDs []string, attrID string) bool {
 	type r struct {
 		N uint64 `json:"n"`
 	}
-	rows, _ := ch.Query[r](s.CH, fmt.Sprintf(
-		"SELECT count() AS n FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id = '%s' AND datatype = 'NUMBER'",
-		inList(studyIDs), sqlLit(attrID)))
+	rows, _ := ch.QueryP[r](s.CH,
+		"SELECT count() AS n FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
+			"AND clinical_attribute_id = {attr:String} AND datatype = 'NUMBER'",
+		ch.Params{"studies": studyIDs, "attr": attrID})
 	return len(rows) > 0 && rows[0].N > 0
 }
 
@@ -550,9 +556,10 @@ func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		SampleID  string `json:"sampleId"`
 		PatientID string `json:"patientId"`
 	}
-	samples, _ := ch.Query[sample](s.CH, fmt.Sprintf(
+	args := newArgs()
+	samples, _ := queryA[sample](s.CH,
 		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId, patient_stable_id AS patientId "+
-			"FROM sample_derived WHERE %s", s.filterWhere(svf)))
+			"FROM sample_derived WHERE "+s.filterWhere(args, svf), args)
 	if len(samples) == 0 {
 		writeJSON(w, out)
 		return

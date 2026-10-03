@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // routeGenericAssay2 registers the generic-assay study-view aggregation
@@ -66,20 +64,21 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	unit := s.gaCountUnit(profileType)
-	scope := fmt.Sprintf("profile_type = '%s' AND sample_unique_id IN (%s)", sqlLit(profileType), s.filterSQL(svf))
+	args := newArgs()
+	scope := fmt.Sprintf("profile_type = %s AND sample_unique_id IN (%s)", args.str(profileType), s.filterSQL(args, svf))
 	entityClause := ""
 	if len(entities) > 0 {
-		entityClause = fmt.Sprintf(" AND entity_stable_id IN (%s)", inList(entities))
+		entityClause = " AND entity_stable_id IN " + args.strs(entities)
 	}
 	type row struct {
 		StableID string `json:"stableId"`
 		Value    string `json:"value"`
 		Count    uint64 `json:"count"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, value, uniqExact(%s) AS count FROM generic_assay_data_derived "+
 			"WHERE NOT %s AND %s%s GROUP BY entity_stable_id, value",
-		unit, isNASQL("value"), scope, entityClause))
+		unit, isNASQL("value"), scope, entityClause), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -90,8 +89,8 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 			type c struct {
 				N uint64 `json:"n"`
 			}
-			t, _ := ch.Query[c](s.CH, fmt.Sprintf(
-				"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE %s", s.filterWhere(svf)))
+			t, _ := queryA[c](s.CH,
+				"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE "+s.filterWhere(args, svf), args)
 			if len(t) > 0 {
 				total = t[0].N
 			}
@@ -102,16 +101,16 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		type c struct {
 			N uint64 `json:"n"`
 		}
-		t, _ := ch.Query[c](s.CH, fmt.Sprintf(
-			"SELECT uniqExact(%s) AS n FROM generic_assay_data_derived WHERE %s", unit, scope))
+		t, _ := queryA[c](s.CH, fmt.Sprintf(
+			"SELECT uniqExact(%s) AS n FROM generic_assay_data_derived WHERE %s", unit, scope), args)
 		if len(t) > 0 {
 			total = t[0].N
 		}
 		type e struct {
 			StableID string `json:"stableId"`
 		}
-		es, _ := ch.Query[e](s.CH, fmt.Sprintf(
-			"SELECT DISTINCT entity_stable_id AS stableId FROM generic_assay_data_derived WHERE %s", scope))
+		es, _ := queryA[e](s.CH,
+			"SELECT DISTINCT entity_stable_id AS stableId FROM generic_assay_data_derived WHERE "+scope, args)
 		for _, x := range es {
 			entities = append(entities, x.StableID)
 		}
@@ -188,9 +187,10 @@ func (s *State) genericAssayDataInProfileGet(w http.ResponseWriter, r *http.Requ
 // ---------- Single-entity metadata GETs ----------
 
 // genericAssayMetasWhere returns distinct entity metadata rows matching the
-// given WHERE clause, in generic_assay_meta_derived's order.
-func (s *State) genericAssayMetasWhere(where string) ([]GenericAssayMeta, error) {
-	props, err := s.genericAssayMetaProperties(where)
+// given WHERE clause (with placeholders bound in args), in
+// generic_assay_meta_derived's order.
+func (s *State) genericAssayMetasWhere(where string, args *sqlArgs) ([]GenericAssayMeta, error) {
+	props, err := s.genericAssayMetaProperties(where, args)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,8 @@ func (s *State) genericAssayMetasWhere(where string) ([]GenericAssayMeta, error)
 // one entity across all profiles it appears in. Returns an array.
 func (s *State) genericAssayMetaByStableIdGet(w http.ResponseWriter, r *http.Request) {
 	stableID := r.PathValue("genericAssayStableId")
-	out, err := s.genericAssayMetasWhere(fmt.Sprintf("entity_stable_id = '%s'", sqlLit(stableID)))
+	args := newArgs()
+	out, err := s.genericAssayMetasWhere("entity_stable_id = "+args.str(stableID), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -219,8 +220,9 @@ func (s *State) genericAssayMetaByIDGet(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, []GenericAssayMeta{})
 		return
 	}
+	args := newArgs()
 	out, err := s.genericAssayMetasWhere(fmt.Sprintf(
-		"study_id = '%s' AND profile_stable_id = '%s'", sqlLit(m.StudyID), sqlLit(m.StableID)))
+		"study_id = %s AND profile_stable_id = %s", args.str(m.StudyID), args.str(m.StableID)), args)
 	if err != nil {
 		fail(w, err)
 		return

@@ -20,7 +20,7 @@ import (
 // the statement, so they are never parsed as SQL.
 //
 // Supported value types: string, bool, int, int64, uint64, float64,
-// []string, []int, []int64 and [][2]string (for Array(Tuple(String, String))).
+// []string, []int, []int64, [][2]string and [][3]string (for Array(Tuple(String, …))).
 type Params map[string]any
 
 const (
@@ -142,50 +142,73 @@ func EncodeParam(v any) (string, error) {
 			b.WriteByte(')')
 		}
 		b.WriteByte(']')
+	case [][3]string:
+		b.WriteByte('[')
+		for i, p := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteByte('(')
+			quoteParam(&b, p[0])
+			b.WriteByte(',')
+			quoteParam(&b, p[1])
+			b.WriteByte(',')
+			quoteParam(&b, p[2])
+			b.WriteByte(')')
+		}
+		b.WriteByte(']')
 	default:
 		return "", fmt.Errorf("clickhouse: unsupported parameter type %T", v)
 	}
 	return b.String(), nil
 }
 
-// extTable is an array parameter sent as an external table.
+// extTable is an array parameter sent as an external table: one row per
+// element, numbered by i so the array form keeps the element order.
 type extTable struct {
 	name      string // table name in the query
 	structure string // column definitions
-	cols      string // column list
+	cols      string // element columns
 	data      []byte // TabSeparated rows
 }
 
 // tableParam converts an array value to an external table, or reports false
 // for a value that is not an array.
 func tableParam(name string, v any) (extTable, bool) {
-	t := extTable{name: "_param_" + name, structure: "v String", cols: "v"}
+	t := extTable{name: "_param_" + name, structure: "i UInt64, v String", cols: "v"}
 	var buf bytes.Buffer
+	row := func(i int, fields ...string) {
+		buf.WriteString(strconv.Itoa(i))
+		for _, f := range fields {
+			buf.WriteByte('\t')
+			buf.WriteString(f)
+		}
+		buf.WriteByte('\n')
+	}
 	switch x := v.(type) {
 	case []string:
-		for _, s := range x {
-			buf.WriteString(EscapeParam(s))
-			buf.WriteByte('\n')
+		for i, s := range x {
+			row(i, EscapeParam(s))
 		}
 	case []int:
-		t.structure = "v Int64"
-		for _, n := range x {
-			buf.WriteString(strconv.Itoa(n))
-			buf.WriteByte('\n')
+		t.structure = "i UInt64, v Int64"
+		for i, n := range x {
+			row(i, strconv.Itoa(n))
 		}
 	case []int64:
-		t.structure = "v Int64"
-		for _, n := range x {
-			buf.WriteString(strconv.FormatInt(n, 10))
-			buf.WriteByte('\n')
+		t.structure = "i UInt64, v Int64"
+		for i, n := range x {
+			row(i, strconv.FormatInt(n, 10))
 		}
 	case [][2]string:
-		t.structure, t.cols = "c1 String, c2 String", "c1, c2"
-		for _, p := range x {
-			buf.WriteString(EscapeParam(p[0]))
-			buf.WriteByte('\t')
-			buf.WriteString(EscapeParam(p[1]))
-			buf.WriteByte('\n')
+		t.structure, t.cols = "i UInt64, c1 String, c2 String", "c1, c2"
+		for i, p := range x {
+			row(i, EscapeParam(p[0]), EscapeParam(p[1]))
+		}
+	case [][3]string:
+		t.structure, t.cols = "i UInt64, c1 String, c2 String, c3 String", "c1, c2, c3"
+		for i, p := range x {
+			row(i, EscapeParam(p[0]), EscapeParam(p[1]), EscapeParam(p[2]))
 		}
 	default:
 		return t, false
@@ -215,19 +238,25 @@ func precededByIN(sql string, i int) bool {
 
 // substituteTable replaces each {name:Array(...)} placeholder with a subquery
 // over the external table: the table's rows on the right of IN, the rows
-// collected into an array anywhere else.
+// collected into an array, in element order, anywhere else.
 func substituteTable(sql, name string, t extTable) string {
 	re := placeholderRE(name)
+	elem := "x.2"
+	if n := strings.Count(t.cols, ",") + 1; n > 1 {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = fmt.Sprintf("x.%d", i+2)
+		}
+		elem = "(" + strings.Join(parts, ", ") + ")"
+	}
 	var b strings.Builder
 	last := 0
 	for _, m := range re.FindAllStringIndex(sql, -1) {
 		b.WriteString(sql[last:m[0]])
 		if precededByIN(sql, m[0]) {
 			fmt.Fprintf(&b, "(SELECT %s FROM %s)", t.cols, t.name)
-		} else if strings.Contains(t.cols, ",") {
-			fmt.Fprintf(&b, "(SELECT groupArray((%s)) FROM %s)", t.cols, t.name)
 		} else {
-			fmt.Fprintf(&b, "(SELECT groupArray(%s) FROM %s)", t.cols, t.name)
+			fmt.Fprintf(&b, "(SELECT arrayMap(x -> %s, arraySort(groupArray((i, %s)))) FROM %s)", elem, t.cols, t.name)
 		}
 		last = m[1]
 	}

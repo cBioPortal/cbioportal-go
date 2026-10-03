@@ -57,19 +57,20 @@ type gaProfileData struct {
 func (s *State) gaLoadProfile(meta profileMeta, entityIDs, sampleIDs []string) (*gaProfileData, error) {
 	d := &gaProfileData{meta: meta, patientLevel: s.gaProfilePatientLevel(meta),
 		cells: map[string]map[string]string{}, patientOf: map[string]string{}}
-	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
+	args := newArgs()
+	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
 	if entityIDs != nil {
 		if len(entityIDs) == 0 {
 			return d, nil
 		}
-		where += fmt.Sprintf(" AND entity_stable_id IN (%s)", inList(entityIDs))
+		where += " AND entity_stable_id IN " + args.strs(entityIDs)
 	}
 	type entityRow struct {
 		E string `json:"e"`
 	}
-	ents, err := ch.Query[entityRow](s.CH, fmt.Sprintf(
+	ents, err := queryA[entityRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS e FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
-			"GROUP BY entity_stable_id ORDER BY min((_part, _part_offset)), entity_stable_id", where))
+			"GROUP BY entity_stable_id ORDER BY min((_part, _part_offset)), entity_stable_id", where), args)
 	if err != nil {
 		return nil, err
 	}
@@ -85,12 +86,12 @@ func (s *State) gaLoadProfile(meta profileMeta, entityIDs, sampleIDs []string) (
 		if len(sampleIDs) == 0 {
 			return d, nil
 		}
-		sampleCond = fmt.Sprintf(" AND s.sample_id IN (%s)", inList(sampleIDs))
+		sampleCond = " AND s.sample_id IN " + args.strs(sampleIDs)
 	}
-	rows, err := ch.Query[genericAssayMatrixRow](s.CH, fmt.Sprintf(
+	rows, err := queryA[genericAssayMatrixRow](s.CH, fmt.Sprintf(
 		"SELECT s.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, %s AS value "+
 			"FROM (SELECT * FROM %s WHERE %s) m JOIN sample s ON s.study_id = m.study_id AND %s%s",
-		javaTruncatedValueSQL("m.value"), genericAssaySource(s), where, join, sampleCond))
+		javaTruncatedValueSQL("m.value"), genericAssaySource(s), where, join, sampleCond), args)
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +190,8 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 		type idRow struct {
 			SampleID string `json:"sampleId"`
 		}
-		rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
-			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = '%s'", sqlLit(f.SampleListID)))
+		rows, err := ch.QueryP[idRow](s.CH,
+			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String}", ch.Params{"list": f.SampleListID})
 		if err != nil {
 			fail(w, err)
 			return
@@ -287,6 +288,7 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	var f genericAssayMetaFilter
 	readBody(r, &f)
 
+	args := newArgs()
 	var conds []string
 	if len(f.MolecularProfileIDs) > 0 {
 		var pairs [][2]string
@@ -299,10 +301,10 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, []GenericAssayMeta{})
 			return
 		}
-		conds = append(conds, fmt.Sprintf("(study_id, profile_stable_id) IN (%s)", tupleIn(pairs)))
+		conds = append(conds, "(study_id, profile_stable_id) IN "+args.pairs(pairs))
 	}
 	if len(f.GenericAssayStableIDs) > 0 {
-		conds = append(conds, fmt.Sprintf("entity_stable_id IN (%s)", inList(f.GenericAssayStableIDs)))
+		conds = append(conds, "entity_stable_id IN "+args.strs(f.GenericAssayStableIDs))
 	}
 	if len(conds) == 0 {
 		writeJSON(w, []GenericAssayMeta{})
@@ -312,7 +314,7 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	if len(conds) > 0 {
 		where = strings.Join(conds, " AND ")
 	}
-	props, err := s.genericAssayMetaProperties(where)
+	props, err := s.genericAssayMetaProperties(where, args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -334,18 +336,19 @@ func genericAssayMetaList(props map[string]map[string]string) []GenericAssayMeta
 
 // genericAssayMetaProperties returns the meta properties of the generic
 // assay entities matching where (over study_id, profile_stable_id and
-// entity_stable_id), keyed by entity stable id: every stored property where
-// the raw database has the entity tables of a production clone, else the
-// NAME / DESCRIPTION / URL columns of the staged matrix.
-func (s *State) genericAssayMetaProperties(where string) (map[string]map[string]string, error) {
+// entity_stable_id, with placeholders bound in args), keyed by entity stable
+// id: every stored property where the raw database has the entity tables of a
+// production clone, else the NAME / DESCRIPTION / URL columns of the staged
+// matrix.
+func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[string]map[string]string, error) {
 	if len(s.rawColumns("generic_assay_entity_meta")) > 0 {
 		type propRow struct {
 			StableID string            `json:"stableId"`
 			Props    map[string]string `json:"props"`
 		}
-		rows, err := ch.Query[propRow](s.CH, fmt.Sprintf(
+		rows, err := queryA[propRow](s.CH, fmt.Sprintf(
 			"SELECT entity_stable_id AS stableId, properties AS props FROM cbioportal_raw.generic_assay_entity_meta "+
-				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where))
+				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where), args)
 		if err != nil {
 			return nil, err
 		}
@@ -358,9 +361,9 @@ func (s *State) genericAssayMetaProperties(where string) (map[string]map[string]
 		}
 		return out, nil
 	}
-	rows, err := ch.Query[genericAssayMetaRow](s.CH, fmt.Sprintf(
+	rows, err := queryA[genericAssayMetaRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
-			"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where))
+			"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where), args)
 	if err != nil {
 		return nil, err
 	}

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 	"github.com/inodb/cbioportal-go/internal/stats"
 )
 
@@ -79,9 +78,10 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	if patient {
 		unit = "patient_unique_id"
 	}
-	var a alterationSQL
+	args := newArgs()
+	a := alterationSQL{args: args}
 	if body.AlterationEventTypes != nil {
-		a = alterationSQL{*body.AlterationEventTypes}
+		a.af = *body.AlterationEventTypes
 	}
 	profileStudy := s.profileStudies(body.Groups)
 	type geneRow struct {
@@ -123,12 +123,12 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		if len(entitySet) == 0 {
 			continue
 		}
-		sc := &groupScope{entities: inList(sortedKeys(entitySet)), profiles: inList(sortedKeys(profileSet))}
-		altered, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
+		sc := &groupScope{entities: args.strs(sortedKeys(entitySet)), profiles: args.strs(sortedKeys(profileSet))}
+		altered, err := queryA[geneRow](s.CH, fmt.Sprintf(
 			"SELECT hugo_gene_symbol AS gene, any(toInt64OrNull(toString(entrez_gene_id))) AS entrez, toInt64(uniqExact(%[1]s)) AS n "+
-				"FROM genomic_event_derived WHERE mutation_status != 'UNCALLED' AND genetic_profile_stable_id IN (%[2]s) "+
-				"AND %[1]s IN (%[3]s) AND %[4]s GROUP BY hugo_gene_symbol",
-			unit, sc.profiles, sc.entities, a.enrichmentClause()))
+				"FROM genomic_event_derived WHERE mutation_status != 'UNCALLED' AND genetic_profile_stable_id IN %[2]s "+
+				"AND %[1]s IN %[3]s AND %[4]s GROUP BY hugo_gene_symbol",
+			unit, sc.profiles, sc.entities, a.enrichmentClause()), args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -139,13 +139,13 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		}
 		scopes[i] = sc
 	}
-	geneList := inList(sortedKeys(alteredGenes))
+	geneList := args.strs(sortedKeys(alteredGenes))
 	for i, g := range body.Groups {
 		sc := scopes[i]
 		if sc == nil || len(alteredGenes) == 0 {
 			continue
 		}
-		profiled, err := s.profiledPerGene(unit, sc.profiles, sc.entities, geneList)
+		profiled, err := s.profiledPerGene(args, unit, sc.profiles, sc.entities, geneList)
 		if err != nil {
 			fail(w, err)
 			return
@@ -234,19 +234,20 @@ func (s *State) routeEnrichment(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/alteration-enrichments/fetch", s.alterationEnrichmentsFetch)
 }
 
-// profiledPerGene counts, per gene of genes (a SQL list), the entities with a
-// panel covering it: entities are grouped by their panel combination and each
-// combination's genes are expanded once.
-func (s *State) profiledPerGene(unit, profiles, entities, genes string) (map[string]int, error) {
+// profiledPerGene counts, per gene of genes, the entities with a panel
+// covering it: entities are grouped by their panel combination and each
+// combination's genes are expanded once. profiles, entities and genes are
+// array placeholders bound in args.
+func (s *State) profiledPerGene(args *sqlArgs, unit, profiles, entities, genes string) (map[string]int, error) {
 	type combo struct {
 		Panels []string `json:"panels"`
 		N      int      `json:"n"`
 	}
-	combos, err := ch.Query[combo](s.CH, fmt.Sprintf(
+	combos, err := queryA[combo](s.CH, fmt.Sprintf(
 		"SELECT panels, toInt64(count()) AS n FROM (SELECT sd.%[1]s AS entity, arraySort(groupUniqArray(p.gene_panel_id)) AS panels "+
 			"FROM sample_to_gene_panel_derived p JOIN sample_derived sd ON sd.sample_unique_id = p.sample_unique_id "+
-			"WHERE p.genetic_profile_id IN (%[2]s) AND sd.%[1]s IN (%[3]s) GROUP BY entity) GROUP BY panels",
-		unit, profiles, entities))
+			"WHERE p.genetic_profile_id IN %[2]s AND sd.%[1]s IN %[3]s GROUP BY entity) GROUP BY panels",
+		unit, profiles, entities), args)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +257,7 @@ func (s *State) profiledPerGene(unit, profiles, entities, genes string) (map[str
 			panelSet[p] = true
 		}
 	}
-	panelGenes, err := s.panelGenes(sortedKeys(panelSet), genes)
+	panelGenes, err := s.panelGenes(args, sortedKeys(panelSet), genes)
 	if err != nil {
 		return nil, err
 	}
@@ -275,9 +276,9 @@ func (s *State) profiledPerGene(unit, profiles, entities, genes string) (map[str
 	return out, nil
 }
 
-// panelGenes returns each panel's genes among genes (a SQL list); WES covers
-// every gene.
-func (s *State) panelGenes(panels []string, genes string) (map[string][]string, error) {
+// panelGenes returns each panel's genes among genes (an array placeholder
+// bound in args); WES covers every gene.
+func (s *State) panelGenes(args *sqlArgs, panels []string, genes string) (map[string][]string, error) {
 	out := map[string][]string{}
 	if len(panels) == 0 {
 		return out, nil
@@ -286,9 +287,9 @@ func (s *State) panelGenes(panels []string, genes string) (map[string][]string, 
 		Panel string   `json:"panel"`
 		Genes []string `json:"genes"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT gene_panel_id AS panel, groupArray(gene) AS genes FROM gene_panel_to_gene_derived "+
-			"WHERE gene_panel_id IN (%s) AND gene IN (%s) GROUP BY gene_panel_id", inList(panels), genes))
+			"WHERE gene_panel_id IN %s AND gene IN %s GROUP BY gene_panel_id", args.strs(panels), genes), args)
 	if err != nil {
 		return nil, err
 	}

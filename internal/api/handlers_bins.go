@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 	"github.com/inodb/cbioportal-go/internal/databin"
 )
 
@@ -160,8 +159,9 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 	if len(keys) == 0 {
 		return
 	}
+	args := newArgs()
 	scopes := fmt.Sprintf("WITH unfiltered AS (%s), filtered AS (%s) ",
-		s.filterSQL(unfilteredScope), s.filterSQL(filteredScope))
+		s.filterSQL(args, unfilteredScope), s.filterSQL(args, filteredScope))
 	type totalRow struct {
 		U uint64 `json:"u"`
 		F uint64 `json:"f"`
@@ -171,7 +171,7 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 		total = "SELECT (SELECT uniqExact(patient_unique_id) FROM sample_derived WHERE sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, " +
 			"(SELECT uniqExact(patient_unique_id) FROM sample_derived WHERE sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f"
 	}
-	totals, _ := ch.Query[totalRow](s.CH, scopes+total)
+	totals, _ := queryA[totalRow](s.CH, scopes+total, args)
 	var totalU, totalF uint64
 	if len(totals) > 0 {
 		totalU, totalF = totals[0].U, totals[0].F
@@ -188,14 +188,14 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 	if unit == "patient_unique_id" {
 		countIf = "uniqExactIf(patient_unique_id, "
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(scopes+
+	rows, _ := queryA[row](s.CH, fmt.Sprintf(scopes+
 		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
-		"FROM %[3]s WHERE (%[1]s, profile_type) IN (%[4]s) AND NOT %[5]s "+
+		"FROM %[3]s WHERE (%[1]s, profile_type) IN %[4]s AND NOT %[5]s "+
 		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
 		"GROUP BY key, profileType, value",
-		keyCol, valueCol, table, tupleIn(keys), naSQL, countIf))
+		keyCol, valueCol, table, args.pairs(keys), naSQL, countIf), args)
 	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
 		k := [2]string{r.Key, r.ProfileType}
@@ -341,9 +341,10 @@ func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 		SampleID string `json:"sampleId"`
 	}
 	inScope := func(scope studyViewFilter) map[string]bool {
-		rows, _ := ch.Query[sample](s.CH, fmt.Sprintf(
-			"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM sample_derived WHERE %s",
-			s.filterWhere(scope)))
+		args := newArgs()
+		rows, _ := queryA[sample](s.CH,
+			"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM sample_derived WHERE "+
+				s.filterWhere(args, scope), args)
 		m := map[string]bool{}
 		for _, r := range rows {
 			m[r.StudyID+"\x00"+r.SampleID] = true

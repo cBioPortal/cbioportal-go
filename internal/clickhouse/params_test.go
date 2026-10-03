@@ -36,6 +36,7 @@ func TestEncodeParam(t *testing.T) {
 		{[]int64{}, "[]"},
 		{[][2]string{{"s1", "p'1"}, {"s2", `p\2`}}, `[('s1','p\'1'),('s2','p\\2')]`},
 		{[][2]string{}, "[]"},
+		{[][3]string{{"a", "b'", `c\`}}, `[('a','b\'','c\\')]`},
 	}
 	for _, c := range cases {
 		got, err := EncodeParam(c.v)
@@ -54,13 +55,13 @@ func TestEncodeParam(t *testing.T) {
 func TestSubstituteTable(t *testing.T) {
 	ts, _ := tableParam("ids", []string{"a"})
 	sql := "SELECT has({ids:Array(String)}, x) FROM t WHERE x IN {ids:Array(String)} AND y NOT IN { ids : Array(String) } AND z = {idsx:String}"
-	want := "SELECT has((SELECT groupArray(v) FROM _param_ids), x) FROM t WHERE x IN (SELECT v FROM _param_ids) AND y NOT IN (SELECT v FROM _param_ids) AND z = {idsx:String}"
+	want := "SELECT has((SELECT arrayMap(x -> x.2, arraySort(groupArray((i, v)))) FROM _param_ids), x) FROM t WHERE x IN (SELECT v FROM _param_ids) AND y NOT IN (SELECT v FROM _param_ids) AND z = {idsx:String}"
 	if got := substituteTable(sql, "ids", ts); got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 	tp, _ := tableParam("p", [][2]string{{"a", "b"}})
 	if got := substituteTable("(a, b) IN {p:Array(Tuple(String, String))} OR length({p:Array(Tuple(String, String))}) > 0", "p", tp); got !=
-		"(a, b) IN (SELECT c1, c2 FROM _param_p) OR length((SELECT groupArray((c1, c2)) FROM _param_p)) > 0" {
+		"(a, b) IN (SELECT c1, c2 FROM _param_p) OR length((SELECT arrayMap(x -> (x.2, x.3), arraySort(groupArray((i, c1, c2)))) FROM _param_p)) > 0" {
 		t.Errorf("tuple substitution: %s", got)
 	}
 	// MIN is not the IN keyword.
@@ -149,8 +150,8 @@ func TestRequestShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rec.form["query"] != "SELECT 1 WHERE x IN (SELECT v FROM _param_ids) AND y = {s:String} FORMAT JSONEachRow" ||
-		rec.form["param_s"] != "z" || !strings.Contains(rec.url, "_param_ids_structure=v+String") ||
-		!strings.HasPrefix(rec.files["_param_ids"], "sample_00000\nsample_00001\nsample_00002\ntab\\there\n") {
+		rec.form["param_s"] != "z" || !strings.Contains(rec.url, "_param_ids_structure=i+UInt64%2C+v+String") ||
+		!strings.HasPrefix(rec.files["_param_ids"], "0\tsample_00000\n1\tsample_00001\n2\tsample_00002\n3\ttab\\there\n") {
 		t.Errorf("large: url=%s query=%s", rec.url, rec.form["query"])
 	}
 
@@ -204,6 +205,21 @@ func TestLiveRoundTrip(t *testing.T) {
 	for i := range pairs {
 		pairs[i] = [2]string{fmt.Sprintf("study'%d", i), fmt.Sprintf("s\\%d", i)}
 	}
+	triples := make([][3]string, 8000)
+	for i := range triples {
+		triples[i] = [3]string{"st", fmt.Sprintf("p\t%d", i), fmt.Sprintf("s'%d", i)}
+	}
+	for _, ts := range [][][3]string{{{"a", "b", "c"}}, triples} {
+		rows, err := QueryP[struct {
+			N    uint64 `json:"n"`
+			Last string `json:"last"`
+		}](c, "SELECT countIf(t IN {t:Array(Tuple(String, String, String))}) AS n, tupleElement(arrayElement({t:Array(Tuple(String, String, String))}, -1), 3) AS last "+
+			"FROM (SELECT arrayJoin({t:Array(Tuple(String, String, String))}) AS t)", Params{"t": ts})
+		if err != nil || len(rows) != 1 || rows[0].N != uint64(len(ts)) || rows[0].Last != ts[len(ts)-1][2] {
+			t.Errorf("%d triples: %v %v", len(ts), rows, err)
+		}
+	}
+
 	for _, ps := range [][][2]string{{{"a", "b"}}, pairs} {
 		rows, err := QueryP[struct {
 			N uint64 `json:"n"`
