@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // routeCompat registers endpoints that are thin views over others: the GET
@@ -27,8 +28,9 @@ type MrnaPercentile struct {
 }
 
 // mrnaPercentileFetch ranks the sample's value of each gene among all the
-// profile's numeric values for that gene (ties share their average rank) and
-// reports rank/n as a percentile rounded to two decimals.
+// profile's numeric values for that gene and reports rank/n as a percentile
+// rounded half up to two decimals, as Java's MrnaPercentileServiceImpl: tied
+// values all take the highest rank of their group (TiesStrategy.MAXIMUM).
 func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 	var entrez []int64
 	readBody(r, &entrez)
@@ -44,7 +46,7 @@ func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 		if d.EntrezGeneID == nil {
 			continue
 		}
-		if v, err := strconv.ParseFloat(d.Value, 64); err == nil && !math.IsNaN(v) {
+		if v, err := strconv.ParseFloat(d.Value, 64); err == nil && !math.IsNaN(v) && !math.IsInf(v, 0) {
 			byGene[*d.EntrezGeneID] = append(byGene[*d.EntrezGeneID], v)
 		}
 	}
@@ -53,19 +55,17 @@ func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		v, err := strconv.ParseFloat(d.Value, 64)
-		if err != nil || math.IsNaN(v) {
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
 			continue
 		}
 		values := byGene[*d.EntrezGeneID]
 		sorted := append([]float64(nil), values...)
 		sort.Float64s(sorted)
-		lo := sort.SearchFloat64s(sorted, v)
-		hi := lo
+		hi := sort.SearchFloat64s(sorted, v)
 		for hi < len(sorted) && sorted[hi] == v {
 			hi++
 		}
-		rank := float64(lo+1+hi) / 2
-		pct := math.Round(rank/float64(len(sorted))*100*100) / 100
+		pct := roundHalfUp(float64(hi)/float64(len(sorted))*100, 2)
 		out = append(out, MrnaPercentile{
 			MolecularProfileID: d.MolecularProfileID, SampleID: d.SampleID, PatientID: d.PatientID, StudyID: d.StudyID,
 			EntrezGeneID: *d.EntrezGeneID, Percentile: pct, ZScore: v,
@@ -73,4 +73,21 @@ func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, out)
+}
+
+// roundHalfUp rounds x to the given decimals as Java's
+// BigDecimal.valueOf(x).setScale(decimals, ROUND_HALF_UP): on x's shortest
+// decimal representation, halves away from zero, so 27.155 is 27.16.
+func roundHalfUp(x float64, decimals int) float64 {
+	s := strconv.FormatFloat(math.Abs(x), 'f', -1, 64)
+	dot := strings.IndexByte(s, '.')
+	if dot < 0 || len(s)-dot-1 <= decimals {
+		return x
+	}
+	v, _ := strconv.ParseFloat(s[:dot+1+decimals], 64)
+	if s[dot+1+decimals] >= '5' {
+		v += math.Pow(10, -float64(decimals))
+	}
+	v, _ = strconv.ParseFloat(strconv.FormatFloat(v, 'f', decimals, 64), 64)
+	return math.Copysign(v, x)
 }

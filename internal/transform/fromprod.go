@@ -195,7 +195,7 @@ func (b *prodBuilder) steps() []prodObject {
 				"p.alteration_type AS molecular_alteration_type, p.datatype AS datatype, gp.name AS name, "+
 				"ifNull(gp.description, '') AS description, toUInt8(gp.show_profile_in_analysis_tab) AS show_profile_in_analysis_tab, "+
 				"p.profile_stable_id AS profile_stable_id, ifNull(gp.generic_assay_type, '') AS generic_assay_type, "+
-				"gp.pivot_threshold AS pivot_threshold, gp.sort_order AS sort_order, toUInt8(p.patient_level) AS patient_level "+
+				"toFloat64OrNull(toString(toFloat32(gp.pivot_threshold))) AS pivot_threshold, gp.sort_order AS sort_order, toUInt8(p.patient_level) AS patient_level "+
 				"FROM {p}.genetic_profile gp INNER JOIN {t}.prod_profile p ON p.genetic_profile_id = gp.genetic_profile_id"),
 		b.table("patient", "(study_id, patient_id)", "SELECT study_id, patient_id FROM {t}.prod_patient"),
 		b.table("sample", "(study_id, sample_id)", "SELECT study_id, sample_id, patient_id FROM {t}.prod_sample"),
@@ -424,12 +424,14 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 			"if(p.patient_level, 'true', 'false') AS patient_level "+
 			"FROM {t}.prod_profile p INNER JOIN {p}.genetic_profile gp ON gp.genetic_profile_id = p.genetic_profile_id"))
 	// Gene matrices: one row per sample x gene x profile with a stored value.
+	// Rows are ordered by gene, so the storage-order columns the API orders
+	// by are constant.
 	for _, m := range matrixTables {
 		add(b.rawView(m[1], fmt.Sprintf(
 			"SELECT ga.cancer_study_identifier AS study_id, ga.profile_type AS profile_stable_id, "+
 				"ga.hugo_gene_symbol AS hugo_symbol, toString(g.entrez_gene_id) AS entrez_gene_id, "+
 				"substring(ga.sample_unique_id, length(ga.cancer_study_identifier) + 2) AS sample_id, "+
-				"ifNull(ga.alteration_value, '') AS value, '%s' AS alteration_type "+
+				"ifNull(ga.alteration_value, '') AS value, '%s' AS alteration_type, '' AS _part, toUInt64(0) AS _part_offset "+
 				"FROM {p}.genetic_alteration_derived ga LEFT JOIN (SELECT entrez_gene_id, hugo_gene_symbol FROM {p}.gene) g "+
 				"ON g.hugo_gene_symbol = ga.hugo_gene_symbol "+
 				"WHERE (ga.cancer_study_identifier, ga.profile_type) IN "+

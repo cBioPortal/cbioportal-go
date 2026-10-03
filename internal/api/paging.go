@@ -23,6 +23,77 @@ var oneBasedPaths = map[string]bool{
 	"/api/studies": true,
 }
 
+// pagedEndpoints are the Java endpoints that take pageSize / pageNumber /
+// sortBy / direction (their controller methods declare them); every other
+// endpoint ignores those params, as Java does.
+var pagedEndpoints = []string{
+	"GET /api/cancer-types",
+	"GET /api/clinical-attributes",
+	"GET /api/gene-panels",
+	"POST /api/generic-assay-meta/fetch",
+	"GET /api/genes",
+	"GET /api/genesets",
+	"GET /api/legacy/samples",
+	"GET /api/legacy/studies",
+	"GET /api/legacy/studies/{}/patients/{}/samples",
+	"GET /api/legacy/studies/{}/samples",
+	"GET /api/molecular-profiles",
+	"GET /api/molecular-profiles/{}/mutations",
+	"POST /api/molecular-profiles/{}/mutations/fetch",
+	"POST /api/mutations/fetch",
+	"POST /api/not-ready-yet/mutations/fetch",
+	"GET /api/patients",
+	"GET /api/sample-lists",
+	"GET /api/samples",
+	"GET /api/studies",
+	"GET /api/studies/{}/clinical-attributes",
+	"GET /api/studies/{}/clinical-data",
+	"GET /api/studies/{}/clinical-events",
+	"GET /api/studies/{}/molecular-profiles",
+	"GET /api/studies/{}/patients",
+	"GET /api/studies/{}/patients/{}/clinical-data",
+	"GET /api/studies/{}/patients/{}/clinical-events",
+	"GET /api/studies/{}/patients/{}/resource-data",
+	"GET /api/studies/{}/patients/{}/samples",
+	"GET /api/studies/{}/resource-data",
+	"GET /api/studies/{}/resource-data-all",
+	"GET /api/studies/{}/resource-definitions",
+	"GET /api/studies/{}/sample-lists",
+	"GET /api/studies/{}/samples",
+	"GET /api/studies/{}/samples/{}/clinical-data",
+	"GET /api/studies/{}/samples/{}/copy-number-segments",
+	"GET /api/studies/{}/samples/{}/resource-data",
+	"GET /api/studies/{}/significant-copy-number-regions",
+	"GET /api/studies/{}/significantly-mutated-genes",
+}
+
+// pagedEndpoint reports whether the request is for one of pagedEndpoints
+// ({} matches one path segment).
+func pagedEndpoint(method, path string) bool {
+	segs := strings.Split(strings.TrimSuffix(path, "/"), "/")
+	for _, e := range pagedEndpoints {
+		m, tmpl, _ := strings.Cut(e, " ")
+		if m != method {
+			continue
+		}
+		t := strings.Split(tmpl, "/")
+		if len(t) != len(segs) {
+			continue
+		}
+		match := true
+		for i := range t {
+			if t[i] != "{}" && t[i] != segs[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 // pageList implements the pageSize / pageNumber / sortBy / direction query
 // params of the Java list endpoints for every handler returning a JSON array:
 // the array is stably sorted by the sortBy field (ASC unless direction=DESC)
@@ -34,6 +105,7 @@ func pageList(next http.Handler) http.Handler {
 		q := r.URL.Query()
 		sizeParam, numberParam, sortBy := q.Get("pageSize"), q.Get("pageNumber"), q.Get("sortBy")
 		if (sizeParam == "" && numberParam == "" && sortBy == "") || selfPagedPaths[r.URL.Path] ||
+			!pagedEndpoint(r.Method, r.URL.Path) ||
 			strings.EqualFold(q.Get("projection"), "META") {
 			next.ServeHTTP(w, r)
 			return
