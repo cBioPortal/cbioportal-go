@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -39,13 +38,15 @@ func toSampleList(r sampleListRow) SampleList {
 	}
 }
 
-func (s *State) sampleListsQuery(w http.ResponseWriter, where string) {
+// sampleListsQuery writes the sample lists matching where, whose placeholders
+// take their values from p.
+func (s *State) sampleListsQuery(w http.ResponseWriter, where string, p ch.Params) {
 	sql := sampleListSelect
 	if where != "" {
 		sql += " WHERE " + where
 	}
 	sql += " GROUP BY study_id, list_id ORDER BY list_id"
-	rows, err := ch.Query[sampleListRow](s.CH, sql)
+	rows, err := ch.QueryP[sampleListRow](s.CH, sql, p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -58,14 +59,14 @@ func (s *State) sampleListsQuery(w http.ResponseWriter, where string) {
 }
 
 func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId"))))
+	s.sampleListsQuery(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
 // sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
 func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	sql := fmt.Sprintf("%s WHERE list_id = '%s' GROUP BY study_id, list_id", sampleListSelect, sqlLit(id))
-	rows, err := ch.Query[sampleListRow](s.CH, sql)
+	rows, err := ch.QueryP[sampleListRow](s.CH, sampleListSelect+" WHERE list_id = {list:String} GROUP BY study_id, list_id",
+		ch.Params{"list": id})
 	if err != nil {
 		fail(w, err)
 		return
@@ -84,5 +85,5 @@ func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []SampleList{})
 		return
 	}
-	s.sampleListsQuery(w, fmt.Sprintf("list_id IN (%s)", inList(ids)))
+	s.sampleListsQuery(w, "list_id IN {ids:Array(String)}", ch.Params{"ids": ids})
 }

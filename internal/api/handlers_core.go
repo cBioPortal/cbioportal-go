@@ -488,7 +488,7 @@ type CancerType struct {
 }
 
 func (s *State) cancerTypes(w http.ResponseWriter, r *http.Request) {
-	out, err := s.queryCancerTypes("")
+	out, err := s.queryCancerTypes("", nil)
 	if err != nil {
 		fail(w, err)
 		return

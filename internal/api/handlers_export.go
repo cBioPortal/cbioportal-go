@@ -211,9 +211,9 @@ type exportStudyMeta struct {
 }
 
 func (s *State) exportStudyMetadata(studyID string) (*exportStudyMeta, error) {
-	rows, err := ch.Query[exportStudyMeta](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[exportStudyMeta](s.CH,
 		"SELECT study_id, cancer_type_id, name, description, citation, pmid, groups, reference_genome "+
-			"FROM cancer_study WHERE study_id = '%s' LIMIT 1", sqlLit(studyID)))
+			"FROM cancer_study WHERE study_id = {study:String} LIMIT 1", ch.Params{"study": studyID})
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -239,25 +239,25 @@ func (e *studyExport) loadCases() error {
 	type patientRow struct {
 		PatientID string `json:"patient_id"`
 	}
-	lit := sqlLit(e.studyID)
+	p := ch.Params{"study": e.studyID}
 	var samples []sampleRow
 	var patients []patientRow
 	var err error
 	if e.hasRaw("clinical_sample") && e.hasRaw("clinical_patient") {
-		samples, err = ch.Query[sampleRow](e.s.CH, fmt.Sprintf(
-			"SELECT sample_id, patient_id FROM cbioportal_raw.clinical_sample WHERE study_id = '%s' AND sample_id != '' ORDER BY %s",
-			lit, rawFileOrder))
+		samples, err = ch.QueryP[sampleRow](e.s.CH,
+			"SELECT sample_id, patient_id FROM cbioportal_raw.clinical_sample WHERE study_id = {study:String} AND sample_id != '' ORDER BY "+
+				rawFileOrder, p)
 		if err == nil {
-			patients, err = ch.Query[patientRow](e.s.CH, fmt.Sprintf(
-				"SELECT patient_id FROM cbioportal_raw.clinical_patient WHERE study_id = '%s' AND patient_id != '' ORDER BY %s",
-				lit, rawFileOrder))
+			patients, err = ch.QueryP[patientRow](e.s.CH,
+				"SELECT patient_id FROM cbioportal_raw.clinical_patient WHERE study_id = {study:String} AND patient_id != '' ORDER BY "+
+					rawFileOrder, p)
 		}
 	} else {
-		samples, err = ch.Query[sampleRow](e.s.CH, fmt.Sprintf(
-			"SELECT sample_id, patient_id FROM sample WHERE study_id = '%s' ORDER BY sample_id", lit))
+		samples, err = ch.QueryP[sampleRow](e.s.CH,
+			"SELECT sample_id, patient_id FROM sample WHERE study_id = {study:String} ORDER BY sample_id", p)
 		if err == nil {
-			patients, err = ch.Query[patientRow](e.s.CH, fmt.Sprintf(
-				"SELECT patient_id FROM patient WHERE study_id = '%s' ORDER BY patient_id", lit))
+			patients, err = ch.QueryP[patientRow](e.s.CH,
+				"SELECT patient_id FROM patient WHERE study_id = {study:String} ORDER BY patient_id", p)
 		}
 	}
 	if err != nil {
@@ -348,7 +348,7 @@ func javaGroups(groups string) string {
 // cancerType writes the study's cancer type and its ancestors
 // (CancerTypeDataTypeExporter): no header row.
 func (e *studyExport) cancerType() error {
-	types, err := e.s.queryCancerTypes("")
+	types, err := e.s.queryCancerTypes("", nil)
 	if err != nil {
 		return err
 	}
@@ -420,10 +420,10 @@ func (e *studyExport) clinicalAttrs(patient bool) ([]exportAttr, error) {
 	if patient {
 		flag = 1
 	}
-	return ch.Query[exportAttr](e.s.CH, fmt.Sprintf(
+	return ch.QueryP[exportAttr](e.s.CH, fmt.Sprintf(
 		"SELECT clinical_attribute_id, display_name, description, datatype, priority FROM clinical_attribute_meta "+
-			"WHERE study_id = '%s' AND patient_attribute = %d AND clinical_attribute_id NOT IN (%s) ORDER BY clinical_attribute_id",
-		sqlLit(e.studyID), flag, excludedClinicalAttributes[patient]))
+			"WHERE study_id = {study:String} AND patient_attribute = %d AND clinical_attribute_id NOT IN (%s) ORDER BY clinical_attribute_id",
+		flag, excludedClinicalAttributes[patient]), ch.Params{"study": e.studyID})
 }
 
 type clinicalValue struct {
@@ -437,9 +437,9 @@ func (e *studyExport) clinicalValues(patient bool) (map[string]map[string]string
 	if patient {
 		table, idCol = "clinical_patient", "patient_id"
 	}
-	rows, err := ch.Query[clinicalValue](e.s.CH, fmt.Sprintf(
-		"SELECT %s AS id, attr_id, attr_value FROM %s WHERE study_id = '%s' AND attr_id NOT IN (%s)",
-		idCol, table, sqlLit(e.studyID), excludedClinicalAttributes[patient]))
+	rows, err := ch.QueryP[clinicalValue](e.s.CH, fmt.Sprintf(
+		"SELECT %s AS id, attr_id, attr_value FROM %s WHERE study_id = {study:String} AND attr_id NOT IN (%s)",
+		idCol, table, excludedClinicalAttributes[patient]), ch.Params{"study": e.studyID})
 	if err != nil {
 		return nil, err
 	}
@@ -575,9 +575,9 @@ func (e *studyExport) clinicalTimeline() error {
 			sel = append(sel, "`"+c+"`")
 		}
 	}
-	rows, err := ch.Query[map[string]string](e.s.CH, fmt.Sprintf(
-		"SELECT %s FROM cbioportal_raw.timeline WHERE study_id = '%s' ORDER BY source_file, %s",
-		strings.Join(sel, ", "), sqlLit(e.studyID), rawFileOrder))
+	rows, err := ch.QueryP[map[string]string](e.s.CH, fmt.Sprintf(
+		"SELECT %s FROM cbioportal_raw.timeline WHERE study_id = {study:String} ORDER BY source_file, %s",
+		strings.Join(sel, ", "), rawFileOrder), ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}
@@ -684,11 +684,11 @@ func (e *studyExport) exportProfiles(alterationType, datatype string) ([]exportP
 	if alterationType == "COPY_NUMBER_ALTERATION" && datatype == "DISCRETE" {
 		types = append(types, "DISCRETE_LONG")
 	}
-	return ch.Query[exportProfile](e.s.CH, fmt.Sprintf(
+	return ch.QueryP[exportProfile](e.s.CH,
 		"SELECT molecular_profile_id, profile_stable_id, name, description, show_profile_in_analysis_tab, datatype "+
-			"FROM molecular_profile WHERE study_id = '%s' AND molecular_alteration_type = '%s' AND datatype IN (%s) "+
-			"ORDER BY molecular_profile_id",
-		sqlLit(e.studyID), sqlLit(alterationType), inList(types)))
+			"FROM molecular_profile WHERE study_id = {study:String} AND molecular_alteration_type = {type:String} "+
+			"AND datatype IN {datatypes:Array(String)} ORDER BY molecular_profile_id",
+		ch.Params{"study": e.studyID, "type": alterationType, "datatypes": types})
 }
 
 func profileFileNames(alterationType, datatype, suffix string) (meta, data string) {
@@ -815,13 +815,13 @@ func (e *studyExport) structuralVariants() error {
 		if err := e.writeMeta(metaFile, profileMetaEntries(e.studyID, "STRUCTURAL_VARIANT", "SV", p, dataFile)); err != nil {
 			return err
 		}
-		rows, err := ch.Query[map[string]any](e.s.CH, fmt.Sprintf(
+		rows, err := ch.QueryP[map[string]any](e.s.CH, fmt.Sprintf(
 			"SELECT %s FROM (%s) sv "+
 				"INNER JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
 				"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 				"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
-				"WHERE sv.study_id = '%s' AND sv.profile_stable_id = '%s' ORDER BY sampleId, site1HugoSymbol, site2HugoSymbol",
-			strings.Join(cols, ", "), svSiteEntrezSQL, sqlLit(e.studyID), sqlLit(p.StableID)))
+				"WHERE sv.study_id = {study:String} AND sv.profile_stable_id = {profile:String} ORDER BY sampleId, site1HugoSymbol, site2HugoSymbol",
+			strings.Join(cols, ", "), svSiteEntrezSQL), ch.Params{"study": e.studyID, "profile": p.StableID})
 		if err != nil {
 			return err
 		}
@@ -924,17 +924,16 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 		if err := e.writeMeta(metaFile, profileMetaEntries(e.studyID, alterationType, datatype, p, dataFile)); err != nil {
 			return err
 		}
-		cells, err := ch.Query[matrixCell](e.s.CH, fmt.Sprintf(
+		cells, err := ch.QueryP[matrixCell](e.s.CH, fmt.Sprintf(
 			"SELECT gk.resolved_entrez_gene_id AS entrez, ifNull(rg.genetic_entity_id, 0) AS entity_id, "+
 				"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, gk.resolved_hugo_gene_symbol) AS hugo, "+
 				"t.sample_id AS sample_id, trimBoth(t.value) AS value, concat(t.hugo_symbol, '\\t', t.entrez_gene_id) AS gene_key "+
-				"FROM (SELECT *, %s AS ord FROM cbioportal_raw.%s WHERE study_id = '%s' AND profile_stable_id = '%s') t "+
-				"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%s' AND study_id = '%s' AND profile_stable_id = '%s') gk "+
+				"FROM (SELECT *, %s AS ord FROM cbioportal_raw.%s WHERE study_id = {study:String} AND profile_stable_id = {profile:String}) t "+
+				"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%s' AND study_id = {study:String} AND profile_stable_id = {profile:String}) gk "+
 				"ON gk.hugo_symbol = t.hugo_symbol AND gk.entrez_gene_id = t.entrez_gene_id "+
 				"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = gk.resolved_entrez_gene_id "+
 				"ORDER BY t.ord",
-			"tuple("+rawFileOrder+")", table, sqlLit(e.studyID), sqlLit(p.StableID),
-			table, sqlLit(e.studyID), sqlLit(p.StableID)))
+			"tuple("+rawFileOrder+")", table, table), ch.Params{"study": e.studyID, "profile": p.StableID})
 		if err != nil {
 			return err
 		}
@@ -1022,9 +1021,9 @@ func (e *studyExport) matrixHeader(stableID string, known map[string]bool) ([]st
 	type row struct {
 		SampleID string `json:"sample_id"`
 	}
-	rows, err := ch.Query[row](e.s.CH, fmt.Sprintf(
-		"SELECT sample_id FROM cbioportal_raw.profile_sample WHERE study_id = '%s' AND profile_stable_id = '%s' "+
-			"AND kind = 'header' ORDER BY %s", sqlLit(e.studyID), sqlLit(stableID), rawFileOrder))
+	rows, err := ch.QueryP[row](e.s.CH,
+		"SELECT sample_id FROM cbioportal_raw.profile_sample WHERE study_id = {study:String} AND profile_stable_id = {profile:String} "+
+			"AND kind = 'header' ORDER BY "+rawFileOrder, ch.Params{"study": e.studyID, "profile": stableID})
 	if err != nil {
 		return nil, err
 	}
@@ -1087,9 +1086,9 @@ func (e *studyExport) copyNumberSegments() error {
 		NumMark  string `json:"num_mark"`
 		SegMean  string `json:"seg_mean"`
 	}
-	rows, err := ch.Query[segRow](e.s.CH, fmt.Sprintf(
-		"SELECT id, chrom, loc_start, loc_end, num_mark, seg_mean FROM cbioportal_raw.cna_seg WHERE study_id = '%s' ORDER BY %s",
-		sqlLit(e.studyID), rawFileOrder))
+	rows, err := ch.QueryP[segRow](e.s.CH,
+		"SELECT id, chrom, loc_start, loc_end, num_mark, seg_mean FROM cbioportal_raw.cna_seg WHERE study_id = {study:String} ORDER BY "+
+			rawFileOrder, ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}
@@ -1153,9 +1152,9 @@ func (e *studyExport) genePanelMatrix() error {
 		ProfileID string `json:"molecular_profile_id"`
 		Panel     string `json:"gene_panel_id"`
 	}
-	rows, err := ch.Query[row](e.s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[row](e.s.CH,
 		"SELECT sample_id, molecular_profile_id, gene_panel_id FROM sample_profile "+
-			"WHERE study_id = '%s' AND gene_panel_id IS NOT NULL", sqlLit(e.studyID)))
+			"WHERE study_id = {study:String} AND gene_panel_id IS NOT NULL", ch.Params{"study": e.studyID})
 	if err != nil || len(rows) == 0 {
 		return err
 	}
@@ -1217,10 +1216,10 @@ func (e *studyExport) caseLists() error {
 		Description string `json:"description"`
 		SampleID    string `json:"sample_id"`
 	}
-	rows, err := ch.Query[row](e.s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[row](e.s.CH,
 		"SELECT DISTINCT sl.list_id AS list_id, sl.name AS name, sl.description AS description, sl.sample_id AS sample_id "+
 			"FROM sample_list sl INNER JOIN sample s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id "+
-			"WHERE sl.study_id = '%s' ORDER BY list_id, sample_id", sqlLit(e.studyID)))
+			"WHERE sl.study_id = {study:String} ORDER BY list_id, sample_id", ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}

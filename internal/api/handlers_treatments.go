@@ -147,13 +147,13 @@ func tierParam(w http.ResponseWriter, r *http.Request) (treatmentTier, bool) {
 func (s *State) treatmentEventsByTier(a *sqlArgs, f studyViewFilter, tier treatmentTier) string {
 	value := "value"
 	if tier.split != "" {
-		value = fmt.Sprintf("arrayJoin(splitByRegexp('%s', value))", sqlLit(tier.split))
+		value = fmt.Sprintf("arrayJoin(splitByRegexp(%s, value))", a.str(tier.split))
 	}
 	return fmt.Sprintf(
 		"SELECT patient_unique_id, %s AS value, start_date FROM clinical_event_data_derived "+
-			"WHERE cancer_study_identifier IN %s AND lower(event_type) = 'treatment' AND key = '%s' "+
+			"WHERE cancer_study_identifier IN %s AND lower(event_type) = 'treatment' AND key = %s "+
 			"AND patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s)",
-		value, a.strs(f.studyIDs()), sqlLit(tier.key), s.filterWhere(a, f))
+		value, a.strs(f.studyIDs()), a.str(tier.key), s.filterWhere(a, f))
 }
 
 func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
@@ -196,7 +196,7 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 	studyIn := args.strs(f.studyIDs())
 	value := "value"
 	if tier.split != "" {
-		value = fmt.Sprintf("arrayJoin(splitByRegexp('%s', value))", sqlLit(tier.split))
+		value = fmt.Sprintf("arrayJoin(splitByRegexp(%s, value))", args.str(tier.split))
 	}
 	type row struct {
 		Treatment string `json:"treatment"`
@@ -215,11 +215,11 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 			"GROUP BY patient_unique_id, value, cancer_study_identifier) ced "+
 			"INNER JOIN (SELECT patient_unique_id, treatment, min(start_date) AS treatment_time_taken "+
 			"FROM (SELECT patient_unique_id, %[3]s AS treatment, start_date FROM clinical_event_data_derived "+
-			"WHERE cancer_study_identifier IN %[1]s AND lower(event_type) = 'treatment' AND key = '%[4]s') "+
+			"WHERE cancer_study_identifier IN %[1]s AND lower(event_type) = 'treatment' AND key = %[4]s) "+
 			"GROUP BY patient_unique_id, treatment) t "+
 			"ON t.patient_unique_id = ced.patient_unique_id "+
 			"WHERE concat(ced.cancer_study_identifier, '_', ced.sample_id) IN (%[2]s)",
-		studyIn, s.filterSQL(args, f), value, sqlLit(tier.key)), args)
+		studyIn, s.filterSQL(args, f), value, args.str(tier.key)), args)
 	byKey := map[string]*SampleTreatmentRow{}
 	for _, r := range rows {
 		time := "Post"

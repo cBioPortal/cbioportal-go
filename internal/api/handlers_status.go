@@ -230,9 +230,9 @@ func (s *State) sitemapStudy(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		PatientID string `json:"patientId"`
 	}
-	patients, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT patient_id AS patientId FROM patient WHERE study_id = '%s' ORDER BY patient_id LIMIT %d OFFSET %d",
-		sqlLit(id), patientsPerSitemap, page*patientsPerSitemap))
+	patients, err := ch.QueryP[row](s.CH, fmt.Sprintf(
+		"SELECT patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY patient_id LIMIT %d OFFSET %d",
+		patientsPerSitemap, page*patientsPerSitemap), ch.Params{"study": id})
 	if err != nil {
 		fail(w, err)
 		return
