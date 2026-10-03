@@ -157,13 +157,13 @@ func TestOAuth2LoginFlow(t *testing.T) {
 		t.Fatalf("unauthenticated API: %v %v, want 401", resp.StatusCode, err)
 	}
 	// Open paths need no login.
-	if got := mustBody(t)(http.Get(portal.URL+"/api/health")); !strings.HasPrefix(got, "GET /api/health user=") {
+	if got := mustBody(t)(http.Get(portal.URL + "/api/health")); !strings.HasPrefix(got, "GET /api/health user=") {
 		t.Fatalf("health: %q", got)
 	}
 
 	// A page goes through the provider and lands where it started, logged in.
 	c := browser(t)
-	got := mustBody(t)(c.Get(portal.URL+"/study/summary?id=study_a"))
+	got := mustBody(t)(c.Get(portal.URL + "/study/summary?id=study_a"))
 	if want := "GET /study/summary user=testuser@example.org roles=study_a,study_b"; !strings.HasPrefix(got, want) {
 		t.Fatalf("after login got %q, want prefix %q", got, want)
 	}
@@ -171,7 +171,7 @@ func TestOAuth2LoginFlow(t *testing.T) {
 		t.Errorf("redirect_uri %q", p.tokenReq.Get("redirect_uri"))
 	}
 	// The session cookie authenticates API calls.
-	if got := mustBody(t)(c.Get(portal.URL+"/api/studies")); !strings.Contains(got, "user=testuser@example.org") {
+	if got := mustBody(t)(c.Get(portal.URL + "/api/studies")); !strings.Contains(got, "user=testuser@example.org") {
 		t.Fatalf("API with session: %q", got)
 	}
 
@@ -196,7 +196,7 @@ func TestOAuth2LoginReplaysPostedForm(t *testing.T) {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 	// Only once: the next visit is a plain GET.
-	if got := mustBody(t)(c.Get(portal.URL+"/results")); !strings.HasPrefix(got, "GET /results") {
+	if got := mustBody(t)(c.Get(portal.URL + "/results")); !strings.HasPrefix(got, "GET /results") {
 		t.Fatalf("second visit %q", got)
 	}
 }
