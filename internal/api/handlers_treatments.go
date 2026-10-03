@@ -70,10 +70,10 @@ func (s *State) treatmentsDisplaySample(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, false)
 		return
 	}
-	ok, err := s.existsIn(fmt.Sprintf(
-		"SELECT count() AS n FROM clinical_event_data_derived WHERE cancer_study_identifier IN (%s) "+
+	ok, err := s.existsIn(
+		"SELECT count() AS n FROM clinical_event_data_derived WHERE cancer_study_identifier IN {studies:Array(String)} "+
 			"AND lower(key) = 'sample_id' AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN')",
-		inList(treated)))
+		ch.Params{"studies": treated})
 	if err != nil {
 		fail(w, err)
 		return

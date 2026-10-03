@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // routeGenericAssay2 registers the generic-assay study-view aggregation
@@ -238,9 +240,9 @@ func (s *State) gaCountUnit(profileType string) string {
 	type lvl struct {
 		P uint64 `json:"p"`
 	}
-	lv, _ := cachedQuery[lvl](s, fmt.Sprintf(
-		"SELECT count() AS p FROM cbioportal_raw.genetic_profile WHERE profile_stable_id = '%s' AND lower(toString(patient_level)) = 'true'",
-		sqlLit(profileType)))
+	lv, _ := cachedQueryP[lvl](s,
+		"SELECT count() AS p FROM cbioportal_raw.genetic_profile WHERE profile_stable_id = {profile:String} AND lower(toString(patient_level)) = 'true'",
+		ch.Params{"profile": profileType})
 	if len(lv) > 0 && lv[0].P > 0 {
 		return "patient_unique_id"
 	}

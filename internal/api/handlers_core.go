@@ -201,12 +201,13 @@ func cancerTypeName(name, id string) string {
 func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
+	args := newArgs()
 	if kw := strings.TrimSpace(q.Get("keyword")); kw != "" {
 		var ands []string
 		for term := range strings.FieldsSeq(kw) {
-			t := sqlLit(term)
-			ands = append(ands, fmt.Sprintf("(c.name ILIKE '%%%[1]s%%' OR c.study_id ILIKE '%%%[1]s%%' OR "+
-				"ifNull(t.name, '') ILIKE '%%%[1]s%%' OR c.cancer_type_id ILIKE '%%%[1]s%%')", t))
+			t := args.str("%" + term + "%")
+			ands = append(ands, fmt.Sprintf("(c.name ILIKE %[1]s OR c.study_id ILIKE %[1]s OR "+
+				"ifNull(t.name, '') ILIKE %[1]s OR c.cancer_type_id ILIKE %[1]s)", t))
 		}
 		where = strings.Join(ands, " AND ")
 	}
@@ -228,7 +229,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []CancerStudy{})
 		return
 	}
-	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", s.studySelect(), where, order))
+	rows, err := cachedQueryA[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", s.studySelect(), where, order), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -253,7 +254,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 // .getStudy): the DETAILED study with its resource counts.
 func (s *State) study(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("studyId")
-	rows, err := cachedQuery[studyRow](s, fmt.Sprintf("%s WHERE c.study_id = '%s'", s.studySelect(), sqlLit(id)))
+	rows, err := cachedQueryP[studyRow](s, s.studySelect()+" WHERE c.study_id = {study:String}", ch.Params{"study": id})
 	if err != nil {
 		fail(w, err)
 		return
@@ -275,8 +276,8 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []CancerStudy{})
 		return
 	}
-	sql := fmt.Sprintf("%s WHERE c.study_id IN (%s) ORDER BY c.study_id", s.studySelect(), inList(ids))
-	rows, err := cachedQuery[studyRow](s, sql)
+	rows, err := cachedQueryP[studyRow](s, s.studySelect()+" WHERE c.study_id IN {ids:Array(String)} ORDER BY c.study_id",
+		ch.Params{"ids": ids})
 	if err != nil {
 		fail(w, err)
 		return
@@ -515,7 +516,7 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 	for i, st := range studies {
 		ids[i] = st.StudyID
 	}
-	rows, err := cachedQuery[ResourceCount](s, fmt.Sprintf(
+	rows, err := cachedQueryP[ResourceCount](s,
 		"SELECT rd.resource_id AS resourceId, any(rd.display_name) AS displayName, any(rd.description) AS description, "+
 			"any(rd.resource_type) AS resourceType, toString(any(rd.priority)) AS priority, toBool(any(rd.open_by_default) = 1) AS openByDefault, "+
 			"rd.study_id AS cancerStudyIdentifier, ifNull(any(rd.custom_metadata), '') AS customMetaData, "+
@@ -524,7 +525,8 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 			"UNION ALL SELECT r.study_id, r.resource_id, s.sample_id, r.patient_id FROM resource_patient r "+
 			"LEFT JOIN sample s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+
 			"JOIN resource_definition rd ON rd.study_id = x.study_id AND rd.resource_id = x.resource_id "+
-			"WHERE x.study_id IN (%s) GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId", inList(ids)))
+			"WHERE x.study_id IN {ids:Array(String)} GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId",
+		ch.Params{"ids": ids})
 	if err != nil {
 		rows = nil
 	}

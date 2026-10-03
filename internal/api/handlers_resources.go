@@ -117,11 +117,12 @@ func queryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
 	return rows, err
 }
 
-// existsIn reports whether a SELECT count() query returns a non-zero count.
-func (s *State) existsIn(sql string) (bool, error) {
-	rows, err := cachedQuery[struct {
+// existsIn reports whether a SELECT count() query, with placeholder values p,
+// returns a non-zero count.
+func (s *State) existsIn(sql string, p ch.Params) (bool, error) {
+	rows, err := cachedQueryP[struct {
 		N uint64 `json:"n"`
-	}](s, sql)
+	}](s, sql, p)
 	if err != nil {
 		return false, err
 	}
@@ -130,7 +131,7 @@ func (s *State) existsIn(sql string) (bool, error) {
 
 // requireStudy writes a 404 and returns false when the study does not exist.
 func (s *State) requireStudy(w http.ResponseWriter, studyID string) bool {
-	ok, err := s.existsIn(fmt.Sprintf("SELECT count() AS n FROM cancer_study WHERE study_id = '%s'", sqlLit(studyID)))
+	ok, err := s.existsIn("SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": studyID})
 	if err != nil {
 		fail(w, err)
 		return false
@@ -323,8 +324,8 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 	if !s.requireStudy(w, studyID) {
 		return
 	}
-	ok, err := s.existsIn(fmt.Sprintf("SELECT count() AS n FROM patient WHERE study_id = '%s' AND patient_id = '%s'",
-		sqlLit(studyID), sqlLit(patientID)))
+	ok, err := s.existsIn("SELECT count() AS n FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String}",
+		ch.Params{"study": studyID, "patient": patientID})
 	if err != nil {
 		fail(w, err)
 		return
@@ -347,8 +348,8 @@ func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 	if !s.requireStudy(w, studyID) {
 		return
 	}
-	ok, err := s.existsIn(fmt.Sprintf("SELECT count() AS n FROM sample WHERE study_id = '%s' AND sample_id = '%s'",
-		sqlLit(studyID), sqlLit(sampleID)))
+	ok, err := s.existsIn("SELECT count() AS n FROM sample WHERE study_id = {study:String} AND sample_id = {sample:String}",
+		ch.Params{"study": studyID, "sample": sampleID})
 	if err != nil {
 		fail(w, err)
 		return

@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -45,17 +46,32 @@ func (c *metaCache) validate(client *ch.Client) {
 // cachedQuery runs a metadata query through the State's cache. Callers get
 // their own copy of the cached slice.
 func cachedQuery[T any](s *State, sql string) ([]T, error) {
+	return cachedQueryP[T](s, sql, nil)
+}
+
+// cachedQueryA is cachedQuery for a statement whose values are bound in a.
+func cachedQueryA[T any](s *State, sql string, a *sqlArgs) ([]T, error) {
+	return cachedQueryP[T](s, sql, a.params(sql))
+}
+
+// cachedQueryP is cachedQuery with query parameters; entries are keyed on the
+// statement and its parameter values.
+func cachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
+	key, err := cacheKey(sql, p)
+	if err != nil {
+		return nil, err
+	}
 	s.meta.validate(s.CH)
 	s.meta.mu.Lock()
-	if v, ok := s.meta.entries[sql]; ok {
+	if v, ok := s.meta.entries[key]; ok {
 		s.meta.mu.Unlock()
 		return slices.Clone(v.([]T)), nil
 	}
 	version := s.meta.version
 	s.meta.mu.Unlock()
 	// Concurrent misses for the same query share one ClickHouse round trip.
-	v, err, _ := s.meta.inflight.Do(version+"\x00"+sql, func() (any, error) {
-		return ch.Query[T](s.CH, sql)
+	v, err, _ := s.meta.inflight.Do(version+"\x00"+key, func() (any, error) {
+		return ch.QueryP[T](s.CH, sql, p)
 	})
 	if err != nil {
 		return nil, err
@@ -69,9 +85,27 @@ func cachedQuery[T any](s *State, sql string) ([]T, error) {
 	if s.meta.entries == nil {
 		s.meta.entries = map[string]any{}
 	}
-	s.meta.entries[sql] = rows
+	s.meta.entries[key] = rows
 	s.meta.mu.Unlock()
 	return slices.Clone(rows), nil
+}
+
+// cacheKey identifies a statement with its parameter values: the SQL, then
+// each parameter's name, Go type and text encoding in name order.
+func cacheKey(sql string, p ch.Params) (string, error) {
+	if len(p) == 0 {
+		return sql, nil
+	}
+	var b strings.Builder
+	b.WriteString(sql)
+	for _, name := range slices.Sorted(maps.Keys(p)) {
+		enc, err := ch.EncodeParam(p[name])
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "\x00%s\x00%T\x00%s", name, p[name], enc)
+	}
+	return b.String(), nil
 }
 
 // rawColumns lists a raw staging table's columns in file order, or none when
@@ -81,8 +115,9 @@ func (s *State) rawColumns(table string) []string {
 	type col struct {
 		Name string `json:"name"`
 	}
-	cols, err := cachedQuery[col](s, fmt.Sprintf(
-		"SELECT name FROM system.columns WHERE database = 'cbioportal_raw' AND table = '%s' ORDER BY position", sqlLit(table)))
+	cols, err := cachedQueryP[col](s,
+		"SELECT name FROM system.columns WHERE database = 'cbioportal_raw' AND table = {table:String} ORDER BY position",
+		ch.Params{"table": table})
 	if err != nil {
 		return nil
 	}
@@ -98,9 +133,9 @@ func (s *State) modelHasColumn(table, column string) bool {
 	type row struct {
 		N uint64 `json:"n"`
 	}
-	rows, err := cachedQuery[row](s, fmt.Sprintf(
-		"SELECT count() AS n FROM system.columns WHERE database = currentDatabase() AND table = '%s' AND name = '%s'",
-		sqlLit(table), sqlLit(column)))
+	rows, err := cachedQueryP[row](s,
+		"SELECT count() AS n FROM system.columns WHERE database = currentDatabase() AND table = {table:String} AND name = {column:String}",
+		ch.Params{"table": table, "column": column})
 	return err == nil && len(rows) == 1 && rows[0].N > 0
 }
 

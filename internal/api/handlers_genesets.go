@@ -58,25 +58,24 @@ func (r genesetRefRow) dto() Geneset {
 	return Geneset{GenesetID: r.GenesetID, Name: r.Name, Description: r.Description, RefLink: r.RefLink}
 }
 
-// refGenesets reads gene sets of the reference (GenesetMapper's select).
-func (s *State) refGenesets(where, order string) ([]genesetRefRow, error) {
-	return cachedQuery[genesetRefRow](s, fmt.Sprintf(
+// refGenesets reads gene sets of the reference (GenesetMapper's select)
+// matching where, whose placeholders take their values from p.
+func (s *State) refGenesets(where string, p ch.Params, order string) ([]genesetRefRow, error) {
+	return cachedQueryP[genesetRefRow](s, fmt.Sprintf(
 		"SELECT id, external_id AS genesetId, name, description, ref_link AS refLink FROM cbioportal_ref.geneset WHERE %s ORDER BY %s",
-		where, order))
+		where, order), p)
 }
 
 // genesetsForIDs lists gene sets ordered by id, all or those named.
 func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
 	if s.hasGenesetRef() {
 		where := "1"
+		var p ch.Params
 		if ids != nil {
-			// A cached query: the SQL text is its cache key.
-			where = "0"
-			if len(ids) > 0 {
-				where = fmt.Sprintf("external_id IN (%s)", inList(ids))
-			}
+			where = "external_id IN {ids:Array(String)}"
+			p = ch.Params{"ids": ids}
 		}
-		rows, err := s.refGenesets(where, "external_id")
+		rows, err := s.refGenesets(where, p, "external_id")
 		if err != nil {
 			return nil, err
 		}
@@ -443,9 +442,9 @@ func (s *State) genesetPvalueProfile(scores profileMeta) (profileMeta, bool) {
 	type row struct {
 		ID string `json:"id"`
 	}
-	rows, _ := cachedQuery[row](s, fmt.Sprintf(
-		"SELECT molecular_profile_id AS id FROM molecular_profile WHERE study_id = '%s' "+
-			"AND molecular_alteration_type = 'GENESET_SCORE' AND datatype = 'P-VALUE'", sqlLit(scores.StudyID)))
+	rows, _ := cachedQueryP[row](s,
+		"SELECT molecular_profile_id AS id FROM molecular_profile WHERE study_id = {study:String} "+
+			"AND molecular_alteration_type = 'GENESET_SCORE' AND datatype = 'P-VALUE'", ch.Params{"study": scores.StudyID})
 	if len(rows) != 1 {
 		return profileMeta{}, false
 	}
@@ -472,7 +471,7 @@ func (s *State) genesetHierarchy(scores, pvalues []genesetScore, percentile int,
 	if err != nil {
 		return nil, err
 	}
-	genesets, err := s.refGenesets("1", "id")
+	genesets, err := s.refGenesets("1", nil, "id")
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +685,7 @@ func (s *State) genesetHierarchyFromScores(w http.ResponseWriter, meta profileMe
 // genesetGenes lists the member genes of a gene set (entrez id, symbol) by
 // entrez id; found is false for an unknown gene set.
 func (s *State) genesetGenes(genesetID string) (genes []geneRow, found bool, err error) {
-	sets, err := s.refGenesets(fmt.Sprintf("external_id = '%s'", sqlLit(genesetID)), "id")
+	sets, err := s.refGenesets("external_id = {id:String}", ch.Params{"id": genesetID}, "id")
 	if err != nil || len(sets) == 0 {
 		return nil, false, err
 	}

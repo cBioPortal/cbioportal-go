@@ -23,8 +23,9 @@ var MafExportColumns = []string{
 // (empty when the staged file lacks it), the reference gene as hugo / entrez,
 // the stored protein_change, and the record's position in the staged file
 // (blk, off). table is the staging table (mutation_extended or
-// mutation_uncalled) as referenced in SQL; has lists its columns.
-func MafRecordsSQL(table, source, targetDB string, has map[string]bool, studyID, profileStableID string) string {
+// mutation_uncalled) as referenced in SQL; has lists its columns. The study
+// and profile are the query parameters {study:String} and {profile:String}.
+func MafRecordsSQL(table, source, targetDB string, has map[string]bool) string {
 	cols := make([]string, 0, len(MafExportColumns))
 	for _, c := range MafExportColumns {
 		if has[c] {
@@ -33,12 +34,11 @@ func MafRecordsSQL(table, source, targetDB string, has map[string]bool, studyID,
 			cols = append(cols, "'' AS "+c)
 		}
 	}
-	lit := func(s string) string { return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `'`, `\'`) }
 	return fmt.Sprintf(
 		"SELECT %s, gk.resolved_hugo_gene_symbol AS hugo, gk.resolved_entrez_gene_id AS entrez, %s AS protein_change, "+
 			"toUInt64OrZero(splitByChar('_', m._part)[2]) AS blk, m._part_offset AS off "+
-			"FROM %s m%s WHERE m.study_id = '%s' AND m.profile_stable_id = '%s' AND %s",
+			"FROM %s m%s WHERE m.study_id = {study:String} AND m.profile_stable_id = {profile:String} AND %s",
 		strings.Join(cols, ", "), proteinChangeSQL(has), table,
 		geneKeyJoin(targetDB, source, "m", "hugo_symbol", "entrez_gene_id"),
-		lit(studyID), lit(profileStableID), mutationFilterSQL("m", "gk.resolved_entrez_gene_id"))
+		mutationFilterSQL("m", "gk.resolved_entrez_gene_id"))
 }

@@ -809,8 +809,8 @@ func (s *State) studyExists(id string) (bool, error) {
 	type countRow struct {
 		N uint64 `json:"n"`
 	}
-	rows, err := cachedQuery[countRow](s, fmt.Sprintf(
-		"SELECT count() AS n FROM cancer_study WHERE study_id = '%s'", sqlLit(id)))
+	rows, err := cachedQueryP[countRow](s,
+		"SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": id})
 	if err != nil {
 		return false, err
 	}

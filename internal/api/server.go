@@ -147,11 +147,10 @@ func fail(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
 
-// sqlLit and inList write values into SQL text as escaped string literals.
-// They are for values chosen by code (table names, constant lists, column
-// headers of loaded files) and for statements run through cachedQuery, whose
-// cache key is the SQL text; request values otherwise go to ClickHouse as
-// query parameters (sqlArgs, ch.QueryP).
+// sqlLit and inList write values into SQL text as escaped string literals,
+// for values chosen by code (database and table names, constant lists, column
+// headers of loaded files). Request values go to ClickHouse as query
+// parameters (sqlArgs, ch.QueryP, cachedQueryP).
 func sqlLit(s string) string { return ch.SQLLit(s) }
 
 func inList(values []string) string {

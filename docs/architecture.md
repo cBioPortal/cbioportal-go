@@ -52,8 +52,9 @@
   as SQL text. Parameters ride in the URL when small and in a
   multipart/form-data body otherwise; arrays longer than a form field
   (ClickHouse's `http_max_field_value_size`, 128 KiB) are sent as external
-  tables the placeholder selects from. `sqlLit`/`inList` remain for values
-  chosen by code and for statements cached by their SQL text (`cachedQuery`).
+  tables the placeholder selects from. The metadata cache (`cachedQueryP`) keys
+  entries on the SQL and its parameter values. `sqlLit`/`inList` remain for
+  values chosen by code.
 
 ## Dependencies
 

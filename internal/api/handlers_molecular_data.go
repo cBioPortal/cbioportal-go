@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // alterationTypeTable maps a molecular alteration type to its unpivoted matrix
@@ -36,9 +38,9 @@ type profileMeta struct {
 }
 
 func (s *State) profileMeta(mpid string) (profileMeta, bool) {
-	rows, _ := cachedQuery[profileMeta](s, fmt.Sprintf(
+	rows, _ := cachedQueryP[profileMeta](s,
 		"SELECT study_id AS studyId, molecular_alteration_type AS alterationType, datatype, profile_stable_id AS stableId "+
-			"FROM molecular_profile WHERE molecular_profile_id = '%s' LIMIT 1", sqlLit(mpid)))
+			"FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1", ch.Params{"profile": mpid})
 	if len(rows) == 0 {
 		return profileMeta{}, false
 	}

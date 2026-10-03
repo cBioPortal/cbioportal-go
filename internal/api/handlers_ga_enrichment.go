@@ -145,9 +145,10 @@ func (s *State) gaProfilePatientLevel(meta profileMeta) bool {
 	type row struct {
 		P string `json:"p"`
 	}
-	rows, err := cachedQuery[row](s, fmt.Sprintf(
+	rows, err := cachedQueryP[row](s,
 		"SELECT toString(patient_level) AS p FROM cbioportal_raw.genetic_profile "+
-			"WHERE study_id = '%s' AND profile_stable_id = '%s' LIMIT 1", sqlLit(meta.StudyID), sqlLit(meta.StableID)))
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} LIMIT 1",
+		ch.Params{"study": meta.StudyID, "profile": meta.StableID})
 	return err == nil && len(rows) > 0 && strings.EqualFold(strings.TrimSpace(rows[0].P), "true")
 }
 
