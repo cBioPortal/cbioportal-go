@@ -218,11 +218,11 @@ func (b *bufferedResponse) WriteHeader(code int)        { b.status = code }
 // spaHandler serves a built frontend: existing files as-is, every other path
 // (client-side routes such as /results or /patient) as index.html.
 func spaHandler(dir string) http.Handler {
-	files := http.FileServer(http.Dir(dir))
+	files := newStaticFiles(dir)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			files.ServeHTTP(w, r)
+			files.serve(w, r, p, st)
 			return
 		}
 		page, err := os.ReadFile(filepath.Join(dir, "index.html"))

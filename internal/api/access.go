@@ -186,11 +186,15 @@ func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &bufferedWriter{header: http.Header{}}
+		rec := &bufferedResponse{header: http.Header{}}
 		next.ServeHTTP(rec, r)
+		status := rec.status
+		if status == 0 {
+			status = http.StatusOK
+		}
 		keepAll := r.URL.Path == "/api/studies" && policy.showUnauthorized
 		body := rec.body.Bytes()
-		if rec.code() == http.StatusOK {
+		if status == http.StatusOK {
 			body = filterByStudy(body, func(study string) bool {
 				groups, ok := idx.groups[study]
 				return !ok || canRead(auth, study, groups)
@@ -200,7 +204,7 @@ func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			w.Header()[k] = v
 		}
 		w.Header().Del("Content-Length")
-		w.WriteHeader(rec.code())
+		w.WriteHeader(status)
 		w.Write(body)
 	})
 }
@@ -326,26 +330,4 @@ func filterByStudy(body []byte, readable func(string) bool, keepAll, studies boo
 		header.Set("total-count", strconv.Itoa(n))
 	}
 	return out.Bytes()
-}
-
-// bufferedWriter captures a handler's response.
-type bufferedWriter struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
-}
-
-func (b *bufferedWriter) Header() http.Header         { return b.header }
-func (b *bufferedWriter) Write(p []byte) (int, error) { return b.body.Write(p) }
-func (b *bufferedWriter) WriteHeader(code int) {
-	if b.status == 0 {
-		b.status = code
-	}
-}
-
-func (b *bufferedWriter) code() int {
-	if b.status == 0 {
-		return http.StatusOK
-	}
-	return b.status
 }
