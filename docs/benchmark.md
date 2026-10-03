@@ -102,12 +102,60 @@ Caveats:
 
 - go has not served www-scale traffic; the estimate extrapolates from one
   e2e run and from idle use. A load test at www's request rate is needed.
-- **ClickHouse is not measured.** Without Redis, go may send more queries to
-  ClickHouse than www does; a ClickHouse Cloud cost increase could offset
-  part of the saving. Measuring it needs `system.query_log` per user
-  (the import user cannot read it).
-- go lacks features www has (login, authorization, the shared session
+- **ClickHouse may cost more.** Without Redis, go sends more queries to
+  ClickHouse per request than www (see [ClickHouse load](#clickhouse-load));
+  a ClickHouse Cloud cost increase could offset part of the saving.
+- go lacks features www has (data access tokens, SAML, the shared session
   service), see the README's TODO list.
+
+## Parity on production traffic
+
+Production logs the requests it serves (`cbioportal_qc.logged_requests`).
+`test/parity/loggedgen` samples them into a corpus — GETs and POSTs, every
+endpoint, in proportion to its volume — and `cmd/paritydiff` replays it
+against api.cbioportal.org and against go reading the production mirror
+(see [Testing](testing.md)). Requests that write on the server (sessions,
+publishing, cache) are never replayed.
+
+On 2026-10-03, 618 logged requests over 114 endpoints:
+
+| | Requests |
+|---|---|
+| Identical | 609 |
+| Known differences | 9 |
+| Unexplained differences | 0 |
+
+The known differences: www's own bugs (a resource join across studies,
+`allSampleCount: 1`), deployment fields (`/api/info`, the API documents'
+host), ids that live in www's session store (custom data), and three cases
+where Java's order of tied rows is its import order, which go does not keep.
+
+Reaching this fixed, among others: Java's paging applying only to the
+endpoints that declare it, mRNA percentiles ranking ties at their maximum,
+copy-number and variant counts using the profile's matrix samples, and
+expression enrichments on the production mirror.
+
+## ClickHouse load
+
+ClickHouse's `system.query_log` per user, last 24 hours (2026-10-03):
+
+| User | Queries | CPU | Read |
+|---|---|---|---|
+| `cbio_user` (www and api.cbioportal.org, Java) | 1.91 M | 176,000 s (≈ 2 cores) | 68 TiB |
+| `go_portal` (go.cbioportal.org) | 12 k | 1,600 s | 452 GiB |
+
+www and api.cbioportal.org served about 2.0 million requests that day
+(Datadog APM), so Java costs ClickHouse about 0.94 queries, 0.09 CPU
+seconds and 36 MB read per request, with Redis answering repeats.
+
+Replaying the logged corpus, go needed about 2.5 queries, 0.25 CPU seconds
+and 68 MB per request. That overstates go's cost: the corpus takes at least
+two requests from every endpoint, so rare, heavy requests (enrichments,
+study-view aggregations) weigh far more than in real traffic, and every
+request is new (no cache). A like-for-like figure needs the same traffic on
+both: the mirrored api.cbioportal.org traffic, with each deployment's
+queries tagged by `log_comment` (`-clickhouse-log-comment`; for the Java
+portal, `custom_settings=log_comment%3D…` in its JDBC URL).
 
 ## Code size
 
