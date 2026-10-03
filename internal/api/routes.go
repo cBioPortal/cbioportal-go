@@ -98,4 +98,5 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.routeTreatments(mux)
 	s.routeCompat(mux)
 	s.routeProxy(mux)
+	s.routeExport(mux)
 }

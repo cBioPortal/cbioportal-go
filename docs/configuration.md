@@ -123,6 +123,14 @@ docker run --rm --network host \
   inodb/cbioportal-go
 ```
 
+A few of the Java backend's server-side properties apply here too:
+`cache.endpoint.enabled` and `cache.endpoint.api-key` (the `DELETE /api/cache`
+endpoint, which drops the metadata cache), `sitemaps` with
+`robots.disallow_paths`, `robots.crawl_delay` and
+`robots.disallow_user_agents` (`/robots.txt`, `/sitemap_index.xml`,
+`/sitemap_study.xml`), and `feature.study.export` (study download as
+`/export/study/<id>.zip`).
+
 Such files also hold the Java backend's own settings (`spring.datasource.*`,
 `db.*`, `security.*`, …) that this server does not use. They are
 ignored, and the startup log line lists which keys took effect and which were
