@@ -401,89 +401,8 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	return out
 }
 
-// copyNumberEnrichmentsFetch computes per-gene discrete copy-number enrichment
-// across the posted groups, optionally scoped to a single CNA event type
-// (copyNumberEventType=AMP -> 2, HOMDEL -> -2), with a Fisher-exact p-value.
-func (s *State) copyNumberEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Groups []casesGroup `json:"molecularProfileCasesGroupFilter"`
-	}
-	readBody(r, &body)
-	if len(body.Groups) < 2 {
-		writeJSON(w, []AlterationEnrichment{})
-		return
-	}
-
-	// cna holds every discrete level; enrichments count CNA events only.
-	altFilter := " AND alteration IN ('-2', '2')"
-	switch strings.ToUpper(r.URL.Query().Get("copyNumberEventType")) {
-	case "AMP", "2":
-		altFilter = " AND alteration = '2'"
-	case "HOMDEL", "-2":
-		altFilter = " AND alteration = '-2'"
-	}
-
-	type geneKey struct {
-		symbol string
-		entrez int64
-	}
-	altered := make([]map[geneKey]int, len(body.Groups))
-	profiled := make([]int, len(body.Groups))
-	geneSet := map[geneKey]bool{}
-
-	for gi, g := range body.Groups {
-		altered[gi] = map[geneKey]int{}
-		pairs := g.pairs()
-		profiled[gi] = len(pairs)
-		if len(pairs) == 0 {
-			continue
-		}
-		rows, err := ch.Query[geneAlteredRow](s.CH, fmt.Sprintf(
-			"SELECT hugo_symbol AS hugoGeneSymbol, toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS altered "+
-				"FROM cna WHERE (study_id, sample_id) IN (%s)%s GROUP BY hugo_symbol, entrez_gene_id",
-			tupleIn(pairs), altFilter))
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		for _, row := range rows {
-			var e int64
-			if row.EntrezGeneID != nil {
-				e = *row.EntrezGeneID
-			}
-			k := geneKey{row.HugoGeneSymbol, e}
-			altered[gi][k] = row.Altered
-			geneSet[k] = true
-		}
-	}
-
-	out := make([]AlterationEnrichment, 0, len(geneSet))
-	for k := range geneSet {
-		counts := make([]CountSummary, len(body.Groups))
-		for gi, g := range body.Groups {
-			counts[gi] = CountSummary{AlteredCount: altered[gi][k], Name: g.Name, ProfiledCount: profiled[gi]}
-		}
-		p := 1.0
-		if len(body.Groups) == 2 {
-			a := counts[0].AlteredCount
-			b := counts[0].ProfiledCount - a
-			c := counts[1].AlteredCount
-			d := counts[1].ProfiledCount - c
-			if b >= 0 && d >= 0 {
-				p = stats.JavaFisherTwoTailed(a, b, c, d)
-			}
-		}
-		out = append(out, AlterationEnrichment{
-			Counts: counts, EntrezGeneID: k.entrez, HugoGeneSymbol: k.symbol, PValue: p,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].PValue < out[j].PValue })
-	writeJSON(w, out)
-}
-
 func (s *State) routeEnrichment2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/expression-enrichments/fetch", s.expressionEnrichmentsFetch)
-	mux.HandleFunc("POST /api/copy-number-enrichments/fetch", s.copyNumberEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-enrichments/fetch", s.genericAssayEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-binary-enrichments/fetch", s.genericAssayBinaryEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-categorical-enrichments/fetch", s.genericAssayCategoricalEnrichmentsFetch)

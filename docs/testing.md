@@ -12,7 +12,9 @@ Three tiers, fastest first:
    frontend and e2e suite rely on — study-view filters, chart counts, bins,
    sessions, gene tables, enrichments, Java's projections and error contract.
    Add a case whenever a contract is fixed. They expect the API to serve the
-   test databases built from cBioPortal's e2e fixture studies:
+   test databases built from cBioPortal's e2e fixture studies and gene sets
+   (`setup_test_db.sh` also runs `load-genesets` on `data/genesets`; on an
+   older reference database `cbioportal-import load-genesets` adds them):
 
    ```bash
    git clone https://github.com/cBioPortal/cbioportal-test

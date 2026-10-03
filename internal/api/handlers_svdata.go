@@ -181,39 +181,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		scope += " AND (" + strings.Join(geneOrs, " OR ") + ")"
 	}
 
-	have := s.svViewColumns()
-	cols := []string{
-		"sv.study_id AS studyId", "sv.sample_id AS sampleId", "ifNull(sm.patient_id, '') AS patientId",
-		"sv.e1 AS site1EntrezGeneId", "g1.hugo_gene_symbol AS site1HugoSymbol",
-		"sv.e2 AS site2EntrezGeneId", "g2.hugo_gene_symbol AS site2HugoSymbol",
-		"concat(sv.study_id, '_', sv.profile_stable_id) AS molecularProfileId",
-	}
-	textCols := [][2]string{
-		{"site1_ensembl_transcript_id", "site1EnsemblTranscriptId"}, {"site1_chromosome", "site1Chromosome"},
-		{"site1_position", "site1Position"}, {"site1_contig", "site1Contig"}, {"site1_region", "site1Region"},
-		{"site1_region_number", "site1RegionNumber"}, {"site1_description", "site1Description"},
-		{"site2_ensembl_transcript_id", "site2EnsemblTranscriptId"}, {"site2_chromosome", "site2Chromosome"},
-		{"site2_position", "site2Position"}, {"site2_contig", "site2Contig"}, {"site2_region", "site2Region"},
-		{"site2_region_number", "site2RegionNumber"}, {"site2_description", "site2Description"},
-		{"site2_effect_on_frame", "site2EffectOnFrame"}, {"ncbi_build", "ncbiBuild"},
-		{"dna_support", "dnaSupport"}, {"rna_support", "rnaSupport"},
-		{"normal_read_count", "normalReadCount"}, {"tumor_read_count", "tumorReadCount"},
-		{"normal_variant_count", "normalVariantCount"}, {"tumor_variant_count", "tumorVariantCount"},
-		{"normal_paired_end_read_count", "normalPairedEndReadCount"}, {"tumor_paired_end_read_count", "tumorPairedEndReadCount"},
-		{"normal_split_read_count", "normalSplitReadCount"}, {"tumor_split_read_count", "tumorSplitReadCount"},
-		{"annotation", "annotation"}, {"breakpoint_type", "breakpointType"}, {"connection_type", "connectionType"},
-		{"event_info", "eventInfo"}, {"class", "variantClass"}, {"sv_length", "length"}, {"comments", "comments"},
-		{"cbp_driver", "driverFilter"}, {"cbp_driver_annotation", "driverFilterAnn"},
-		{"cbp_driver_tiers", "driverTiersFilter"}, {"cbp_driver_tiers_annotation", "driverTiersFilterAnn"},
-		{"sv_status", "svStatus"}, {"namespace_columns", "namespaceColumns"},
-	}
-	for _, c := range textCols {
-		if have[c[0]] {
-			cols = append(cols, fmt.Sprintf("ifNull(toString(sv.%s), '') AS %s", c[0], c[1]))
-		} else {
-			cols = append(cols, "'' AS "+c[1])
-		}
-	}
+	cols := svSelectColumns(s.svViewColumns())
 	rows, err := ch.Query[map[string]any](s.CH, fmt.Sprintf(
 		"SELECT %s FROM (%s) sv "+
 			"LEFT JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
@@ -230,6 +198,48 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		out[i] = toStructuralVariant(r)
 	}
 	writeJSON(w, out)
+}
+
+// svTextColumns are the structural_variant view columns (left) a fetched SV
+// record carries, under the field names toStructuralVariant reads (right).
+var svTextColumns = [][2]string{
+	{"site1_ensembl_transcript_id", "site1EnsemblTranscriptId"}, {"site1_chromosome", "site1Chromosome"},
+	{"site1_position", "site1Position"}, {"site1_contig", "site1Contig"}, {"site1_region", "site1Region"},
+	{"site1_region_number", "site1RegionNumber"}, {"site1_description", "site1Description"},
+	{"site2_ensembl_transcript_id", "site2EnsemblTranscriptId"}, {"site2_chromosome", "site2Chromosome"},
+	{"site2_position", "site2Position"}, {"site2_contig", "site2Contig"}, {"site2_region", "site2Region"},
+	{"site2_region_number", "site2RegionNumber"}, {"site2_description", "site2Description"},
+	{"site2_effect_on_frame", "site2EffectOnFrame"}, {"ncbi_build", "ncbiBuild"},
+	{"dna_support", "dnaSupport"}, {"rna_support", "rnaSupport"},
+	{"normal_read_count", "normalReadCount"}, {"tumor_read_count", "tumorReadCount"},
+	{"normal_variant_count", "normalVariantCount"}, {"tumor_variant_count", "tumorVariantCount"},
+	{"normal_paired_end_read_count", "normalPairedEndReadCount"}, {"tumor_paired_end_read_count", "tumorPairedEndReadCount"},
+	{"normal_split_read_count", "normalSplitReadCount"}, {"tumor_split_read_count", "tumorSplitReadCount"},
+	{"annotation", "annotation"}, {"breakpoint_type", "breakpointType"}, {"connection_type", "connectionType"},
+	{"event_info", "eventInfo"}, {"class", "variantClass"}, {"sv_length", "length"}, {"comments", "comments"},
+	{"cbp_driver", "driverFilter"}, {"cbp_driver_annotation", "driverFilterAnn"},
+	{"cbp_driver_tiers", "driverTiersFilter"}, {"cbp_driver_tiers_annotation", "driverTiersFilterAnn"},
+	{"sv_status", "svStatus"}, {"namespace_columns", "namespaceColumns"},
+}
+
+// svSelectColumns selects a structural variant record over svSiteEntrezSQL
+// (alias sv, sample alias sm, gene aliases g1 and g2) as toStructuralVariant
+// reads it; view columns missing from have read as empty.
+func svSelectColumns(have map[string]bool) []string {
+	cols := []string{
+		"sv.study_id AS studyId", "sv.sample_id AS sampleId", "ifNull(sm.patient_id, '') AS patientId",
+		"sv.e1 AS site1EntrezGeneId", "g1.hugo_gene_symbol AS site1HugoSymbol",
+		"sv.e2 AS site2EntrezGeneId", "g2.hugo_gene_symbol AS site2HugoSymbol",
+		"concat(sv.study_id, '_', sv.profile_stable_id) AS molecularProfileId",
+	}
+	for _, c := range svTextColumns {
+		if have[c[0]] {
+			cols = append(cols, fmt.Sprintf("ifNull(toString(sv.%s), '') AS %s", c[0], c[1]))
+		} else {
+			cols = append(cols, "'' AS "+c[1])
+		}
+	}
+	return cols
 }
 
 // svSiteEntrezSQL is the structural_variant view with each site's entrez id

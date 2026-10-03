@@ -21,6 +21,9 @@ cd "$(dirname "$0")/.."
 go build -o bin/cbioportal-import ./cmd/cbioportal-import
 
 bin/cbioportal-import load-reference "$SEED" --db "$REF_DB" --url "$CH"
+GS="$FIXTURES/data/genesets"
+bin/cbioportal-import load-genesets "$GS/study_es_0_genesets.gmt" --version msigdb_7.5.1 \
+  --supp "$GS/study_es_0_supp-genesets.txt" --hierarchy "$GS/study_es_0_tree.yaml" --db "$REF_DB" --url "$CH"
 for s in "${STUDIES[@]}"; do
   bin/cbioportal-import ingest "$FIXTURES/data/studies/$s" --db "$RAW_DB" --url "$CH"
 done

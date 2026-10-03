@@ -143,12 +143,6 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// emptyArray drains the body and returns [] — for not-yet-implemented endpoints.
-func emptyArray(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
-	writeJSON(w, []any{})
-}
-
 func fail(w http.ResponseWriter, err error) {
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 }

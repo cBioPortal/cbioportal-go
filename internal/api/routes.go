@@ -91,9 +91,12 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.routeResources(mux)
 	s.routeSignificance(mux)
 	s.routeStudyTags(mux)
+	s.routeNamespace(mux)
+	s.routeStatus(mux)
 	s.routeCancerTypes(mux)
 	mux.HandleFunc("POST /api/custom-driver-annotation-report/fetch", s.customDriverAnnotationReport)
 	s.routeTreatments(mux)
 	s.routeCompat(mux)
 	s.routeProxy(mux)
+	s.routeExport(mux)
 }

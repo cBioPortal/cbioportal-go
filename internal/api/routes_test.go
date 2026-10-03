@@ -123,9 +123,9 @@ func TestTrailingSlashMatch(t *testing.T) {
 	mux := http.NewServeMux()
 	s.routes(mux)
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/health/", nil))
-	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "{}" {
-		t.Fatalf("GET /api/health/: status %d body %q, want 200 {}", w.Code, w.Body.String())
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/hello/", nil))
+	if w.Code != http.StatusOK || w.Body.String() != "Greetings from Spring Boot!" {
+		t.Fatalf("GET /api/hello/: status %d body %q, want 200 greeting", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/no-such-endpoint/", nil))

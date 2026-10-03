@@ -80,135 +80,139 @@ func spearman(a, b []float64) float64 {
 
 // ---------- 1. co-expression ----------
 
+// CoExpression is CoExpressionDTO. A gene too sparse or too constant to
+// correlate is reported without a correlation and p-value.
 type CoExpression struct {
-	GeneticEntityID      string  `json:"geneticEntityId"`
-	GeneticEntityType    string  `json:"geneticEntityType"`
-	EntrezGeneID         *int64  `json:"entrezGeneId,omitempty"`
-	HugoGeneSymbol       string  `json:"hugoGeneSymbol,omitempty"`
-	Cytoband             string  `json:"cytoband,omitempty"`
-	SpearmansCorrelation float64 `json:"spearmansCorrelation"`
-	PValue               float64 `json:"pValue"`
-	QValue               float64 `json:"qValue"`
-	MolecularProfileID   string  `json:"molecularProfileId,omitempty"`
+	GeneticEntityID      string   `json:"geneticEntityId"`
+	GeneticEntityType    string   `json:"geneticEntityType"`
+	SpearmansCorrelation *float64 `json:"spearmansCorrelation,omitempty"`
+	PValue               *float64 `json:"pValue,omitempty"`
 }
 
 type coExpressionFilter struct {
-	EntrezGeneID int64    `json:"entrezGeneId"`
-	GenesetID    string   `json:"genesetId"`
+	EntrezGeneID *int64   `json:"entrezGeneId"`
 	SampleIDs    []string `json:"sampleIds"`
-	SampleListID string   `json:"sampleListId"`
+	SampleListID *string  `json:"sampleListId"`
 }
 
-// coExpressionsFetch computes Spearman correlations between a query genetic
-// entity in profile A and every other entity in profile B over shared samples.
+// coExpressionsFetch ports ColumnStoreCoExpressionController and
+// FetchCoExpressionsUseCase: the Spearman correlation (ClickHouse rankCorr)
+// between the query gene in profile A and every other gene of profile B over
+// the requested samples of study A, as ClickhouseCoExpressionMapper computes
+// it. Genes with at least 3 samples, more than one value and more than n/2
+// distinct values are kept when |r| reaches the threshold; the others are
+// listed without a correlation.
 func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 	var f coExpressionFilter
 	readBody(r, &f)
-
-	profileA := r.URL.Query().Get("molecularProfileIdA")
-	profileB := r.URL.Query().Get("molecularProfileIdB")
-	if profileB == "" {
-		profileB = profileA
-	}
+	q := r.URL.Query()
+	profileA, profileB := q.Get("molecularProfileIdA"), q.Get("molecularProfileIdB")
 	threshold := 0.3
-	if t := r.URL.Query().Get("threshold"); t != "" {
-		if v, err := strconv.ParseFloat(t, 64); err == nil {
-			threshold = v
+	if t := q.Get("threshold"); t != "" {
+		v, err := strconv.ParseFloat(t, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, `Request parameter type mismatch: java.lang.NumberFormatException: For input string: "`+t+`"`)
+			return
+		}
+		threshold = v
+	}
+	out := []CoExpression{}
+	if f.EntrezGeneID == nil {
+		writeJSON(w, out)
+		return
+	}
+	sampleIDs := f.SampleIDs
+	if f.SampleListID != nil {
+		type row struct {
+			SampleID string `json:"sampleId"`
+		}
+		rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = '%s'", sqlLit(*f.SampleListID)))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		sampleIDs = sampleIDs[:0]
+		for _, rw := range rows {
+			sampleIDs = append(sampleIDs, rw.SampleID)
 		}
 	}
-
-	metaA, okA := s.profileMeta(profileA)
-	metaB, okB := s.profileMeta(profileB)
-	if !okA || !okB {
-		writeJSON(w, []CoExpression{})
+	if len(sampleIDs) == 0 {
+		writeJSON(w, out)
 		return
 	}
-	tableA, tableB := metaA.dataTable(), metaB.dataTable()
-	if tableA == "" || tableB == "" {
-		writeJSON(w, []CoExpression{})
+	metaA, ok := s.profileMeta(profileA)
+	if !ok {
+		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(profileA))
 		return
 	}
-
-	sampleFilter := coexpSampleFilter(f)
-
-	// Query entity match (profile A). genesetId identifies GENESET entities.
-	queryEntity := fmt.Sprintf("%d", f.EntrezGeneID)
-	queryMatch := fmt.Sprintf("toString(entrez_gene_id) = '%s'", sqlLit(queryEntity))
-	sourceA := s.rawSource(tableA, "study_id", "profile_stable_id", "sample_id", "value", "entrez_gene_id")
-	if f.GenesetID != "" {
-		queryEntity = f.GenesetID
-		queryMatch = fmt.Sprintf("geneset_id = '%s'", sqlLit(f.GenesetID))
-		sourceA = s.rawSource(tableA, "study_id", "profile_stable_id", "sample_id", "value", "geneset_id")
+	metaB := metaA
+	if profileB != profileA {
+		if metaB, ok = s.profileMeta(profileB); !ok {
+			writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(profileB))
+			return
+		}
 	}
-
-	hugoCol := "hugo_symbol"
-	entityCol := "toString(entrez_gene_id)"
-	sourceB := s.rawSource(tableB, geneMatrixCols...)
-	if tableB == "geneset_score_matrix" {
-		hugoCol = "''"
-		entityCol = "geneset_id"
-		sourceB = genesetScoreSource(s)
+	type geneRow struct {
+		Hugo string `json:"hugo"`
 	}
-
-	// Push the correlation into ClickHouse (spearmanSQL) so only the entities
-	// above the threshold cross the wire (dozens–hundreds), not the whole
-	// profile-B matrix (millions of rows).
-	querySub := fmt.Sprintf(
-		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM %s "+
-			"WHERE study_id = '%s' AND profile_stable_id = '%s' AND %s "+
-			"AND toFloat64OrNull(value) IS NOT NULL%s",
-		sourceA, sqlLit(metaA.StudyID), sqlLit(metaA.StableID), queryMatch, sampleFilter)
-
-	type coexpRow struct {
-		Entity string   `json:"entity"`
-		Hugo   string   `json:"hugo"`
-		N      int      `json:"n"`
-		SC     *float64 `json:"sc"`
-	}
-	rows, err := ch.Query[coexpRow](s.CH, spearmanSQL(fmt.Sprintf(
-		"SELECT %s AS entity, %s AS hugo, toFloat64OrZero(b.value) AS x, q.qval AS y "+
-			"FROM %s AS b INNER JOIN (%s) AS q USING (sample_id) "+
-			"WHERE b.study_id = '%s' AND b.profile_stable_id = '%s' "+
-			"AND toFloat64OrNull(b.value) IS NOT NULL",
-		entityCol, hugoCol, sourceB, querySub, sqlLit(metaB.StudyID), sqlLit(metaB.StableID)),
-		fmt.Sprintf("entity != '%s'", sqlLit(queryEntity)), threshold))
+	genes, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
+		"SELECT hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE entrez_gene_id = %d", *f.EntrezGeneID))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-
-	out := []CoExpression{}
+	if len(genes) == 0 {
+		writeError(w, http.StatusNotFound, msgGeneNotFound(strconv.FormatInt(*f.EntrezGeneID, 10)))
+		return
+	}
+	hugo := sqlLit(genes[0].Hugo)
+	typeA := strings.TrimPrefix(profileA, metaA.StudyID+"_")
+	typeB := strings.TrimPrefix(profileB, metaB.StudyID+"_")
+	uniqueIDs := make([]string, len(sampleIDs))
+	for i, id := range sampleIDs {
+		uniqueIDs[i] = metaA.StudyID + "_" + id
+	}
+	type coexpRow struct {
+		EntrezGeneID int64    `json:"entrezGeneId"`
+		Corr         *float64 `json:"corr"`
+		N            int      `json:"n"`
+	}
+	rows, err := ch.Query[coexpRow](s.CH, fmt.Sprintf(
+		"WITH ref_values AS ("+
+			"SELECT sample_unique_id, toFloat64OrNull(alteration_value) AS ref_val FROM genetic_alteration_derived "+
+			"WHERE cancer_study_identifier = '%s' AND profile_type = '%s' AND hugo_gene_symbol = '%s' "+
+			"AND alteration_value != '' AND alteration_value != 'NA' AND toFloat64OrNull(alteration_value) IS NOT NULL "+
+			"AND sample_unique_id IN (%s)), "+
+			"per_gene AS (SELECT g.entrez_gene_id AS entrezGeneId, count(*) AS numSamples, "+
+			"uniqExact(toFloat64OrNull(d.alteration_value)) AS exactDistinct, uniq(toFloat64OrNull(d.alteration_value)) AS approxDistinct, "+
+			"groupArray(r.ref_val) AS refValues, groupArray(toFloat64OrNull(d.alteration_value)) AS geneValues "+
+			"FROM genetic_alteration_derived d INNER JOIN ref_values r ON d.sample_unique_id = r.sample_unique_id "+
+			"INNER JOIN cbioportal_ref.gene g ON d.hugo_gene_symbol = g.hugo_gene_symbol "+
+			"WHERE d.cancer_study_identifier = '%s' AND d.profile_type = '%s' AND d.hugo_gene_symbol != '%s' "+
+			"AND d.alteration_value != '' AND d.alteration_value != 'NA' AND toFloat64OrNull(d.alteration_value) IS NOT NULL "+
+			"GROUP BY g.entrez_gene_id), "+
+			"scored AS (SELECT entrezGeneId, numSamples, "+
+			"(numSamples >= 3 AND exactDistinct > 1 AND approxDistinct > numSamples / 2) AS validNumeric, "+
+			"arrayReduce('rankCorr', if(exactDistinct > 1, refValues, [0., 1.]), if(exactDistinct > 1, geneValues, [0., 1.])) AS corr "+
+			"FROM per_gene) "+
+			"SELECT entrezGeneId, if(validNumeric AND isFinite(corr), corr, NULL) AS corr, toInt64(numSamples) AS n FROM scored "+
+			"WHERE (validNumeric AND isFinite(corr) AND abs(corr) >= %v) OR (NOT validNumeric) ORDER BY entrezGeneId",
+		sqlLit(metaA.StudyID), sqlLit(typeA), hugo, inList(uniqueIDs),
+		sqlLit(metaB.StudyID), sqlLit(typeB), hugo, threshold))
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	for _, row := range rows {
-		if row.SC == nil {
-			continue
-		}
-		sc := *row.SC
-		ce := CoExpression{
-			GeneticEntityID:      row.Entity,
-			GeneticEntityType:    "GENE",
-			HugoGeneSymbol:       row.Hugo,
-			SpearmansCorrelation: sc,
-			PValue:               stats.SpearmanPValue(sc, row.N),
-			MolecularProfileID:   profileB,
-		}
-		if f.GenesetID != "" {
-			ce.GeneticEntityType = "GENESET"
-		} else if id, e := strconv.ParseInt(row.Entity, 10, 64); e == nil {
-			ce.EntrezGeneID = &id
+		ce := CoExpression{GeneticEntityID: strconv.FormatInt(row.EntrezGeneID, 10), GeneticEntityType: "GENE"}
+		if row.Corr != nil {
+			p := stats.CommonsCorrelationPValue(*row.Corr, row.N)
+			ce.SpearmansCorrelation, ce.PValue = row.Corr, &p
 		}
 		out = append(out, ce)
 	}
 	writeJSON(w, out)
-}
-
-func coexpSampleFilter(f coExpressionFilter) string {
-	if len(f.SampleIDs) > 0 {
-		return fmt.Sprintf(" AND sample_id IN (%s)", inList(f.SampleIDs))
-	}
-	if f.SampleListID != "" {
-		return fmt.Sprintf(" AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(f.SampleListID))
-	}
-	return ""
 }
 
 // ---------- clinical value resolution (shared by density + violin) ----------

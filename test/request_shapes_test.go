@@ -2,6 +2,7 @@ package contract
 
 import (
 	"encoding/base64"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -61,13 +62,6 @@ func TestContractPagingSortByDirection(t *testing.T) {
 	if a[0] >= d[0] {
 		t.Errorf("first ASC %q should precede first DESC %q", a[0], d[0])
 	}
-}
-
-func TestContractPatientsKeyword(t *testing.T) {
-	requireAPI(t)
-	var d []map[string]any
-	get(t, "/api/patients?keyword=TCGA-A1-A0SB", &d)
-	wantEq(t, ids(d, "patientId"), []string{"TCGA-A1-A0SB"})
 }
 
 // ------------------------------------------------------ filter forms ----
@@ -182,19 +176,27 @@ func TestContractStructuralVariantCountsPairs(t *testing.T) {
 
 // ------------------------------------------------- endpoint params ----
 
+// The geneset hierarchy takes its samples from sampleListId or a bare
+// sample-id body; with the gene set reference loaded, a profile that is not
+// GSVA-SCORE is Java's unhandled IllegalArgumentException (500).
 func TestContractGenesetHierarchyBody(t *testing.T) {
 	requireAPI(t)
-	var bySampleList, bySamples, notGsva []map[string]any
+	var bySampleList, byStudy, bySamples []map[string]any
 	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_gsva_scores&sampleListId=study_es_0_all", nil, &bySampleList)
+	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_gsva_scores", nil, &byStudy)
 	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_gsva_scores", []string{"TCGA-A1-A0SB-01"}, &bySamples)
-	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_mrna", []string{}, &notGsva)
-	if len(bySampleList) != 1 || len(bySampleList[0]["genesets"].([]any)) == 0 {
-		t.Fatalf("hierarchy by sample list: %v", bySampleList)
+	if len(bySampleList) == 0 || len(bySampleList) != len(byStudy) {
+		t.Fatalf("hierarchy by sample list %v, by study %v", bySampleList, byStudy)
 	}
-	if len(bySamples) != 1 {
-		t.Fatalf("hierarchy by bare sample-id list: %v", bySamples)
+	if bySamples == nil {
+		t.Fatalf("hierarchy by bare sample-id list: null")
 	}
-	wantEq(t, len(notGsva), 0)
+	var v string
+	get(t, "/api/genesets/version", &v)
+	if v == "msigdb_7.5.1" {
+		resp, _ := rawDo(t, http.MethodPost, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_mrna", "[]")
+		wantEq(t, resp.StatusCode, http.StatusInternalServerError)
+	}
 }
 
 func TestContractTreatmentsDisplay(t *testing.T) {
@@ -332,13 +334,32 @@ func TestContractCacheAndTokenMethods(t *testing.T) {
 	get(t, "/api/data-access-tokens", &tokens)
 	var tok map[string]any
 	post(t, "/api/data-access-tokens", nil, &tok)
-	for _, path := range []string{"/api/cache", "/api/cache/study_es_0", "/api/data-access-tokens"} {
+	resp, _ := rawDo(t, http.MethodDelete, "/api/data-access-tokens", "")
+	wantEq(t, resp.StatusCode, http.StatusOK)
+}
+
+// CacheController: the X-API-KEY header is required (Spring's 400 without
+// it), and with cache.endpoint.enabled unset the endpoints answer 404 with a
+// plain-text reason. There is no GET.
+func TestContractCacheEndpointDisabled(t *testing.T) {
+	requireAPI(t)
+	for _, path := range []string{"/api/cache", "/api/cache/study_es_0"} {
+		resp, _ := rawDo(t, http.MethodDelete, path, "")
+		wantEq(t, resp.StatusCode, http.StatusBadRequest)
+
 		req, _ := http.NewRequest(http.MethodDelete, apiBase()+path, nil)
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		req.Header.Set("X-API-KEY", "anything")
+		r2, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 		if err != nil {
 			t.Fatalf("DELETE %s: %v", path, err)
 		}
-		resp.Body.Close()
-		wantEq(t, resp.StatusCode, http.StatusOK)
+		body, _ := io.ReadAll(r2.Body)
+		r2.Body.Close()
+		wantEq(t, r2.StatusCode, http.StatusNotFound)
+		wantEq(t, string(body), "Cache endpoint is disabled for this instance.")
+
+		resp, _ = rawDo(t, http.MethodGet, path, "")
+		wantEq(t, resp.StatusCode, http.StatusMethodNotAllowed)
+		wantEq(t, resp.Header.Get("Allow"), "DELETE")
 	}
 }

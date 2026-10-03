@@ -15,9 +15,6 @@ import (
 )
 
 // routeMisc registers the view-backed endpoints implemented in this file.
-// It deliberately does NOT register POST /api/clinical-attributes/counts/fetch
-// (currently an emptyArray stub in routes.go); the integrator wires
-// s.clinicalAttributeCountsFetch after removing that stub.
 func (s *State) routeMisc(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/copy-number-segments/fetch", s.copyNumberSegmentsFetch)
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-attributes", s.studyClinicalAttributes)
@@ -274,9 +271,6 @@ type ClinicalAttributeCount struct {
 }
 
 // clinicalAttributeCountsFetch serves POST /api/clinical-attributes/counts/fetch.
-// It is intentionally NOT registered in routeMisc: routes.go currently has an
-// emptyArray stub for that pattern. The integrator removes the stub and wires
-// this method to avoid a duplicate-pattern panic.
 func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers []identifier    `json:"sampleIdentifiers"`
@@ -305,24 +299,26 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	if sampleScope == "" {
 		sampleScope = s.sampleScope(scopeFilter)
 	}
-	patientScope := fmt.Sprintf(
-		"(study_id, patient_id) IN (SELECT study_id, patient_id FROM sample WHERE %s)", sampleScope)
-
 	type countRow struct {
 		AttrID string `json:"attr_id"`
 		C      uint64 `json:"c"`
 	}
 	out := []ClinicalAttributeCount{}
-	queries := []struct {
-		view, idCol, scope string
-	}{
-		{"clinical_sample", "sample_id", sampleScope},
-		{"clinical_patient", "patient_id", patientScope},
+	// ClinicalAttributeMapper counts rows: a sample attribute once per sample,
+	// a patient attribute once per selected sample of the patient (the
+	// patient row joined to its samples). Sample counts come first.
+	queries := []string{
+		fmt.Sprintf("SELECT attr_id, count() AS c FROM clinical_sample WHERE %s GROUP BY attr_id ORDER BY attr_id", sampleScope),
+		fmt.Sprintf("SELECT cp.attr_id AS attr_id, count() AS c FROM clinical_patient cp "+
+			"JOIN (SELECT study_id, patient_id FROM sample WHERE %s) sm ON sm.study_id = cp.study_id AND sm.patient_id = cp.patient_id "+
+			"GROUP BY cp.attr_id ORDER BY attr_id", sampleScope),
 	}
 	for _, q := range queries {
-		rows, _ := ch.Query[countRow](s.CH, fmt.Sprintf(
-			"SELECT attr_id, uniqExact(%s) AS c FROM %s WHERE %s GROUP BY attr_id",
-			q.idCol, q.view, q.scope))
+		rows, err := ch.Query[countRow](s.CH, q)
+		if err != nil {
+			fail(w, err)
+			return
+		}
 		for _, r := range rows {
 			out = append(out, ClinicalAttributeCount{ClinicalAttributeID: r.AttrID, Count: r.C})
 		}

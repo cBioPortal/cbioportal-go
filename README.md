@@ -83,9 +83,9 @@ weekly.
   carry over from existing portals.
 - **Importer coverage.** Tested on a handful of studies; needs validation
   against all of datahub and cbioportal-core's validator rules.
-- **API parity.** Remaining Java endpoints and differences (study export
-  `.zip`, URL shortener, MatchMiner, newer column-store response shapes); the
-  API still reads the staging database for a few per-gene matrices.
+- **API parity.** See [API coverage](docs/api-coverage.md): data-access
+  tokens, login pages, the URL shortener and MatchMiner remain; the API still
+  reads the staging database for a few per-gene matrices.
 - **Performance.** Whole-profile reads of large studies (expression
   enrichments, co-expression on TCGA PanCancer), RowBinary decoding for large
   responses, projections applied in the handlers instead of a middleware.
@@ -97,6 +97,8 @@ weekly.
 - [Testing](docs/testing.md) — test tiers, test databases, the e2e harness, CI.
 - [Architecture](docs/architecture.md) — data flow, code layout, dependency
   policy.
+- [API coverage](docs/api-coverage.md) — every Java endpoint, its status and
+  contract-test coverage.
 - [Benchmark](docs/benchmark.md) — go.cbioportal.org vs www.cbioportal.org:
   page speed, resource use, cost estimate.
 - [Deployment](docs/deployment.md) — the container image and the daily

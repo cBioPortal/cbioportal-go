@@ -401,7 +401,7 @@ func (s *State) sessionAdd(w http.ResponseWriter, r *http.Request) {
 	typ := r.PathValue("type")
 	if !sessionTypes[typ] {
 		readBody(r, nil)
-		http.Error(w, "unknown session type: "+typ, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, msgEnumMismatch(sessionTypeClass, typ))
 		return
 	}
 	s.addSession(w, r, typ, false)
@@ -416,7 +416,7 @@ func (s *State) sessionAddWith(typ string, save bool) http.HandlerFunc {
 func (s *State) addSession(w http.ResponseWriter, r *http.Request, typ string, save bool) {
 	body, err := readObject(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, msgBadJSON)
 		return
 	}
 	user, authed := sessionUser(r)
@@ -444,7 +444,7 @@ func (s *State) addSession(w http.ResponseWriter, r *http.Request, typ string, s
 			return
 		}
 		if p, _ := body["page"].(string); p != "study_view" && p != "results_view" {
-			http.Error(w, "invalid page", http.StatusBadRequest)
+			springError(w, r, http.StatusInternalServerError)
 			return
 		}
 		data = body
@@ -495,12 +495,12 @@ func applyVirtualStudyDefaults(data map[string]any) {
 func (s *State) sessionGet(w http.ResponseWriter, r *http.Request) {
 	typ, id := r.PathValue("type"), r.PathValue("id")
 	if !sessionTypes[typ] {
-		http.Error(w, "unknown session type: "+typ, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, msgEnumMismatch(sessionTypeClass, typ))
 		return
 	}
 	sess, ok := s.store().get(typ, id)
 	if !ok {
-		http.Error(w, "session not found", http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	if typ == "virtual_study" {
@@ -566,11 +566,12 @@ func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 	switch typ {
 	case "virtual_study", "group", "custom_data", "custom_gene_list":
 	default:
-		http.NotFound(w, r)
+		// The route's {type} pattern admits only these types.
+		springNotFound(w, r)
 		return
 	}
 	if op != "add" && op != "delete" {
-		http.Error(w, "unknown operation: "+op, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, msgEnumMismatch("org.cbioportal.legacy.web.Operation", op))
 		return
 	}
 	user, ok := sessionUser(r)
@@ -580,7 +581,7 @@ func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	sess, found := s.store().get(typ, id)
 	if !found {
-		http.Error(w, "session not found", http.StatusNotFound)
+		springError(w, r, http.StatusInternalServerError)
 		return
 	}
 	users := stringSet(sess.Data["users"])
@@ -639,8 +640,9 @@ func numberToInt64(v any) int64 {
 
 func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := readObject(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	page, _ := body["page"].(string)
+	if err != nil || (body["page"] != nil && page != "study_view" && page != "results_view") {
+		writeError(w, http.StatusBadRequest, msgBadJSON)
 		return
 	}
 	user, ok := sessionUser(r)
@@ -648,9 +650,10 @@ func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	page, _ := body["page"].(string)
-	if page != "study_view" && page != "results_view" {
-		w.WriteHeader(http.StatusBadRequest)
+	if page == "" {
+		// settingsData.getPage().name() on a missing page: the IOException
+		// handler does not catch it.
+		springError(w, r, http.StatusInternalServerError)
 		return
 	}
 	origin := stringSet(body["origin"])
@@ -681,12 +684,16 @@ func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 		Origin []string `json:"origin"`
 	}
 	readBody(r, &id)
+	if id.Page != "" && id.Page != "study_view" && id.Page != "results_view" {
+		writeError(w, http.StatusBadRequest, msgBadJSON)
+		return
+	}
 	user, ok := sessionUser(r)
 	if !ok {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	if id.Page != "study_view" && id.Page != "results_view" {
+	if id.Page == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -768,12 +775,12 @@ func (s *State) publicVirtualStudies(w http.ResponseWriter, r *http.Request) {
 func checkPublisherKey(w http.ResponseWriter, r *http.Request) bool {
 	provided, present := r.Header["X-Publisher-Api-Key"]
 	if !present {
-		http.Error(w, "Required request header 'X-PUBLISHER-API-KEY' is not present", http.StatusBadRequest)
+		springError(w, r, http.StatusBadRequest)
 		return false
 	}
 	required := strings.TrimSpace(os.Getenv("PUBLISHER_API_KEY"))
 	if required == "" || len(provided) == 0 || provided[0] != required {
-		http.Error(w, "The provided publisher API key is not correct.", http.StatusForbidden)
+		writeError(w, http.StatusForbidden, "The access is forbidden.")
 		return false
 	}
 	return true
@@ -817,7 +824,7 @@ func (s *State) applyPublishMetadata(w http.ResponseWriter, r *http.Request, dat
 	if q.Has("typeOfCancerId") {
 		toc := q.Get("typeOfCancerId")
 		if ok, err := s.cancerTypeExists(toc); err != nil || !ok {
-			http.Error(w, "The cancer type is not valid: "+toc, http.StatusBadRequest)
+			springError(w, r, http.StatusInternalServerError)
 			return false
 		}
 		data["typeOfCancerId"] = toc
@@ -837,7 +844,7 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		vs, ok := s.store().get("virtual_study", id)
 		if !ok {
-			http.Error(w, "The virtual study with id="+id+" has not been found.", http.StatusNotFound)
+			springError(w, r, http.StatusInternalServerError)
 			return
 		}
 		if !s.applyPublishMetadata(w, r, vs.Data) {
@@ -851,26 +858,24 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 
 	var body map[string]any
 	if err := decodeJSON(raw, &body); err != nil || body == nil {
-		http.Error(w, "invalid virtual study data", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, msgBadJSON)
 		return
 	}
 	data := pickFields(body, virtualStudyFields)
-	if name, _ := data["name"].(string); strings.TrimSpace(name) == "" {
-		http.Error(w, "Virtual study name is required.", http.StatusBadRequest)
+	if msg := virtualStudyDataViolation(data); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
+	// VirtualStudyService.validateResolvableVirtualStudyData: the filter must
+	// select samples (a missing filter selects none).
 	filter, ok := data["studyViewFilter"]
 	if !ok || filter == nil || s.CH == nil {
-		http.Error(w, "The virtual study filters are invalid.", http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, msgVSInvalidFilters)
 		return
 	}
 	samples, err := s.filterSamples(filter)
-	if err != nil {
-		http.Error(w, "The virtual study filters are invalid.", http.StatusBadRequest)
-		return
-	}
-	if len(samples) == 0 {
-		http.Error(w, "The virtual study filters yield no samples.", http.StatusBadRequest)
+	if err != nil || len(samples) == 0 {
+		writeError(w, http.StatusBadRequest, msgVSInvalidFilters)
 		return
 	}
 	applyVirtualStudyDefaults(data)
@@ -884,11 +889,11 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if exists {
-		http.Error(w, "The study with id="+id+" already exists. Use a different id for the virtual study.", http.StatusConflict)
+		conflict(w, "The study with id="+id+" already exists. Use a different id for the virtual study.")
 		return
 	}
 	if !s.store().insert("virtual_study", id, data) {
-		http.Error(w, "A virtual study with the same ID or identical definition already exists: "+id, http.StatusConflict)
+		conflict(w, "A virtual study with the same ID or identical definition already exists: "+id)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -901,8 +906,12 @@ func (s *State) unpublishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	vs, ok := s.store().get("virtual_study", id)
-	if !ok || !containsUser(stringSet(vs.Data["users"]), allUsers) {
-		http.Error(w, "The virtual study with id="+id+" has not been found in the public list.", http.StatusNotFound)
+	if !ok {
+		springError(w, r, http.StatusInternalServerError)
+		return
+	}
+	if !containsUser(stringSet(vs.Data["users"]), allUsers) {
+		writeError(w, http.StatusNotFound, "The virtual study with id="+id+" has not been found in the public list.")
 		return
 	}
 	if r.URL.Query().Get("softDelete") == "false" {
@@ -926,4 +935,59 @@ func (s *State) sessionData(typ, id string) (json.RawMessage, bool) {
 		return nil, false
 	}
 	return raw, true
+}
+
+// sessionTypeClass is the enum Spring converts the {type} path variable to.
+const sessionTypeClass = "org.cbioportal.legacy.utils.removeme.Session.SessionType"
+
+// VirtualStudyValidationMessages.
+const (
+	vsSchemaHint        = "See https://docs.cbioportal.org/virtual-study-data-schema/#virtual-study-json-schema"
+	msgVSNameRequired   = "Virtual study name cannot be null or blank. Check that you are passing virtual study data only (data field content) and not the whole session object (with _id). " + vsSchemaHint
+	msgVSStudies        = "Virtual study must contain at least one study with samples. " + vsSchemaHint
+	msgVSStudyID        = "Each study in virtual study must have a non-null and non-blank id. " + vsSchemaHint
+	msgVSDynamicFilter  = "Virtual study with dynamic=true must have a defined study view filter. " + vsSchemaHint
+	msgVSStaticSamples  = "Static virtual study (dynamic=false) must contain at least one sample in each study. " + vsSchemaHint
+	msgVSInvalidFilters = "The provided virtual study data is not valid. Check that the filters are correct and that the studies and samples you are referring to in virtual study data exist in the system. " + vsSchemaHint
+)
+
+// virtualStudyDataViolation validates a published VirtualStudyData body
+// (@NotBlank name, @NotEmpty studies, @NotBlank study ids and
+// VirtualStudyDataValidator) and returns the first violation as the
+// MethodArgumentNotValidException answer, "<field> <message>", or "".
+func virtualStudyDataViolation(data map[string]any) string {
+	if name, _ := data["name"].(string); strings.TrimSpace(name) == "" {
+		return "name " + msgVSNameRequired
+	}
+	studies, _ := data["studies"].([]any)
+	if len(studies) == 0 {
+		return "studies " + msgVSStudies
+	}
+	for _, st := range studies {
+		m, _ := st.(map[string]any)
+		if id, _ := m["id"].(string); strings.TrimSpace(id) == "" {
+			return "studies[].id " + msgVSStudyID
+		}
+	}
+	if dyn, _ := data["dynamic"].(bool); dyn {
+		if data["studyViewFilter"] == nil {
+			return "studyViewFilter " + msgVSDynamicFilter
+		}
+		return ""
+	}
+	for _, st := range studies {
+		m, _ := st.(map[string]any)
+		if samples, _ := m["samples"].([]any); len(samples) == 0 {
+			return "studies " + msgVSStaticSamples
+		}
+	}
+	return ""
+}
+
+// conflict is DuplicateVirtualStudyException's answer: 409 with the message
+// as a plain body.
+func conflict(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "text/plain;charset=UTF-8")
+	w.WriteHeader(http.StatusConflict)
+	w.Write([]byte(msg))
 }
