@@ -10,7 +10,8 @@
 //	  -ua cbioportal-go-parity -a http://localhost:18091
 //
 // Only successful requests with intact JSON bodies are taken (the largest
-// logged bodies were captured gzip-corrupted). Records are compared without
+// logged bodies were captured gzip-corrupted), and never requests that write
+// on the server they are replayed against (sessions, publishing, cache). Records are compared without
 // regard to order, as this backend does not keep the Java importer's row
 // order. Requests whose difference is expected (known.go: www's session
 // store, deployment-specific fields, www bugs, unspecified tie order) are
@@ -63,6 +64,10 @@ WITH clean AS (
     SELECT DISTINCT endpoint, method, path, query_string, if(method = 'POST', body, '') AS body
     FROM ` + *table + `
     WHERE response_status = 200 AND method IN ('GET', 'POST') AND startsWith(path, '/api/')
+      -- Requests that write on the server they are sent to (sessions, virtual
+      -- study publishing, cache eviction) are never replayed.
+      AND NOT (startsWith(path, '/api/session') OR startsWith(path, '/api/public_virtual_studies')
+               OR startsWith(path, '/api/cache'))
       AND (method = 'GET' OR (length(body) BETWEEN 2 AND {maxBody:UInt64}
            AND ((startsWith(body, '{') AND endsWith(body, '}')) OR (startsWith(body, '[') AND endsWith(body, ']')))
            AND position(body, unhex('EFBFBD')) = 0))
