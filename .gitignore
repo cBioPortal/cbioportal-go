@@ -16,3 +16,6 @@
 *.log
 test/keycloak/realm.generated.json
 .claude/
+
+# Parity tool cache (www responses) and local scratch
+.parity/

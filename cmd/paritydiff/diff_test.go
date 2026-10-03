@@ -1,0 +1,190 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func mustJSON(t *testing.T, s string) any {
+	t.Helper()
+	v, err := decodeJSON([]byte(s))
+	if err != nil {
+		t.Fatalf("decode %s: %v", s, err)
+	}
+	return v
+}
+
+func diff(t *testing.T, a, b string, o compareOptions) diffResult {
+	t.Helper()
+	return compareJSON(mustJSON(t, a), mustJSON(t, b), o)
+}
+
+func TestCompareKeyOrderIrrelevant(t *testing.T) {
+	r := diff(t, `{"a":1,"b":{"x":"y","z":[1,2]}}`, `{"b":{"z":[1,2],"x":"y"},"a":1}`, defaultOptions())
+	if r.Count != 0 {
+		t.Fatalf("want identical, got %v", r.Diffs)
+	}
+}
+
+func TestCompareFloatTolerance(t *testing.T) {
+	o := defaultOptions()
+	if r := diff(t, `[0.30000000000000004, 1e-20, 12345678901234567]`, `[0.3, 0, 12345678901234568]`, o); r.Count != 0 {
+		t.Fatalf("within tolerance: %v", r.Diffs)
+	}
+	if r := diff(t, `[0.3001]`, `[0.3]`, o); r.Count != 1 {
+		t.Fatalf("outside tolerance: want 1 difference, got %v", r.Diffs)
+	}
+	if r := diff(t, `[1]`, `["1"]`, o); r.Count != 1 {
+		t.Fatalf("number vs string must differ: %v", r.Diffs)
+	}
+}
+
+func TestCompareOrderOnlyReportedOnce(t *testing.T) {
+	r := diff(t, `[{"id":1},{"id":2},{"id":3}]`, `[{"id":3},{"id":1},{"id":2}]`, defaultOptions())
+	if r.Count != 1 || !strings.Contains(r.Diffs[0], "different order") {
+		t.Fatalf("want one order difference, got %v", r.Diffs)
+	}
+	o := defaultOptions()
+	o.Unordered = true
+	if r := diff(t, `[{"id":1},{"id":2},{"id":3}]`, `[{"id":3},{"id":1},{"id":2}]`, o); r.Count != 0 {
+		t.Fatalf("unordered: %v", r.Diffs)
+	}
+}
+
+func TestCompareUnorderedNested(t *testing.T) {
+	o := defaultOptions()
+	o.Unordered = true
+	a := `[{"g":"TP53","s":["b","a"]},{"g":"KRAS","s":[]}]`
+	b := `[{"g":"KRAS","s":[]},{"g":"TP53","s":["a","b"]}]`
+	if r := diff(t, a, b, o); r.Count != 0 {
+		t.Fatalf("nested arrays sorted too: %v", r.Diffs)
+	}
+}
+
+func TestCompareUnorderedAlignsByIdentity(t *testing.T) {
+	o := defaultOptions()
+	o.Unordered = true
+	a := `[{"studyId":"b","count":1},{"studyId":"a","count":5}]`
+	b := `[{"studyId":"a","count":9},{"studyId":"b","count":1}]`
+	r := diff(t, a, b, o)
+	if r.Count != 1 || !strings.Contains(r.Diffs[0], "[0].count: a=5 b=9") {
+		t.Fatalf("records should line up by studyId: %v", r.Diffs)
+	}
+}
+
+func TestCompareTiesKeepRunOrder(t *testing.T) {
+	o := defaultOptions()
+	o.Ties = []string{"g"}
+	a := `[{"g":1,"p":"x"},{"g":1,"p":"y"},{"g":2,"p":"z"}]`
+	if r := diff(t, a, `[{"g":1,"p":"y"},{"g":1,"p":"x"},{"g":2,"p":"z"}]`, o); r.Count != 0 {
+		t.Fatalf("order within a tie is free: %v", r.Diffs)
+	}
+	if r := diff(t, a, `[{"g":2,"p":"z"},{"g":1,"p":"x"},{"g":1,"p":"y"}]`, o); r.Count != 1 {
+		t.Fatalf("order of the tied runs must still match: %v", r.Diffs)
+	}
+}
+
+func TestCompareUnorderedKeys(t *testing.T) {
+	o := defaultOptions()
+	o.UnorderedKeys = map[string]bool{"sampleIds": true}
+	a := `[{"id":"l1","sampleIds":["b","a"]},{"id":"l2","sampleIds":[]}]`
+	if r := diff(t, a, `[{"id":"l1","sampleIds":["a","b"]},{"id":"l2","sampleIds":[]}]`, o); r.Count != 0 {
+		t.Fatalf("sampleIds unordered: %v", r.Diffs)
+	}
+	if r := diff(t, a, `[{"id":"l2","sampleIds":[]},{"id":"l1","sampleIds":["a","b"]}]`, o); r.Count != 1 {
+		t.Fatalf("outer list still ordered: %v", r.Diffs)
+	}
+}
+
+func TestCompareLengthMismatchListsExtras(t *testing.T) {
+	r := diff(t, `[{"id":1},{"id":2},{"id":4}]`, `[{"id":1},{"id":2}]`, defaultOptions())
+	if r.Count != 2 || !strings.Contains(r.Diffs[0], "length a=3 b=2") || !strings.Contains(r.Diffs[1], `only in a: {"id":4}`) {
+		t.Fatalf("got %v", r.Diffs)
+	}
+}
+
+func TestCompareFieldDiffPaths(t *testing.T) {
+	r := diff(t, `[{"id":1,"v":"x","extra":true}]`, `[{"id":1,"v":"y","more":null}]`, defaultOptions())
+	want := []string{`$[0].extra: only in a (true)`, `$[0].more: only in b (null)`, `$[0].v: a="x" b="y"`}
+	if r.Count != 3 {
+		t.Fatalf("got %v", r.Diffs)
+	}
+	for i, w := range want {
+		if strings.TrimPrefix(r.Diffs[i], "$") != strings.TrimPrefix(w, "$") {
+			t.Errorf("diff %d: got %q want %q", i, r.Diffs[i], w)
+		}
+	}
+}
+
+func TestCompareNullIsMissingAndIgnore(t *testing.T) {
+	o := defaultOptions()
+	o.NullIsMissing = true
+	o.Ignore = map[string]bool{"importDate": true}
+	r := diff(t, `{"a":null,"importDate":"2024","b":[{"importDate":1,"k":2}]}`, `{"importDate":"2025","b":[{"k":2}]}`, o)
+	if r.Count != 0 {
+		t.Fatalf("got %v", r.Diffs)
+	}
+}
+
+func TestCompareMaxDiffsCapsListNotCount(t *testing.T) {
+	o := defaultOptions()
+	o.MaxDiffs = 2
+	r := diff(t, `[1,2,3,4]`, `[5,6,7,8]`, o)
+	if r.Count != 4 || len(r.Diffs) != 2 {
+		t.Fatalf("count %d diffs %v", r.Count, r.Diffs)
+	}
+}
+
+func TestParseCorpus(t *testing.T) {
+	src := `# comment
+## studies unordered ignore=importDate,readPermission known="www is newer"
+GET /api/studies?projection=SUMMARY
+
+## mutations nullmissing
+POST /api/mutations/fetch
+{
+  "entrezGeneIds": [7157]
+}
+`
+	reqs, err := parseCorpus(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reqs) != 2 {
+		t.Fatalf("got %d requests", len(reqs))
+	}
+	s := reqs[0]
+	if s.Name != "studies" || s.Method != "GET" || s.Path != "/api/studies?projection=SUMMARY" || s.Body != "" ||
+		!s.Opts.Unordered || len(s.Opts.Ignore) != 2 || s.Opts.Known != "www is newer" {
+		t.Fatalf("studies: %+v", s)
+	}
+	m := reqs[1]
+	if m.Method != "POST" || !m.Opts.NullIsMissing || !strings.Contains(m.Body, `"entrezGeneIds": [7157]`) {
+		t.Fatalf("mutations: %+v", m)
+	}
+	if _, err := parseCorpus(strings.NewReader("## a\nGET /x\n## a\nGET /y\n")); err == nil {
+		t.Fatal("duplicate names must fail")
+	}
+	if reqs, err := parseCorpus(strings.NewReader("## a unordered=sampleIds ties=g,h\nGET /x\n")); err != nil ||
+		len(reqs[0].Opts.UnorderedKeys) != 1 || len(reqs[0].Opts.Ties) != 2 {
+		t.Fatalf("keyed options: %+v %v", reqs, err)
+	}
+	if _, err := parseCorpus(strings.NewReader("## a bogus\nGET /x\n")); err == nil {
+		t.Fatal("unknown option must fail")
+	}
+}
+
+func TestCompareResponsesOutcomes(t *testing.T) {
+	o := defaultOptions()
+	rq := request{Name: "x"}
+	if r := compareResponses(rq, response{200, `{"a":1}`}, response{200, `{"a":1}`}, o); r.Outcome != identical {
+		t.Fatalf("got %+v", r)
+	}
+	if r := compareResponses(rq, response{200, `{}`}, response{400, `{}`}, o); r.Outcome != status {
+		t.Fatalf("got %+v", r)
+	}
+	rq.Opts.Known = "reason"
+	if r := compareResponses(rq, response{200, `{"a":1}`}, response{200, `{"a":2}`}, o); r.Outcome != known {
+		t.Fatalf("got %+v", r)
+	}
+}

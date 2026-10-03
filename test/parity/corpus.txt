@@ -1,0 +1,754 @@
+# API parity corpus: requests the cBioPortal frontend makes, for
+# cmd/paritydiff (see docs/testing.md). Studies: acc_tcga_pan_can_atlas_2018
+# (TCGA, all data types), msk_impact_2017 (targeted panels, SV, ~11k samples),
+# acbc_mskcc_2015 (12 samples), lgg_ucsf_2014 (timeline and treatments).
+#
+# Format:
+#   ## name [unordered] [nullmissing] [status-only] [ignore=key,...] [known="reason"]
+#   METHOD /api/path?query
+#   optional JSON body
+
+# ---------------------------------------------------------------- reference data
+## info ignore=gitBranch,gitCommitId,gitCommitIdAbbrev,gitCommitIdDescribe,gitCommitIdDescribeShort,gitCommitMessageFull,gitCommitMessageShort,gitCommitMessageUserEmail,gitCommitMessageUserName,portalVersion,gitDirty,dbVersion,derivedTableVersion
+GET /api/info
+## cancer-types
+GET /api/cancer-types
+## cancer-types-paged
+GET /api/cancer-types?pageSize=10&pageNumber=2&sortBy=name&direction=DESC
+## cancer-type-one
+GET /api/cancer-types/brca
+## cancer-type-missing
+GET /api/cancer-types/nosuchtype
+## genes-keyword
+GET /api/genes?keyword=TP5&pageSize=20
+## genes-keyword-lower
+GET /api/genes?keyword=brca&projection=SUMMARY
+## genes-alias
+GET /api/genes?alias=P53
+## genes-paged
+GET /api/genes?pageSize=25&pageNumber=3&sortBy=hugoGeneSymbol&direction=ASC
+## gene-by-symbol
+GET /api/genes/TP53
+## gene-by-entrez
+GET /api/genes/7157
+## gene-aliases
+GET /api/genes/7157/aliases
+## gene-missing
+GET /api/genes/NOSUCHGENE
+## genes-fetch-symbol
+POST /api/genes/fetch?geneIdType=HUGO_GENE_SYMBOL
+["TP53","KRAS","EGFR","CDKN2A","MLL2","NOSUCH"]
+## genes-fetch-entrez
+POST /api/genes/fetch?geneIdType=ENTREZ_GENE_ID&projection=SUMMARY
+["7157","3845","1956","1029"]
+## genes-fetch-id
+POST /api/genes/fetch?geneIdType=ENTREZ_GENE_ID&projection=ID
+["7157","3845"]
+## gene-panels
+GET /api/gene-panels
+## gene-panels-paged
+GET /api/gene-panels?pageSize=5&pageNumber=1&direction=DESC
+## gene-panel-one
+GET /api/gene-panels/IMPACT341
+## gene-panels-fetch
+POST /api/gene-panels/fetch?projection=DETAILED
+["IMPACT341","IMPACT410"]
+## reference-genome-gene
+GET /api/reference-genome-genes/hg19/7157
+## reference-genome-genes-fetch
+POST /api/reference-genome-genes/hg19/fetch
+["7157","3845","1956"]
+## genesets-version
+GET /api/genesets/version
+## timestamps known="www answers HTTP 500 (SQL exception)"
+GET /api/timestamps
+
+# ---------------------------------------------------------------- studies
+## studies-summary unordered known="www lists resource definitions of other studies sharing a resource id"
+GET /api/studies?projection=SUMMARY
+## studies-id unordered
+GET /api/studies?projection=ID
+## studies-keyword
+GET /api/studies?keyword=breast&projection=SUMMARY
+## studies-paged
+GET /api/studies?pageSize=10&pageNumber=2&sortBy=studyId&direction=ASC
+## studies-paged-first
+GET /api/studies?pageSize=5&pageNumber=0&sortBy=name&direction=DESC
+## studies-keyword-two-words
+GET /api/studies?keyword=lung%20msk&projection=SUMMARY
+## studies-meta status-only
+GET /api/studies?projection=META
+## study-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018
+## study-tags-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/tags
+## study-msk
+GET /api/studies/msk_impact_2017
+## study-tags-msk
+GET /api/studies/msk_impact_2017/tags
+## study-acbc
+GET /api/studies/acbc_mskcc_2015
+## study-tags-acbc
+GET /api/studies/acbc_mskcc_2015/tags
+## study-lgg
+GET /api/studies/lgg_ucsf_2014
+## study-tags-lgg
+GET /api/studies/lgg_ucsf_2014/tags
+## study-missing
+GET /api/studies/no_such_study
+## studies-fetch-summary unordered known="www legacy studies/fetch reports allSampleCount 1"
+POST /api/studies/fetch?projection=SUMMARY
+["acc_tcga_pan_can_atlas_2018","msk_impact_2017","acbc_mskcc_2015","lgg_ucsf_2014"]
+## studies-fetch-detailed unordered known="www legacy studies/fetch reports allSampleCount 1"
+POST /api/studies/fetch?projection=DETAILED
+["acc_tcga_pan_can_atlas_2018","acbc_mskcc_2015"]
+## studies-tags-fetch unordered
+POST /api/studies/tags/fetch
+["acc_tcga_pan_can_atlas_2018","msk_impact_2017"]
+
+# ---------------------------------------------------------------- patients and samples
+## samples-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples
+## samples-acc-detailed
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples?projection=DETAILED&pageSize=50
+## patients-acc unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/patients
+## sample-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples/TCGA-OR-A5J1-01
+## patient-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/patients/TCGA-OR-A5J1
+## patient-samples-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/patients/TCGA-OR-A5J1/samples?projection=DETAILED
+## samples-msk
+GET /api/studies/msk_impact_2017/samples
+## samples-msk-detailed
+GET /api/studies/msk_impact_2017/samples?projection=DETAILED&pageSize=50
+## patients-msk unordered
+GET /api/studies/msk_impact_2017/patients
+## sample-msk
+GET /api/studies/msk_impact_2017/samples/P-0000004-T01-IM3
+## patient-msk
+GET /api/studies/msk_impact_2017/patients/P-0000004
+## patient-samples-msk
+GET /api/studies/msk_impact_2017/patients/P-0000004/samples?projection=DETAILED
+## samples-acbc
+GET /api/studies/acbc_mskcc_2015/samples
+## samples-acbc-detailed
+GET /api/studies/acbc_mskcc_2015/samples?projection=DETAILED&pageSize=50
+## patients-acbc unordered
+GET /api/studies/acbc_mskcc_2015/patients
+## sample-acbc
+GET /api/studies/acbc_mskcc_2015/samples/AdCC10T
+## patient-acbc
+GET /api/studies/acbc_mskcc_2015/patients/AdCC10T
+## patient-samples-acbc
+GET /api/studies/acbc_mskcc_2015/patients/AdCC10T/samples?projection=DETAILED
+## samples-lgg
+GET /api/studies/lgg_ucsf_2014/samples
+## samples-lgg-detailed
+GET /api/studies/lgg_ucsf_2014/samples?projection=DETAILED&pageSize=50
+## patients-lgg unordered
+GET /api/studies/lgg_ucsf_2014/patients
+## sample-lgg
+GET /api/studies/lgg_ucsf_2014/samples/P01_Pri
+## patient-lgg
+GET /api/studies/lgg_ucsf_2014/patients/P01
+## patient-samples-lgg unordered
+GET /api/studies/lgg_ucsf_2014/patients/P01/samples?projection=DETAILED
+## samples-paged-sorted
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples?pageSize=10&pageNumber=1&sortBy=sampleId&direction=DESC
+## samples-id-projection
+GET /api/studies/acbc_mskcc_2015/samples?projection=ID
+## samples-keyword unordered
+GET /api/samples?keyword=TCGA-OR-A5J1&projection=SUMMARY
+## patients-keyword ties=patientId
+GET /api/patients?keyword=TCGA-OR-A5J&pageSize=20
+## sample-missing
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples/NOSUCH
+## samples-fetch-ids
+POST /api/samples/fetch?projection=DETAILED
+{"sampleIdentifiers":[{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J1-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J2-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J3-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J4-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J5-01"},{"studyId":"lgg_ucsf_2014","sampleId":"P01_Pri"},{"studyId":"lgg_ucsf_2014","sampleId":"P01_Rec"},{"studyId":"lgg_ucsf_2014","sampleId":"P02_Pri"}]}
+## samples-fetch-list
+POST /api/samples/fetch?projection=SUMMARY
+{"sampleListIds":["acbc_mskcc_2015_all","lgg_ucsf_2014_sequenced"]}
+## samples-fetch-msk-list
+POST /api/samples/fetch?projection=ID
+{"sampleListIds":["msk_impact_2017_Melanoma"]}
+## samples-fetch-keys
+POST /api/samples/fetch
+{"uniqueSampleKeys":["VENHQS1PUi1BNUoxLTAxOmFjY190Y2dhX3Bhbl9jYW5fYXRsYXNfMjAxOA"]}
+## patients-fetch unordered
+POST /api/patients/fetch?projection=DETAILED
+{"patientIdentifiers":[{"studyId":"lgg_ucsf_2014","patientId":"P01"},{"studyId":"acc_tcga_pan_can_atlas_2018","patientId":"TCGA-OR-A5J1"}]}
+## patients-fetch-keys
+POST /api/patients/fetch
+{"uniquePatientKeys":["UDAxOmxnZ191Y3NmXzIwMTQ"]}
+
+# ---------------------------------------------------------------- clinical data
+## clinical-attributes-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/clinical-attributes
+## clinical-attributes-msk
+GET /api/studies/msk_impact_2017/clinical-attributes
+## clinical-attributes-lgg
+GET /api/studies/lgg_ucsf_2014/clinical-attributes
+## clinical-attribute-one
+GET /api/studies/acc_tcga_pan_can_atlas_2018/clinical-attributes/OS_STATUS
+## clinical-attributes-detailed
+GET /api/studies/lgg_ucsf_2014/clinical-attributes?projection=DETAILED
+## clinical-attributes-fetch ties=clinicalAttributeId
+POST /api/clinical-attributes/fetch
+["acc_tcga_pan_can_atlas_2018","lgg_ucsf_2014"]
+## clinical-attributes-fetch-id
+POST /api/clinical-attributes/fetch?projection=ID
+["acbc_mskcc_2015"]
+## clinical-attributes-counts unordered
+POST /api/clinical-attributes/counts/fetch
+{"sampleListId":"lgg_ucsf_2014_all"}
+## clinical-attributes-counts-ids unordered
+POST /api/clinical-attributes/counts/fetch
+{"sampleIdentifiers":[{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J1-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J2-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J3-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J4-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J5-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J6-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J7-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J8-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J9-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5JA-01"}]}
+## clinical-data-study-sample unordered
+GET /api/studies/acbc_mskcc_2015/clinical-data?clinicalDataType=SAMPLE
+## clinical-data-study-patient unordered
+GET /api/studies/lgg_ucsf_2014/clinical-data?clinicalDataType=PATIENT
+## clinical-data-study-attr unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/clinical-data?clinicalDataType=PATIENT&attributeId=OS_MONTHS&projection=DETAILED
+## clinical-data-study-paged known="ties of sortBy=clinicalAttributeId are in import order, so the page holds other samples"
+GET /api/studies/acc_tcga_pan_can_atlas_2018/clinical-data?clinicalDataType=SAMPLE&pageSize=20&pageNumber=2&sortBy=clinicalAttributeId&direction=DESC
+## clinical-data-sample unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples/TCGA-OR-A5J1-01/clinical-data
+## clinical-data-patient unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/patients/TCGA-OR-A5J1/clinical-data?projection=DETAILED
+## clinical-data-fetch-sample unordered
+POST /api/clinical-data/fetch?clinicalDataType=SAMPLE
+{"attributeIds":["CANCER_TYPE","MUTATION_COUNT","FRACTION_GENOME_ALTERED"],"identifiers":[{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J1-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J2-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J3-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J4-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J5-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J6-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J7-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J8-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J9-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JA-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JB-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JC-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JD-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JE-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JF-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JG-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JH-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JI-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JJ-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JK-01"}]}
+## clinical-data-fetch-patient unordered
+POST /api/clinical-data/fetch?clinicalDataType=PATIENT&projection=DETAILED
+{"attributeIds":["OS_MONTHS","OS_STATUS","SEX","AGE"],"identifiers":[{"studyId":"lgg_ucsf_2014","entityId":"P01"},{"studyId":"lgg_ucsf_2014","entityId":"P02"},{"studyId":"lgg_ucsf_2014","entityId":"P04"},{"studyId":"lgg_ucsf_2014","entityId":"P05"}]}
+## clinical-data-fetch-all-attrs unordered
+POST /api/clinical-data/fetch?clinicalDataType=SAMPLE
+{"identifiers":[{"studyId":"acbc_mskcc_2015","entityId":"AdCC10T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC11T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC12T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC1T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC2T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC32T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC3T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC4T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC5T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC6T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC8T"},{"studyId":"acbc_mskcc_2015","entityId":"AdCC9T"}]}
+## clinical-data-study-fetch unordered
+POST /api/studies/lgg_ucsf_2014/clinical-data/fetch?clinicalDataType=SAMPLE
+{"ids":["P01_Pri","P01_Rec"],"attributeIds":["SAMPLE_TYPE","GRADE"]}
+## clinical-data-fetch-id unordered
+POST /api/clinical-data/fetch?clinicalDataType=PATIENT&projection=ID
+{"attributeIds":["OS_STATUS"],"identifiers":[{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J1"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J2"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J3"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J4"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J5"}]}
+
+# ---------------------------------------------------------------- molecular profiles and sample lists
+## molecular-profiles-acc
+GET /api/studies/acc_tcga_pan_can_atlas_2018/molecular-profiles
+## molecular-profiles-msk-detailed
+GET /api/studies/msk_impact_2017/molecular-profiles?projection=DETAILED
+## molecular-profile-one
+GET /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_mutations
+## molecular-profile-missing
+GET /api/molecular-profiles/no_such_profile
+## molecular-profiles-fetch-studies
+POST /api/molecular-profiles/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018","lgg_ucsf_2014","acbc_mskcc_2015"]}
+## molecular-profiles-fetch-ids
+POST /api/molecular-profiles/fetch?projection=DETAILED
+{"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_gistic","msk_impact_2017_mutations"]}
+## molecular-profiles-paged
+GET /api/molecular-profiles?pageSize=20&pageNumber=5&projection=SUMMARY
+## sample-lists-acc unordered=sampleIds
+GET /api/studies/acc_tcga_pan_can_atlas_2018/sample-lists
+## sample-lists-msk-detailed unordered=sampleIds
+GET /api/studies/msk_impact_2017/sample-lists?projection=DETAILED&pageSize=5
+## sample-list-one
+GET /api/sample-lists/lgg_ucsf_2014_all
+## sample-list-ids unordered
+GET /api/sample-lists/acbc_mskcc_2015_cnaseq/sample-ids
+## sample-list-missing
+GET /api/sample-lists/no_such_list
+## sample-lists-fetch unordered
+POST /api/sample-lists/fetch?projection=DETAILED
+["acc_tcga_pan_can_atlas_2018_cna","lgg_ucsf_2014_sequenced"]
+## sample-lists-paged unordered=sampleIds
+GET /api/sample-lists?pageSize=10&pageNumber=7&sortBy=sampleListId&direction=ASC
+
+# ---------------------------------------------------------------- mutations, copy number, structural variants
+## mutations-acc-list ties=molecularProfileId,sampleId,entrezGeneId
+GET /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_mutations/mutations?sampleListId=acc_tcga_pan_can_atlas_2018_all&entrezGeneId=7157&projection=DETAILED
+## mutations-acc-fetch ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_mutations/mutations/fetch?projection=DETAILED
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","entrezGeneIds":[7157,3845,1956,5290,673,5728,1029,4193,3417,546]}
+## mutations-acc-summary ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_mutations/mutations/fetch?projection=SUMMARY
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","entrezGeneIds":[7157,3845,1956,5290,673,5728,1029,4193,3417,546]}
+## mutations-acc-meta status-only
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_mutations/mutations/fetch?projection=META
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","entrezGeneIds":[7157,3845,1956,5290,673,5728,1029,4193,3417,546]}
+## mutations-msk-tp53 ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/molecular-profiles/msk_impact_2017_mutations/mutations/fetch?projection=DETAILED
+{"sampleListId":"msk_impact_2017_all","entrezGeneIds":[7157,3845]}
+## mutations-msk-paged ties=proteinChange
+POST /api/molecular-profiles/msk_impact_2017_mutations/mutations/fetch?pageSize=20&pageNumber=3&sortBy=proteinChange&direction=DESC
+{"sampleListId":"msk_impact_2017_all","entrezGeneIds":[7157]}
+## mutations-msk-samples ties=molecularProfileId,sampleId,entrezGeneId known="fixed in transform --from-prod; identical once the mirror is rebuilt"
+POST /api/molecular-profiles/msk_impact_2017_mutations/mutations/fetch?projection=DETAILED
+{"sampleIds":["P-0000004-T01-IM3","P-0000015-T01-IM3","P-0000023-T01-IM3","P-0000024-T01-IM3","P-0000025-T01-IM3","P-0000025-T02-IM5","P-0000026-T01-IM3","P-0000027-T01-IM3","P-0000030-T01-IM3","P-0000034-T01-IM3","P-0000036-T01-IM3","P-0000037-T01-IM3","P-0000037-T02-IM3","P-0000039-T01-IM3","P-0000041-T01-IM3","P-0000042-T01-IM3","P-0000043-T02-IM3","P-0000047-T01-IM3","P-0000053-T01-IM3","P-0000055-T01-IM3","P-0000056-T01-IM3","P-0000057-T01-IM3","P-0000058-T01-IM3","P-0000059-T01-IM3","P-0000060-T01-IM3","P-0000061-T01-IM3","P-0000062-T01-IM3","P-0000063-T01-IM3","P-0000064-T02-IM3","P-0000065-T01-IM3","P-0000066-T01-IM3","P-0000066-T02-IM5","P-0000067-T01-IM3","P-0000067-T02-IM5","P-0000068-T01-IM3","P-0000069-T01-IM3","P-0000071-T01-IM3","P-0000073-T01-IM3","P-0000075-T01-IM3","P-0000076-T01-IM3"]}
+## mutations-multi ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/mutations/fetch?projection=DETAILED
+{"entrezGeneIds":[7157,3417,546],"molecularProfileIds":["lgg_ucsf_2014_mutations","acc_tcga_pan_can_atlas_2018_mutations"]}
+## mutations-multi-ids ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/mutations/fetch?projection=SUMMARY
+{"entrezGeneIds":[7157,3417],"sampleMolecularIdentifiers":[{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P01_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P01_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P02_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P02_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P04_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P04_Rec1"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P04_Rec2"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P04_Rec3"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P05_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P05_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P06_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P06_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P07_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P07_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P08_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P08_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P09_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P09_Rec"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P10_Pri"},{"molecularProfileId":"lgg_ucsf_2014_mutations","sampleId":"P10_Rec"}]}
+## mutations-uncalled ties=molecularProfileId,sampleId,entrezGeneId known="fixed in transform --from-prod; identical once the mirror is rebuilt"
+POST /api/molecular-profiles/glioma_msk_2018_mutations_uncalled/mutations/fetch?projection=DETAILED
+{"sampleListId":"glioma_msk_2018_all","entrezGeneIds":[7157,3417,546]}
+## mutations-acbc-all ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/molecular-profiles/acbc_mskcc_2015_mutations/mutations/fetch?projection=DETAILED
+{"sampleListId":"acbc_mskcc_2015_all"}
+## mutation-spectrums unordered
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_mutations/mutation-spectrums/fetch
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all"}
+## mutation-counts-by-position unordered known="fixed in transform --from-prod; identical once the mirror is rebuilt"
+POST /api/mutation-counts-by-position/fetch
+[{"entrezGeneId":7157,"proteinPosStart":175,"proteinPosEnd":175},{"entrezGeneId":3845,"proteinPosStart":12,"proteinPosEnd":13}]
+## variant-counts unordered
+POST /api/molecular-profiles/msk_impact_2017_mutations/variant-counts/fetch
+[{"entrezGeneId":7157,"keyword":"TP53 R175 missense"},{"entrezGeneId":3845,"keyword":"KRAS G12 missense"}]
+## cna-acc-get
+GET /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_gistic/discrete-copy-number?sampleListId=acc_tcga_pan_can_atlas_2018_all&discreteCopyNumberEventType=HOMDEL_AND_AMP&projection=DETAILED
+## cna-acc-fetch
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=HOMDEL_AND_AMP&projection=DETAILED
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","entrezGeneIds":[7157,3845,1956,5290,673,5728,1029,4193,3417,546]}
+## cna-acc-all-types
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=ALL
+{"sampleIds":["TCGA-OR-A5J1-01","TCGA-OR-A5J2-01","TCGA-OR-A5J3-01","TCGA-OR-A5J4-01","TCGA-OR-A5J5-01","TCGA-OR-A5J6-01","TCGA-OR-A5J7-01","TCGA-OR-A5J8-01","TCGA-OR-A5J9-01","TCGA-OR-A5JA-01"],"entrezGeneIds":[7157,1029]}
+## cna-msk-fetch
+POST /api/molecular-profiles/msk_impact_2017_cna/discrete-copy-number/fetch?discreteCopyNumberEventType=HOMDEL_AND_AMP&projection=SUMMARY
+{"sampleListId":"msk_impact_2017_all","entrezGeneIds":[1029,4193,1956]}
+## cna-counts
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_gistic/discrete-copy-number-counts/fetch
+[{"entrezGeneId":1029,"alteration":-2},{"entrezGeneId":4193,"alteration":2}]
+## sv-fetch-genes ties=site1HugoSymbol,site2HugoSymbol
+POST /api/structural-variant/fetch
+{"entrezGeneIds":[238,2078,5979],"molecularProfileIds":["msk_impact_2017_structural_variants"]}
+## sv-fetch-samples ties=site1HugoSymbol,site2HugoSymbol
+POST /api/structural-variant/fetch
+{"sampleMolecularIdentifiers":[{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC10T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC11T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC12T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC1T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC2T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC32T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC3T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC4T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC5T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC6T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC8T"},{"molecularProfileId":"acbc_mskcc_2015_structural_variants","sampleId":"AdCC9T"}]}
+## sv-fetch-queries ties=site1HugoSymbol,site2HugoSymbol
+POST /api/structural-variant/fetch
+{"molecularProfileIds":["msk_impact_2017_structural_variants"],"structuralVariantQueries":[{"gene1":{"entrezId":238},"gene2":{"specialValue":"ANY_GENE"}}]}
+## gene-panel-data-profile unordered
+POST /api/molecular-profiles/msk_impact_2017_mutations/gene-panel-data/fetch
+{"sampleIds":["P-0000004-T01-IM3","P-0000015-T01-IM3","P-0000023-T01-IM3","P-0000024-T01-IM3","P-0000025-T01-IM3","P-0000025-T02-IM5","P-0000026-T01-IM3","P-0000027-T01-IM3","P-0000030-T01-IM3","P-0000034-T01-IM3","P-0000036-T01-IM3","P-0000037-T01-IM3","P-0000037-T02-IM3","P-0000039-T01-IM3","P-0000041-T01-IM3","P-0000042-T01-IM3","P-0000043-T02-IM3","P-0000047-T01-IM3","P-0000053-T01-IM3","P-0000055-T01-IM3","P-0000056-T01-IM3","P-0000057-T01-IM3","P-0000058-T01-IM3","P-0000059-T01-IM3","P-0000060-T01-IM3","P-0000061-T01-IM3","P-0000062-T01-IM3","P-0000063-T01-IM3","P-0000064-T02-IM3","P-0000065-T01-IM3","P-0000066-T01-IM3","P-0000066-T02-IM5","P-0000067-T01-IM3","P-0000067-T02-IM5","P-0000068-T01-IM3","P-0000069-T01-IM3","P-0000071-T01-IM3","P-0000073-T01-IM3","P-0000075-T01-IM3","P-0000076-T01-IM3"]}
+## gene-panel-data-multi unordered
+POST /api/gene-panel-data/fetch
+{"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_mutations","acc_tcga_pan_can_atlas_2018_gistic","acbc_mskcc_2015_mutations"]}
+## gene-panel-data-ids unordered
+POST /api/gene-panel-data/fetch
+{"sampleMolecularIdentifiers":[{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000004-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000015-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000023-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000024-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000025-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000025-T02-IM5"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000026-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000027-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000030-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000034-T01-IM3"}]}
+## segments-sample unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples/TCGA-OR-A5J1-01/copy-number-segments
+## segments-fetch unordered
+POST /api/copy-number-segments/fetch?chromosome=17
+[{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J1-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J2-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J3-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J4-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J5-01"}]
+## segments-fetch-summary unordered
+POST /api/copy-number-segments/fetch?projection=SUMMARY
+[{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J1-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J2-01"}]
+## gistic
+GET /api/studies/acc_tcga_pan_can_atlas_2018/significant-copy-number-regions
+## mutsig
+GET /api/studies/acc_tcga_pan_can_atlas_2018/significantly-mutated-genes?pageSize=20
+
+# ---------------------------------------------------------------- molecular data and generic assay
+## molecular-data-get
+GET /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna/molecular-data?sampleListId=acc_tcga_pan_can_atlas_2018_all&entrezGeneId=7157
+## molecular-data-fetch
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna_median_Zscores/molecular-data/fetch
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","entrezGeneIds":[7157,1956,1029]}
+## molecular-data-multi ties=sampleId
+POST /api/molecular-data/fetch?projection=SUMMARY
+{"entrezGeneIds":[7157,1029],"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_gistic","acc_tcga_pan_can_atlas_2018_rppa_Zscores","acc_tcga_pan_can_atlas_2018_log2CNA"]}
+## molecular-data-multi-ids
+POST /api/molecular-data/fetch
+{"entrezGeneIds":[7157],"sampleMolecularIdentifiers":[{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J1-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J2-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J3-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J4-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J5-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J6-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J7-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J8-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5J9-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna","sampleId":"TCGA-OR-A5JA-01"}]}
+## molecular-data-detailed
+POST /api/molecular-data/fetch?projection=DETAILED
+{"entrezGeneIds":[7157],"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_gistic"]}
+## mrna-percentile
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna/mrna-percentile/fetch?sampleId=TCGA-OR-A5J1-01
+[7157,1956,1029]
+## generic-assay-meta-profile unordered
+GET /api/generic-assay-meta/acc_tcga_pan_can_atlas_2018_armlevel_cna
+## generic-assay-meta-entity
+GET /api/generic-assay-meta/generic-assay/AFR
+## generic-assay-meta-fetch unordered
+POST /api/generic-assay-meta/fetch?projection=DETAILED
+{"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_genetic_ancestry"]}
+## generic-assay-meta-fetch-ids unordered
+POST /api/generic-assay-meta/fetch
+{"genericAssayStableIds":["1p_status","AFR"]}
+## generic-assay-data-get unordered
+GET /api/generic-assay-data/acc_tcga_pan_can_atlas_2018_armlevel_cna/generic-assay/1p_status
+## generic-assay-data-fetch unordered
+POST /api/generic_assay_data/acc_tcga_pan_can_atlas_2018_genetic_ancestry/fetch
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","genericAssayStableIds":["AFR","EUR"]}
+## generic-assay-data-multi unordered
+POST /api/generic_assay_data/fetch
+{"genericAssayStableIds":["1p_status","1q_status"],"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_armlevel_cna"]}
+## generic-assay-data-multi-ids unordered
+POST /api/generic_assay_data/fetch?projection=SUMMARY
+{"genericAssayStableIds":["AFR"],"sampleMolecularIdentifiers":[{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J1-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J2-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J3-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J4-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J5-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J6-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J7-01"},{"molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry","sampleId":"TCGA-OR-A5J8-01"}]}
+
+# ---------------------------------------------------------------- study view
+## filtered-samples-acc unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## filtered-samples-acc-os unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"OS_STATUS","values":[{"value":"1:DECEASED"}]}]}
+## filtered-samples-acc-age unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"AGE","values":[{"start":30,"end":60}]}]}
+## filtered-samples-acc-cdkn2a unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"],"geneFilters":[{"molecularProfileIds":["acc_tcga_pan_can_atlas_2018_gistic"],"geneQueries":[[{"hugoGeneSymbol":"CDKN2A","entrezGeneId":1029,"alterations":["HOMDEL"]}]]}]}
+## filtered-samples-msk unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["msk_impact_2017"]}
+## filtered-samples-msk-primary unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["msk_impact_2017"],"clinicalDataFilters":[{"attributeId":"SAMPLE_TYPE","values":[{"value":"Primary"}]}]}
+## filtered-samples-msk-tp53 unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["msk_impact_2017"],"geneFilters":[{"molecularProfileIds":["msk_impact_2017_mutations"],"geneQueries":[[{"hugoGeneSymbol":"TP53","entrezGeneId":7157,"alterations":[]}]]}]}
+## filtered-samples-lgg unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["lgg_ucsf_2014"]}
+## filtered-samples-multi unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018","acbc_mskcc_2015"]}
+## filtered-samples-negate unordered
+POST /api/filtered-samples/fetch?negateFilters=true
+{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"OS_STATUS","values":[{"value":"1:DECEASED"}]}]}
+## filtered-samples-sample-ids unordered
+POST /api/filtered-samples/fetch
+{"sampleIdentifiers":[{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J1-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J2-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J3-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J4-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J5-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J6-01"},{"studyId":"acc_tcga_pan_can_atlas_2018","sampleId":"TCGA-OR-A5J7-01"}]}
+## filtered-samples-case-lists unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["msk_impact_2017"],"caseLists":[["msk_impact_2017_Melanoma","msk_impact_2017_Glioma"]]}
+## filtered-samples-genomic-profiles unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"],"genomicProfiles":[["rppa"]]}
+## clinical-data-counts-acc unordered
+POST /api/clinical-data-counts/fetch
+{"attributes":[{"attributeId":"SEX"},{"attributeId":"SAMPLE_TYPE"},{"attributeId":"CANCER_TYPE_DETAILED"},{"attributeId":"OS_STATUS"},{"attributeId":"ONCOTREE_CODE"},{"attributeId":"SUBTYPE"},{"attributeId":"GRADE"},{"attributeId":"SOMATIC_STATUS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## clinical-data-counts-acc-os unordered
+POST /api/clinical-data-counts/fetch
+{"attributes":[{"attributeId":"SEX"},{"attributeId":"SAMPLE_TYPE"},{"attributeId":"CANCER_TYPE_DETAILED"},{"attributeId":"OS_STATUS"},{"attributeId":"ONCOTREE_CODE"},{"attributeId":"SUBTYPE"},{"attributeId":"GRADE"},{"attributeId":"SOMATIC_STATUS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"OS_STATUS","values":[{"value":"1:DECEASED"}]}]}}
+## clinical-data-counts-msk unordered
+POST /api/clinical-data-counts/fetch
+{"attributes":[{"attributeId":"SEX"},{"attributeId":"SAMPLE_TYPE"},{"attributeId":"CANCER_TYPE_DETAILED"},{"attributeId":"OS_STATUS"},{"attributeId":"ONCOTREE_CODE"},{"attributeId":"SUBTYPE"},{"attributeId":"GRADE"},{"attributeId":"SOMATIC_STATUS"}],"studyViewFilter":{"studyIds":["msk_impact_2017"]}}
+## clinical-data-counts-msk-tp53 unordered
+POST /api/clinical-data-counts/fetch
+{"attributes":[{"attributeId":"SEX"},{"attributeId":"SAMPLE_TYPE"},{"attributeId":"CANCER_TYPE_DETAILED"},{"attributeId":"OS_STATUS"},{"attributeId":"ONCOTREE_CODE"},{"attributeId":"SUBTYPE"},{"attributeId":"GRADE"},{"attributeId":"SOMATIC_STATUS"}],"studyViewFilter":{"studyIds":["msk_impact_2017"],"geneFilters":[{"molecularProfileIds":["msk_impact_2017_mutations"],"geneQueries":[[{"hugoGeneSymbol":"TP53","entrezGeneId":7157,"alterations":[]}]]}]}}
+## clinical-data-counts-lgg unordered
+POST /api/clinical-data-counts/fetch
+{"attributes":[{"attributeId":"SEX"},{"attributeId":"SAMPLE_TYPE"},{"attributeId":"CANCER_TYPE_DETAILED"},{"attributeId":"OS_STATUS"},{"attributeId":"ONCOTREE_CODE"},{"attributeId":"SUBTYPE"},{"attributeId":"GRADE"},{"attributeId":"SOMATIC_STATUS"}],"studyViewFilter":{"studyIds":["lgg_ucsf_2014"]}}
+## clinical-data-counts-multi unordered
+POST /api/clinical-data-counts/fetch
+{"attributes":[{"attributeId":"SEX"},{"attributeId":"SAMPLE_TYPE"},{"attributeId":"CANCER_TYPE_DETAILED"},{"attributeId":"OS_STATUS"},{"attributeId":"ONCOTREE_CODE"},{"attributeId":"SUBTYPE"},{"attributeId":"GRADE"},{"attributeId":"SOMATIC_STATUS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018","acbc_mskcc_2015"]}}
+## bin-counts-static-acc
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=STATIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"FRACTION_GENOME_ALTERED"},{"attributeId":"OS_MONTHS"},{"attributeId":"TMB_NONSYNONYMOUS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## bin-counts-dynamic-acc
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=DYNAMIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"OS_MONTHS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## bin-counts-static-acc-age
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=STATIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"FRACTION_GENOME_ALTERED"},{"attributeId":"OS_MONTHS"},{"attributeId":"TMB_NONSYNONYMOUS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"AGE","values":[{"start":30,"end":60}]}]}}
+## bin-counts-dynamic-acc-age
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=DYNAMIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"OS_MONTHS"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"AGE","values":[{"start":30,"end":60}]}]}}
+## bin-counts-static-msk-primary
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=STATIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"FRACTION_GENOME_ALTERED"},{"attributeId":"OS_MONTHS"},{"attributeId":"TMB_NONSYNONYMOUS"}],"studyViewFilter":{"studyIds":["msk_impact_2017"],"clinicalDataFilters":[{"attributeId":"SAMPLE_TYPE","values":[{"value":"Primary"}]}]}}
+## bin-counts-dynamic-msk-primary
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=DYNAMIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"OS_MONTHS"}],"studyViewFilter":{"studyIds":["msk_impact_2017"],"clinicalDataFilters":[{"attributeId":"SAMPLE_TYPE","values":[{"value":"Primary"}]}]}}
+## bin-counts-static-lgg
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=STATIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"FRACTION_GENOME_ALTERED"},{"attributeId":"OS_MONTHS"},{"attributeId":"TMB_NONSYNONYMOUS"}],"studyViewFilter":{"studyIds":["lgg_ucsf_2014"]}}
+## bin-counts-dynamic-lgg
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=DYNAMIC
+{"attributes":[{"attributeId":"AGE"},{"attributeId":"MUTATION_COUNT"},{"attributeId":"OS_MONTHS"}],"studyViewFilter":{"studyIds":["lgg_ucsf_2014"]}}
+## bin-counts-custom
+POST /api/clinical-data-bin-counts/fetch?dataBinMethod=STATIC
+{"attributes":[{"attributeId":"AGE","customBins":[20,40,60]},{"attributeId":"OS_MONTHS","disableLogScale":true}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## mutated-genes-acc unordered
+POST /api/mutated-genes/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## mutated-genes-msk unordered
+POST /api/mutated-genes/fetch
+{"studyIds":["msk_impact_2017"]}
+## mutated-genes-msk-primary unordered
+POST /api/mutated-genes/fetch
+{"studyIds":["msk_impact_2017"],"clinicalDataFilters":[{"attributeId":"SAMPLE_TYPE","values":[{"value":"Primary"}]}]}
+## mutated-genes-acbc unordered
+POST /api/mutated-genes/fetch
+{"studyIds":["acbc_mskcc_2015"]}
+## mutated-genes-multi unordered
+POST /api/mutated-genes/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018","acbc_mskcc_2015"]}
+## cna-genes-acc unordered
+POST /api/cna-genes/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## cna-genes-msk unordered
+POST /api/cna-genes/fetch
+{"studyIds":["msk_impact_2017"]}
+## cna-genes-msk-tp53 unordered
+POST /api/cna-genes/fetch
+{"studyIds":["msk_impact_2017"],"geneFilters":[{"molecularProfileIds":["msk_impact_2017_mutations"],"geneQueries":[[{"hugoGeneSymbol":"TP53","entrezGeneId":7157,"alterations":[]}]]}]}
+## sv-genes-msk unordered
+POST /api/structuralvariant-genes/fetch
+{"studyIds":["msk_impact_2017"]}
+## sv-genes-acc unordered
+POST /api/structuralvariant-genes/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## sv-genes-acbc unordered
+POST /api/structuralvariant-genes/fetch
+{"studyIds":["acbc_mskcc_2015"]}
+## sv-counts-msk unordered known="Java ProfiledCasesCounter appends gene2 panels to the shared panel list of gene1, so later pairs report extra panels"
+POST /api/structuralvariant-counts/fetch
+{"studyIds":["msk_impact_2017"]}
+## sv-counts-acbc unordered
+POST /api/structuralvariant-counts/fetch
+{"studyIds":["acbc_mskcc_2015"]}
+## mutated-genes-driver-filter unordered
+POST /api/mutated-genes/fetch
+{"studyIds":["msk_impact_2017"],"alterationFilter":{"includeDriver":true,"includeVUS":false,"includeUnknownOncogenicity":false,"includeGermline":true,"includeSomatic":true,"includeUnknownStatus":true,"tiersBooleanMap":{},"includeUnknownTier":true}}
+## profile-sample-counts-acc unordered
+POST /api/molecular-profile-sample-counts/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## sample-lists-counts-acc unordered
+POST /api/sample-lists-counts/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## profile-sample-counts-msk unordered
+POST /api/molecular-profile-sample-counts/fetch
+{"studyIds":["msk_impact_2017"]}
+## sample-lists-counts-msk unordered
+POST /api/sample-lists-counts/fetch
+{"studyIds":["msk_impact_2017"]}
+## profile-sample-counts-multi unordered
+POST /api/molecular-profile-sample-counts/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018","acbc_mskcc_2015"]}
+## sample-lists-counts-multi unordered
+POST /api/sample-lists-counts/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018","acbc_mskcc_2015"]}
+## mutation-data-counts unordered
+POST /api/mutation-data-counts/fetch?projection=SUMMARY
+{"genomicDataFilters":[{"hugoGeneSymbol":"TP53","profileType":"mutations"},{"hugoGeneSymbol":"KRAS","profileType":"mutations"}],"studyViewFilter":{"studyIds":["msk_impact_2017"]}}
+## mutation-data-counts-detailed unordered
+POST /api/mutation-data-counts/fetch?projection=DETAILED
+{"genomicDataFilters":[{"hugoGeneSymbol":"TP53","profileType":"mutations"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-counts-CDKN2A unordered
+POST /api/genomic-data-counts/fetch
+{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"gistic"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-counts-MDM2 unordered
+POST /api/genomic-data-counts/fetch
+{"genomicDataFilters":[{"hugoGeneSymbol":"MDM2","profileType":"gistic"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-counts-filtered unordered
+POST /api/genomic-data-counts/fetch
+{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"gistic"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"OS_STATUS","values":[{"value":"1:DECEASED"}]}]}}
+## genomic-data-counts-two-genes unordered known="Java adds one NA count, to an arbitrary gene"
+POST /api/genomic-data-counts/fetch
+{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"gistic"},{"hugoGeneSymbol":"MDM2","profileType":"gistic"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-bin-counts-TP53-rna_seq_v2_mrna
+POST /api/genomic-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genomicDataBinFilters":[{"hugoGeneSymbol":"TP53","profileType":"rna_seq_v2_mrna"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-bin-counts-EGFR-rna_seq_v2_mrna_median_Zscores
+POST /api/genomic-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genomicDataBinFilters":[{"hugoGeneSymbol":"EGFR","profileType":"rna_seq_v2_mrna_median_Zscores"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-bin-counts-CDKN2A-log2CNA
+POST /api/genomic-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genomicDataBinFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"log2CNA"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-bin-counts-TP53-rppa
+POST /api/genomic-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genomicDataBinFilters":[{"hugoGeneSymbol":"TP53","profileType":"rppa"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## genomic-data-bin-counts-dynamic
+POST /api/genomic-data-bin-counts/fetch?dataBinMethod=DYNAMIC
+{"genomicDataBinFilters":[{"hugoGeneSymbol":"TP53","profileType":"rna_seq_v2_mrna"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"OS_STATUS","values":[{"value":"1:DECEASED"}]}]}}
+## genomic-data-bin-counts-two-profiles known="Java bins every gene in the first filter's profile type and adds one NA bin"
+POST /api/genomic-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genomicDataBinFilters":[{"hugoGeneSymbol":"TP53","profileType":"rna_seq_v2_mrna"},{"hugoGeneSymbol":"EGFR","profileType":"rna_seq_v2_mrna_median_Zscores"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-data-counts-1p_status unordered
+POST /api/generic-assay-data-counts/fetch
+{"genericAssayDataFilters":[{"stableId":"1p_status","profileType":"armlevel_cna"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-data-counts-17p_status unordered
+POST /api/generic-assay-data-counts/fetch
+{"genericAssayDataFilters":[{"stableId":"17p_status","profileType":"armlevel_cna"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-data-counts-profile-type unordered
+POST /api/generic-assay-data-counts/fetch
+{"profileType":"armlevel_cna","studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-data-counts-two unordered known="Java adds one NA count, to an arbitrary entity"
+POST /api/generic-assay-data-counts/fetch
+{"genericAssayDataFilters":[{"stableId":"1p_status","profileType":"armlevel_cna"},{"stableId":"17p_status","profileType":"armlevel_cna"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-bin-counts-AFR
+POST /api/generic-assay-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genericAssayDataBinFilters":[{"stableId":"AFR","profileType":"genetic_ancestry"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-bin-counts-EUR
+POST /api/generic-assay-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genericAssayDataBinFilters":[{"stableId":"EUR","profileType":"genetic_ancestry"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## generic-assay-bin-counts-two known="Java adds one NA bin, to an arbitrary entity"
+POST /api/generic-assay-data-bin-counts/fetch?dataBinMethod=STATIC
+{"genericAssayDataBinFilters":[{"stableId":"AFR","profileType":"genetic_ancestry"},{"stableId":"EUR","profileType":"genetic_ancestry"}],"studyViewFilter":{"studyIds":["acc_tcga_pan_can_atlas_2018"]}}
+## clinical-data-table-acc
+POST /api/clinical-data-table/fetch?pageSize=20&pageNumber=0&sortBy=sampleId&direction=ASC
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## clinical-data-table-acc-os
+POST /api/clinical-data-table/fetch?pageSize=20&pageNumber=0&sortBy=sampleId&direction=ASC
+{"studyIds":["acc_tcga_pan_can_atlas_2018"],"clinicalDataFilters":[{"attributeId":"OS_STATUS","values":[{"value":"1:DECEASED"}]}]}
+## clinical-data-table-msk
+POST /api/clinical-data-table/fetch?pageSize=20&pageNumber=0&sortBy=sampleId&direction=ASC
+{"studyIds":["msk_impact_2017"]}
+## clinical-data-table-search
+POST /api/clinical-data-table/fetch?pageSize=10&pageNumber=0&searchTerm=Primary&sortBy=sampleId&direction=DESC
+{"studyIds":["lgg_ucsf_2014"]}
+## clinical-data-table-search-case
+POST /api/clinical-data-table/fetch?pageSize=10&pageNumber=0&searchTerm=primary&sortBy=patientId&direction=ASC
+{"studyIds":["lgg_ucsf_2014"]}
+## clinical-data-table-sort-patient-attr
+POST /api/clinical-data-table/fetch?pageSize=10&pageNumber=0&sortBy=OS_MONTHS&direction=ASC
+{"studyIds":["lgg_ucsf_2014"]}
+## clinical-data-table-sort-string known="ties of the sort value are in import order, so the page holds other samples"
+POST /api/clinical-data-table/fetch?pageSize=10&pageNumber=2&sortBy=CANCER_TYPE_DETAILED&direction=ASC
+{"studyIds":["msk_impact_2017"]}
+## clinical-data-table-sort-attr known="ties of the sort value are in import order, so the page boundary falls elsewhere"
+POST /api/clinical-data-table/fetch?pageSize=15&pageNumber=1&sortBy=AGE&direction=DESC
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## density-plot
+POST /api/clinical-data-density-plot/fetch?xAxisAttributeId=MUTATION_COUNT&yAxisAttributeId=FRACTION_GENOME_ALTERED&xAxisBinCount=50&yAxisBinCount=50&xAxisLogScale=false&yAxisLogScale=false
+{"studyIds":["msk_impact_2017"]}
+## violin-plot unordered=individualPoints
+POST /api/clinical-data-violin-plots/fetch?categoricalAttributeId=CANCER_TYPE_DETAILED&numericalAttributeId=MUTATION_COUNT&numCurvePoints=100&logScale=false&sigmaMultiplier=4
+{"studyIds":["msk_impact_2017"]}
+## clinical-event-type-counts unordered
+POST /api/clinical-event-type-counts/fetch
+{"studyIds":["lgg_ucsf_2014"]}
+## clinical-event-type-counts-acc unordered
+POST /api/clinical-event-type-counts/fetch
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## clinical-events-meta unordered known="www answers HTTP 500"
+POST /api/clinical-events-meta/fetch
+{"patientIdentifiers":[{"studyId":"lgg_ucsf_2014","patientId":"P01"},{"studyId":"lgg_ucsf_2014","patientId":"P02"},{"studyId":"lgg_ucsf_2014","patientId":"P04"},{"studyId":"lgg_ucsf_2014","patientId":"P05"},{"studyId":"lgg_ucsf_2014","patientId":"P06"},{"studyId":"lgg_ucsf_2014","patientId":"P07"},{"studyId":"lgg_ucsf_2014","patientId":"P08"},{"studyId":"lgg_ucsf_2014","patientId":"P09"},{"studyId":"lgg_ucsf_2014","patientId":"P10"},{"studyId":"lgg_ucsf_2014","patientId":"P11"},{"studyId":"lgg_ucsf_2014","patientId":"P12"},{"studyId":"lgg_ucsf_2014","patientId":"P13"},{"studyId":"lgg_ucsf_2014","patientId":"P15"},{"studyId":"lgg_ucsf_2014","patientId":"P16"},{"studyId":"lgg_ucsf_2014","patientId":"P17"},{"studyId":"lgg_ucsf_2014","patientId":"P18"},{"studyId":"lgg_ucsf_2014","patientId":"P21"},{"studyId":"lgg_ucsf_2014","patientId":"P24"},{"studyId":"lgg_ucsf_2014","patientId":"P25"},{"studyId":"lgg_ucsf_2014","patientId":"P26"},{"studyId":"lgg_ucsf_2014","patientId":"P27"},{"studyId":"lgg_ucsf_2014","patientId":"P28"},{"studyId":"lgg_ucsf_2014","patientId":"P29"}],"clinicalEventRequests":[{"eventType":"Treatment","attributes":[]},{"eventType":"Status","attributes":[]}]}
+## treatments-patient-counts-Agent unordered
+POST /api/treatments/patient-counts/fetch?tier=Agent
+{"studyIds":["lgg_ucsf_2014"]}
+## treatments-sample-counts-Agent unordered
+POST /api/treatments/sample-counts/fetch?tier=Agent
+{"studyIds":["lgg_ucsf_2014"]}
+## treatments-patient-counts-AgentClass unordered
+POST /api/treatments/patient-counts/fetch?tier=AgentClass
+{"studyIds":["lgg_ucsf_2014"]}
+## treatments-sample-counts-AgentClass unordered
+POST /api/treatments/sample-counts/fetch?tier=AgentClass
+{"studyIds":["lgg_ucsf_2014"]}
+## treatments-patient-counts-AgentTarget unordered
+POST /api/treatments/patient-counts/fetch?tier=AgentTarget
+{"studyIds":["lgg_ucsf_2014"]}
+## treatments-sample-counts-AgentTarget unordered
+POST /api/treatments/sample-counts/fetch?tier=AgentTarget
+{"studyIds":["lgg_ucsf_2014"]}
+## treatments-display-patient
+POST /api/treatments/display-patient
+["lgg_ucsf_2014","acc_tcga_pan_can_atlas_2018"]
+## treatments-display-sample
+POST /api/treatments/display-sample
+["lgg_ucsf_2014"]
+## treatments-patient-counts-acc unordered
+POST /api/treatments/patient-counts/fetch?tier=Agent
+{"studyIds":["acc_tcga_pan_can_atlas_2018"]}
+## filtered-samples-treatment unordered
+POST /api/filtered-samples/fetch
+{"studyIds":["lgg_ucsf_2014"],"patientTreatmentFilters":{"filters":[{"filters":[{"treatment":"TMZ"}]}]}}
+## custom-data-counts status-only
+POST /api/custom-data-counts/fetch
+{"attributes":[{"attributeId":"custom1"}],"studyViewFilter":{"studyIds":["acbc_mskcc_2015"]}}
+
+# ---------------------------------------------------------------- timeline and survival
+## clinical-events-study unordered
+GET /api/studies/lgg_ucsf_2014/clinical-events?projection=SUMMARY
+## clinical-events-patient unordered
+GET /api/studies/lgg_ucsf_2014/patients/P01/clinical-events?projection=DETAILED
+## clinical-events-paged
+GET /api/studies/lgg_ucsf_2014/clinical-events?pageSize=10&pageNumber=1&sortBy=startNumberOfDaysSinceDiagnosis&direction=DESC
+## survival-data unordered known="www answers HTTP 500"
+POST /api/survival-data/fetch
+{"attributeIdPrefix":"TMZ_TO_STATUS","patientIdentifiers":[{"studyId":"lgg_ucsf_2014","patientId":"P01"},{"studyId":"lgg_ucsf_2014","patientId":"P02"},{"studyId":"lgg_ucsf_2014","patientId":"P04"},{"studyId":"lgg_ucsf_2014","patientId":"P05"},{"studyId":"lgg_ucsf_2014","patientId":"P06"},{"studyId":"lgg_ucsf_2014","patientId":"P07"},{"studyId":"lgg_ucsf_2014","patientId":"P08"},{"studyId":"lgg_ucsf_2014","patientId":"P09"},{"studyId":"lgg_ucsf_2014","patientId":"P10"},{"studyId":"lgg_ucsf_2014","patientId":"P11"},{"studyId":"lgg_ucsf_2014","patientId":"P12"},{"studyId":"lgg_ucsf_2014","patientId":"P13"},{"studyId":"lgg_ucsf_2014","patientId":"P15"},{"studyId":"lgg_ucsf_2014","patientId":"P16"},{"studyId":"lgg_ucsf_2014","patientId":"P17"},{"studyId":"lgg_ucsf_2014","patientId":"P18"},{"studyId":"lgg_ucsf_2014","patientId":"P21"},{"studyId":"lgg_ucsf_2014","patientId":"P24"},{"studyId":"lgg_ucsf_2014","patientId":"P25"},{"studyId":"lgg_ucsf_2014","patientId":"P26"},{"studyId":"lgg_ucsf_2014","patientId":"P27"},{"studyId":"lgg_ucsf_2014","patientId":"P28"},{"studyId":"lgg_ucsf_2014","patientId":"P29"}],"startEventRequestIdentifier":{"clinicalEventRequests":[{"eventType":"Treatment","attributes":[{"key":"AGENT","value":"TMZ"}]}],"position":"FIRST"},"endEventRequestIdentifier":{"clinicalEventRequests":[{"eventType":"Status"}],"position":"LAST"},"censoredEventRequestIdentifier":{"clinicalEventRequests":[{"eventType":"Surgery"},{"eventType":"Specimen"}],"position":"LAST"}}
+## survival-data-first-first unordered known="www answers HTTP 500"
+POST /api/survival-data/fetch
+{"attributeIdPrefix":"SURG","patientIdentifiers":[{"studyId":"lgg_ucsf_2014","patientId":"P01"},{"studyId":"lgg_ucsf_2014","patientId":"P02"},{"studyId":"lgg_ucsf_2014","patientId":"P04"},{"studyId":"lgg_ucsf_2014","patientId":"P05"},{"studyId":"lgg_ucsf_2014","patientId":"P06"},{"studyId":"lgg_ucsf_2014","patientId":"P07"},{"studyId":"lgg_ucsf_2014","patientId":"P08"},{"studyId":"lgg_ucsf_2014","patientId":"P09"},{"studyId":"lgg_ucsf_2014","patientId":"P10"},{"studyId":"lgg_ucsf_2014","patientId":"P11"},{"studyId":"lgg_ucsf_2014","patientId":"P12"},{"studyId":"lgg_ucsf_2014","patientId":"P13"},{"studyId":"lgg_ucsf_2014","patientId":"P15"},{"studyId":"lgg_ucsf_2014","patientId":"P16"},{"studyId":"lgg_ucsf_2014","patientId":"P17"},{"studyId":"lgg_ucsf_2014","patientId":"P18"},{"studyId":"lgg_ucsf_2014","patientId":"P21"},{"studyId":"lgg_ucsf_2014","patientId":"P24"},{"studyId":"lgg_ucsf_2014","patientId":"P25"},{"studyId":"lgg_ucsf_2014","patientId":"P26"},{"studyId":"lgg_ucsf_2014","patientId":"P27"},{"studyId":"lgg_ucsf_2014","patientId":"P28"},{"studyId":"lgg_ucsf_2014","patientId":"P29"}],"startEventRequestIdentifier":{"clinicalEventRequests":[{"eventType":"Surgery"}],"position":"FIRST"},"endEventRequestIdentifier":{"clinicalEventRequests":[{"eventType":"Specimen"}],"position":"LAST"},"censoredEventRequestIdentifier":{"clinicalEventRequests":[{"eventType":"Status"}],"position":"LAST"}}
+
+# ---------------------------------------------------------------- patient view
+## resource-definitions-study
+GET /api/studies/acc_tcga_pan_can_atlas_2018/resource-definitions
+## resource-definitions-fetch
+POST /api/resource-definitions/fetch
+["acc_tcga_pan_can_atlas_2018","msk_impact_2017"]
+## resource-data-sample unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/samples/TCGA-OR-A5J1-01/resource-data?projection=DETAILED
+## resource-data-patient unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/patients/TCGA-OR-A5J1/resource-data
+## resource-data-study-all known="ties of resource_id are in import order, so the page holds other records"
+GET /api/studies/acc_tcga_pan_can_atlas_2018/resource-data-all?pageSize=10
+## patient-clinical-events-acc unordered
+GET /api/studies/acc_tcga_pan_can_atlas_2018/patients/TCGA-OR-A5J1/clinical-events
+## patient-mutations ties=molecularProfileId,sampleId,entrezGeneId
+POST /api/molecular-profiles/lgg_ucsf_2014_mutations/mutations/fetch?projection=DETAILED
+{"sampleIds":["P01_Pri","P01_Rec"]}
+## patient-cna
+POST /api/molecular-profiles/acc_tcga_pan_can_atlas_2018_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=HOMDEL_AND_AMP&projection=DETAILED
+{"sampleIds":["TCGA-OR-A5J2-01"]}
+## patient-gene-panel-data unordered
+POST /api/gene-panel-data/fetch
+{"sampleMolecularIdentifiers":[{"molecularProfileId":"msk_impact_2017_cna","sampleId":"P-0000004-T01-IM3"},{"molecularProfileId":"msk_impact_2017_mutations","sampleId":"P-0000004-T01-IM3"}]}
+
+# ---------------------------------------------------------------- results view and group comparison
+## alteration-enrichments-mut unordered
+POST /api/alteration-enrichments/fetch?enrichmentType=SAMPLE
+{"molecularProfileCasesGroupFilter":[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"}]}],"alterationEventTypes":{"copyNumberAlterationEventTypes":{"AMP":true,"HOMDEL":true},"mutationEventTypes":{"any":true},"structuralVariants":true,"includeDriver":true,"includeVUS":true,"includeUnknownOncogenicity":true,"includeGermline":true,"includeSomatic":true,"includeUnknownStatus":true,"tiersBooleanMap":{},"includeUnknownTier":true}}
+## alteration-enrichments-cna unordered
+POST /api/alteration-enrichments/fetch?enrichmentType=SAMPLE
+{"molecularProfileCasesGroupFilter":[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_gistic"}]}],"alterationEventTypes":{"copyNumberAlterationEventTypes":{"AMP":true,"HOMDEL":true},"mutationEventTypes":{"any":true},"structuralVariants":true,"includeDriver":true,"includeVUS":true,"includeUnknownOncogenicity":true,"includeGermline":true,"includeSomatic":true,"includeUnknownStatus":true,"tiersBooleanMap":{},"includeUnknownTier":true}}
+## alteration-enrichments-lgg-patient unordered
+POST /api/alteration-enrichments/fetch?enrichmentType=PATIENT
+{"molecularProfileCasesGroupFilter":[{"name":"Primary","molecularProfileCaseIdentifiers":[{"caseId":"P01_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P02_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P04_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P05_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P06_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P07_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P08_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P09_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P10_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P11_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P12_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P13_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P15_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P16_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Pri_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Pri_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Pri_C","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P18_Pri_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P18_Pri_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P18_Pri_C","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P18_Pri_D","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P21_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P24_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P25_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P26_Pri_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P26_Pri_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P27_Pri_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P27_Pri_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P28_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P29_Pri","molecularProfileId":"lgg_ucsf_2014_mutations"}]},{"name":"Recurrence","molecularProfileCaseIdentifiers":[{"caseId":"P01_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P02_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P04_Rec1","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P04_Rec2","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P04_Rec3","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P05_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P06_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P07_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P08_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P09_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P10_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P11_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P12_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P13_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P15_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P16_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Rec1_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Rec1_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Rec1_C","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P17_Rec1_D","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P18_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P21_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P24_Rec1","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P24_Rec2","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P25_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P26_Rec1_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P26_Rec1_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P27_Rec1_A","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P27_Rec1_B","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P28_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"},{"caseId":"P29_Rec","molecularProfileId":"lgg_ucsf_2014_mutations"}]}],"alterationEventTypes":{"copyNumberAlterationEventTypes":{"AMP":true,"HOMDEL":true},"mutationEventTypes":{"any":true},"structuralVariants":true,"includeDriver":true,"includeVUS":true,"includeUnknownOncogenicity":true,"includeGermline":true,"includeSomatic":true,"includeUnknownStatus":true,"tiersBooleanMap":{},"includeUnknownTier":true}}
+## alteration-enrichments-three-groups unordered
+POST /api/alteration-enrichments/fetch?enrichmentType=SAMPLE
+{"molecularProfileCasesGroupFilter":[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"}]},{"name":"third","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_mutations"}]}],"alterationEventTypes":{"copyNumberAlterationEventTypes":{"AMP":true,"HOMDEL":true},"mutationEventTypes":{"any":true},"structuralVariants":true,"includeDriver":true,"includeVUS":true,"includeUnknownOncogenicity":true,"includeGermline":true,"includeSomatic":true,"includeUnknownStatus":true,"tiersBooleanMap":{},"includeUnknownTier":true}}
+## expression-enrichments-mrna unordered
+POST /api/expression-enrichments/fetch?enrichmentType=SAMPLE
+[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna"}]}]
+## expression-enrichments-rppa unordered
+POST /api/expression-enrichments/fetch?enrichmentType=SAMPLE
+[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_rppa"}]}]
+## generic-assay-enrichments unordered
+POST /api/generic-assay-enrichments/fetch?enrichmentType=SAMPLE
+[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_genetic_ancestry"}]}]
+## generic-assay-categorical-enrichments unordered
+POST /api/generic-assay-categorical-enrichments/fetch?enrichmentType=SAMPLE
+[{"name":"altered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5J1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J7-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5J9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5JZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K0-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5K9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"}]},{"name":"unaltered","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-OR-A5KQ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KU-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KV-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KW-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KX-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KY-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5KZ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L1-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L2-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L3-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L4-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L5-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L6-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5L9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LD-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LE-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LJ-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LK-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LL-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LM-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LN-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LO-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LP-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LR-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LS-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5LT-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OR-A5OG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-OU-A5PI-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-P6-A5OF-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-P6-A5OH-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-PA-A5YG-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-PK-A5H8-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-PK-A5H9-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-PK-A5HA-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-PK-A5HB-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"},{"caseId":"TCGA-PK-A5HC-01","molecularProfileId":"acc_tcga_pan_can_atlas_2018_armlevel_cna"}]}]
+## coexpression-mrna unordered known="www column-store co-expression returns only entity ids, no correlation or p-value"
+POST /api/molecular-profiles/co-expressions/fetch?molecularProfileIdA=acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna&molecularProfileIdB=acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna&threshold=0.3
+{"sampleListId":"acc_tcga_pan_can_atlas_2018_all","entrezGeneId":7157}
+## coexpression-rppa-mrna unordered known="www column-store co-expression returns only entity ids, no correlation or p-value"
+POST /api/molecular-profiles/co-expressions/fetch?molecularProfileIdA=acc_tcga_pan_can_atlas_2018_rppa&molecularProfileIdB=acc_tcga_pan_can_atlas_2018_rna_seq_v2_mrna&threshold=0.3
+{"sampleIds":["TCGA-OR-A5J1-01","TCGA-OR-A5J2-01","TCGA-OR-A5J3-01","TCGA-OR-A5J4-01","TCGA-OR-A5J5-01","TCGA-OR-A5J6-01","TCGA-OR-A5J7-01","TCGA-OR-A5J8-01","TCGA-OR-A5J9-01","TCGA-OR-A5JA-01","TCGA-OR-A5JB-01","TCGA-OR-A5JC-01","TCGA-OR-A5JD-01","TCGA-OR-A5JE-01","TCGA-OR-A5JF-01","TCGA-OR-A5JG-01","TCGA-OR-A5JH-01","TCGA-OR-A5JI-01","TCGA-OR-A5JJ-01","TCGA-OR-A5JK-01","TCGA-OR-A5JL-01","TCGA-OR-A5JM-01","TCGA-OR-A5JO-01","TCGA-OR-A5JP-01","TCGA-OR-A5JQ-01","TCGA-OR-A5JR-01","TCGA-OR-A5JS-01","TCGA-OR-A5JT-01","TCGA-OR-A5JU-01","TCGA-OR-A5JV-01","TCGA-OR-A5JW-01","TCGA-OR-A5JX-01","TCGA-OR-A5JY-01","TCGA-OR-A5JZ-01","TCGA-OR-A5K0-01","TCGA-OR-A5K1-01","TCGA-OR-A5K2-01","TCGA-OR-A5K3-01","TCGA-OR-A5K4-01","TCGA-OR-A5K5-01","TCGA-OR-A5K6-01","TCGA-OR-A5K8-01","TCGA-OR-A5K9-01","TCGA-OR-A5KB-01","TCGA-OR-A5KO-01","TCGA-OR-A5KP-01","TCGA-OR-A5KQ-01","TCGA-OR-A5KS-01","TCGA-OR-A5KT-01","TCGA-OR-A5KU-01","TCGA-OR-A5KV-01","TCGA-OR-A5KW-01","TCGA-OR-A5KX-01","TCGA-OR-A5KY-01","TCGA-OR-A5KZ-01","TCGA-OR-A5L1-01","TCGA-OR-A5L2-01","TCGA-OR-A5L3-01","TCGA-OR-A5L4-01","TCGA-OR-A5L5-01","TCGA-OR-A5L6-01","TCGA-OR-A5L8-01","TCGA-OR-A5L9-01","TCGA-OR-A5LA-01","TCGA-OR-A5LB-01","TCGA-OR-A5LC-01","TCGA-OR-A5LD-01","TCGA-OR-A5LE-01","TCGA-OR-A5LF-01","TCGA-OR-A5LG-01","TCGA-OR-A5LH-01","TCGA-OR-A5LI-01","TCGA-OR-A5LJ-01","TCGA-OR-A5LK-01","TCGA-OR-A5LL-01","TCGA-OR-A5LM-01","TCGA-OR-A5LN-01","TCGA-OR-A5LO-01","TCGA-OR-A5LP-01","TCGA-OR-A5LR-01","TCGA-OR-A5LS-01","TCGA-OR-A5LT-01","TCGA-OR-A5OG-01","TCGA-OU-A5PI-01","TCGA-P6-A5OF-01","TCGA-P6-A5OH-01","TCGA-PA-A5YG-01","TCGA-PK-A5H8-01","TCGA-PK-A5H9-01","TCGA-PK-A5HA-01","TCGA-PK-A5HB-01","TCGA-PK-A5HC-01"],"entrezGeneId":1956}
+## custom-driver-annotation-report
+POST /api/custom-driver-annotation-report/fetch
+["msk_impact_2017_mutations","msk_impact_2017_cna"]
+## custom-driver-annotation-report-acc
+POST /api/custom-driver-annotation-report/fetch
+["acc_tcga_pan_can_atlas_2018_mutations"]
+## results-clinical-data unordered
+POST /api/clinical-data/fetch?clinicalDataType=SAMPLE
+{"attributeIds":["CANCER_TYPE_DETAILED","SAMPLE_TYPE"],"identifiers":[{"studyId":"msk_impact_2017","entityId":"P-0000004-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000015-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000023-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000024-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000025-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000025-T02-IM5"},{"studyId":"msk_impact_2017","entityId":"P-0000026-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000027-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000030-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000034-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000036-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000037-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000037-T02-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000039-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000041-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000042-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000043-T02-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000047-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000053-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000055-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000056-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000057-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000058-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000059-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000060-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000061-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000062-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000063-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000064-T02-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000065-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000066-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000066-T02-IM5"},{"studyId":"msk_impact_2017","entityId":"P-0000067-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000067-T02-IM5"},{"studyId":"msk_impact_2017","entityId":"P-0000068-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000069-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000071-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000073-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000075-T01-IM3"},{"studyId":"msk_impact_2017","entityId":"P-0000076-T01-IM3"}]}
+## results-patient-os unordered
+POST /api/clinical-data/fetch?clinicalDataType=PATIENT
+{"attributeIds":["OS_MONTHS","OS_STATUS","DFS_MONTHS","DFS_STATUS"],"identifiers":[{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J1"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J2"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J3"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J4"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J5"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J6"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J7"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J8"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5J9"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JA"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JB"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JC"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JD"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JE"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JF"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JG"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JH"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JI"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JJ"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JK"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JL"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JM"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JO"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JP"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JQ"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JR"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JS"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JT"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JU"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JV"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JW"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JX"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JY"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5JZ"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K0"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K1"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K2"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K3"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K4"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K5"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K6"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K8"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5K9"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KB"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KO"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KP"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KQ"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KS"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KT"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KU"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KV"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KW"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KX"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KY"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5KZ"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L1"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L2"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L3"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L4"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L5"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L6"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L8"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5L9"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LA"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LB"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LC"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LD"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LE"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LF"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LG"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LH"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LI"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LJ"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LK"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LL"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LM"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LN"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LO"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LP"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LR"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LS"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5LT"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OR-A5OG"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-OU-A5PI"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-P6-A5OF"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-P6-A5OH"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-PA-A5YG"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-PK-A5H8"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-PK-A5H9"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-PK-A5HA"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-PK-A5HB"},{"studyId":"acc_tcga_pan_can_atlas_2018","entityId":"TCGA-PK-A5HC"}]}
+
