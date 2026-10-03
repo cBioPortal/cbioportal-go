@@ -12,7 +12,11 @@
 // Only successful requests with intact JSON bodies are taken (the largest
 // logged bodies were captured gzip-corrupted). Records are compared without
 // regard to order, as this backend does not keep the Java importer's row
-// order.
+// order. Requests whose difference is expected (known.go: www's session
+// store, deployment-specific fields, www bugs, unspecified tie order) are
+// marked with their reason; -annotate marks them in an existing corpus:
+//
+//	go run ./test/parity/loggedgen -annotate < old.txt > .parity/logged.txt
 package main
 
 import (
@@ -31,7 +35,15 @@ func main() {
 	minPer := flag.Int("min", 2, "requests per endpoint at least")
 	maxBody := flag.Int("max-body", 200000, "skip POST bodies larger than this (bytes)")
 	seed := flag.Int("seed", 1, "sample seed")
+	annotateOnly := flag.Bool("annotate", false, "copy the corpus on stdin to stdout with the expected differences marked")
 	flag.Parse()
+	if *annotateOnly {
+		if err := annotate(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "loggedgen:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *url == "" {
 		fmt.Fprintln(os.Stderr, "loggedgen: set -url or CLICKHOUSE_URL")
 		os.Exit(2)
@@ -84,7 +96,15 @@ ORDER BY endpoint, rn`
 		if r.Query != "" {
 			target += "?" + r.Query
 		}
-		fmt.Printf("\n## %s-%s-%d unordered\n%s %s\n", strings.ToLower(r.Method), name, seen[name], r.Method, target)
+		header := fmt.Sprintf("%s-%s-%d unordered", strings.ToLower(r.Method), name, seen[name])
+		fmt.Println()
+		if opts, comment := expect(r.Method, target, r.Body); opts != "" {
+			if comment != "" {
+				fmt.Println("# " + comment)
+			}
+			header += " " + opts
+		}
+		fmt.Printf("## %s\n%s %s\n", header, r.Method, target)
 		if r.Method == "POST" {
 			fmt.Println(r.Body)
 		}

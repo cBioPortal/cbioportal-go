@@ -96,6 +96,33 @@ The known differences are listed in
 [Deployment](deployment.md#mirroring-production); three of them disappear
 once the mirror is rebuilt with the current `transform --from-prod`.
 
+### Logged production requests
+
+`test/parity/loggedgen` samples a corpus from the requests production logged
+(`cbioportal_qc.logged_requests`), GET and POST in proportion to each
+endpoint's volume, and marks the requests whose difference is expected
+(`test/parity/loggedgen/known.go`): www's session store (sessions and
+custom-data ids exist only there), deployment-specific fields (`/api/info`
+versions, the API documentation's origin), www bugs (resource definitions of
+other studies in the study list, `allSampleCount` 1 in `studies/fetch`) and
+pages whose boundary falls in ties Java leaves unordered or in Java's import
+order (clinical data by internal id, samples of the same id in several
+studies, clinical-table sort values). `-annotate` marks them in an existing
+corpus. Compare it against api.cbioportal.org with an API serving a mirror
+built by `transform --from-prod`:
+
+```bash
+go run ./test/parity/loggedgen -n 500 > .parity/logged.txt      # CLICKHOUSE_URL/USER/PASSWORD
+go run ./cmd/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
+  -ua cbioportal-go-parity -a http://localhost:18091 -cache .parity/cache-api -q
+```
+
+On 2026-10-03: 620 of 636 requests identical, 16 known differences, none
+unexplained. One more is a www failure rather than a difference: a study
+without clinical events can time out there (HTTP 502), as
+`getDataOfClinicalEvents` without event ids reads all of
+`clinical_event_data`.
+
 ## Java oracle
 
 The Java backend itself, run on the same fixture studies, is the reference
