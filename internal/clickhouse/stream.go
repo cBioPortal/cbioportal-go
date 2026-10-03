@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/http"
 	"net/url"
-	"strings"
 )
 
 // QueryStream runs a SELECT in the given output format (the statement must
@@ -18,22 +16,16 @@ import (
 // results can be decoded as they arrive. The request is bound to ctx:
 // cancelling it aborts the query. The caller closes the body.
 func (c *Client) QueryStream(ctx context.Context, sql, format string) (io.ReadCloser, error) {
-	q := url.Values{"database": {c.database}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/?"+withSessionSettings(q).Encode(),
-		strings.NewReader(c.rewrite(sql)+" FORMAT "+format))
+	return c.QueryStreamP(ctx, sql, format, nil)
+}
+
+// QueryStreamP is QueryStream with query parameters.
+func (c *Client) QueryStreamP(ctx context.Context, sql, format string, p Params) (io.ReadCloser, error) {
+	req, err := c.newRequest(ctx, url.Values{"database": {c.database}}, c.rewrite(sql)+" FORMAT "+format, p)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode/100 != 2 {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("clickhouse HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return resp.Body, nil
+	return c.do(req, "")
 }
 
 // RowBinaryReader decodes ClickHouse RowBinary values.

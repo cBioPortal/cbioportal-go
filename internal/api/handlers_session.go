@@ -793,9 +793,9 @@ func (s *State) cancerTypeExists(id string) (bool, error) {
 	type countRow struct {
 		N uint64 `json:"n"`
 	}
-	rows, err := ch.Query[countRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[countRow](s.CH,
 		"SELECT count() AS n FROM (SELECT type_of_cancer_id FROM cbioportal_ref.type_of_cancer "+
-			"UNION DISTINCT SELECT type_of_cancer_id FROM type_of_cancer) WHERE type_of_cancer_id = '%s'", sqlLit(id)))
+			"UNION DISTINCT SELECT type_of_cancer_id FROM type_of_cancer) WHERE type_of_cancer_id = {id:String}", ch.Params{"id": id})
 	if err != nil {
 		return false, err
 	}

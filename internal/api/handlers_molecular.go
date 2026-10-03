@@ -72,12 +72,14 @@ func toMP(r mpRow) MolecularProfile {
 	}
 }
 
-func (s *State) mpQuery(w http.ResponseWriter, where string) {
+// mpQuery writes the molecular profiles matching where, whose placeholders
+// take their values from p.
+func (s *State) mpQuery(w http.ResponseWriter, where string, p ch.Params) {
 	sql := s.mpSelect()
 	if where != "" {
 		sql += " WHERE " + where
 	}
-	rows, err := ch.Query[mpRow](s.CH, sql+" ORDER BY molecularProfileId")
+	rows, err := ch.QueryP[mpRow](s.CH, sql+" ORDER BY molecularProfileId", p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -89,15 +91,14 @@ func (s *State) mpQuery(w http.ResponseWriter, where string) {
 	writeJSON(w, out)
 }
 
-func (s *State) molecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, "") }
+func (s *State) molecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, "", nil) }
 
 func (s *State) studyMolecularProfiles(w http.ResponseWriter, r *http.Request) {
-	s.mpQuery(w, fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId"))))
+	s.mpQuery(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
 func (s *State) molecularProfile(w http.ResponseWriter, r *http.Request) {
-	sql := fmt.Sprintf("%s WHERE molecular_profile_id = '%s'", s.mpSelect(), sqlLit(r.PathValue("id")))
-	rows, err := ch.Query[mpRow](s.CH, sql)
+	rows, err := ch.QueryP[mpRow](s.CH, s.mpSelect()+" WHERE molecular_profile_id = {id:String}", ch.Params{"id": r.PathValue("id")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -117,9 +118,9 @@ func (s *State) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
 	readBody(r, &f)
 	switch {
 	case len(f.MolecularProfileIDs) > 0:
-		s.mpQuery(w, fmt.Sprintf("molecular_profile_id IN (%s)", inList(f.MolecularProfileIDs)))
+		s.mpQuery(w, "molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": f.MolecularProfileIDs})
 	case len(f.StudyIDs) > 0:
-		s.mpQuery(w, fmt.Sprintf("study_id IN (%s)", inList(f.StudyIDs)))
+		s.mpQuery(w, "study_id IN {ids:Array(String)}", ch.Params{"ids": f.StudyIDs})
 	default:
 		writeJSON(w, []MolecularProfile{})
 	}
@@ -324,12 +325,14 @@ func projectionOf(r *http.Request) string {
 	return "SUMMARY"
 }
 
-func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, limit int) {
+// mutationsWhere writes the mutations matching where, whose placeholders are
+// bound in args.
+func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs, limit int) {
 	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", mutationSelect, where, mutationOrder)
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
 	}
-	rows, err := ch.Query[mutationRow](s.CH, sql)
+	rows, err := queryA[mutationRow](s.CH, sql, args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -356,8 +359,9 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 // mutations in the sampleListId sample list, for the entrezGeneId gene.
 func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	where := profileMutationsClause(r.PathValue("id"))
-	where += sampleListClause("sample_id", q.Get("sampleListId"))
+	args := newArgs()
+	where := profileMutationsClause(args, r.PathValue("id"))
+	where += sampleListClause(args, "sample_id", q.Get("sampleListId"))
 	var entrez []int64
 	for _, e := range q["entrezGeneId"] {
 		if id, err := strconv.ParseInt(e, 10, 64); err == nil {
@@ -369,22 +373,22 @@ func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	if q.Get("sampleListId") == "" && len(entrez) == 0 {
 		limit = 100000
 	}
-	s.mutationsWhere(w, r, where, limit)
+	s.mutationsWhere(w, r, where, args, limit)
 }
 
 // profileMutationsClause selects a mutation profile's rows (a study can hold
 // both its MUTATION_EXTENDED and MUTATION_UNCALLED profiles).
-func profileMutationsClause(profileID string) string {
-	return fmt.Sprintf("study_id = '%s' AND molecular_profile_id = '%s'", sqlLit(profileStudy(profileID)), sqlLit(profileID))
+func profileMutationsClause(a *sqlArgs, profileID string) string {
+	return fmt.Sprintf("study_id = %s AND molecular_profile_id = %s", a.str(profileStudy(profileID)), a.str(profileID))
 }
 
 // sampleListClause restricts col to the members of a sample list (no-op for
 // an empty list id).
-func sampleListClause(col, listID string) string {
+func sampleListClause(a *sqlArgs, col, listID string) string {
 	if listID == "" {
 		return ""
 	}
-	return fmt.Sprintf(" AND %s IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", col, sqlLit(listID))
+	return fmt.Sprintf(" AND %s IN (SELECT sample_id FROM sample_list WHERE list_id = %s)", col, a.str(listID))
 }
 
 type mutationFilter struct {
@@ -412,15 +416,16 @@ func geneFilter(entrez []int64) string {
 func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
 	readBody(r, &f)
-	where := profileMutationsClause(r.PathValue("id"))
+	args := newArgs()
+	where := profileMutationsClause(args, r.PathValue("id"))
 	// MutationFilter is EITHER explicit sample ids OR a sample list.
 	if len(f.SampleIDs) > 0 {
-		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(f.SampleIDs))
+		where += " AND sample_id IN " + args.strs(f.SampleIDs)
 	} else {
-		where += sampleListClause("sample_id", f.SampleListID)
+		where += sampleListClause(args, "sample_id", f.SampleListID)
 	}
 	where += geneFilter(f.EntrezGeneIDs)
-	s.mutationsWhere(w, r, where, 0)
+	s.mutationsWhere(w, r, where, args, 0)
 }
 
 func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
@@ -429,13 +434,14 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 	// MutationMultipleStudyFilter is EITHER a set of (profile, sample) pairs OR a
 	// list of molecular profiles (all their samples), each with an optional gene
 	// filter. The results view uses the molecularProfileIds form.
+	args := newArgs()
 	if len(f.SampleMolecularIdentifiers) > 0 {
 		triples := make([][3]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {
 			triples[i] = [3]string{profileStudy(id.MolecularProfileID), id.MolecularProfileID, id.SampleID}
 		}
-		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN (%s)%s", tripleIn(triples), geneFilter(f.EntrezGeneIDs))
-		s.mutationsWhere(w, r, where, 0)
+		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN %s%s", args.triples(triples), geneFilter(f.EntrezGeneIDs))
+		s.mutationsWhere(w, r, where, args, 0)
 		return
 	}
 	if len(f.MolecularProfileIDs) > 0 {
@@ -443,9 +449,9 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 		for i, id := range f.MolecularProfileIDs {
 			studies[i] = profileStudy(id)
 		}
-		where := fmt.Sprintf("study_id IN (%s) AND molecular_profile_id IN (%s)%s",
-			inList(studies), inList(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))
-		s.mutationsWhere(w, r, where, 0)
+		where := fmt.Sprintf("study_id IN %s AND molecular_profile_id IN %s%s",
+			args.strs(studies), args.strs(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))
+		s.mutationsWhere(w, r, where, args, 0)
 		return
 	}
 	writeJSON(w, []Mutation{})
@@ -508,8 +514,8 @@ func (s *State) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []GenePanel{})
 		return
 	}
-	sql := fmt.Sprintf("%s WHERE genePanelId IN (%s) ORDER BY genePanelId, hugoGeneSymbol", panelSelect, inList(ids))
-	rows, err := ch.Query[panelGeneRow](s.CH, sql)
+	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId IN {ids:Array(String)} ORDER BY genePanelId, hugoGeneSymbol",
+		ch.Params{"ids": ids})
 	if err != nil {
 		fail(w, err)
 		return
@@ -518,8 +524,8 @@ func (s *State) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) genePanel(w http.ResponseWriter, r *http.Request) {
-	sql := fmt.Sprintf("%s WHERE genePanelId = '%s' ORDER BY hugoGeneSymbol", panelSelect, sqlLit(r.PathValue("id")))
-	rows, err := ch.Query[panelGeneRow](s.CH, sql)
+	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId = {id:String} ORDER BY hugoGeneSymbol",
+		ch.Params{"id": r.PathValue("id")})
 	if err != nil {
 		fail(w, err)
 		return

@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // filteredSample is a sample as ColumnarStoreStudyViewController's
@@ -26,9 +24,10 @@ type filteredSample struct {
 func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, err := queryA[idRow](s.CH, fmt.Sprintf(
 		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId FROM sample s "+
-			"WHERE concat(s.study_id, '_', s.sample_id) IN (%s) ORDER BY s.sample_id, s.study_id", s.filterSQL(f)))
+			"WHERE concat(s.study_id, '_', s.sample_id) IN (%s) ORDER BY s.sample_id, s.study_id", s.filterSQL(args, f)), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -88,10 +87,11 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		Patient uint8  `json:"patient"`
 		Sample  uint8  `json:"sample"`
 	}
-	levels, _ := ch.Query[levelRow](s.CH, fmt.Sprintf(
+	args := newArgs()
+	levels, _ := queryA[levelRow](s.CH, fmt.Sprintf(
 		"SELECT clinical_attribute_id AS attrId, max(patient_attribute = 1) AS patient, max(patient_attribute = 0) AS sample "+
-			"FROM clinical_attribute_meta WHERE study_id IN (%s) AND clinical_attribute_id IN (%s) GROUP BY clinical_attribute_id",
-		inList(studies), inList(attrIDs)))
+			"FROM clinical_attribute_meta WHERE study_id IN %s AND clinical_attribute_id IN %s GROUP BY clinical_attribute_id",
+		args.strs(studies), args.strs(attrIDs)), args)
 	var sampleAttrs, patientAttrs, conflicting []string
 	isPatient := map[string]bool{}
 	for _, l := range levels {
@@ -105,7 +105,7 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 			sampleAttrs = append(sampleAttrs, l.AttrID)
 		}
 	}
-	filtered := s.filterSQL(f)
+	filtered := s.filterSQL(args, f)
 	notNA := "NOT " + isNASQL("attribute_value")
 	type countRow struct {
 		AttrID string `json:"attrId"`
@@ -116,31 +116,31 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 	if len(sampleAttrs) > 0 {
 		queries = append(queries, fmt.Sprintf(
 			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM clinical_data_derived "+
-				"WHERE type = 'sample' AND %s AND sample_unique_id IN (%s) AND attribute_name IN (%s) GROUP BY attribute_name, attribute_value",
-			notNA, filtered, inList(sampleAttrs)))
+				"WHERE type = 'sample' AND %s AND sample_unique_id IN (%s) AND attribute_name IN %s GROUP BY attribute_name, attribute_value",
+			notNA, filtered, args.strs(sampleAttrs)))
 	}
 	if len(patientAttrs) > 0 {
 		queries = append(queries, fmt.Sprintf(
 			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM clinical_data_derived "+
 				"WHERE type = 'patient' AND %s AND patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE sample_unique_id IN (%s)) "+
-				"AND attribute_name IN (%s) GROUP BY attribute_name, attribute_value",
-			notNA, filtered, inList(patientAttrs)))
+				"AND attribute_name IN %s GROUP BY attribute_name, attribute_value",
+			notNA, filtered, args.strs(patientAttrs)))
 	}
 	if len(conflicting) > 0 {
 		queries = append(queries, fmt.Sprintf(
 			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM ("+
 				"SELECT attribute_name, attribute_value, sample_unique_id FROM clinical_data_derived "+
-				"WHERE type = 'sample' AND %[1]s AND sample_unique_id IN (%[2]s) AND attribute_name IN (%[3]s) "+
+				"WHERE type = 'sample' AND %[1]s AND sample_unique_id IN (%[2]s) AND attribute_name IN %[3]s "+
 				"UNION ALL SELECT cdd.attribute_name, cdd.attribute_value, sd.sample_unique_id FROM clinical_data_derived cdd "+
 				"JOIN sample_derived sd ON cdd.patient_unique_id = sd.patient_unique_id "+
-				"WHERE cdd.type = 'patient' AND %[1]s AND sd.sample_unique_id IN (%[2]s) AND cdd.attribute_name IN (%[3]s)"+
+				"WHERE cdd.type = 'patient' AND %[1]s AND sd.sample_unique_id IN (%[2]s) AND cdd.attribute_name IN %[3]s"+
 				") GROUP BY attribute_name, attribute_value",
-			notNA, filtered, inList(conflicting)))
+			notNA, filtered, args.strs(conflicting)))
 	}
 	counts := map[string]map[string]*ClinicalDataCount{}
 	sums := map[string]uint64{}
 	for _, q := range queries {
-		rows, err := ch.Query[countRow](s.CH, q)
+		rows, err := queryA[countRow](s.CH, q, args)
 		if err != nil {
 			continue
 		}
@@ -168,8 +168,8 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		type c struct {
 			N uint64 `json:"n"`
 		}
-		rows, _ := ch.Query[c](s.CH, fmt.Sprintf(
-			"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE sample_unique_id IN (%s)", filtered))
+		rows, _ := queryA[c](s.CH, fmt.Sprintf(
+			"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE sample_unique_id IN (%s)", filtered), args)
 		if len(rows) > 0 {
 			nPatients = rows[0].N
 		}

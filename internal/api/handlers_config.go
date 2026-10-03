@@ -3,7 +3,6 @@ package api
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -51,11 +50,10 @@ func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, report)
 		return
 	}
-	where := fmt.Sprintf("genetic_profile_stable_id IN (%s)", inList(ids))
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, _ := ch.QueryP[row](s.CH,
 		"SELECT toUInt8(countIf(driver_filter IN ('Putative_Driver', 'Putative_Passenger')) > 0) AS hasBinary, "+
 			"arraySort(groupUniqArrayIf(driver_tiers_filter, driver_tiers_filter NOT IN ('', 'NA'))) AS tiers "+
-			"FROM genomic_event_derived WHERE %s", where))
+			"FROM genomic_event_derived WHERE genetic_profile_stable_id IN {ids:Array(String)}", ch.Params{"ids": ids})
 	if len(rows) > 0 {
 		report["hasBinary"] = rows[0].HasBinary == 1
 		if len(rows[0].Tiers) > 0 {

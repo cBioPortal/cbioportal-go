@@ -77,16 +77,17 @@ func sampleFullSelectOrdered(where, order string) string {
 // (ILIKE, so % and _ are wildcards), and matches whose id starts with the
 // whole keyword come first, each part ordered by sample id.
 func (s *State) allSamples(w http.ResponseWriter, r *http.Request) {
+	args := newArgs()
 	conds := []string{"1"}
 	order := "s.study_id, s.sample_id"
 	if q := r.URL.Query(); q.Has("keyword") {
 		kw := q.Get("keyword")
 		for term := range strings.SplitSeq(strings.TrimSpace(kw), " ") {
-			conds = append(conds, fmt.Sprintf("s.sample_id ILIKE concat('%%', '%s', '%%')", sqlLit(term)))
+			conds = append(conds, fmt.Sprintf("s.sample_id ILIKE concat('%%', %s, '%%')", args.str(term)))
 		}
-		order = fmt.Sprintf("if(s.sample_id ILIKE concat('%s', '%%'), 0, 1), s.sample_id", sqlLit(kw))
+		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id", args.str(kw))
 	}
-	rows, err := ch.Query[sampleFullRow](s.CH, sampleFullSelectOrdered(strings.Join(conds, " AND "), order))
+	rows, err := queryA[sampleFullRow](s.CH, sampleFullSelectOrdered(strings.Join(conds, " AND "), order), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -100,10 +101,8 @@ func (s *State) allSamples(w http.ResponseWriter, r *http.Request) {
 
 // sampleInStudy — GET /api/studies/{studyId}/samples/{sampleId}. Single Sample.
 func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	smp := sqlLit(r.PathValue("sampleId"))
-	where := fmt.Sprintf("s.study_id = '%s' AND s.sample_id = '%s'", sid, smp)
-	rows, err := ch.Query[sampleFullRow](s.CH, sampleFullSelect(where))
+	rows, err := ch.QueryP[sampleFullRow](s.CH, sampleFullSelect("s.study_id = {study:String} AND s.sample_id = {sample:String}"),
+		ch.Params{"study": r.PathValue("studyId"), "sample": r.PathValue("sampleId")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -124,20 +123,21 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 // patients whose id starts with the whole keyword first, then by patient id.
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	args := newArgs()
 	sql := "SELECT study_id AS studyId, patient_id AS patientId FROM patient ORDER BY study_id, patient_id"
 	if q.Has("keyword") {
 		kw := q.Get("keyword")
 		var conds []string
 		for term := range strings.SplitSeq(kw, " ") {
-			t := sqlLit(term)
-			conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', '%s', '%%') OR sm.sample_id LIKE concat('%%', '%s', '%%'))", t, t))
+			t := args.str(term)
+			conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', %s, '%%') OR sm.sample_id LIKE concat('%%', %s, '%%'))", t, t))
 		}
 		sql = fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
 			"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
-			"ORDER BY if(p.patient_id LIKE concat('%s', '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
-			strings.Join(conds, " AND "), sqlLit(kw))
+			"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
+			strings.Join(conds, " AND "), args.str(kw))
 	}
-	rows, err := ch.Query[idRow](s.CH, sql)
+	rows, err := queryA[idRow](s.CH, sql, args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -150,11 +150,11 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 // allGenes — GET /api/genes, with GeneMapper's keyword and alias matching.
 func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	args := newArgs()
 	conds := []string{"1"}
 	if alias, ok := q["alias"]; ok {
-		conds = append(conds, fmt.Sprintf(
-			"entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = '%s')",
-			sqlLit(alias[0])))
+		conds = append(conds,
+			"entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = "+args.str(alias[0])+")")
 	}
 	// GeneMapper: every space-separated keyword term is a case-insensitive
 	// symbol prefix; matches of the whole keyword with its exact case come
@@ -162,14 +162,14 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	order := "entrez_gene_id"
 	if kw, ok := q["keyword"]; ok {
 		for _, term := range strings.Split(kw[0], " ") {
-			conds = append(conds, fmt.Sprintf("hugo_gene_symbol ILIKE '%s%%'", sqlLit(term)))
+			conds = append(conds, fmt.Sprintf("hugo_gene_symbol ILIKE concat(%s, '%%')", args.str(term)))
 		}
-		order = fmt.Sprintf("hugo_gene_symbol LIKE '%s%%' DESC, hugo_gene_symbol", sqlLit(kw[0]))
+		order = fmt.Sprintf("hugo_gene_symbol LIKE concat(%s, '%%') DESC, hugo_gene_symbol", args.str(kw[0]))
 	}
-	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
+	rows, err := queryA[geneRow](s.CH, fmt.Sprintf(
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type, "+
 			"genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s ORDER BY %s",
-		strings.Join(conds, " AND "), order))
+		strings.Join(conds, " AND "), order), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -184,18 +184,18 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 
 // allSampleLists — GET /api/sample-lists. Returns []SampleList across studies.
 func (s *State) allSampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, "")
+	s.sampleListsQuery(w, "", nil)
 }
 
 // sampleListSampleIDs — GET /api/sample-lists/{sampleListId}/sample-ids.
 // Returns []string of sample ids in the list.
 func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
-	lid := sqlLit(r.PathValue("sampleListId"))
 	type row struct {
 		SampleID string `json:"sampleId"`
 	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = '%s' ORDER BY sample_id", lid))
+	rows, err := ch.QueryP[row](s.CH,
+		"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String} ORDER BY sample_id",
+		ch.Params{"list": r.PathValue("sampleListId")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -230,18 +230,18 @@ func (s *State) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
 // /api/studies/{studyId}/samples/{sampleId}/copy-number-segments. Returns
 // []CopyNumberSeg for one sample (same shape as copyNumberSegmentsFetch).
 func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	smp := sqlLit(r.PathValue("sampleId"))
+	p := ch.Params{"study": r.PathValue("studyId"), "sample": r.PathValue("sampleId")}
 	chrom := ""
 	if c := r.URL.Query().Get("chromosome"); c != "" {
-		chrom = fmt.Sprintf(" AND g.chrom = '%s'", sqlLit(c))
+		chrom = " AND g.chrom = {chrom:String}"
+		p["chrom"] = c
 	}
-	rows, err := ch.Query[segRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[segRow](s.CH, fmt.Sprintf(
 		"SELECT g.study_id AS studyId, g.sample_id AS sampleId, ifNull(sp.patient_id, '') AS patientId, "+
 			"g.chrom AS chromosome, toInt64OrZero(g.start) AS start, toInt64OrZero(g.end) AS end, "+
 			"toInt64OrZero(g.num_probes) AS numberOfProbes, toFloat64OrZero(g.segment_mean) AS segmentMean "+
 			"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id "+
-			"WHERE g.study_id = '%s' AND g.sample_id = '%s'%s ORDER BY g.chrom, start", sid, smp, chrom))
+			"WHERE g.study_id = {study:String} AND g.sample_id = {sample:String}%s ORDER BY g.chrom, start", chrom), p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -261,9 +261,10 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 }
 
 // writeSamples writes the samples matching a predicate over the `sample` view
-// (aliased s), with type, sequenced and segment flags.
-func (s *State) writeSamples(w http.ResponseWriter, where string) {
-	rows, err := ch.Query[sampleFullRow](s.CH, sampleFullSelect(where))
+// (aliased s), with type, sequenced and segment flags. where may hold
+// placeholders bound in args.
+func (s *State) writeSamples(w http.ResponseWriter, where string, args *sqlArgs) {
+	rows, err := queryA[sampleFullRow](s.CH, sampleFullSelect(where), args)
 	if err != nil {
 		fail(w, err)
 		return

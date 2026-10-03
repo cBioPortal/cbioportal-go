@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
@@ -39,12 +38,13 @@ type typeOfCancerRow struct {
 
 // queryCancerTypes returns the cancer types matching where (may be empty),
 // falling back to the reference set when the study cancer-type view is absent
-// or predates the short_name column.
-func (s *State) queryCancerTypes(where string) ([]CancerType, error) {
+// or predates the short_name column. p holds the values of where's
+// placeholders.
+func (s *State) queryCancerTypes(where string, p ch.Params) ([]CancerType, error) {
 	tail := where + " ORDER BY type_of_cancer_id"
-	rows, err := ch.Query[typeOfCancerRow](s.CH, "SELECT * FROM ("+cancerTypesSQL+")"+tail)
+	rows, err := ch.QueryP[typeOfCancerRow](s.CH, "SELECT * FROM ("+cancerTypesSQL+")"+tail, p)
 	if err != nil {
-		rows, err = ch.Query[typeOfCancerRow](s.CH, "SELECT * FROM ("+refCancerTypesSQL+")"+tail)
+		rows, err = ch.QueryP[typeOfCancerRow](s.CH, "SELECT * FROM ("+refCancerTypesSQL+")"+tail, p)
 	}
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (s *State) queryCancerTypes(where string) ([]CancerType, error) {
 // cancerType — GET /api/cancer-types/{cancerTypeId}.
 func (s *State) cancerType(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cancerTypeId")
-	rows, err := s.queryCancerTypes(fmt.Sprintf(" WHERE type_of_cancer_id = '%s'", sqlLit(id)))
+	rows, err := s.queryCancerTypes(" WHERE type_of_cancer_id = {id:String}", ch.Params{"id": id})
 	if err != nil {
 		fail(w, err)
 		return

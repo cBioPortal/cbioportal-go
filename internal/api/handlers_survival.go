@@ -46,24 +46,24 @@ func patientIdentifierPairs(ids []identifier) [][2]string {
 
 // patientEventScope is the clinical_event_data_derived predicate selecting the
 // given patients.
-func patientEventScope(pairs [][2]string) string {
+func patientEventScope(a *sqlArgs, pairs [][2]string) string {
 	keys := make([]string, len(pairs))
 	studies := map[string]bool{}
 	for i, p := range pairs {
 		keys[i] = p[0] + "_" + p[1]
 		studies[p[0]] = true
 	}
-	return fmt.Sprintf("cancer_study_identifier IN (%s) AND patient_unique_id IN (%s)",
-		inList(sortedKeys(studies)), inList(keys))
+	return fmt.Sprintf("cancer_study_identifier IN %s AND patient_unique_id IN %s",
+		a.strs(sortedKeys(studies)), a.strs(keys))
 }
 
 // eventRequestsSQL renders event requests as an OR over event type (and, with
 // attributes, the event_type_key[_value] combinations); "" selects every event.
-func eventRequestsSQL(reqs []clinicalEventRequest, withValue bool) string {
+func eventRequestsSQL(a *sqlArgs, reqs []clinicalEventRequest, withValue bool) string {
 	var ors []string
 	for _, q := range reqs {
 		if len(q.Attributes) == 0 {
-			ors = append(ors, fmt.Sprintf("event_type = '%s'", sqlLit(q.EventType)))
+			ors = append(ors, "event_type = "+a.str(q.EventType))
 			continue
 		}
 		combos := make([]string, len(q.Attributes))
@@ -77,7 +77,7 @@ func eventRequestsSQL(reqs []clinicalEventRequest, withValue bool) string {
 		if withValue {
 			expr = "concat(event_type, '_', key, '_', value)"
 		}
-		ors = append(ors, fmt.Sprintf("%s IN (%s)", expr, inList(combos)))
+		ors = append(ors, fmt.Sprintf("%s IN %s", expr, a.strs(combos)))
 	}
 	if len(ors) == 0 {
 		return ""
@@ -112,8 +112,9 @@ func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs 
 	if len(pairs) == 0 {
 		return starts, ends, censors, nil, nil
 	}
+	args := newArgs()
 	cond := func(reqs []clinicalEventRequest) string {
-		if c := eventRequestsSQL(reqs, true); c != "" {
+		if c := eventRequestsSQL(args, reqs, true); c != "" {
 			return strings.TrimPrefix(c, " AND ")
 		}
 		return "1"
@@ -136,11 +137,11 @@ func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs 
 		CensorStop  int64  `json:"censorStop"`
 	}
 	sc, ec, cc := cond(startReqs), cond(endReqs), cond(censorReqs)
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT cancer_study_identifier AS studyId, substring(patient_unique_id, length(cancer_study_identifier) + 2) AS patientId, "+
 			"%s, %s, %s FROM clinical_event_data_derived WHERE %s AND ((%s) OR (%s) OR (%s)) "+
 			"GROUP BY cancer_study_identifier, patient_unique_id HAVING startN > 0 ORDER BY studyId, patientId",
-		span("start", sc), span("end", ec), span("censor", cc), patientEventScope(pairs), sc, ec, cc))
+		span("start", sc), span("end", ec), span("censor", cc), patientEventScope(args, pairs), sc, ec, cc), args)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -344,10 +345,11 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 		Key       string `json:"attrKey"`
 		Value     string `json:"attrValue"`
 	}
-	rows, err := ch.Query[metaRow](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, err := queryA[metaRow](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT lower(event_type) AS eventType, lower(key) AS attrKey, lower(value) AS attrValue "+
 			"FROM clinical_event_data_derived WHERE %s%s ORDER BY eventType, attrKey, attrValue",
-		patientEventScope(patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(req.ClinicalEventRequests, false)))
+		patientEventScope(args, patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(args, req.ClinicalEventRequests, false)), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -366,19 +368,21 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 // all timeline events for the study as ClinicalEvent rows. Empty (typed) when the
 // study has no timeline data.
 func (s *State) studyClinicalEvents(w http.ResponseWriter, r *http.Request) {
-	s.writeClinicalEvents(w, fmt.Sprintf("study_id = '%s'", sqlLit(r.PathValue("studyId"))))
+	s.writeClinicalEvents(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
 // patientClinicalEvents serves the patient-view timeline:
 // GET /api/studies/{studyId}/patients/{patientId}/clinical-events.
 func (s *State) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
-	s.writeClinicalEvents(w, fmt.Sprintf("study_id = '%s' AND patient_id = '%s'",
-		sqlLit(r.PathValue("studyId")), sqlLit(r.PathValue("patientId"))))
+	s.writeClinicalEvents(w, "study_id = {study:String} AND patient_id = {patient:String}",
+		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
 }
 
-func (s *State) writeClinicalEvents(w http.ResponseWriter, where string) {
-	rows, err := ch.Query[timelineRow](s.CH, fmt.Sprintf(
-		"%s WHERE %s ORDER BY patientId, startDate, eventType", s.timelineSelect(), where))
+// writeClinicalEvents writes the timeline events matching where, whose
+// placeholders take their values from p.
+func (s *State) writeClinicalEvents(w http.ResponseWriter, where string, p ch.Params) {
+	rows, err := ch.QueryP[timelineRow](s.CH, fmt.Sprintf(
+		"%s WHERE %s ORDER BY patientId, startDate, eventType", s.timelineSelect(), where), p)
 	if err != nil {
 		fail(w, err)
 		return

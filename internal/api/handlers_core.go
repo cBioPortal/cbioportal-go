@@ -348,7 +348,8 @@ type Sample struct {
 }
 
 func (s *State) samples(w http.ResponseWriter, r *http.Request) {
-	s.writeSamples(w, fmt.Sprintf("s.study_id = '%s'", sqlLit(r.PathValue("studyId"))))
+	args := newArgs()
+	s.writeSamples(w, "s.study_id = "+args.str(r.PathValue("studyId")), args)
 }
 
 type identifier struct {
@@ -380,13 +381,14 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 	// sample keys. The results view uses the sampleListIds form to expand a case
 	// set into its samples.
 	var where string
+	args := newArgs()
 	switch {
 	case len(f.SampleIdentifiers) > 0:
 		pairs := make([][2]string, len(f.SampleIdentifiers))
 		for i, id := range f.SampleIdentifiers {
 			pairs[i] = [2]string{id.StudyID, id.id()}
 		}
-		where = fmt.Sprintf("(s.study_id, s.sample_id) IN (%s)", tupleIn(pairs))
+		where = "(s.study_id, s.sample_id) IN " + args.pairs(pairs)
 	case len(f.UniqueSampleKeys) > 0:
 		var pairs [][2]string
 		for _, k := range f.UniqueSampleKeys {
@@ -398,16 +400,15 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, []Sample{})
 			return
 		}
-		where = fmt.Sprintf("(s.study_id, s.sample_id) IN (%s)", tupleIn(pairs))
+		where = "(s.study_id, s.sample_id) IN " + args.pairs(pairs)
 	case len(f.SampleListIDs) > 0:
-		where = fmt.Sprintf(
-			"(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id IN (%s))",
-			inList(f.SampleListIDs))
+		where = "(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id IN " +
+			args.strs(f.SampleListIDs) + ")"
 	default:
 		writeJSON(w, []Sample{})
 		return
 	}
-	s.writeSamples(w, where)
+	s.writeSamples(w, where, args)
 }
 
 // ---------- Patients ----------
@@ -421,9 +422,9 @@ type Patient struct {
 }
 
 func (s *State) patients(w http.ResponseWriter, r *http.Request) {
-	sid := sqlLit(r.PathValue("studyId"))
-	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = '%s' ORDER BY patient_id", sid))
+	rows, err := ch.QueryP[idRow](s.CH,
+		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY patient_id",
+		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -458,8 +459,9 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []Patient{})
 		return
 	}
-	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE (study_id, patient_id) IN (%s) ORDER BY study_id, patient_id", tupleIn(pairs)))
+	rows, err := ch.QueryP[idRow](s.CH,
+		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} "+
+			"ORDER BY study_id, patient_id", ch.Params{"ids": pairs})
 	if err != nil {
 		fail(w, err)
 		return
@@ -486,7 +488,7 @@ type CancerType struct {
 }
 
 func (s *State) cancerTypes(w http.ResponseWriter, r *http.Request) {
-	out, err := s.queryCancerTypes("")
+	out, err := s.queryCancerTypes("", nil)
 	if err != nil {
 		fail(w, err)
 		return

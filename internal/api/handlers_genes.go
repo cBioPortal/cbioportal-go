@@ -39,20 +39,22 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var conds []string
+	p := ch.Params{}
 	if len(entrez) > 0 {
 		conds = append(conds, fmt.Sprintf("entrez_gene_id IN (%s)", strings.Join(entrez, ", ")))
 	}
 	if len(symbols) > 0 {
 		up := make([]string, len(symbols))
 		for i, sym := range symbols {
-			up[i] = "'" + sqlLit(strings.ToUpper(sym)) + "'"
+			up[i] = strings.ToUpper(sym)
 		}
-		conds = append(conds, fmt.Sprintf("upper(hugo_gene_symbol) IN (%s)", strings.Join(up, ", ")))
+		conds = append(conds, "upper(hugo_gene_symbol) IN {symbols:Array(String)}")
+		p["symbols"] = up
 	}
-	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[geneRow](s.CH, fmt.Sprintf(
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type "+
 			"FROM cbioportal_ref.gene WHERE %s",
-		strings.Join(conds, " OR ")))
+		strings.Join(conds, " OR ")), p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -63,12 +65,13 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 // gene by id (entrez or hugo).
 func (s *State) gene(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	cond := fmt.Sprintf("upper(hugo_gene_symbol) = '%s'", sqlLit(strings.ToUpper(id)))
+	cond := "upper(hugo_gene_symbol) = {symbol:String}"
+	p := ch.Params{"symbol": strings.ToUpper(id)}
 	if _, err := strconv.ParseInt(id, 10, 64); err == nil {
 		cond = "entrez_gene_id = " + id
 	}
-	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
-		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type FROM cbioportal_ref.gene WHERE %s LIMIT 1", cond))
+	rows, err := ch.QueryP[geneRow](s.CH,
+		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type FROM cbioportal_ref.gene WHERE "+cond+" LIMIT 1", p)
 	if err != nil {
 		fail(w, err)
 		return

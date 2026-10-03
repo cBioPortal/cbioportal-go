@@ -146,21 +146,22 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	readBody(r, &f)
 
 	var scope string
+	args := newArgs()
 	switch {
 	case len(f.SampleMolecularIdentifiers) > 0:
 		pairs := make([][2]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {
 			pairs[i] = [2]string{svStudy(id.MolecularProfileID), id.SampleID}
 		}
-		scope = fmt.Sprintf("(sv.study_id, sv.sample_id) IN (%s)", tupleIn(pairs))
+		scope = "(sv.study_id, sv.sample_id) IN " + args.pairs(pairs)
 	case len(f.MolecularProfileIDs) > 0:
 		studies := make([]string, len(f.MolecularProfileIDs))
 		for i, p := range f.MolecularProfileIDs {
 			studies[i] = svStudy(p)
 		}
-		scope = fmt.Sprintf("sv.study_id IN (%s)", inList(studies))
+		scope = "sv.study_id IN " + args.strs(studies)
 		if f.SampleListID != "" {
-			scope += fmt.Sprintf(" AND sv.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(f.SampleListID))
+			scope += " AND sv.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
 		}
 	default:
 		writeJSON(w, []StructuralVariant{})
@@ -182,13 +183,13 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cols := svSelectColumns(s.svViewColumns())
-	rows, err := ch.Query[map[string]any](s.CH, fmt.Sprintf(
+	rows, err := queryA[map[string]any](s.CH, fmt.Sprintf(
 		"SELECT %s FROM (%s) sv "+
 			"LEFT JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 			"WHERE %s ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId",
-		strings.Join(cols, ", "), svSiteEntrezSQL, scope))
+		strings.Join(cols, ", "), svSiteEntrezSQL, scope), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -392,8 +393,8 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 		type sr struct {
 			SampleID string `json:"sampleId"`
 		}
-		rows, _ := ch.Query[sr](s.CH, fmt.Sprintf(
-			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = '%s'", sqlLit(f.SampleListID)))
+		rows, _ := ch.QueryP[sr](s.CH,
+			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String}", ch.Params{"list": f.SampleListID})
 		for _, x := range rows {
 			samples = append(samples, x.SampleID)
 		}
@@ -443,9 +444,9 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 		ID   string `json:"id"`
 		Type string `json:"type"`
 	}
-	types, _ := ch.Query[typeRow](s.CH, fmt.Sprintf(
-		"SELECT molecular_profile_id AS id, molecular_alteration_type AS type FROM molecular_profile WHERE molecular_profile_id IN (%s)",
-		inList(profIDs)))
+	types, _ := ch.QueryP[typeRow](s.CH,
+		"SELECT molecular_profile_id AS id, molecular_alteration_type AS type FROM molecular_profile WHERE molecular_profile_id IN {ids:Array(String)}",
+		ch.Params{"ids": profIDs})
 	isMutation := map[string]bool{}
 	for _, t := range types {
 		isMutation[t.ID] = t.Type == "MUTATION_EXTENDED"
@@ -459,9 +460,9 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 		return out
 	}
 	patientOf := map[string]string{}
-	rows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id IN (%s)",
-		inList(studies)))
+	rows, _ := ch.QueryP[idRow](s.CH,
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id IN {ids:Array(String)}",
+		ch.Params{"ids": studies})
 	for _, r := range rows {
 		patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
 	}
@@ -470,9 +471,9 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 		SampleID string  `json:"sampleId"`
 		Panel    *string `json:"panel"`
 	}
-	members, _ := ch.Query[memberRow](s.CH, fmt.Sprintf(
+	members, _ := ch.QueryP[memberRow](s.CH,
 		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
-			"WHERE molecular_profile_id IN (%s)", inList(profIDs)))
+			"WHERE molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": profIDs})
 	type membership struct{ panel string }
 	member := map[string]membership{}
 	for _, m := range members {
@@ -483,15 +484,13 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 		member[jkey(m.Profile, m.SampleID)] = membership{panel}
 	}
 	sequenced := map[string]bool{}
-	seqRows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, sample_id AS sampleId FROM sample_list WHERE list_id IN (%s)",
-		inList(func() []string {
-			ids := make([]string, len(studies))
-			for i, st := range studies {
-				ids[i] = st + "_sequenced"
-			}
-			return ids
-		}())))
+	sequencedLists := make([]string, len(studies))
+	for i, st := range studies {
+		sequencedLists[i] = st + "_sequenced"
+	}
+	seqRows, _ := ch.QueryP[idRow](s.CH,
+		"SELECT study_id AS studyId, sample_id AS sampleId FROM sample_list WHERE list_id IN {ids:Array(String)}",
+		ch.Params{"ids": sequencedLists})
 	for _, r := range seqRows {
 		sequenced[jkey(r.StudyID, r.SampleID)] = true
 	}

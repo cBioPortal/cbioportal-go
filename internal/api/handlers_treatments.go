@@ -40,10 +40,10 @@ func (s *State) studiesWithTreatments(studyIDs []string, key string) []string {
 	type row struct {
 		Study string `json:"study"`
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, _ := ch.QueryP[row](s.CH,
 		"SELECT DISTINCT cancer_study_identifier AS study FROM clinical_event_data_derived "+
-			"WHERE cancer_study_identifier IN (%s) AND lower(event_type) = 'treatment' AND lower(key) = lower('%s')",
-		orEmpty(studyIDs), sqlLit(key)))
+			"WHERE cancer_study_identifier IN {studies:Array(String)} AND lower(event_type) = 'treatment' AND lower(key) = lower({key:String})",
+		ch.Params{"studies": studyIDs, "key": key})
 	out := make([]string, len(rows))
 	for i, r := range rows {
 		out[i] = r.Study
@@ -112,8 +112,8 @@ type SampleTreatmentReport struct {
 }
 
 // treatmentEvents selects the AGENT treatment events of the filtered patients.
-func (s *State) treatmentEvents(f studyViewFilter) string {
-	return s.treatmentEventsByTier(f, treatmentTiers["Agent"])
+func (s *State) treatmentEvents(a *sqlArgs, f studyViewFilter) string {
+	return s.treatmentEventsByTier(a, f, treatmentTiers["Agent"])
 }
 
 // treatmentTier is a ClinicalEventKeyCode: the event key a treatment tier
@@ -144,16 +144,16 @@ func tierParam(w http.ResponseWriter, r *http.Request) (treatmentTier, bool) {
 
 // treatmentEventsByTier selects the treatment events of the filtered
 // patients for one tier, one row per (split) treatment value.
-func (s *State) treatmentEventsByTier(f studyViewFilter, tier treatmentTier) string {
+func (s *State) treatmentEventsByTier(a *sqlArgs, f studyViewFilter, tier treatmentTier) string {
 	value := "value"
 	if tier.split != "" {
-		value = fmt.Sprintf("arrayJoin(splitByRegexp('%s', value))", sqlLit(tier.split))
+		value = fmt.Sprintf("arrayJoin(splitByRegexp(%s, value))", a.str(tier.split))
 	}
 	return fmt.Sprintf(
 		"SELECT patient_unique_id, %s AS value, start_date FROM clinical_event_data_derived "+
-			"WHERE cancer_study_identifier IN (%s) AND lower(event_type) = 'treatment' AND key = '%s' "+
+			"WHERE cancer_study_identifier IN %s AND lower(event_type) = 'treatment' AND key = %s "+
 			"AND patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s)",
-		value, orEmpty(f.studyIDs()), sqlLit(tier.key), s.filterWhere(f))
+		value, a.strs(f.studyIDs()), a.str(tier.key), s.filterWhere(a, f))
 }
 
 func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
@@ -161,9 +161,10 @@ func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
 		Treatment string `json:"treatment"`
 		Count     int    `json:"count"`
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT value AS treatment, toInt64(uniqExact(patient_unique_id)) AS count FROM (%s) GROUP BY value ORDER BY value",
-		s.treatmentEvents(f)))
+		s.treatmentEvents(args, f)), args)
 	out := make([]PatientTreatment, len(rows))
 	for i, r := range rows {
 		out[i] = PatientTreatment{Treatment: r.Treatment, Count: r.Count}
@@ -171,8 +172,8 @@ func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
 	type total struct {
 		N int `json:"n"`
 	}
-	t, _ := ch.Query[total](s.CH, fmt.Sprintf(
-		"SELECT toInt64(uniqExact(patient_unique_id)) AS n FROM (%s)", s.treatmentEvents(f)))
+	t, _ := queryA[total](s.CH, fmt.Sprintf(
+		"SELECT toInt64(uniqExact(patient_unique_id)) AS n FROM (%s)", s.treatmentEvents(args, f)), args)
 	n := 0
 	if len(t) > 0 {
 		n = t[0].N
@@ -191,10 +192,11 @@ func (s *State) patientTreatmentCountsFetch(w http.ResponseWriter, r *http.Reque
 // first dose of each treatment its patient received: Pre when the sample was
 // taken on or before that dose, Post otherwise.
 func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treatmentTier) []SampleTreatmentRow {
-	studyIn := orEmpty(f.studyIDs())
+	args := newArgs()
+	studyIn := args.strs(f.studyIDs())
 	value := "value"
 	if tier.split != "" {
-		value = fmt.Sprintf("arrayJoin(splitByRegexp('%s', value))", sqlLit(tier.split))
+		value = fmt.Sprintf("arrayJoin(splitByRegexp(%s, value))", args.str(tier.split))
 	}
 	type row struct {
 		Treatment string `json:"treatment"`
@@ -204,20 +206,20 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 		Time      int    `json:"time"`
 		Pre       uint8  `json:"pre"`
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT t.treatment AS treatment, ced.sample_id AS sampleId, ced.patient_unique_id AS patient, "+
 			"ced.cancer_study_identifier AS study, toInt64(ced.time_taken) AS time, toUInt8(ced.time_taken <= t.treatment_time_taken) AS pre "+
 			"FROM (SELECT value AS sample_id, patient_unique_id, min(start_date) AS time_taken, cancer_study_identifier "+
-			"FROM clinical_event_data_derived WHERE cancer_study_identifier IN (%[1]s) "+
+			"FROM clinical_event_data_derived WHERE cancer_study_identifier IN %[1]s "+
 			"AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN') AND key = 'SAMPLE_ID' "+
 			"GROUP BY patient_unique_id, value, cancer_study_identifier) ced "+
 			"INNER JOIN (SELECT patient_unique_id, treatment, min(start_date) AS treatment_time_taken "+
 			"FROM (SELECT patient_unique_id, %[3]s AS treatment, start_date FROM clinical_event_data_derived "+
-			"WHERE cancer_study_identifier IN (%[1]s) AND lower(event_type) = 'treatment' AND key = '%[4]s') "+
+			"WHERE cancer_study_identifier IN %[1]s AND lower(event_type) = 'treatment' AND key = %[4]s) "+
 			"GROUP BY patient_unique_id, treatment) t "+
 			"ON t.patient_unique_id = ced.patient_unique_id "+
 			"WHERE concat(ced.cancer_study_identifier, '_', ced.sample_id) IN (%[2]s)",
-		studyIn, s.filterSQL(f), value, sqlLit(tier.key)))
+		studyIn, s.filterSQL(args, f), value, args.str(tier.key)), args)
 	byKey := map[string]*SampleTreatmentRow{}
 	for _, r := range rows {
 		time := "Post"
@@ -260,12 +262,13 @@ func (s *State) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Reques
 	type total struct {
 		N int `json:"n"`
 	}
-	t, _ := ch.Query[total](s.CH, fmt.Sprintf(
-		"SELECT toInt64(uniqExact(value)) AS n FROM clinical_event_data_derived WHERE cancer_study_identifier IN (%s) "+
+	args := newArgs()
+	t, _ := queryA[total](s.CH, fmt.Sprintf(
+		"SELECT toInt64(uniqExact(value)) AS n FROM clinical_event_data_derived WHERE cancer_study_identifier IN %s "+
 			"AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN') AND key = 'SAMPLE_ID' "+
 			"AND concat(cancer_study_identifier, '_', value) IN (%s) "+
 			"AND patient_unique_id IN (SELECT patient_unique_id FROM (%s))",
-		orEmpty(f.studyIDs()), s.filterSQL(f), s.treatmentEvents(f)))
+		args.strs(f.studyIDs()), s.filterSQL(args, f), s.treatmentEvents(args, f)), args)
 	n := 0
 	if len(t) > 0 {
 		n = t[0].N
@@ -290,11 +293,12 @@ func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
 		Study     string `json:"study"`
 		SampleID  string `json:"sampleId"`
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT t.value AS treatment, sd.patient_stable_id AS patient, sd.cancer_study_identifier AS study, "+
 			"sd.sample_stable_id AS sampleId FROM (%s) t JOIN sample_derived sd ON sd.patient_unique_id = t.patient_unique_id "+
 			"WHERE %s ORDER BY treatment, study, patient, sampleId",
-		s.treatmentEventsByTier(f, tier), s.filterWhere(f)))
+		s.treatmentEventsByTier(args, f, tier), s.filterWhere(args, f)), args)
 	type patientRow struct {
 		Treatment string                `json:"treatment"`
 		Count     int                   `json:"count"`
@@ -358,10 +362,11 @@ func (s *State) clinicalEventTypeCountsFetch(w http.ResponseWriter, r *http.Requ
 		EventType string `json:"eventType"`
 		Count     int    `json:"count"`
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT event_type AS eventType, toInt64(uniqExact(patient_unique_id)) AS count FROM clinical_event_data_derived "+
 			"WHERE patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s) GROUP BY event_type ORDER BY event_type",
-		s.filterWhere(f)))
+		s.filterWhere(args, f)), args)
 	out := make([]ClinicalEventTypeCount, len(rows))
 	for i, r := range rows {
 		out[i] = ClinicalEventTypeCount{EventType: r.EventType, Count: r.Count}

@@ -79,6 +79,10 @@ jobs:
       - run: go test ./test/
         env:
           API: http://localhost:18090
+      - name: Query parameter round trips
+        run: go test ./internal/clickhouse/ -run Live
+        env:
+          CLICKHOUSE_TEST_URL: http://localhost:18123
       - name: API log
         if: failure()
         run: cat api.log

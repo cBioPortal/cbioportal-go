@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // routeStudyView2 registers the remaining study-view aggregation endpoints:
@@ -48,7 +46,8 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		g := f.GenomicDataFilters[0]
 		svf = svf.withoutMutation(g.HugoGeneSymbol, g.ProfileType, "MUTATED")
 	}
-	filtered := s.filterSQL(svf)
+	args := newArgs()
+	filtered := s.filterSQL(args, svf)
 	out := []GenomicDataCountItem{}
 	if summary {
 		if len(f.GenomicDataFilters) == 0 {
@@ -65,17 +64,17 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			Mutated  uint64 `json:"mutated"`
 			Profiled uint64 `json:"profiled"`
 		}
-		rows, err := ch.Query[countsRow](s.CH, fmt.Sprintf(
+		rows, err := queryA[countsRow](s.CH, fmt.Sprintf(
 			"WITH scope AS (%[1]s) SELECT gene, sum(m) AS mutated, sum(p) AS profiled FROM ("+
 				"SELECT hugo_gene_symbol AS gene, uniqExact(sample_unique_id) AS m, toUInt64(0) AS p FROM genomic_event_derived "+
-				"WHERE sample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN (%[2]s) "+
+				"WHERE sample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN %[2]s "+
 				"AND variant_type = 'mutation' GROUP BY gene "+
 				"UNION ALL SELECT gpg.gene AS gene, toUInt64(0) AS m, uniqExact(sgp.sample_unique_id) AS p FROM sample_to_gene_panel_derived sgp "+
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
-				"WHERE sgp.sample_unique_id IN (SELECT sample_unique_id FROM scope) AND gpg.gene IN (%[2]s) "+
+				"WHERE sgp.sample_unique_id IN (SELECT sample_unique_id FROM scope) AND gpg.gene IN %[2]s "+
 				"AND sgp.alteration_type = 'MUTATION_EXTENDED' GROUP BY gene"+
 				") GROUP BY gene",
-			filtered, inList(genes)))
+			filtered, args.strs(genes)), args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -122,12 +121,12 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		U      uint64 `json:"u"`
 		Sample string `json:"samples"`
 	}
-	rows, _ := ch.Query[typeRow](s.CH, fmt.Sprintf(
+	rows, _ := queryA[typeRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
 			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM genomic_event_derived "+
-			"WHERE sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN (%s) "+
+			"WHERE sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
-		filtered, inList(genes)))
+		filtered, args.strs(genes)), args)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	for _, r := range rows {
@@ -147,7 +146,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		out = append(out, *byGene[g])
 	}
 	if includeSampleIDs {
-		gene := sqlLit(genes[0])
+		gene := args.str(genes[0])
 		type idsRow struct {
 			N   uint64 `json:"n"`
 			IDs string `json:"ids"`
@@ -155,19 +154,19 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		profiled := fmt.Sprintf(
 			"SELECT DISTINCT sgp.sample_unique_id FROM sample_to_gene_panel_derived sgp "+
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
-				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = '%s' AND sgp.alteration_type = 'MUTATION_EXTENDED'", filtered, gene)
+				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'", filtered, gene)
 		mutated := fmt.Sprintf(
 			"SELECT sample_unique_id FROM genomic_event_derived WHERE sample_unique_id IN (%s) "+
-				"AND variant_type = 'mutation' AND hugo_gene_symbol = '%s'", filtered, gene)
+				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", filtered, gene)
 		extra := []struct{ label, value, sql string }{
 			{"Not Mutated", "NOT_MUTATED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM (%s) WHERE sample_unique_id NOT IN (%s)", profiled, mutated)},
-			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM sample_derived WHERE cancer_study_identifier IN (%s) AND sample_unique_id NOT IN (%s)", inList(svf.studyIDs()), profiled)},
+			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM sample_derived WHERE cancer_study_identifier IN %s AND sample_unique_id NOT IN (%s)", args.strs(svf.studyIDs()), profiled)},
 		}
 		if len(out) == 0 {
 			out = append(out, GenomicDataCountItem{HugoGeneSymbol: genes[0], ProfileType: "mutations", Counts: []GenomicDataCount{}})
 		}
 		for _, e := range extra {
-			r, err := ch.Query[idsRow](s.CH, e.sql)
+			r, err := queryA[idsRow](s.CH, e.sql, args)
 			if err != nil || len(r) == 0 {
 				continue
 			}
@@ -211,11 +210,12 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Value string `json:"value"`
 		C     uint64 `json:"c"`
 	}
-	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
+	args := newArgs()
+	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM genetic_alteration_derived "+
-			"WHERE NOT %s AND profile_type = '%s' AND sample_unique_id IN (%s) AND hugo_gene_symbol IN (%s) "+
+			"WHERE NOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, alteration_value ORDER BY hugo_gene_symbol, alteration_value",
-		isNASQL("assumeNotNull(alteration_value)"), sqlLit(profileType), s.filterSQL(svf), inList(genes)))
+		isNASQL("assumeNotNull(alteration_value)"), args.str(profileType), s.filterSQL(args, svf), args.strs(genes)), args)
 	total := s.scopeSampleCount(svf)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
@@ -294,10 +294,11 @@ func mergeCaseListCounts(rows []CaseListDataCount) []CaseListDataCount {
 func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	scope := s.sampleScope(f)
-	rows, err := ch.Query[CaseListDataCount](s.CH, fmt.Sprintf(
+	args := newArgs()
+	scope := s.sampleScope(args, f)
+	rows, err := queryA[CaseListDataCount](s.CH, fmt.Sprintf(
 		"SELECT replaceAll(list_id, concat(study_id, '_'), '') AS value, any(name) AS label, count() AS count "+
-			"FROM sample_list WHERE %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", scope))
+			"FROM sample_list WHERE %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", scope), args)
 	if err != nil {
 		fail(w, err)
 		return

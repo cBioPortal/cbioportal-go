@@ -1,9 +1,10 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
+
+	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // routeSignificance registers the per-study GISTIC and MutSig endpoints
@@ -62,10 +63,10 @@ func importerFloat(text string, parsed float64) float64 {
 }
 
 // writeTotalCount answers a META projection: the total-count header, no body.
-func (s *State) writeTotalCount(w http.ResponseWriter, sql string) {
+func (s *State) writeTotalCount(w http.ResponseWriter, sql string, p ch.Params) {
 	rows, err := queryView[struct {
 		N uint64 `json:"n"`
-	}](s.CH, sql)
+	}](s.CH, sql, p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -89,10 +90,11 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 	if !s.requireStudy(w, studyID) {
 		return
 	}
-	where := fmt.Sprintf("study_id = '%s'", sqlLit(studyID))
+	where := "study_id = {study:String}"
+	p := ch.Params{"study": studyID}
 	projection := projectionParam(r)
 	if projection == "META" {
-		s.writeTotalCount(w, "SELECT count() AS n FROM gistic WHERE "+where)
+		s.writeTotalCount(w, "SELECT count() AS n FROM gistic WHERE "+where, p)
 		return
 	}
 	type regionRow struct {
@@ -107,7 +109,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 	}
 	regions, err := queryView[regionRow](s.CH,
 		"SELECT gistic_roi_id, chromosome, cytoband, wide_peak_start, wide_peak_end, q_value, q_value_text, amp FROM gistic WHERE "+where+
-			pagingClause(r, gisticSort, "amp DESC, chromosome ASC, wide_peak_start ASC, gistic_roi_id ASC"))
+			pagingClause(r, gisticSort, "amp DESC, chromosome ASC, wide_peak_start ASC, gistic_roi_id ASC"), p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -120,7 +122,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 		}
 		rows, err := queryView[geneRow](s.CH,
 			"SELECT gistic_roi_id, entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol FROM gistic_to_gene WHERE "+
-				where+" ORDER BY gistic_roi_id, gene_index")
+				where+" ORDER BY gistic_roi_id, gene_index", p)
 		if err != nil {
 			fail(w, err)
 			return
@@ -156,9 +158,10 @@ func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request
 	if !s.requireStudy(w, studyID) {
 		return
 	}
-	where := fmt.Sprintf("study_id = '%s'", sqlLit(studyID))
+	where := "study_id = {study:String}"
+	p := ch.Params{"study": studyID}
 	if projectionParam(r) == "META" {
-		s.writeTotalCount(w, "SELECT count() AS n FROM mutsig WHERE "+where)
+		s.writeTotalCount(w, "SELECT count() AS n FROM mutsig WHERE "+where, p)
 		return
 	}
 	type mutSigRow struct {
@@ -170,7 +173,7 @@ func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request
 		"SELECT study_id AS studyId, entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, `rank` AS rank, "+
 			"num_mutations AS numberOfMutations, p_value AS pValue, q_value AS qValue, "+
 			"p_value_text AS pValueText, q_value_text AS qValueText FROM mutsig WHERE "+where+
-			pagingClause(r, mutSigSort, "entrez_gene_id ASC"))
+			pagingClause(r, mutSigSort, "entrez_gene_id ASC"), p)
 	if err != nil {
 		fail(w, err)
 		return

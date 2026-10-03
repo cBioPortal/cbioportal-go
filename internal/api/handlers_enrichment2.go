@@ -111,15 +111,6 @@ func (s *State) resolveGroupTriples(g casesGroup, metaCache map[string]profileMe
 	return triples, table
 }
 
-// tripleIn renders a ClickHouse tuple-membership list for 3-tuples.
-func tripleIn(triples [][3]string) string {
-	q := make([]string, len(triples))
-	for i, t := range triples {
-		q[i] = fmt.Sprintf("('%s', '%s', '%s')", sqlLit(t[0]), sqlLit(t[1]), sqlLit(t[2]))
-	}
-	return strings.Join(q, ", ")
-}
-
 // contStatRow is one gene/entity's count, mean and sample variance of the
 // numeric values within one group.
 type contStatRow struct {
@@ -148,6 +139,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		key = "hugo_symbol AS symbol, toInt64OrNull(entrez_gene_id) AS entrez"
 	}
 	metaCache := map[string]profileMeta{}
+	args := newArgs()
 	var parts []string
 	for gi, g := range groups {
 		triples, table := s.resolveGroupTriples(g, metaCache)
@@ -158,8 +150,8 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 			"SELECT %s, toUInt32(%d) AS grp, "+
 				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v, (part_, off_) AS pos_ "+
 				"FROM (SELECT *, _part AS part_, _part_offset AS off_, toFloat64OrNull("+javaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
-				"WHERE (study_id, profile_stable_id, sample_id) IN (%s)) WHERE isFinite(x)",
-			key, gi, table, tripleIn(triples)))
+				"WHERE (study_id, profile_stable_id, sample_id) IN %s) WHERE isFinite(x)",
+			key, gi, table, args.triples(triples)))
 	}
 	if len(parts) < 2 {
 		return []contResult{}, nil
@@ -173,7 +165,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 			"LEFT JOIN (SELECT entrez_gene_id, genetic_entity_id FROM cbioportal_ref.gene) g ON g.entrez_gene_id = a.entrez " +
 			"ORDER BY g.genetic_entity_id, a.symbol, a.grp"
 	}
-	rows, err := ch.Query[contStatRow](s.CH, query)
+	rows, err := queryA[contStatRow](s.CH, query, args)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +299,8 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	props := map[string]map[string]string{}
 	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
-		props, _ = s.genericAssayMetaProperties(fmt.Sprintf("(study_id, profile_stable_id) IN (%s)", tupleIn(pairs)))
+		args := newArgs()
+		props, _ = s.genericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.pairs(pairs), args)
 	}
 	out := make([]GenericAssayEnrichment, len(results))
 	for i, res := range results {
@@ -386,9 +379,10 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	}
 	samplesOf := map[string][]string{}
 	if len(pairs) > 0 {
-		rows, _ := ch.Query[idRow](s.CH, fmt.Sprintf(
+		rows, _ := ch.QueryP[idRow](s.CH,
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample "+
-				"WHERE (study_id, patient_id) IN (%s) ORDER BY study_id, sample_id", tupleIn(pairs)))
+				"WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id",
+			ch.Params{"ids": pairs})
 		for _, r := range rows {
 			k := jkey(r.StudyID, r.PatientID)
 			samplesOf[k] = append(samplesOf[k], r.SampleID)
