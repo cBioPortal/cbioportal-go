@@ -109,6 +109,42 @@ Caveats:
 - go lacks features www has (login, authorization, the shared session
   service), see the README's TODO list.
 
+## Code size
+
+What there is to maintain, counted on 2026-10-03 (cbioportal `f4cedba`,
+cbioportal-core `47890bb`, cbioportal-go `1331b57`): lines of code without
+blank and comment lines; the frontend, which both use unchanged, is not
+counted.
+
+| | Main code | Tests |
+|---|---|---|
+| **cbioportal-go** (API + importer) | **≈ 26,500** — Go 26.1k (SQL inline), scripts 0.4k | ≈ 9,200 |
+| cbioportal (Java backend) | ≈ 80,000 — Java 63.9k, MyBatis mapper XML 11.9k, SQL 1.3k, other 2.7k | ≈ 60,500 |
+| cbioportal-core (Java importer + Python validator) | ≈ 33,300 — Java 23.5k, Python 7.9k, shell 1.5k, other 0.5k | ≈ 22,700 |
+| **Java stack total** | **≈ 113,000** | ≈ 83,000 |
+
+The Go code is about a quarter of the size, in one language and with no
+third-party dependencies (the Java stack builds on Spring Boot, MyBatis,
+Jackson, commons-math and a Redis cache). Part of the difference is scope,
+part is structure:
+
+- **Not yet in Go:** the study validator (cbioportal-core's Python
+  `validateData.py`, ≈ 8k lines), SAML login, data access tokens and a few
+  MSK-only endpoints (see [API coverage](api-coverage.md)). Adding them is
+  estimated at 5–10k lines, which keeps Go at roughly a third of the size.
+- **Two backends in Java:** the Java portal carries both the legacy
+  MySQL/MyBatis implementation and the ClickHouse column-store one, each with
+  controllers, services, repositories, mapper XML and DTOs. Go has one path:
+  a handler per endpoint with its SQL.
+- **Tests:** the Java stack has ≈ 9× more test code. Go's behaviour is pinned
+  mostly by API contract tests, the frontend's e2e suite and the parity
+  comparison with www (`cmd/paritydiff`) rather than per-class unit tests.
+
+For maintenance this means one ≈ 26k-line codebase in place of two
+repositories and three languages, with one build (`go build`) and no dependency upgrades to track beyond the
+Go toolchain. The container image, frontend included, is ≈ 100 MB, against
+1.33 GB for `cbioportal/cbioportal:master`.
+
 ## Why go is fast without Redis
 
 - **An in-process cache** for the metadata the frontend asks for many times
