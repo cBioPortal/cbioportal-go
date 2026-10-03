@@ -100,6 +100,8 @@ weekly.
 - [Testing](docs/testing.md) — test tiers, test databases, the e2e harness, CI.
 - [Architecture](docs/architecture.md) — data flow, code layout, dependency
   policy.
+- [Benchmark](docs/benchmark.md) — go.cbioportal.org vs www.cbioportal.org:
+  page speed, resource use, cost estimate.
 - [Deployment](docs/deployment.md) — the container image and the daily
   datahub import behind go.cbioportal.org.
 
