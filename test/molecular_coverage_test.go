@@ -303,7 +303,7 @@ func TestContractGenePanelDataInProfile(t *testing.T) {
 
 // AlterationDriverAnnotationServiceImpl: binary annotations present and the
 // sorted distinct tiers (NA / empty excluded) of the profiles' mutation, CNA
-// event and SV annotations. An empty list drops the profile condition.
+// event and SV annotations. An empty list reports none.
 func TestContractCustomDriverAnnotationReport(t *testing.T) {
 	requireAPI(t)
 	report := func(ids []string) map[string]any {
@@ -315,14 +315,14 @@ func TestContractCustomDriverAnnotationReport(t *testing.T) {
 	wantEq(t, report([]string{"study_es_0_gistic"}), map[string]any{"hasBinary": true, "tiers": []any{"Class 1", "Class 2"}})
 	wantEq(t, report([]string{"study_es_0_structural_variants"}), map[string]any{"hasBinary": true, "tiers": []any{"Class 1", "Class 2", "Class 3", "Class 4", "Unknown"}})
 	wantEq(t, report([]string{"study_hg38_mutations"}), map[string]any{"hasBinary": false, "tiers": []any{}})
-	wantEq(t, report([]string{}), map[string]any{"hasBinary": true, "tiers": []any{"Class 1", "Class 2", "Class 3", "Class 4", "Unknown"}})
+	wantEq(t, report([]string{}), map[string]any{"hasBinary": false, "tiers": []any{}})
 }
 
 // ------------------------------------------------------------- gene sets ----
 
 // GenesetDataServiceImpl.fetchGenesetData: the GSVA score of every requested
 // gene set for every requested sample of the profile (data_gsva_scores.txt);
-// TCGA-A2-A04P-01 has no scores.
+// TCGA-A2-A04P-01 has no scores. Values are truncated to 4 decimals.
 func TestContractGenesetGeneticData(t *testing.T) {
 	requireAPI(t)
 	var rows []map[string]any
@@ -339,10 +339,10 @@ func TestContractGenesetGeneticData(t *testing.T) {
 		}
 	}
 	wantEq(t, got, map[[2]string]string{
-		{"TCGA-A1-A0SB-01", "GO_ACYLGLYCEROL_HOMEOSTASIS"}:                                 "-0.138520488027997",
-		{"TCGA-A2-A04U-01", "GO_ACYLGLYCEROL_HOMEOSTASIS"}:                                 "-0.503435483643209",
-		{"TCGA-A1-A0SB-01", "GO_ANATOMICAL_STRUCTURE_FORMATION_INVOLVED_IN_MORPHOGENESIS"}: "0.0643924387145285",
-		{"TCGA-A2-A04U-01", "GO_ANATOMICAL_STRUCTURE_FORMATION_INVOLVED_IN_MORPHOGENESIS"}: "-0.0625185753394938",
+		{"TCGA-A1-A0SB-01", "GO_ACYLGLYCEROL_HOMEOSTASIS"}:                                 "-0.1385",
+		{"TCGA-A2-A04U-01", "GO_ACYLGLYCEROL_HOMEOSTASIS"}:                                 "-0.5034",
+		{"TCGA-A1-A0SB-01", "GO_ANATOMICAL_STRUCTURE_FORMATION_INVOLVED_IN_MORPHOGENESIS"}: "0.0644",
+		{"TCGA-A2-A04U-01", "GO_ANATOMICAL_STRUCTURE_FORMATION_INVOLVED_IN_MORPHOGENESIS"}: "-0.0625",
 	})
 }
 

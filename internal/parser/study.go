@@ -3,9 +3,20 @@ package parser
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// metaFileName matches meta file names as cbioportal-core's importer
+// (get_meta_filenames) does: "meta" after a word start or "_", followed by a
+// word end, "_" or a digit, in any case.
+var metaFileName = regexp.MustCompile(`(?i)(\b|_)meta(\b|[_0-9])`)
+
+// IsMetaFile reports whether a study directory entry name is a meta file.
+func IsMetaFile(name string) bool {
+	return metaFileName.MatchString(name) && !strings.HasPrefix(name, ".") && !strings.HasSuffix(name, "~")
+}
 
 // Layout is how a data file's rows are physically laid out.
 type Layout int
@@ -48,8 +59,19 @@ type DataFile struct {
 	Namespaces         string
 	GenePanel          string
 	PatientLevel       string
-	Layout             Layout
-	StageSlug          string
+	PivotThreshold     string
+	SortOrder          string
+	// EntityMetaProperties are the meta file's generic_entity_meta_properties:
+	// the generic assay property columns, named as listed.
+	EntityMetaProperties []string
+	Layout               Layout
+	StageSlug            string
+}
+
+// MatrixShape splits the file's header into identifier and sample columns;
+// a generic assay file's listed property columns are identifiers too.
+func (d *DataFile) MatrixShape(columns []string) MatrixShape {
+	return ShapeWithFeatures(columns, d.EntityMetaProperties)
 }
 
 // IsMolecularProfile reports whether this is a molecular genetic profile (has a
@@ -117,7 +139,7 @@ func classify(at, dt string) (Layout, string) {
 	return Other, strings.ToLower(up) + "_" + strings.ToLower(udt)
 }
 
-// Scan discovers a study directory: pairs meta_*.txt with data files, reads
+// Scan discovers a study directory: pairs meta files with data files, reads
 // meta_study.txt, and classifies each data file.
 func Scan(dir string) (*Study, error) {
 	entries, err := os.ReadDir(dir)
@@ -127,7 +149,7 @@ func Scan(dir string) (*Study, error) {
 	var metas []string
 	for _, e := range entries {
 		n := e.Name()
-		if strings.HasPrefix(n, "meta_") && strings.HasSuffix(n, ".txt") {
+		if !e.IsDir() && IsMetaFile(n) {
 			metas = append(metas, filepath.Join(dir, n))
 		}
 	}
@@ -169,24 +191,38 @@ func Scan(dir string) (*Study, error) {
 		}
 		layout, slug := classify(at, dt)
 		s.Files = append(s.Files, DataFile{
-			MetaPath:           mp,
-			DataPath:           dataPath,
-			AlterationType:     at,
-			Datatype:           dt,
-			StableID:           meta.Get("stable_id"),
-			ProfileName:        meta.Get("profile_name"),
-			ProfileDescription: meta.Get("profile_description"),
-			ShowInAnalysis:     meta.Get("show_profile_in_analysis_tab"),
-			GenericAssayType:   meta.Get("generic_assay_type"),
-			Namespaces:         meta.Get("namespaces"),
-			GenePanel:          meta.Get("gene_panel"),
-			PatientLevel:       meta.Get("patient_level"),
-			Layout:             layout,
-			StageSlug:          slug,
+			MetaPath:             mp,
+			DataPath:             dataPath,
+			AlterationType:       at,
+			Datatype:             dt,
+			StableID:             meta.Get("stable_id"),
+			ProfileName:          meta.Get("profile_name"),
+			ProfileDescription:   meta.Get("profile_description"),
+			ShowInAnalysis:       meta.Get("show_profile_in_analysis_tab"),
+			GenericAssayType:     meta.Get("generic_assay_type"),
+			Namespaces:           meta.Get("namespaces"),
+			GenePanel:            meta.Get("gene_panel"),
+			PatientLevel:         meta.Get("patient_level"),
+			PivotThreshold:       meta.Get("pivot_threshold_value"),
+			SortOrder:            meta.Get("value_sort_order"),
+			EntityMetaProperties: splitList(meta.Get("generic_entity_meta_properties")),
+			Layout:               layout,
+			StageSlug:            slug,
 		})
 	}
 	if s.StudyID == "" {
 		s.StudyID = filepath.Base(dir)
 	}
 	return s, nil
+}
+
+// splitList splits a comma-separated meta value, dropping empty items.
+func splitList(v string) []string {
+	var out []string
+	for _, x := range strings.Split(strings.TrimSpace(v), ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
 }

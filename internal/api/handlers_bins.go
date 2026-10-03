@@ -150,10 +150,11 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 
 // scopedValueCounts counts, for each (entity, profile type) key, the non-NA
 // values of table over two study-view scopes in one query, and adds each
-// scope's remaining samples as NA.
+// scope's remaining cases as NA.
 // keyCol names the entity column and valueCol the value column; naSQL is the
-// predicate that marks a value as NA.
-func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL string, keys [][2]string,
+// predicate that marks a value as NA; unit is the case column counted
+// (sample_unique_id, or patient_unique_id for a patient-level profile).
+func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, keys [][2]string,
 	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value) {
 	unfiltered, filtered = map[[2]string][]databin.Value{}, map[[2]string][]databin.Value{}
 	if len(keys) == 0 {
@@ -165,8 +166,12 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL string, keys []
 		U uint64 `json:"u"`
 		F uint64 `json:"f"`
 	}
-	totals, _ := ch.Query[totalRow](s.CH, scopes+
-		"SELECT (SELECT count() FROM unfiltered) AS u, (SELECT count() FROM filtered) AS f")
+	total := "SELECT (SELECT count() FROM unfiltered) AS u, (SELECT count() FROM filtered) AS f"
+	if unit == "patient_unique_id" {
+		total = "SELECT (SELECT uniqExact(patient_unique_id) FROM sample_derived WHERE sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, " +
+			"(SELECT uniqExact(patient_unique_id) FROM sample_derived WHERE sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f"
+	}
+	totals, _ := ch.Query[totalRow](s.CH, scopes+total)
 	var totalU, totalF uint64
 	if len(totals) > 0 {
 		totalU, totalF = totals[0].U, totals[0].F
@@ -178,14 +183,19 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL string, keys []
 		U           uint64 `json:"u"`
 		F           uint64 `json:"f"`
 	}
+	// Rows are counted per sample; a patient-level profile counts patients.
+	countIf := "countIf("
+	if unit == "patient_unique_id" {
+		countIf = "uniqExactIf(patient_unique_id, "
+	}
 	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(scopes+
 		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
-		"countIf(sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
-		"countIf(sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
+		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
+		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
 		"FROM %[3]s WHERE (%[1]s, profile_type) IN (%[4]s) AND NOT %[5]s "+
 		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
 		"GROUP BY key, profileType, value",
-		keyCol, valueCol, table, tupleIn(keys), naSQL))
+		keyCol, valueCol, table, tupleIn(keys), naSQL, countIf))
 	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
 		k := [2]string{r.Key, r.ProfileType}
@@ -243,7 +253,7 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 		keys[i] = [2]string{g.HugoGeneSymbol, g.ProfileType}
 	}
 	unfiltered, filtered := s.scopedValueCounts("genetic_alteration_derived", "hugo_gene_symbol", "alteration_value",
-		isNASQL("assumeNotNull(alteration_value)"), keys, svf.partial(), svf)
+		isNASQL("assumeNotNull(alteration_value)"), "sample_unique_id", keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenomicDataBin{}
 	for i, g := range f.GenomicDataBinFilters {
@@ -288,8 +298,12 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 	for i, g := range f.GenericAssayDataBinFilters {
 		keys[i] = [2]string{g.StableID, g.ProfileType}
 	}
+	unit := "sample_unique_id"
+	if len(f.GenericAssayDataBinFilters) > 0 {
+		unit = s.gaCountUnit(f.GenericAssayDataBinFilters[0].ProfileType)
+	}
 	unfiltered, filtered := s.scopedValueCounts("generic_assay_data_derived", "entity_stable_id", "value",
-		isNASQL("value"), keys, svf.partial(), svf)
+		isNASQL("value"), unit, keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenericAssayDataBin{}
 	for i, g := range f.GenericAssayDataBinFilters {

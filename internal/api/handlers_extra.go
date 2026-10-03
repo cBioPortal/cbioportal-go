@@ -146,10 +146,11 @@ func springNotFound(w http.ResponseWriter, r *http.Request) {
 func springError(w http.ResponseWriter, r *http.Request, status int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]any{
-		"timestamp": time.Now().UTC().Format("2006-01-02T15:04:05.000+00:00"),
-		"status":    status,
-		"error":     http.StatusText(status),
-		"path":      r.URL.Path,
-	})
+	// Field order and the epoch-millisecond timestamp as Spring Boot writes them.
+	json.NewEncoder(w).Encode(struct {
+		Timestamp int64  `json:"timestamp"`
+		Status    int    `json:"status"`
+		Error     string `json:"error"`
+		Path      string `json:"path"`
+	}{time.Now().UnixMilli(), status, http.StatusText(status), r.URL.Path})
 }

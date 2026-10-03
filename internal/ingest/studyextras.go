@@ -129,3 +129,63 @@ func ingestMutSig(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	}
 	return stats, nil
 }
+
+// ingestGenericAssayEntities stores the study's generic assay entities as
+// cbioportal-core's ImportGenericAssayEntity does: per profile, the entities
+// of its file (generic_assay_profile_entity), and per entity the properties
+// listed in the meta file's generic_entity_meta_properties, keyed as listed,
+// for the columns the file has (generic_assay_entity_meta). Runs after the
+// matrices are staged; the values come from generic_assay_matrix.
+func ingestGenericAssayEntities(c *ch.Client, s *parser.Study) error {
+	db := c.Database()
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS `%s`.generic_assay_profile_entity (study_id String, profile_stable_id String, entity_stable_id String) "+
+			"ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, entity_stable_id)", db)); err != nil {
+		return err
+	}
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS `%s`.generic_assay_entity_meta (study_id String, entity_stable_id String, entity_type String, "+
+			"properties Map(String, String)) ENGINE = MergeTree ORDER BY (entity_stable_id, study_id)", db)); err != nil {
+		return err
+	}
+	where := fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))
+	c.DeleteWhere("generic_assay_profile_entity", where)
+	c.DeleteWhere("generic_assay_entity_meta", where)
+	for i := range s.Files {
+		f := &s.Files[i]
+		if f.StageSlug != "generic_assay_matrix" {
+			continue
+		}
+		h, err := parser.ReadHeader(f.DataPath)
+		if err != nil {
+			return err
+		}
+		staged := parser.SanitizeColumns(h.Columns)
+		var kv []string
+		for _, p := range f.EntityMetaProperties {
+			for j, col := range h.Columns {
+				if strings.EqualFold(strings.TrimSpace(col), p) {
+					kv = append(kv, fmt.Sprintf("'%s', any(`%s`)", ch.SQLLit(p), staged[j]))
+					break
+				}
+			}
+		}
+		props := "map()"
+		if len(kv) > 0 {
+			props = "map(" + strings.Join(kv, ", ") + ")"
+		}
+		cond := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s' AND source_file = '%s'",
+			ch.SQLLit(s.StudyID), ch.SQLLit(f.StableID), ch.SQLLit(fileName(f.DataPath)))
+		if _, err := c.Execute(fmt.Sprintf(
+			"INSERT INTO `%[1]s`.generic_assay_profile_entity SELECT DISTINCT study_id, profile_stable_id, entity_stable_id "+
+				"FROM `%[1]s`.generic_assay_matrix WHERE %[2]s", db, cond)); err != nil {
+			return err
+		}
+		if _, err := c.Execute(fmt.Sprintf(
+			"INSERT INTO `%[1]s`.generic_assay_entity_meta SELECT study_id, entity_stable_id, 'GENERIC_ASSAY', %[3]s "+
+				"FROM `%[1]s`.generic_assay_matrix WHERE %[2]s GROUP BY study_id, entity_stable_id", db, cond, props)); err != nil {
+			return err
+		}
+	}
+	return nil
+}

@@ -116,7 +116,8 @@ func TestContractUnknownAPIPath(t *testing.T) {
 
 // TestContractMutationCountsByPositionStoredRecords pins that only stored
 // mutations are counted (MutationMapper counts mutation_derived): the lgg
-// study's silent MYC p.T73= is filtered at import, so position 73 has none.
+// study's silent MYC p.T73= is filtered at import, so position 73 has none
+// and reads null, as the Java backend returns it.
 func TestContractMutationCountsByPositionStoredRecords(t *testing.T) {
 	requireAPI(t)
 	var got []map[string]any
@@ -125,6 +126,7 @@ func TestContractMutationCountsByPositionStoredRecords(t *testing.T) {
 		{"entrezGeneId": 7157, "proteinPosStart": 273, "proteinPosEnd": 273},
 	}, &got)
 	wantEq(t, got, []map[string]any{
+		nil,
 		{"entrezGeneId": float64(7157), "proteinPosStart": float64(273), "proteinPosEnd": float64(273), "count": float64(9)},
 	})
 }

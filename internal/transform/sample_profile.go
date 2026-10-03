@@ -9,14 +9,24 @@ import (
 // mutationFilterSQL is cBioPortal's default MutationFilter (no
 // filtered_mutations override) as a WHERE condition over a MAF staging alias;
 // entrez is the resolved Entrez id expression (5'Flank variants are kept only
-// for the promoter whitelist, TERT = 7015).
+// for the promoter whitelist, TERT = 7015). Records whose chromosome
+// DaoGeneOptimized.normalizeChr does not recognize are skipped too.
 func mutationFilterSQL(a, entrez string) string {
-	return fmt.Sprintf(
+	return normalizedChrSQL(a+".chromosome") + " != '' AND " + fmt.Sprintf(
 		"NOT startsWith(lower(%[1]s.mutation_status), 'none') AND NOT startsWith(lower(%[1]s.mutation_status), 'loh') "+
 			"AND NOT startsWith(lower(%[1]s.mutation_status), 'wildtype') AND NOT startsWith(lower(%[1]s.validation_status), 'redacted') "+
 			"AND lower(%[1]s.variant_classification) NOT IN ('silent', 'intron', '3''utr', '5''utr', '3''flank', 'igr', 'rna') "+
 			"AND ( lower(%[1]s.variant_classification) != '5''flank' OR %[2]s = 7015 )",
 		a, entrez)
+}
+
+// normalizedChrSQL is DaoGeneOptimized.normalizeChr over the upper-cased
+// value: 1-24 with an optional CHR prefix, X and Y as 23 and 24, NA and MT;
+// anything else reads as empty (the importer skips the record).
+func normalizedChrSQL(x string) string {
+	u := fmt.Sprintf("upper(%s)", x)
+	return fmt.Sprintf("multiIf(%[1]s IN ('X', 'CHRX'), '23', %[1]s IN ('Y', 'CHRY'), '24', %[1]s IN ('NA', 'MT'), %[1]s, "+
+		"match(%[1]s, '^(CHR)?([1-9]|1[0-9]|2[0-4])$'), replaceRegexpOne(%[1]s, '^CHR', ''), '')", u)
 }
 
 // sanitizeIdentSQL mirrors parser.SanitizeIdent in SQL so profile stable ids
@@ -46,7 +56,9 @@ func sanitizeIdentSQL(expr string) string {
 // Non-matrix sources take the panel from the meta file's `gene_panel` key.
 // Finally, as prod's derived-table build does, members of a `*_sequenced` case
 // list that are in no MUTATION_EXTENDED profile of their study are added to
-// `<study>_mutations` with a NULL panel. Only samples present in clinical data
+// `<study>_mutations` with a NULL panel (case_list_only = 1: the importer's
+// own sample_profile, which MUTATION_COUNT is computed from, lacks them).
+// Only samples present in clinical data
 // and profiles present in genetic_profile are kept (prod's INNER JOINs).
 //
 // Header ids come from the ingest-captured `profile_sample` staging table; for
@@ -178,7 +190,8 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 	base := fmt.Sprintf(
 		"SELECT a.study_id AS study_id, a.sample_id AS sample_id, gp.profile_stable_id AS profile_stable_id, "+
 			"gp.molecular_profile_id AS molecular_profile_id, gp.alteration_type AS alteration_type, gp.datatype AS datatype, "+
-			"CAST(if(a.p = 0, nullIf(a.mpanel, ''), nullIf(%[1]s, '')) AS Nullable(String)) AS gene_panel_id "+
+			"CAST(if(a.p = 0, nullIf(a.mpanel, ''), nullIf(%[1]s, '')) AS Nullable(String)) AS gene_panel_id, "+
+			"toUInt8(0) AS case_list_only "+
 			"FROM (SELECT study_id, sample_id, profile_stable_id, min(prio) AS p, argMin(panel, prio) AS mpanel "+
 			"FROM (%[2]s) GROUP BY study_id, sample_id, profile_stable_id) a "+
 			"INNER JOIN `%[3]s`.genetic_profile gp ON gp.study_id = a.study_id AND gp.profile_stable_id = a.profile_stable_id "+
@@ -191,7 +204,7 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 	missing := fmt.Sprintf(
 		"SELECT sl.study_id AS study_id, sl.sample_id AS sample_id, gp.profile_stable_id AS profile_stable_id, "+
 			"gp.molecular_profile_id AS molecular_profile_id, gp.alteration_type AS alteration_type, gp.datatype AS datatype, "+
-			"CAST(NULL AS Nullable(String)) AS gene_panel_id "+
+			"CAST(NULL AS Nullable(String)) AS gene_panel_id, toUInt8(1) AS case_list_only "+
 			"FROM (SELECT DISTINCT study_id, sample_id FROM `%[1]s`.sample_list WHERE list_id LIKE '%%_sequenced') sl "+
 			"INNER JOIN `%[1]s`.genetic_profile gp ON gp.study_id = sl.study_id AND gp.molecular_profile_id = concat(sl.study_id, '_mutations') "+
 			"INNER JOIN %[2]s s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id "+

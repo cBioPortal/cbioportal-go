@@ -97,8 +97,7 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	for _, v := range []view{
 		{"clinical_attribute_meta", fmt.Sprintf(
 			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)},
-		{"molecular_profile", fmt.Sprintf(
-			"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type FROM `%s`.genetic_profile", rawDB)},
+		{"molecular_profile", molecularProfileSQL(c, rawDB)},
 		{"sample_list", sampleListSQL(c, rawDB)},
 		{"gene_panel", genePanelSQL(rawDB, refDB, hasRef)},
 		{"patient", fmt.Sprintf(
@@ -243,25 +242,28 @@ func namespaceColumnsExpr(c *client, rawDB string, has map[string]bool, tablePre
 			continue
 		}
 		prefix := strings.ToLower(name) + "_"
-		var subCols, nonEmpty []string
+		var subCols []string
 		for _, col := range sortedColumnNames(has) {
 			if strings.HasPrefix(col, prefix) && len(col) > len(prefix) {
 				sub := col[len(prefix):]
 				// Numeric values are emitted as JSON numbers, as the importer's
-				// namespace parser stores them.
+				// namespace parser stores them; empty values are stored as
+				// null, which the API leaves out.
 				v := tablePrefix + col
 				subCols = append(subCols, fmt.Sprintf(
-					`'"%s":', if(match(%s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %s, toJSONString(%s))`, sub, v, v, v))
-				nonEmpty = append(nonEmpty, fmt.Sprintf("%s%s != ''", tablePrefix, col))
+					`if(%[2]s = '', '', concat('"%[1]s":', if(match(%[2]s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %[2]s, toJSONString(%[2]s))))`, sub, v))
 			}
 		}
 		if len(subCols) == 0 {
 			continue
 		}
-		// concat('"Name":{', '"sub":', toJSONString(col), ',', ..., '}')
-		inner := strings.Join(subCols, ", ',', ")
-		obj := fmt.Sprintf(`concat('"%s":{', %s, '}')`, name, inner)
-		frags = append(frags, fmt.Sprintf("if(%s, %s, '')", strings.Join(nonEmpty, " OR "), obj))
+		// Every record of a profile declaring the namespace carries it, empty
+		// when the record has no value for any of its columns.
+		obj := fmt.Sprintf(`concat('"%s":{', arrayStringConcat(arrayFilter(x -> x != '', [%s]), ','), '}')`,
+			name, strings.Join(subCols, ", "))
+		declares := fmt.Sprintf("(%[1]sstudy_id, %[1]sprofile_stable_id) IN (SELECT study_id, profile_stable_id FROM `%[2]s`.genetic_profile "+
+			"WHERE has(arrayMap(x -> lower(trimBoth(x)), splitByChar(',', namespaces)), '%[3]s'))", tablePrefix, rawDB, strings.ToLower(name))
+		frags = append(frags, fmt.Sprintf("if(%s, %s, '')", declares, obj))
 	}
 	if len(frags) == 0 {
 		return "'{}'"
@@ -347,7 +349,7 @@ func mutationSQL(c *client, rawDB, targetDB string) string {
 	nsCol := namespaceColumnsExpr(c, rawDB, has, "m.")
 	return fmt.Sprintf(
 		"SELECT m.study_id AS study_id, m.tumor_sample_barcode AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
-			"%s AS entrez_gene_id, m.chromosome AS chromosome, m.start_position AS start_position, "+
+			"%s AS entrez_gene_id, "+normalizedChrSQL("m.chromosome")+" AS chromosome, m.start_position AS start_position, "+
 			"m.end_position AS end_position, m.reference_allele AS reference_allele, m.tumor_seq_allele2 AS tumor_seq_allele2, "+
 			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
 			"m.validation_status AS validation_status, "+
@@ -447,11 +449,42 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 		for i, n := range names {
 			pairs[i] = fmt.Sprintf("('%s', `%s`)", strings.ToUpper(n), n)
 		}
+		value := "kv.2"
+		if srcTable == "clinical_patient" {
+			value = survivalStatusSQL("kv.1", "kv.2")
+		}
 		sel = fmt.Sprintf(
-			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, kv.2 AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
-			idCol, idCol, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
+			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, %s AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
+			idCol, idCol, value, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
 	}
 	return sel, nil
+}
+
+// molecularProfileSQL builds the molecular profiles from the staged meta
+// files; the generic assay pivot threshold, sort order and patient level
+// come from pivot_threshold_value, value_sort_order and patient_level where
+// the staging table has them.
+func molecularProfileSQL(c *client, rawDB string) string {
+	extra := ""
+	if hasColumn(c, rawDB, "genetic_profile", "sort_order") && hasColumn(c, rawDB, "genetic_profile", "pivot_threshold") &&
+		hasColumn(c, rawDB, "genetic_profile", "patient_level") {
+		extra = ", toFloat64OrNull(pivot_threshold) AS pivot_threshold, nullIf(trimBoth(sort_order), '') AS sort_order, " +
+			"toUInt8(lower(trimBoth(patient_level)) = 'true') AS patient_level"
+	}
+	return fmt.Sprintf(
+		"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, "+
+			"show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type%s FROM `%s`.genetic_profile",
+		extra, rawDB)
+}
+
+// survivalStatusSQL is cbioportal-core's SurvivalAttributeUtil as
+// ImportClinicalData applies it to patient attributes: an OS_STATUS or
+// DFS_STATUS value in the old format gets its status prefix ("DECEASED" ->
+// "1:DECEASED", "LIVING" -> "0:LIVING"); other values are kept.
+func survivalStatusSQL(attr, value string) string {
+	return fmt.Sprintf("if(%[1]s IN ('OS_STATUS', 'DFS_STATUS'), multiIf("+
+		"upper(replaceAll(trimBoth(%[2]s), '/', '_')) IN ('DECEASED', 'RECURRED_PROGRESSED', 'RECURRED', 'PROGRESSED'), concat('1:', trimBoth(%[2]s)), "+
+		"upper(trimBoth(%[2]s)) IN ('LIVING', 'DISEASEFREE'), concat('0:', trimBoth(%[2]s)), %[2]s), %[2]s)", attr, value)
 }
 
 // proteinChangeSQL follows ExtendedMutationUtil.getProteinChange: the first
