@@ -6,6 +6,10 @@
 #
 #   test/e2e_api.sh             # foreground, on :18090
 #   KEYCLOAK=false test/e2e_api.sh   # anonymous, AUTH_DEFAULT_USER=testuser
+#
+# Anonymous mode is the contract tests' backend: it serves study_hg38, which
+# the e2e portal properties lock (study_availability.enabled), since the
+# contract tests read its data.
 set -euo pipefail
 GO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$GO"
@@ -29,6 +33,7 @@ if [ "${KEYCLOAK:-true}" != false ]; then
   )
 else
   export AUTH_DEFAULT_USER=testuser
+  auth=(--study_availability.enabled=false)
 fi
 
 FRONTEND_DIR=${FRONTEND_DIR:-frontend/dist} PUBLISHER_API_KEY=SECRETKEY \

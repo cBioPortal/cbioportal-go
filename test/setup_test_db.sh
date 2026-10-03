@@ -27,4 +27,8 @@ bin/cbioportal-import load-genesets "$GS/study_es_0_genesets.gmt" --version msig
 for s in "${STUDIES[@]}"; do
   bin/cbioportal-import ingest "$FIXTURES/data/studies/$s" --db "$RAW_DB" --url "$CH"
 done
+# study_hg38 is mid-(re)import (cancer_study.status 0), as in upstream CI's
+# localdb database: the e2e portal answers 423 for it (study_availability).
+curl -sf "$CH" --data-binary "ALTER TABLE \`$RAW_DB\`.cancer_study ADD COLUMN IF NOT EXISTS status String"
+curl -sf "$CH" --data-binary "ALTER TABLE \`$RAW_DB\`.cancer_study UPDATE status = '0' WHERE study_id = 'study_hg38' SETTINGS mutations_sync = 1"
 bin/cbioportal-import transform --raw-db "$RAW_DB" --db "$DB" --ref-db "$REF_DB" --url "$CH"

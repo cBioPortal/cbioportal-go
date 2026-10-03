@@ -177,7 +177,7 @@ func (b *prodBuilder) steps() []prodObject {
 			"SELECT cs.study_id AS study_id, c.name AS name, '' AS short_name, c.description AS description, "+
 				"c.type_of_cancer_id AS cancer_type_id, ifNull(c.groups, '') AS groups, ifNull(c.pmid, '') AS pmid, "+
 				"ifNull(c.citation, '') AS citation, ifNull(rg.name, '') AS reference_genome, toUInt8(0) AS add_global_case_list, "+
-				"c.import_date AS import_date, toUInt8(c.public = 1) AS public_study "+
+				"c.import_date AS import_date, toUInt8(c.public = 1) AS public_study, toInt64(ifNull(c.status, 1)) AS status "+
 				"FROM {p}.cancer_study c INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = c.cancer_study_id "+
 				"LEFT JOIN {p}.reference_genome rg ON rg.reference_genome_id = c.reference_genome_id"),
 		// Every cancer type is in the reference type_of_cancer.

@@ -83,7 +83,7 @@ func NewRouter(s *State) http.Handler {
 	if s.login != nil {
 		authCfg.DefaultUser = "" // users log in
 	}
-	h := auth(authCfg, s.extraEndpoints(s.javaContract(pageList(metaProjection(bodyErrors(mux))))))
+	h := auth(authCfg, s.studyAvailability(s.extraEndpoints(s.javaContract(pageList(metaProjection(bodyErrors(mux)))))))
 	if s.login != nil {
 		h = s.login.middleware(s.studyAccess(s.access, h))
 	}

@@ -21,6 +21,7 @@ type studyRow struct {
 	ReferenceGenome  string `json:"referenceGenome"`
 	AllSampleCount   int64  `json:"allSampleCount"`
 	PublicFlag       int    `json:"publicFlag"`
+	Status           int    `json:"status"`
 	CancerTypeName   string `json:"cancerTypeName"`
 	CancerTypeColor  string `json:"cancerTypeColor"`
 	CancerTypeParent string `json:"cancerTypeParent"`
@@ -123,7 +124,7 @@ const studySelectTmpl = "SELECT c.study_id AS studyId, c.cancer_type_id AS cance
 	"c.name AS name, c.description AS description, c.pmid AS pmid, c.citation AS citation, " +
 	"c.groups AS groups, c.reference_genome AS referenceGenome, " +
 	"toInt64(ifNull(lc.all_samples, 0)) AS allSampleCount, " +
-	"{public} AS publicFlag, " +
+	"{public} AS publicFlag, {status} AS status, " +
 	"ifNull(t.name, '') AS cancerTypeName, ifNull(t.dedicated_color, '') AS cancerTypeColor, ifNull(t.parent, '') AS cancerTypeParent, " +
 	"ifNull(t.short_name, '') AS cancerTypeShort, " +
 	studyCountCols +
@@ -134,7 +135,16 @@ const studySelectTmpl = "SELECT c.study_id AS studyId, c.cancer_type_id AS cance
 // public when the portal cancer_study says so (public_study, built from a
 // production clone), else when its groups include PUBLIC.
 func (s *State) studySelect() string {
-	return strings.Replace(studySelectTmpl, "{public}", s.studyPublicSQL("c."), 1)
+	return strings.NewReplacer("{public}", s.studyPublicSQL("c."), "{status}", s.studyStatusSQL("c.")).Replace(studySelectTmpl)
+}
+
+// studyStatusSQL is the status of a cancer_study row: 1 (AVAILABLE) unless
+// the study is being (re)imported, and for databases built without it.
+func (s *State) studyStatusSQL(alias string) string {
+	if s.modelHasColumn("cancer_study", "status") {
+		return "toInt64(" + alias + "status)"
+	}
+	return "toInt64(1)"
 }
 
 // studyPublicSQL is the UInt8 public flag of a cancer_study row (alias is
@@ -161,7 +171,7 @@ func toCancerStudy(r studyRow, shape studyShape, importDates map[string]string) 
 	}
 	out.studySummary = &studySummary{
 		CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description, PublicStudy: r.PublicFlag != 0,
-		Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups, ImportDate: importDates[r.StudyID],
+		Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups, Status: r.Status, ImportDate: importDates[r.StudyID],
 		AllSampleCount: r.AllSampleCount, ReferenceGenome: referenceGenome(r.ReferenceGenome),
 	}
 	if shape.detailed {
@@ -244,8 +254,9 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
 		out[i] = toCancerStudy(r, shape, dates)
-		// CancerStudyMetadataMapper.toDtos maps readPermission from publicStudy.
-		out[i].ReadPermission = r.PublicFlag != 0
+		// CancerStudyMetadataMapper.toDtos maps readPermission from publicStudy;
+		// nobody can read a study that is being (re)imported.
+		out[i].ReadPermission = r.PublicFlag != 0 && r.Status == 1
 	}
 	writeJSON(w, s.withResourceCounts(out))
 }

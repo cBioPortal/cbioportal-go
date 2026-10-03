@@ -179,6 +179,7 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"enable_study_tags", "enable_study_tags", nil},
 	{"clickhouse_mode", "clickhouse_mode", strPtr("false")},
 	{"feature.study.export", "feature_study_export", strPtr("false")},
+	{"study_availability.enabled", "study_availability_enabled", strPtr("false")},
 }
 
 // specialFrontendNames lists frontend property names that require special

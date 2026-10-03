@@ -93,3 +93,13 @@ e=plain
 		}
 	}
 }
+
+func TestStudyAvailabilityEnabled(t *testing.T) {
+	if v := FrontendConfig("/", nil, false)["study_availability_enabled"]; v != false {
+		t.Errorf("default study_availability_enabled = %#v, want false", v)
+	}
+	cfg := FrontendConfig("/", map[string]string{"study_availability.enabled": "true"}, true)
+	if v := cfg["study_availability_enabled"]; v != true {
+		t.Errorf("study_availability_enabled = %#v, want true", v)
+	}
+}

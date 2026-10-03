@@ -76,8 +76,11 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 		return nil
 	}
 
+	// status is cbioportal-core's DaoCancerStudy.Status ordinal: 1 (AVAILABLE)
+	// once a study is loaded, unless staging marks it otherwise.
 	if err := make("cancer_study", fmt.Sprintf(
-		"SELECT study_id, name, short_name, description, type_of_cancer AS cancer_type_id, groups, pmid, citation, reference_genome, add_global_case_list = 'true' AS add_global_case_list FROM `%s`.cancer_study", rawDB)); err != nil {
+		"SELECT study_id, name, short_name, description, type_of_cancer AS cancer_type_id, groups, pmid, citation, reference_genome, add_global_case_list = 'true' AS add_global_case_list, "+
+			"toInt64OrDefault(status, toInt64(1)) AS status FROM `%s`.cancer_study", rawDB)); err != nil {
 		return nil, err
 	}
 	// type_of_cancer holds the study-supplied cancer types (cbioportal-core
