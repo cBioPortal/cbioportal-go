@@ -97,8 +97,7 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	for _, v := range []view{
 		{"clinical_attribute_meta", fmt.Sprintf(
 			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)},
-		{"molecular_profile", fmt.Sprintf(
-			"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type FROM `%s`.genetic_profile", rawDB)},
+		{"molecular_profile", molecularProfileSQL(c, rawDB)},
 		{"sample_list", sampleListSQL(c, rawDB)},
 		{"gene_panel", genePanelSQL(rawDB, refDB, hasRef)},
 		{"patient", fmt.Sprintf(
@@ -447,11 +446,42 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 		for i, n := range names {
 			pairs[i] = fmt.Sprintf("('%s', `%s`)", strings.ToUpper(n), n)
 		}
+		value := "kv.2"
+		if srcTable == "clinical_patient" {
+			value = survivalStatusSQL("kv.1", "kv.2")
+		}
 		sel = fmt.Sprintf(
-			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, kv.2 AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
-			idCol, idCol, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
+			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, %s AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
+			idCol, idCol, value, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
 	}
 	return sel, nil
+}
+
+// molecularProfileSQL builds the molecular profiles from the staged meta
+// files; the generic assay pivot threshold, sort order and patient level
+// come from pivot_threshold_value, value_sort_order and patient_level where
+// the staging table has them.
+func molecularProfileSQL(c *client, rawDB string) string {
+	extra := ""
+	if hasColumn(c, rawDB, "genetic_profile", "sort_order") && hasColumn(c, rawDB, "genetic_profile", "pivot_threshold") &&
+		hasColumn(c, rawDB, "genetic_profile", "patient_level") {
+		extra = ", toFloat64OrNull(pivot_threshold) AS pivot_threshold, nullIf(trimBoth(sort_order), '') AS sort_order, " +
+			"toUInt8(lower(trimBoth(patient_level)) = 'true') AS patient_level"
+	}
+	return fmt.Sprintf(
+		"SELECT molecular_profile_id, study_id, alteration_type AS molecular_alteration_type, datatype, name, description, "+
+			"show_in_analysis = 'true' AS show_profile_in_analysis_tab, profile_stable_id, generic_assay_type%s FROM `%s`.genetic_profile",
+		extra, rawDB)
+}
+
+// survivalStatusSQL is cbioportal-core's SurvivalAttributeUtil as
+// ImportClinicalData applies it to patient attributes: an OS_STATUS or
+// DFS_STATUS value in the old format gets its status prefix ("DECEASED" ->
+// "1:DECEASED", "LIVING" -> "0:LIVING"); other values are kept.
+func survivalStatusSQL(attr, value string) string {
+	return fmt.Sprintf("if(%[1]s IN ('OS_STATUS', 'DFS_STATUS'), multiIf("+
+		"upper(replaceAll(trimBoth(%[2]s), '/', '_')) IN ('DECEASED', 'RECURRED_PROGRESSED', 'RECURRED', 'PROGRESSED'), concat('1:', trimBoth(%[2]s)), "+
+		"upper(trimBoth(%[2]s)) IN ('LIVING', 'DISEASEFREE'), concat('0:', trimBoth(%[2]s)), %[2]s), %[2]s)", attr, value)
 }
 
 // proteinChangeSQL follows ExtendedMutationUtil.getProteinChange: the first

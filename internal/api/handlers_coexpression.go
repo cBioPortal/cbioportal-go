@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -297,10 +298,13 @@ type DensityPlotBin struct {
 	MaxY  float64 `json:"maxY"`
 }
 
+// DensityPlotData is the density plot; the correlations are unset (and not
+// serialized) when no sample has both values, as in
+// ClinicalDataDensityPlotServiceImpl.
 type DensityPlotData struct {
 	Bins         []DensityPlotBin `json:"bins"`
-	PearsonCorr  float64          `json:"pearsonCorr"`
-	SpearmanCorr float64          `json:"spearmanCorr"`
+	PearsonCorr  *jacksonDouble   `json:"pearsonCorr,omitempty"`
+	SpearmanCorr *jacksonDouble   `json:"spearmanCorr,omitempty"`
 }
 
 func queryFloat(r *http.Request, name string) (float64, bool) {
@@ -430,10 +434,12 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 			result.Bins = append(result.Bins, bins[i])
 		}
 	}
+	// Constant values give NaN correlations, which Java writes as "NaN".
+	var pearsonCorr, spearmanCorr jacksonDouble
 	if len(xs) > 1 {
-		result.PearsonCorr = safeFloat(pearson(xs, ys))
-		result.SpearmanCorr = safeFloat(spearman(xs, ys))
+		pearsonCorr, spearmanCorr = jacksonDouble(pearson(xs, ys)), jacksonDouble(spearman(xs, ys))
 	}
+	result.PearsonCorr, result.SpearmanCorr = &pearsonCorr, &spearmanCorr
 	writeJSON(w, result)
 }
 
@@ -461,9 +467,11 @@ type ClinicalViolinPlotRowData struct {
 	NumSamples       int                                 `json:"numSamples"`
 }
 
+// ClinicalViolinPlotData is the violin plot; without data its axis runs
+// from Infinity to -Infinity, as ViolinPlotServiceImpl leaves it.
 type ClinicalViolinPlotData struct {
-	AxisStart float64                     `json:"axisStart"`
-	AxisEnd   float64                     `json:"axisEnd"`
+	AxisStart jacksonDouble               `json:"axisStart"`
+	AxisEnd   jacksonDouble               `json:"axisEnd"`
 	Rows      []ClinicalViolinPlotRowData `json:"rows"`
 }
 
@@ -517,13 +525,13 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 			byCategory[cat] = append(byCategory[cat], point{studyID: row.StudyID, sampleID: row.SampleID, val: scale(v)})
 		}
 	}
+	axisStart := math.Inf(1)
+	axisEnd := math.Inf(-1)
 	if len(byCategory) == 0 {
+		result.AxisStart, result.AxisEnd = jacksonDouble(axisStart), jacksonDouble(axisEnd)
 		writeJSON(w, result)
 		return
 	}
-
-	axisStart := math.Inf(1)
-	axisEnd := math.Inf(-1)
 
 	type catBox struct {
 		box                   ClinicalViolinPlotBoxData
@@ -590,17 +598,16 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	if v, ok := queryFloat(r, "axisEnd"); ok {
 		axisEnd = v
 	}
-	result.AxisStart = safeFloat(axisStart)
-	result.AxisEnd = safeFloat(axisEnd)
+	result.AxisStart, result.AxisEnd = jacksonDouble(axisStart), jacksonDouble(axisEnd)
 
 	// Curve sample points across the axis.
 	var stepSize float64
 	if numCurvePoints > 1 {
-		stepSize = (result.AxisEnd - result.AxisStart) / float64(numCurvePoints-1)
+		stepSize = (axisEnd - axisStart) / float64(numCurvePoints-1)
 	}
 	curvePoints := make([]float64, numCurvePoints)
 	for i := range curvePoints {
-		curvePoints[i] = result.AxisStart + float64(i)*stepSize
+		curvePoints[i] = axisStart + float64(i)*stepSize
 	}
 	sigma := sigmaMultiplier * stepSize
 
@@ -608,7 +615,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		cb := boxes[cat]
 		row := ClinicalViolinPlotRowData{
 			Category:         cat,
-			BoxData:          clampWhiskers(cb.box, result.AxisStart, result.AxisEnd),
+			BoxData:          clampWhiskers(cb.box, axisStart, axisEnd),
 			CurveData:        []float64{},
 			IndividualPoints: []ClinicalViolinPlotIndividualPoint{},
 			NumSamples:       len(cb.nonOutliers) + len(cb.outliers),
@@ -766,6 +773,23 @@ func maxFloat(v []float64) float64 {
 		}
 	}
 	return m
+}
+
+// jacksonDouble is a double as Jackson writes it: NaN and the infinities as the
+// strings "NaN", "Infinity" and "-Infinity".
+type jacksonDouble float64
+
+func (d jacksonDouble) MarshalJSON() ([]byte, error) {
+	v := float64(d)
+	switch {
+	case math.IsNaN(v):
+		return []byte(`"NaN"`), nil
+	case math.IsInf(v, 1):
+		return []byte(`"Infinity"`), nil
+	case math.IsInf(v, -1):
+		return []byte(`"-Infinity"`), nil
+	}
+	return json.Marshal(v)
 }
 
 func safeFloat(v float64) float64 {

@@ -59,6 +59,8 @@ type DataFile struct {
 	Namespaces         string
 	GenePanel          string
 	PatientLevel       string
+	PivotThreshold     string
+	SortOrder          string
 	// EntityMetaProperties are the meta file's generic_entity_meta_properties:
 	// the generic assay property columns, named as listed.
 	EntityMetaProperties []string
@@ -201,6 +203,8 @@ func Scan(dir string) (*Study, error) {
 			Namespaces:           meta.Get("namespaces"),
 			GenePanel:            meta.Get("gene_panel"),
 			PatientLevel:         meta.Get("patient_level"),
+			PivotThreshold:       meta.Get("pivot_threshold_value"),
+			SortOrder:            meta.Get("value_sort_order"),
 			EntityMetaProperties: splitList(meta.Get("generic_entity_meta_properties")),
 			Layout:               layout,
 			StageSlug:            slug,

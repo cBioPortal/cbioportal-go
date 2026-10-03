@@ -184,3 +184,93 @@ func TestOracleFilteredSamplesIDFields(t *testing.T) {
 	}
 	wantEq(t, keys(d[0]), []string{"patientId", "sampleId", "studyId", "uniquePatientKey", "uniqueSampleKey"})
 }
+
+// ImportClinicalData prefixes old-format survival statuses of patients.
+func TestOracleSurvivalStatusPrefix(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	get(t, "/api/studies/study_hg38/patients/TCGA-A2-A04P/clinical-data", &d)
+	got := map[string]any{}
+	for _, x := range d {
+		got[x["clinicalAttributeId"].(string)] = x["value"]
+	}
+	wantEq(t, got["DFS_STATUS"], "1:Recurred/Progressed")
+}
+
+// Generic assay profiles carry the meta file's pivot threshold, sort order
+// and patient level.
+func TestOracleMolecularProfileGenericAssayFields(t *testing.T) {
+	requireAPI(t)
+	var ec50, patient map[string]any
+	get(t, "/api/molecular-profiles/study_es_0_treatment_ec50", &ec50)
+	wantEq(t, []any{ec50["pivotThreshold"], ec50["sortOrder"], ec50["patientLevel"]}, []any{0.1, "ASC", false})
+	get(t, "/api/molecular-profiles/study_es_0_generic_assay_patient_test", &patient)
+	wantEq(t, patient["patientLevel"], true)
+	var all []map[string]any
+	get(t, "/api/studies/lgg_ucsf_2014_test_generic_assay/molecular-profiles", &all)
+	for _, p := range all {
+		if p["molecularProfileId"] == "lgg_ucsf_2014_test_generic_assay_hla" && p["patientLevel"] != true {
+			t.Errorf("hla profile: %v", p)
+		}
+	}
+}
+
+// FRACTION_GENOME_ALTERED reads as Java's Double.toString writes it.
+func TestOracleFractionGenomeAlteredFormat(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	post(t, "/api/clinical-data/fetch?clinicalDataType=SAMPLE", map[string]any{
+		"attributeIds": []string{"FRACTION_GENOME_ALTERED"},
+		"identifiers": []map[string]string{{"studyId": "teststudy_genepanels", "entityId": "sample1"},
+			{"studyId": "teststudy_genepanels", "entityId": "sample2"}},
+	}, &d)
+	var got []string
+	for _, x := range d {
+		got = append(got, x["sampleId"].(string)+"="+x["value"].(string))
+	}
+	sort.Strings(got)
+	wantEq(t, got, []string{"sample1=0.0", "sample2=1.0"})
+}
+
+// The density plot leaves the correlations unset when no sample has both
+// values, and writes an undefined one (constant values) as "NaN"; an empty
+// violin plot's axis runs from "Infinity" to "-Infinity" (Jackson's
+// non-finite doubles).
+func TestOracleNonFiniteDoubles(t *testing.T) {
+	requireAPI(t)
+	path := "/api/clinical-data-density-plot/fetch?xAxisAttributeId=MUTATION_COUNT&yAxisAttributeId=FRACTION_GENOME_ALTERED&xAxisBinCount=10&yAxisBinCount=10"
+	var none map[string]any
+	post(t, path, map[string]any{"studyIds": []string{"study_hg38"}}, &none)
+	if _, ok := none["pearsonCorr"]; ok {
+		t.Errorf("correlation without data: %v", none)
+	}
+	var constant map[string]any
+	post(t, path, map[string]any{"studyIds": []string{"ascn_test_study"}, "clinicalDataFilters": []map[string]any{{
+		"attributeId": "MUTATION_COUNT", "values": []map[string]any{{"start": 6, "end": 6}}}}}, &constant)
+	wantEq(t, []any{constant["pearsonCorr"], constant["spearmanCorr"]}, []any{"NaN", "NaN"})
+	var violin map[string]any
+	post(t, "/api/clinical-data-violin-plots/fetch?categoricalAttributeId=CANCER_TYPE_DETAILED&numericalAttributeId=MUTATION_COUNT",
+		map[string]any{"studyIds": []string{"ascn_test_study"}}, &violin)
+	wantEq(t, []any{violin["axisStart"], violin["axisEnd"]}, []any{"Infinity", "-Infinity"})
+}
+
+// Bin counts of a patient-level generic assay profile count patients.
+func TestOraclePatientLevelGenericAssayBinsCountPatients(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	post(t, "/api/generic-assay-data-bin-counts/fetch?dataBinMethod=STATIC", map[string]any{
+		"studyViewFilter":            map[string]any{"studyIds": []string{"study_es_0"}},
+		"genericAssayDataBinFilters": []map[string]any{{"stableId": "test_patient_generic_assay_1", "profileType": "generic_assay_patient_test"}},
+	}, &d)
+	total := 0
+	var na float64
+	for _, b := range d {
+		total += int(b["count"].(float64))
+		if b["specialValue"] == "NA" {
+			na = b["count"].(float64)
+		}
+	}
+	var patients []map[string]any
+	get(t, "/api/studies/study_es_0/patients", &patients)
+	wantEq(t, []any{total, na}, []any{len(patients), float64(len(patients) - 2)})
+}

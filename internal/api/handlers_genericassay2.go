@@ -65,18 +65,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 			entities = append(entities, g.StableID)
 		}
 	}
-	type lvl struct {
-		P uint64 `json:"p"`
-	}
-	// GenericAssayMapper's profile_level: any profile of this type, in any
-	// study, declared patient_level.
-	lv, _ := cachedQuery[lvl](s, fmt.Sprintf(
-		"SELECT count() AS p FROM cbioportal_raw.genetic_profile WHERE profile_stable_id = '%s' AND lower(toString(patient_level)) = 'true'",
-		sqlLit(profileType)))
-	unit := "sample_unique_id"
-	if len(lv) > 0 && lv[0].P > 0 {
-		unit = "patient_unique_id"
-	}
+	unit := s.gaCountUnit(profileType)
 	scope := fmt.Sprintf("profile_type = '%s' AND sample_unique_id IN (%s)", sqlLit(profileType), s.filterSQL(svf))
 	entityClause := ""
 	if len(entities) > 0 {
@@ -237,4 +226,21 @@ func (s *State) genericAssayMetaByIDGet(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, out)
+}
+
+// gaCountUnit is the case column generic assay chart counts count for a
+// profile type: patients when, as GenericAssayMapper's profile_level has it,
+// any profile of this type in any study is declared patient_level, else
+// samples.
+func (s *State) gaCountUnit(profileType string) string {
+	type lvl struct {
+		P uint64 `json:"p"`
+	}
+	lv, _ := cachedQuery[lvl](s, fmt.Sprintf(
+		"SELECT count() AS p FROM cbioportal_raw.genetic_profile WHERE profile_stable_id = '%s' AND lower(toString(patient_level)) = 'true'",
+		sqlLit(profileType)))
+	if len(lv) > 0 && lv[0].P > 0 {
+		return "patient_unique_id"
+	}
+	return "sample_unique_id"
 }

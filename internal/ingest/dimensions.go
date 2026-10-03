@@ -54,7 +54,7 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 	table := "genetic_profile"
 	cols := []string{"molecular_profile_id", "study_id", "profile_stable_id",
 		"alteration_type", "datatype", "name", "description", "show_in_analysis", "generic_assay_type", "namespaces",
-		"gene_panel", "patient_level"}
+		"gene_panel", "patient_level", "pivot_threshold", "sort_order"}
 	existing, err := c.TableColumns(table)
 	if err != nil {
 		return err
@@ -89,7 +89,7 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 		}
 		mpid := s.StudyID + "_" + f.StableID
 		values := []string{mpid, s.StudyID, f.StableID, f.AlterationType, f.Datatype, f.ProfileName, f.ProfileDescription, f.ShowInAnalysis, f.GenericAssayType, f.Namespaces,
-			f.GenePanel, f.PatientLevel}
+			f.GenePanel, f.PatientLevel, f.PivotThreshold, f.SortOrder}
 		quoted := make([]string, len(values))
 		for j, v := range values {
 			quoted[j] = "'" + ch.SQLLit(v) + "'"

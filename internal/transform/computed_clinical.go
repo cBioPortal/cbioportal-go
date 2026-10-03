@@ -14,7 +14,8 @@ import (
 //     through the `*_sequenced` case list get none: the importer computes the
 //     count before the derived-table build adds them to sample_profile.
 //   - FRACTION_GENOME_ALTERED: share of segmented length with |segment mean| >=
-//     0.2, rounded to 4 decimals (DaoCopyNumberSegment).
+//     0.2, rounded to 4 decimals (DaoCopyNumberSegment), as Java's
+//     Double.toString writes it ("1.0", "0.8079", "2.0E-4").
 //   - SAMPLE_COUNT (patient): the patient's number of samples
 //     (DaoPatient.createSampleCountClinicalData).
 //
@@ -34,11 +35,12 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 	}
 	if hasSegments {
 		computed = append(computed, fmt.Sprintf(
-			"SELECT study_id, id AS sample_id, 'FRACTION_GENOME_ALTERED' AS attr_id, "+
-				"toString(round(sumIf(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start), abs(toFloat64OrZero(seg_mean)) >= 0.2) / "+
-				"sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)), 4)) AS attr_value "+
-				"FROM `%s`.cna_seg GROUP BY study_id, id HAVING sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)) > 0",
-			rawDB))
+			"SELECT study_id, sample_id, attr_id, %s AS attr_value FROM ("+
+				"SELECT study_id, id AS sample_id, 'FRACTION_GENOME_ALTERED' AS attr_id, "+
+				"round(sumIf(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start), abs(toFloat64OrZero(seg_mean)) >= 0.2) / "+
+				"sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)), 4) AS fga "+
+				"FROM `%s`.cna_seg GROUP BY study_id, id HAVING sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)) > 0)",
+			javaDoubleString4("fga"), rawDB))
 	}
 	if len(computed) == 0 {
 		return nil
@@ -108,4 +110,12 @@ func samplesPerPatient(c *client, rawDB, targetDB string) error {
 			"SELECT * FROM (%[2]s) b WHERE b.attr_id != 'SAMPLE_COUNT' UNION ALL %[3]s",
 		targetDB, base, computed))
 	return err
+}
+
+// javaDoubleString4 writes a value in [0, 1] rounded to 4 decimals as Java's
+// Double.toString does: at least one fractional digit, and scientific
+// notation below 1e-3.
+func javaDoubleString4(x string) string {
+	return fmt.Sprintf("multiIf(%[1]s = floor(%[1]s), concat(toString(toInt64(%[1]s)), '.0'), "+
+		"%[1]s < 0.001, concat(toString(toInt64(round(%[1]s * 10000))), '.0E-4'), toString(%[1]s))", x)
 }
