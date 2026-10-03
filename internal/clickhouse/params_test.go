@@ -189,7 +189,8 @@ func TestLiveRoundTrip(t *testing.T) {
 		big[i] = fmt.Sprintf("sample_%05d", i)
 	}
 	copy(big, odd)
-	for _, ids := range [][]string{{}, odd, big} {
+	// In the URL, as form fields, and as an external table.
+	for _, ids := range [][]string{{}, odd, big[:3000], big} {
 		rows, err := QueryP[arrRow](c,
 			"SELECT {ids:Array(String)} AS a, countIf(x IN {ids:Array(String)}) AS n FROM (SELECT arrayJoin({ids:Array(String)}) AS x)",
 			Params{"ids": ids})

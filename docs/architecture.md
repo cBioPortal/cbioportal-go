@@ -46,7 +46,14 @@
   study-view `*_derived` tables, following cbioportal-core's import rules.
 - `internal/api` — HTTP handlers; `internal/databin`, `internal/stats` — ports
   of cBioPortal's data binning and statistics.
-- `internal/clickhouse` — minimal HTTP client.
+- `internal/clickhouse` — minimal HTTP client. Request values reach ClickHouse
+  as server-side query parameters (`{name:Type}` placeholders, `ch.QueryP`;
+  in `internal/api`, `sqlArgs` binds them while a statement is assembled), not
+  as SQL text. Parameters ride in the URL when small and in a
+  multipart/form-data body otherwise; arrays longer than a form field
+  (ClickHouse's `http_max_field_value_size`, 128 KiB) are sent as external
+  tables the placeholder selects from. `sqlLit`/`inList` remain for values
+  chosen by code and for statements cached by their SQL text (`cachedQuery`).
 
 ## Dependencies
 

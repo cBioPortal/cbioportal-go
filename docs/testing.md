@@ -5,7 +5,10 @@ Three tiers, fastest first:
 
 1. **Unit tests** — `go test ./internal/...` (no services needed). Includes the
    `internal/databin` port of Java's DataBinner, checked against ~1,800
-   Java-recorded scenarios in `internal/databin/testdata`.
+   Java-recorded scenarios in `internal/databin/testdata`. With
+   `CLICKHOUSE_TEST_URL=http://localhost:18123`, `internal/clickhouse` also
+   round-trips query parameters (escaping, URL / form / external-table
+   transport) through a live server.
 2. **API contract tests** — `make contract` (`go test ./test/`, ~5s) against a
    running API (`API=http://host:port`, default `http://localhost:18090`;
    skipped when unreachable). They pin the exact endpoint behaviour the
