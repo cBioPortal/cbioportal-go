@@ -2,7 +2,7 @@
 
 Endpoints of the Java backend ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) `master`, controllers under `org.cbioportal.legacy.web` and `org.cbioportal.application`) and their status here. Generated from the controllers' request mappings; `params` lists the projection, paging and other request parameters Java accepts.
 
-**188 endpoints** (method + path, aliases below not counted): 164 implemented, 6 stubs, 18 missing; 153 covered by contract tests (`Tested`).
+**188 endpoints** (method + path, aliases below not counted): 166 implemented, 6 stubs, 16 missing; 153 covered by contract tests (`Tested`).
 
 The 33 `/api/legacy/…` and `/api/not-ready-yet/…` aliases (legacy MyBatis and unfinished column-store controllers) are served by the `/api/…` handler of the same name.
 
@@ -215,9 +215,9 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | GET | `/api/data-access-tokens/{token}` |  |  | stub |  | returns {} |
 | DELETE | `/api/data-access-tokens` |  |  | stub | yes | no-op |
 | DELETE | `/api/data-access-tokens/{token}` |  |  | stub |  | no-op |
-| POST | `/login` |  |  | missing |  | Spring Security login page; auth not modelled here |
-| GET | `/login` |  |  | missing |  | Spring Security login page; auth not modelled here |
-| GET | `/restful_login` |  |  | missing |  | SAML/basic login page |
+| POST | `/login` |  |  | implemented |  | with `authenticate=oauth2`: redirects to the provider (see docs/configuration.md) |
+| GET | `/login` |  |  | implemented |  | with `authenticate=oauth2`: redirects to the provider, or explains a refused login (`?logout_failure`) |
+| GET | `/restful_login` |  |  | missing |  | SAML/basic login page (SAML not supported) |
 
 ## Portal, proxies, operations
 
