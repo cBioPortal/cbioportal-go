@@ -39,7 +39,7 @@ func TestFromProdSteps(t *testing.T) {
 	}
 	raw := []string{
 		"genetic_profile", "cna_matrix", "mrna_expression_matrix", "methylation_matrix", "protein_level_matrix",
-		"generic_assay_matrix", "generic_assay_profile_entity", "generic_assay_entity_meta", "timeline",
+		"generic_assay_matrix", "generic_assay_profile_entity", "generic_assay_entity_meta", "timeline", "profile_sample",
 	}
 	for _, name := range raw {
 		if !built["`R`."+name] {

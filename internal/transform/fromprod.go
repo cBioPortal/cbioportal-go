@@ -423,6 +423,17 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 			"ifNull(gp.generic_assay_type, '') AS generic_assay_type, '' AS namespaces, '' AS gene_panel, "+
 			"if(p.patient_level, 'true', 'false') AS patient_level "+
 			"FROM {t}.prod_profile p INNER JOIN {p}.genetic_profile gp ON gp.genetic_profile_id = p.genetic_profile_id"))
+	// The samples of each matrix profile in matrix order (production's
+	// genetic_profile_samples, internal sample ids with a trailing comma),
+	// shaped like the ingest's header rows and stored in matrix order.
+	add(b.rawTable("profile_sample", "(study_id, profile_stable_id, position)",
+		"SELECT p.study_id AS study_id, '' AS source_file, p.profile_stable_id AS profile_stable_id, "+
+			"'header' AS kind, s.sample_id AS sample_id, gps.position AS position "+
+			"FROM (SELECT genetic_profile_id, toInt64(id) AS internal_id, position "+
+			"FROM (SELECT genetic_profile_id, arrayFilter(x -> x != '', splitByChar(',', ordered_sample_list)) AS ids "+
+			"FROM {p}.genetic_profile_samples FINAL) ARRAY JOIN ids AS id, arrayEnumerate(ids) AS position) gps "+
+			"INNER JOIN {t}.prod_profile p ON p.genetic_profile_id = gps.genetic_profile_id "+
+			"INNER JOIN {t}.prod_sample s ON s.internal_id = gps.internal_id"))
 	// Gene matrices: one row per sample x gene x profile with a stored value.
 	// Rows are ordered by gene, so the storage-order columns the API orders
 	// by are constant.

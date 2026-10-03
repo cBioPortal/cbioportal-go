@@ -101,7 +101,9 @@ ClickHouse Cloud and copies little:
   the mutation and uncalled-mutation profiles (from `mutation_derived`),
   AMP/HOMDEL events with their driver annotations
   (`cna_event`), structural variants, segments, gene panels, GISTIC, MutSig,
-  resources, and the timeline (`clinical_event` with its attributes).
+  resources, the timeline (`clinical_event` with its attributes), and each
+  matrix profile's samples in matrix order (`profile_sample`, from
+  `genetic_profile_samples`).
 
 The clone also serves as the reference database (genes, aliases, cancer
 types, reference genomes). A few API responses read production-only columns

@@ -88,7 +88,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			item := GenomicDataCountItem{HugoGeneSymbol: g.HugoGeneSymbol, ProfileType: "mutations", Counts: []GenomicDataCount{}}
 			add := func(label, value string, n uint64) {
 				if n > 0 {
-					item.Counts = append(item.Counts, GenomicDataCount{Label: label, Value: value, Count: n, UniqueCount: n})
+					item.Counts = append(item.Counts, GenomicDataCount{Label: label, Value: value, Count: n, UniqueCount: &n})
 				}
 			}
 			add("Mutated", "MUTATED", mutated)
@@ -136,7 +136,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			byGene[r.Gene] = it
 			order = append(order, r.Gene)
 		}
-		c := GenomicDataCount{Label: strings.ReplaceAll(r.Type, "_", " "), Value: r.Type, Count: r.C, UniqueCount: r.U}
+		c := GenomicDataCount{Label: strings.ReplaceAll(r.Type, "_", " "), Value: r.Type, Count: r.C, UniqueCount: &r.U}
 		if includeSampleIDs {
 			c.SampleIDs = strings.Split(r.Sample, ",")
 		}
@@ -162,19 +162,20 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			{"Not Mutated", "NOT_MUTATED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM (%s) WHERE sample_unique_id NOT IN (%s)", profiled, mutated)},
 			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM sample_derived WHERE cancer_study_identifier IN %s AND sample_unique_id NOT IN (%s)", args.strs(svf.studyIDs()), profiled)},
 		}
-		if len(out) == 0 {
-			out = append(out, GenomicDataCountItem{HugoGeneSymbol: genes[0], ProfileType: "mutations", Counts: []GenomicDataCount{}})
-		}
+		// The mapper's result map groups rows by gene and profile type: the
+		// not-mutated and not-profiled rows (always present, counts possibly
+		// 0) are items of their own, with the label as profile type.
 		for _, e := range extra {
 			r, err := queryA[idsRow](s.CH, e.sql, args)
 			if err != nil || len(r) == 0 {
 				continue
 			}
-			c := GenomicDataCount{Label: e.label, Value: e.value, Count: r[0].N, UniqueCount: r[0].N}
+			n := r[0].N
+			c := GenomicDataCount{Label: e.label, Value: e.value, Count: n, UniqueCount: &n}
 			if r[0].IDs != "" {
 				c.SampleIDs = strings.Split(r[0].IDs, ",")
 			}
-			out[0].Counts = append(out[0].Counts, c)
+			out = append(out, GenomicDataCountItem{HugoGeneSymbol: genes[0], ProfileType: e.label, Counts: []GenomicDataCount{c}})
 		}
 	}
 	writeJSON(w, out)

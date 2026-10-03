@@ -227,14 +227,44 @@ func (s *State) discreteCopyNumberFromValues(mpid string, meta profileMeta, f mo
 }
 
 // profileSampleCount is MolecularDataService.getNumberOfSamplesInMolecularProfile:
-// every sample of the profile, altered or not.
-func (s *State) profileSampleCount(mpid string) int64 {
+// the samples of the profile's matrix (genetic_profile_samples), i.e. the
+// data file's sample columns that are samples of the study, or the samples of
+// a discrete-long file. A profile without such a list counts its profiled
+// samples.
+func (s *State) profileSampleCount(meta profileMeta, mpid string) int64 {
+	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID, "mp": mpid}
+	inStudy := " AND sample_id IN (SELECT sample_id FROM sample WHERE study_id = {study:String})"
+	if len(s.rawColumns("profile_sample")) > 0 {
+		if n := s.countQuery("SELECT uniqExact(sample_id) AS n FROM cbioportal_raw.profile_sample "+
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND kind = 'header'"+inStudy, p); n > 0 {
+			return n
+		}
+	}
+	if strings.EqualFold(meta.Datatype, "DISCRETE_LONG") && len(s.rawColumns("cna_discrete_long")) > 0 {
+		return s.countQuery("SELECT uniqExact(sample_id) AS n FROM cbioportal_raw.cna_discrete_long "+
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String}"+inStudy, p)
+	}
+	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM sample_profile WHERE molecular_profile_id = {mp:String}", p)
+}
+
+// variantSampleCount is VariantCountServiceImpl.getNumberOfSamplesInMolecularProfile:
+// the size of the study's sequenced sample list, else the number of samples
+// with a mutation in the profile.
+func (s *State) variantSampleCount(meta profileMeta, mpid string) int64 {
+	p := ch.Params{"list": meta.StudyID + "_sequenced", "mp": mpid}
+	if n := s.countQuery("SELECT count() AS n FROM sample_list WHERE list_id = {list:String}", p); n > 0 {
+		return n
+	}
+	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM mutation WHERE molecular_profile_id = {mp:String}", p)
+}
+
+// countQuery runs a query returning one count column n; 0 on error.
+func (s *State) countQuery(sql string, p ch.Params) int64 {
 	type c struct {
 		N int64 `json:"n"`
 	}
-	rows, _ := ch.QueryP[c](s.CH,
-		"SELECT uniqExact(sample_id) AS n FROM sample_profile WHERE molecular_profile_id = {profile:String}", ch.Params{"profile": mpid})
-	if len(rows) == 0 {
+	rows, err := ch.QueryP[c](s.CH, sql, p)
+	if err != nil || len(rows) == 0 {
 		return 0
 	}
 	return rows[0].N
@@ -284,7 +314,7 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total := s.profileSampleCount(mpid)
+	total := s.profileSampleCount(meta, mpid)
 
 	pairs := make([]string, len(ids))
 	for i, id := range ids {
@@ -442,7 +472,14 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		entrez = append(entrez, e)
 	}
 
-	total := s.profileSampleCount(mpid)
+	// VariantCountServiceImpl.validateMolecularProfile: only a mutation
+	// profile is found.
+	meta, ok := s.profileMeta(mpid)
+	if !ok || (meta.AlterationType != "MUTATION_EXTENDED" && meta.AlterationType != "MUTATION_UNCALLED") {
+		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(mpid))
+		return
+	}
+	total := s.variantSampleCount(meta, mpid)
 
 	// Per-gene sample counts.
 	geneCount := map[int64]int64{}
@@ -500,12 +537,18 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// VariantCountMapper reads mutation_count_by_keyword, which has a row
-	// only for a gene and keyword (or no keyword) some mutation has.
+	// only for a gene and keyword some mutation has, once per row. Its rows
+	// for mutations without a keyword hold the text "null", which the
+	// mapper's `keyword IS NULL` never matches: an identifier without a
+	// keyword has no count.
 	out := make([]VariantCount, 0, len(ids))
+	emitted := map[string]bool{}
 	for _, id := range ids {
-		if keywordCount[fmt.Sprintf("%d\x00%s", id.EntrezGeneID, id.Keyword)] == 0 {
+		k := fmt.Sprintf("%d\x00%s", id.EntrezGeneID, id.Keyword)
+		if id.Keyword == "" || keywordCount[k] == 0 || emitted[k] {
 			continue
 		}
+		emitted[k] = true
 		out = append(out, VariantCount{
 			EntrezGeneID:                      id.EntrezGeneID,
 			Keyword:                           id.Keyword,

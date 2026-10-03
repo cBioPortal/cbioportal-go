@@ -251,7 +251,7 @@ type GenomicDataCount struct {
 	Value       string   `json:"value"`
 	Label       string   `json:"label"`
 	Count       uint64   `json:"count"`
-	UniqueCount uint64   `json:"uniqueCount,omitempty"`
+	UniqueCount *uint64  `json:"uniqueCount,omitempty"`
 	SampleIDs   []string `json:"sampleIds,omitempty"`
 }
 
