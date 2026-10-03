@@ -60,6 +60,7 @@ line the flags are usually handier.
 |---|---|---|---|
 | `-port` | `PORT` | `8080` | listen port; binds all interfaces (0.0.0.0) |
 | `-clickhouse-url` | `CLICKHOUSE_URL` | `http://localhost:18123` | ClickHouse HTTP endpoint (ClickHouse Cloud: `https://<host>:8443`) |
+| `-clickhouse-log-comment` | `CLICKHOUSE_LOG_COMMENT` | | tag every ClickHouse query with this `log_comment`, to tell deployments apart in `system.query_log` |
 | `-db` | `CBIOPORTAL_DB` | `cbioportal` | database built by `transform` |
 | `-raw-db` | `CBIOPORTAL_RAW_DB` | `cbioportal_raw` | staging database written by `ingest` |
 | `-ref-db` | `CBIOPORTAL_REF_DB` | `cbioportal_ref` | reference database written by `load-reference` |

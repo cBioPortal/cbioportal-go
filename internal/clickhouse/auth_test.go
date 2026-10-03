@@ -32,3 +32,24 @@ func TestCredentialsFromEnvironment(t *testing.T) {
 		t.Fatalf("unexpected credentials without CLICKHOUSE_USER: %q / %q", user, key)
 	}
 }
+
+func TestLogComment(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.Query().Get("log_comment")
+		w.Write([]byte("1\n"))
+	}))
+	defer srv.Close()
+	t.Setenv("CLICKHOUSE_LOG_COMMENT", "cbioportal-go-api")
+	if _, err := New(srv.URL, "db").Execute("SELECT 1"); err != nil {
+		t.Fatal(err)
+	}
+	if got != "cbioportal-go-api" {
+		t.Errorf("log_comment %q", got)
+	}
+	t.Setenv("CLICKHOUSE_LOG_COMMENT", "")
+	New(srv.URL, "db").Execute("SELECT 1")
+	if got != "" {
+		t.Errorf("log_comment without the setting: %q", got)
+	}
+}

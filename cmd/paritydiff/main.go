@@ -31,7 +31,10 @@ import (
 	"time"
 )
 
-const browserUA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+// userAgent is sent with every request: a browser's by default, as www
+// routes non-browser clients elsewhere; api.cbioportal.org refuses browsers
+// (-ua).
+var userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 type response struct {
 	Status int    `json:"status"`
@@ -81,7 +84,7 @@ func (f *fetcher) get(rq request) (response, error) {
 	if err != nil {
 		return response{}, err
 	}
-	req.Header.Set("User-Agent", browserUA)
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json")
 	if rq.Body != "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -195,6 +198,7 @@ func main() {
 	report := flag.String("json", "", "also write the results as JSON to this file")
 	dump := flag.String("dump", "", "write both bodies of every non-identical response to this directory (<name>.a.json, <name>.b.json)")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
+	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
 	flag.Parse()
 
 	f, err := os.Open(*corpus)

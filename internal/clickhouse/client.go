@@ -54,6 +54,9 @@ func New(baseURL, database string) *Client {
 	if user := os.Getenv("CLICKHOUSE_USER"); user != "" {
 		rt = authTransport{base: transport, user: user, password: os.Getenv("CLICKHOUSE_PASSWORD")}
 	}
+	if comment := os.Getenv("CLICKHOUSE_LOG_COMMENT"); comment != "" {
+		rt = commentTransport{base: rt, comment: comment}
+	}
 	return &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		database: database,
@@ -72,6 +75,22 @@ func (a authTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.Header.Set("X-ClickHouse-User", a.user)
 	r.Header.Set("X-ClickHouse-Key", a.password)
 	return a.base.RoundTrip(r)
+}
+
+// commentTransport sets ClickHouse's log_comment on every query, so the
+// queries of one deployment (e.g. the API mirror) can be told apart in
+// system.query_log even when deployments share a ClickHouse user.
+type commentTransport struct {
+	base    http.RoundTripper
+	comment string
+}
+
+func (c commentTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	q := r.URL.Query()
+	q.Set("log_comment", c.comment)
+	r.URL.RawQuery = q.Encode()
+	return c.base.RoundTrip(r)
 }
 
 // transport keeps enough idle connections for a page's burst of parallel API

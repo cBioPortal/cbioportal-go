@@ -32,6 +32,7 @@ var sections = []section{
 	}},
 	{"ClickHouse", []option{
 		{name: "clickhouse-url", arg: "url", env: "CLICKHOUSE_URL", def: "http://localhost:18123", usage: "ClickHouse HTTP endpoint, e.g. https://<host>:8443 for ClickHouse Cloud"},
+		{name: "clickhouse-log-comment", arg: "text", env: "CLICKHOUSE_LOG_COMMENT", usage: "tag every ClickHouse query with this log_comment (system.query_log), e.g. the deployment's name", export: true},
 		{name: "db", arg: "name", env: "CBIOPORTAL_DB", def: "cbioportal", usage: "database built by `cbioportal-import transform`"},
 		{name: "raw-db", arg: "name", env: "CBIOPORTAL_RAW_DB", def: "cbioportal_raw", usage: "staging database written by `cbioportal-import ingest`"},
 		{name: "ref-db", arg: "name", env: "CBIOPORTAL_REF_DB", def: "cbioportal_ref", usage: "reference database written by `cbioportal-import load-reference`"},
