@@ -237,6 +237,8 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | ANY | `/results` |  |  | implemented |  | frontend (POST too) |
 | GET | `/config_service` |  |  | implemented | yes | from portal properties |
 | GET | `/api/v2/api-docs` |  |  | implemented | yes | the Java portal's legacy-api.json (Swagger 2.0), host set to the request's |
+| GET | `/api/v3/api-docs[/{public,internal}]`, `/api/v3/api-docs.yaml[/{public,internal}]` |  |  | implemented | yes | springdoc's OpenAPI 3.1 descriptions, snapshots of api.cbioportal.org (`deploy/refresh-api-docs.sh`), server URL set to the request's origin |
+| GET | `/api/v3/api-docs/swagger-config`, `/api/swagger-ui/**` |  |  | implemented | yes | Swagger UI, as springdoc serves it |
 | ANY | `/api/proxy/{path}` | String |  | missing |  | legacy generic proxy (bitly, 3dHotspots); unused by the frontend |
 | GET | `/api/proxy/bitly` |  |  | missing |  | legacy Bitly proxy; unused by the frontend |
 | ANY | `/api/matchminer/api/**` | JSONObject |  | missing |  | MatchMiner proxy (matchminer.url); MSK deployment only |

@@ -2,23 +2,117 @@ package api
 
 import (
 	"bytes"
-	_ "embed"
+	"embed"
 	"encoding/json"
+	"io/fs"
+	"mime"
 	"net/http"
+	"path"
+	"strings"
 	"sync"
 )
 
-// legacyAPIJSON is the Swagger 2.0 description of the legacy REST API that
-// API clients are generated from (e.g. bravado's
-// SwaggerClient.from_url(".../api/v2/api-docs")). It is the Java portal's own
-// hand-maintained file, cbioportal src/main/resources/legacy-api.json
-// (98600e1), served as its LegacyApiController serves it.
+// The API descriptions and Swagger UI, as the Java portal serves them:
 //
-//go:embed legacy-api.json
-var legacyAPIJSON []byte
+//   - /api/v2/api-docs: the legacy Swagger 2.0 description API clients are
+//     generated from (e.g. bravado's SwaggerClient.from_url), the Java
+//     portal's own hand-maintained cbioportal src/main/resources/
+//     legacy-api.json, with its host set to the requesting host.
+//   - /api/v3/api-docs[/{public,internal}] and their .yaml forms: the
+//     OpenAPI 3.1 descriptions springdoc generates for the Java portal,
+//     with the server URL set to the requesting origin.
+//   - /api/v3/api-docs/swagger-config and /api/swagger-ui/: Swagger UI.
+//
+// The v3 descriptions and Swagger UI are snapshots of api.cbioportal.org's
+// API (deploy/refresh-api-docs.sh refreshes them).
+//
+//go:embed apidocs
+var apiDocsFS embed.FS
 
-// legacyDocs is legacyAPIJSON compacted, split around the value of its
-// top-level "host" key.
+// snapshotOrigin is the server URL the v3 snapshots were taken with.
+const snapshotOrigin = "https://api.cbioportal.org"
+
+func routeAPIDocs(mux *http.ServeMux, s *State) {
+	mux.HandleFunc("GET /api/v2/api-docs", s.legacyAPIDocs)
+	for route, file := range map[string]string{
+		"/api/v3/api-docs":               "v3.json",
+		"/api/v3/api-docs/public":        "v3-public.json",
+		"/api/v3/api-docs/internal":      "v3-internal.json",
+		"/api/v3/api-docs.yaml":          "v3.yaml",
+		"/api/v3/api-docs.yaml/public":   "v3-public.yaml",
+		"/api/v3/api-docs.yaml/internal": "v3-internal.yaml",
+	} {
+		mux.HandleFunc("GET "+route, openAPIDoc(file))
+	}
+	mux.HandleFunc("GET /api/v3/api-docs/swagger-config", swaggerConfig)
+	mux.HandleFunc("GET /api/swagger-ui", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, baseURL(r)+"/api/swagger-ui/index.html", http.StatusFound)
+	})
+	ui, _ := fs.Sub(apiDocsFS, "apidocs/swagger-ui")
+	mux.HandleFunc("GET /api/swagger-ui/{file}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("file")
+		b, err := fs.ReadFile(ui, name)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "No static resource api/swagger-ui/"+name+".")
+			return
+		}
+		ct := mime.TypeByExtension(path.Ext(name))
+		if path.Ext(name) == ".js" {
+			ct = "text/javascript"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Write(b)
+	})
+}
+
+// openAPIDoc serves a v3 description with its server URL set to the
+// requesting origin, as springdoc's "Generated server url".
+func openAPIDoc(file string) http.HandlerFunc {
+	b, err := apiDocsFS.ReadFile("apidocs/" + file)
+	var before, after []byte
+	if err == nil {
+		yaml := strings.HasSuffix(file, ".yaml")
+		marker := []byte(`"servers":[{"url":"` + snapshotOrigin + `"`)
+		if yaml {
+			marker = []byte("- url: " + snapshotOrigin + "\n")
+		}
+		if i := bytes.Index(b, marker); i >= 0 {
+			start := i + bytes.Index(marker, []byte(snapshotOrigin))
+			before, after = b[:start], b[start+len(snapshotOrigin):]
+		} else {
+			before = b
+		}
+	}
+	ct := "application/json"
+	if strings.HasSuffix(file, ".yaml") {
+		ct = "application/vnd.oai.openapi"
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "API description unavailable")
+			return
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Write(before)
+		if after != nil {
+			w.Write([]byte(baseURL(r)))
+			w.Write(after)
+		}
+	}
+}
+
+// swaggerConfig is springdoc's Swagger UI configuration for the portal's two
+// API groups.
+func swaggerConfig(w http.ResponseWriter, r *http.Request) {
+	redirect, _ := json.Marshal(baseURL(r) + "/api/swagger-ui/oauth2-redirect.html")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"configUrl":"/api/v3/api-docs/swagger-config","oauth2RedirectUrl":` + string(redirect) +
+		`,"urls":[{"url":"/api/v3/api-docs/internal","name":"internal"},{"url":"/api/v3/api-docs/public","name":"public"}],` +
+		`"urls.primaryName":"public","validatorUrl":""}`))
+}
+
+// legacyDocs is the legacy description compacted, split around the value of
+// its top-level "host" key.
 var legacyDocs struct {
 	once          sync.Once
 	before, after []byte
@@ -29,7 +123,12 @@ var legacyDocs struct {
 // host the client asked for.
 func (s *State) legacyAPIDocs(w http.ResponseWriter, r *http.Request) {
 	legacyDocs.once.Do(func() {
-		legacyDocs.before, legacyDocs.after, legacyDocs.err = splitTopLevelValue(legacyAPIJSON, "host")
+		doc, err := apiDocsFS.ReadFile("apidocs/legacy-api.json")
+		if err != nil {
+			legacyDocs.err = err
+			return
+		}
+		legacyDocs.before, legacyDocs.after, legacyDocs.err = splitTopLevelValue(doc, "host")
 	})
 	if legacyDocs.err != nil {
 		writeError(w, http.StatusInternalServerError, "legacy API description unavailable")
@@ -70,7 +169,6 @@ func splitTopLevelValue(doc []byte, key string) (before, after []byte, err error
 			return b[:start:start], b[end:], nil
 		}
 	}
-	// No such key: add it as the last member.
 	k, _ := json.Marshal(key)
 	before = append(append(append([]byte{}, b[:len(b)-1]...), ','), k...)
 	return append(before, ':'), []byte("}"), nil
