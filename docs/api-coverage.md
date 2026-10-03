@@ -267,7 +267,6 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
   purpose.
 - **URL shortener and the legacy `/api/proxy/*`**: Bitly / 3D Hotspots
   proxies the frontend no longer calls.
-- **`/api/v2/api-docs`**: the legacy OpenAPI document.
 
 `DocRedirectController` (`/api-docs`, `/swagger-ui.html`) is not registered
 in Java either and is not listed.
