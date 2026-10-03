@@ -358,3 +358,11 @@ func TestOracleViolinIgnoresOwnNumericalFilter(t *testing.T) {
 		t.Errorf("numSamples: all %d, filtered %d", totalAll, totalFiltered)
 	}
 }
+
+// GET mutations of a profile requires the sample list and the gene.
+func TestOracleMutationsGetRequiredParams(t *testing.T) {
+	requireAPI(t)
+	p := "/api/molecular-profiles/study_es_0_mutations/mutations"
+	wantError(t, "GET", p+"?sampleListId=study_es_0_all", "", http.StatusBadRequest, "Request parameter is missing: entrezGeneId")
+	wantError(t, "GET", p+"?entrezGeneId=672", "", http.StatusBadRequest, "Request parameter is missing: sampleListId")
+}

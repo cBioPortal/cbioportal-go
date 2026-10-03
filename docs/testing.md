@@ -92,3 +92,45 @@ unexplained (216 identical and 38 differing before the fixes it prompted).
 The known differences are listed in
 [Deployment](deployment.md#mirroring-production); three of them disappear
 once the mirror is rebuilt with the current `transform --from-prod`.
+
+## Java oracle
+
+The Java backend itself, run on the same fixture studies, is the reference
+for the edge cases production does not exercise (gene panels, generic and
+patient-level assays, hg38, ASCN, namespaces, timelines, SVs).
+`test/java_oracle.sh` builds the ClickHouse database `java_e2e` with the
+`cbioportal/cbioportal:master` image's own tools (its schema and seed,
+cbioportal-core's importer for the gene panels, gene sets and the five
+studies, then its derived-table script; ~2 min) and runs the backend
+(`clickhouse_mode=true`, `authenticate=false`, 2 GB heap) on :18095:
+
+```bash
+test/java_oracle.sh db cbioportal-test      # needs ClickHouse on :18123 (container ch-dge)
+test/java_oracle.sh start
+go run ./cmd/paritydiff -a http://localhost:18090 -b http://localhost:18095 \
+  -corpus test/parity/fixtures.txt -cache '' -rate 0 -q -dump .parity/oracle
+API=http://localhost:18095 go test ./test/ -run Oracle   # the oracle cases hold for Java too
+test/java_oracle.sh stop
+```
+
+`test/parity/fixtures.txt` (~1,450 requests) is generated from the Java
+backend's answers — each study's profiles, sample lists, attributes and the
+chart values its filters use — by `go run ./test/parity/fixturegen >
+test/parity/fixtures.txt`; regenerate it rather than editing it. The API
+under test must serve databases built by `test/setup_test_db.sh` from the
+same cbioportal-test checkout. `TestOracle*` contract tests pin what the
+comparison fixed; running the whole contract suite against the Java backend
+also shows where a test asserts something else than Java does (the session
+and configuration tests fail there by design: no session service).
+
+On 2026-10-03: 1,089 of 1,447 requests identical (798 before the fixes it
+prompted). Most of the rest are known classes: row order (~220: Java returns
+samples and entities in import order, i.e. internal id order, where we sort
+by id), the study `status` (the Java importer stores 1 = AVAILABLE,
+production and we report 0) and `groups` order (a Java HashSet's), and Java
+bugs on these fixtures — a numeric filter on a patient-level generic assay
+profile is ignored, `/clinical-events-meta/fetch` and `/survival-data/fetch`
+answer 500 (a MyBatis expression calls a missing
+`SqlUtils.combineStudyAndPatientIds`), categorical enrichments of a
+patient-level profile answer 500, and `/clinical-data-table/fetch` answers
+500 for a `sortBy` that is not an attribute.

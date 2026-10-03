@@ -100,13 +100,15 @@ const (
 )
 
 // param is one converted request parameter: a Java enum (class + constants)
-// or an Integer with optional bounds.
+// or an Integer with optional bounds; a required one must be present.
 type param struct {
 	name           string
 	class          string
 	values         []string
 	min, max       int
 	hasMin, hasMax bool
+	required       bool
+	text           bool // a String parameter: only its presence is checked
 }
 
 func projectionParamOf(class string) param {
@@ -144,11 +146,14 @@ func checkParams(params []param, q map[string][]string) string {
 	var bounds []bound
 	for _, p := range params {
 		vs := q[p.name]
-		if len(vs) == 0 {
+		if len(vs) == 0 || strings.TrimSpace(vs[0]) == "" {
+			if p.required {
+				return "Request parameter is missing: " + p.name
+			}
 			continue
 		}
 		v := strings.TrimSpace(vs[0])
-		if v == "" {
+		if p.text {
 			continue
 		}
 		if p.class != "" {
@@ -340,7 +345,8 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}", exists: []string{"profile"}, fixed: "DETAILED", shape: molecularProfileShape, nest: "study"},
 	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study"},
 	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study"},
-	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"}},
+	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"},
+		params: []param{{name: "sampleListId", required: true, text: true}, {name: "entrezGeneId", required: true}}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations/fetch", exists: []string{"profile"}},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"}},
