@@ -15,9 +15,6 @@ import (
 )
 
 // routeMisc registers the view-backed endpoints implemented in this file.
-// It deliberately does NOT register POST /api/clinical-attributes/counts/fetch
-// (currently an emptyArray stub in routes.go); the integrator wires
-// s.clinicalAttributeCountsFetch after removing that stub.
 func (s *State) routeMisc(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/copy-number-segments/fetch", s.copyNumberSegmentsFetch)
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-attributes", s.studyClinicalAttributes)
@@ -274,9 +271,6 @@ type ClinicalAttributeCount struct {
 }
 
 // clinicalAttributeCountsFetch serves POST /api/clinical-attributes/counts/fetch.
-// It is intentionally NOT registered in routeMisc: routes.go currently has an
-// emptyArray stub for that pattern. The integrator removes the stub and wires
-// this method to avoid a duplicate-pattern panic.
 func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers []identifier    `json:"sampleIdentifiers"`

@@ -8,8 +8,8 @@ import (
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
-// routeBulkList registers the bulk GET list endpoints, single-resource GETs,
-// and assorted infra trivials. Paging query params are applied by pageList.
+// routeBulkList registers the bulk GET list endpoints, single-resource GETs
+// and the data-access-token placeholders. Paging query params are applied by pageList.
 // All filtering is pushed into ClickHouse.
 func (s *State) routeBulkList(mux *http.ServeMux) {
 	// Bulk GET list endpoints (no study scope).
@@ -23,12 +23,6 @@ func (s *State) routeBulkList(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sample-lists/{sampleListId}/sample-ids", s.sampleListSampleIDs)
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}", s.sampleInStudy)
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/copy-number-segments", s.sampleCopyNumberSegments)
-
-	// Infra trivials — health / timestamps / cache.
-	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
-	mux.HandleFunc("GET /api/timestamps", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
-	mux.HandleFunc("GET /api/cache", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
-	mux.HandleFunc("GET /api/cache/{studyId}", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
 
 	// Data-access tokens — only used if download tokens are enabled; placeholder.
 	mux.HandleFunc("GET /api/data-access-token", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
@@ -44,11 +38,6 @@ func (s *State) routeBulkList(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {})
 	mux.HandleFunc("GET /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
 	mux.HandleFunc("DELETE /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) {})
-	// Cache eviction (CacheController); nothing is cached here.
-	mux.HandleFunc("DELETE /api/cache", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("Flushed all caches!!!")) })
-	mux.HandleFunc("DELETE /api/cache/{studyId}", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Flushed " + r.PathValue("studyId") + " caches!!!"))
-	})
 }
 
 // ---------- Bulk samples ----------

@@ -13,25 +13,12 @@ import (
 )
 
 // routeStudyView3 registers study-view endpoints for clinical-data enrichments,
-// the clinical-data table, custom (session) charts, namespace (custom-column)
-// attributes, and MutSig/GISTIC significance lists.
+// the clinical-data table and custom (session) charts.
 func (s *State) routeStudyView3(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clinical-data-enrichments/fetch", s.clinicalDataEnrichmentsFetch)
 	mux.HandleFunc("POST /api/clinical-data-table/fetch", s.clinicalDataTableFetch)
-
-	// Custom (session-defined) chart data is not persisted in this backend, so
-	// these return correctly-typed empty results after draining the body.
 	mux.HandleFunc("POST /api/custom-data-counts/fetch", s.customDataCountsFetch)
 	mux.HandleFunc("POST /api/custom-data-bin-counts/fetch", s.customDataBinCountsFetch)
-
-	// Namespace (custom-column) attributes are not modeled in staging — the
-	// clinical_attribute_meta view carries no namespace-prefixed attributes —
-	// so these return typed empties.
-	mux.HandleFunc("POST /api/namespace-attributes/fetch", emptyArray)
-	mux.HandleFunc("POST /api/namespace-attributes/counts/fetch", emptyArray)
-	mux.HandleFunc("POST /api/namespace-data-counts/fetch", emptyArray)
-	mux.HandleFunc("POST /api/namespace-data/fetch", emptyArray)
-
 }
 
 // naFilter is the cBioPortal rule for excluding "not available" clinical values,

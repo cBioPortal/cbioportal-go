@@ -2,6 +2,7 @@ package contract
 
 import (
 	"encoding/base64"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -332,13 +333,32 @@ func TestContractCacheAndTokenMethods(t *testing.T) {
 	get(t, "/api/data-access-tokens", &tokens)
 	var tok map[string]any
 	post(t, "/api/data-access-tokens", nil, &tok)
-	for _, path := range []string{"/api/cache", "/api/cache/study_es_0", "/api/data-access-tokens"} {
+	resp, _ := rawDo(t, http.MethodDelete, "/api/data-access-tokens", "")
+	wantEq(t, resp.StatusCode, http.StatusOK)
+}
+
+// CacheController: the X-API-KEY header is required (Spring's 400 without
+// it), and with cache.endpoint.enabled unset the endpoints answer 404 with a
+// plain-text reason. There is no GET.
+func TestContractCacheEndpointDisabled(t *testing.T) {
+	requireAPI(t)
+	for _, path := range []string{"/api/cache", "/api/cache/study_es_0"} {
+		resp, _ := rawDo(t, http.MethodDelete, path, "")
+		wantEq(t, resp.StatusCode, http.StatusBadRequest)
+
 		req, _ := http.NewRequest(http.MethodDelete, apiBase()+path, nil)
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		req.Header.Set("X-API-KEY", "anything")
+		r2, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 		if err != nil {
 			t.Fatalf("DELETE %s: %v", path, err)
 		}
-		resp.Body.Close()
-		wantEq(t, resp.StatusCode, http.StatusOK)
+		body, _ := io.ReadAll(r2.Body)
+		r2.Body.Close()
+		wantEq(t, r2.StatusCode, http.StatusNotFound)
+		wantEq(t, string(body), "Cache endpoint is disabled for this instance.")
+
+		resp, _ = rawDo(t, http.MethodGet, path, "")
+		wantEq(t, resp.StatusCode, http.StatusMethodNotAllowed)
+		wantEq(t, resp.Header.Get("Allow"), "DELETE")
 	}
 }
