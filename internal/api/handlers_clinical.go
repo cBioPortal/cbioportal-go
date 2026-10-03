@@ -227,6 +227,8 @@ type ClinicalAttribute struct {
 	StudyID             string `json:"studyId"`
 }
 
+// clinicalAttributesFetch serves POST /api/clinical-attributes/fetch, ordered
+// by attribute id as in Java (which then orders by its internal study id).
 func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	readBody(r, &studyIDs)

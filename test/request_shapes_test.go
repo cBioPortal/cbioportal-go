@@ -32,12 +32,15 @@ func TestContractPagingSlicesGetLists(t *testing.T) {
 	get(t, "/api/studies/study_es_0/samples?pageSize=2&pageNumber=1", &page)
 	wantEq(t, ids(page, "sampleId"), ids(all, "sampleId")[2:4])
 
-	// ColumnStoreStudyController limits the study list to pageSize and
-	// ignores pageNumber.
-	var studies, limited []map[string]any
+	// ColumnStoreStudyController numbers pages from 1; 0 is the first page too.
+	var studies, limited, first, second []map[string]any
 	get(t, "/api/studies?projection=SUMMARY", &studies)
 	get(t, "/api/studies?projection=SUMMARY&pageSize=2&pageNumber=1", &limited)
 	wantEq(t, ids(limited, "studyId"), ids(studies, "studyId")[:2])
+	get(t, "/api/studies?projection=SUMMARY&pageSize=2&pageNumber=0", &first)
+	wantEq(t, ids(first, "studyId"), ids(studies, "studyId")[:2])
+	get(t, "/api/studies?projection=SUMMARY&pageSize=1&pageNumber=2", &second)
+	wantEq(t, ids(second, "studyId"), ids(studies, "studyId")[1:2])
 
 	var beyond []map[string]any
 	get(t, "/api/studies/study_es_0/samples?pageSize=10&pageNumber=1000", &beyond)

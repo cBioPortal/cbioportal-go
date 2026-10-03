@@ -219,7 +219,10 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	total := s.scopeSampleCount(svf)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
-	var sum uint64
+	// As in ClickhouseGenomicDataMapper.getCNACounts, a single NA count is
+	// reported, for the first gene: the filtered samples minus that gene's
+	// non-NA counts.
+	sum := map[string]uint64{}
 	for _, r := range rows {
 		it, ok := byGene[r.Gene]
 		if !ok {
@@ -232,7 +235,7 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 			label = "NA"
 		}
 		it.Counts = append(it.Counts, GenomicDataCount{Label: label, Value: r.Value, Count: r.C})
-		sum += r.C
+		sum[r.Gene] += r.C
 	}
 	naGene := genes[0]
 	if len(order) > 0 {
@@ -243,8 +246,8 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		order = append(order, naGene)
 	}
 	var na uint64
-	if total > sum {
-		na = total - sum
+	if total > sum[naGene] {
+		na = total - sum[naGene]
 	}
 	byGene[naGene].Counts = append(byGene[naGene].Counts, GenomicDataCount{Label: "NA", Value: "NA", Count: na})
 	for _, g := range order {

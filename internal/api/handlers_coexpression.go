@@ -488,11 +488,32 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		studyID, sampleID string
 		val               float64
 	}
+	// The service walks its sampleId-keyed HashMap of clinical data and adds
+	// categories to another HashMap as it meets them, so both maps' Java
+	// iteration orders decide the row order.
+	pairs := s.scopedAttrPairs(f, numAttr, catAttr)
+	bySample := map[string][]int{}
+	sampleIDs := make([]string, 0, len(pairs))
+	for i, row := range pairs {
+		if _, ok := bySample[row.SampleID]; !ok {
+			sampleIDs = append(sampleIDs, row.SampleID)
+		}
+		bySample[row.SampleID] = append(bySample[row.SampleID], i)
+	}
+	sort.Strings(sampleIDs)
 	byCategory := map[string][]point{}
-	for _, row := range s.scopedAttrPairs(f, numAttr, catAttr) {
-		v, okV := clinicalNumber(row.SampleA, row.PatientA)
-		cat, okC := clinicalCategory(row.SampleB, row.PatientB)
-		if okV && okC {
+	var categoryOrder []string
+	for _, sid := range javaHashMapOrder(sampleIDs) {
+		for _, i := range bySample[sid] {
+			row := pairs[i]
+			v, okV := clinicalNumber(row.SampleA, row.PatientA)
+			cat, okC := clinicalCategory(row.SampleB, row.PatientB)
+			if !okV || !okC {
+				continue
+			}
+			if _, ok := byCategory[cat]; !ok {
+				categoryOrder = append(categoryOrder, cat)
+			}
 			byCategory[cat] = append(byCategory[cat], point{studyID: row.StudyID, sampleID: row.SampleID, val: scale(v)})
 		}
 	}
@@ -511,7 +532,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	boxes := map[string]*catBox{}
 	// Rows follow the iteration order of the service's category HashMap.
-	categories := javaHashMapOrder(sortedKeys(byCategory))
+	categories := javaHashMapOrder(categoryOrder)
 
 	for _, cat := range categories {
 		data := byCategory[cat]

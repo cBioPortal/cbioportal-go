@@ -196,7 +196,8 @@ func cancerTypeName(name, id string) string {
 // studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
 // keyword search over name / id / cancer type and sorting. The ID projection
 // yields an empty list and META an empty list with the total-count header;
-// paging is a plain limit (see pageList).
+// pages are numbered from 1 (see pageList). A keyword search is ordered by
+// name unless sortBy is given.
 func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
@@ -210,6 +211,9 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		where = strings.Join(ands, " AND ")
 	}
 	order := "c.study_id"
+	if strings.TrimSpace(q.Get("keyword")) != "" {
+		order = "c.name"
+	}
 	sortCols := map[string]string{"studyId": "c.study_id", "cancerTypeId": "c.cancer_type_id", "name": "c.name",
 		"description": "c.description", "publicStudy": "publicFlag", "pmid": "c.pmid", "citation": "c.citation",
 		"groups": "c.groups", "status": "c.study_id", "importDate": "c.study_id"}

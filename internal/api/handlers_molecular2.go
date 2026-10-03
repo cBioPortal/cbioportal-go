@@ -427,7 +427,6 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []VariantCount{})
 		return
 	}
-	study := profileStudy(mpid)
 
 	entrezSet := map[int64]bool{}
 	for _, id := range ids {
@@ -449,8 +448,8 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		rows, _ := ch.Query[gr](s.CH, fmt.Sprintf(
 			"SELECT toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS n "+
-				"FROM mutation WHERE study_id = '%s' AND toInt64OrNull(entrez_gene_id) IN (%s) "+
-				"GROUP BY entrezGeneId", sqlLit(study), intListSQL(entrez)))
+				"FROM mutation WHERE molecular_profile_id = '%s' AND toInt64OrNull(entrez_gene_id) IN (%s) "+
+				"GROUP BY entrezGeneId", sqlLit(mpid), intListSQL(entrez)))
 		for _, r := range rows {
 			geneCount[derefInt(r.EntrezGeneID)] = r.N
 		}
@@ -478,8 +477,8 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 				"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, "+
 				"m.protein_change AS proteinChange, m.variant_classification AS mutationType "+
 				"FROM mutation m LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(m.entrez_gene_id) "+
-				"WHERE m.study_id = '%s' AND toInt64OrNull(m.entrez_gene_id) IN (%s)",
-			sqlLit(study), intListSQL(entrez)))
+				"WHERE m.molecular_profile_id = '%s' AND toInt64OrNull(m.entrez_gene_id) IN (%s)",
+			sqlLit(mpid), intListSQL(entrez)))
 		samples := map[string]map[string]bool{}
 		for _, r := range rows {
 			kw := mutationKeyword(r.HugoGeneSymbol, r.ProteinChange, naString(r.MutationType))
@@ -549,12 +548,14 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 	// their resolved gene) to (entrez, protein start, protein end) once, then
 	// count, per requested (gene, start, end), the mutations lying within it
 	// (MutationMapper.getMutationCountByPosition). A protein position is
-	// "start[-end][/length]"; a single position is both start and end.
+	// "start[-end][/length]"; a single position is both start and end, and an
+	// unknown one ("?") is -1.
 	sql := fmt.Sprintf(
 		"WITH mut AS ("+
 			"SELECT toInt64OrNull(entrez_gene_id) AS g, splitByChar('/', protein_position)[1] AS r, "+
-			"toInt64OrNull(extract(r, '^(-?[0-9]+)')) AS ps, "+
-			"if(match(r, '^-?[0-9]+-'), toInt64OrNull(extract(r, '^-?[0-9]+-(-?[0-9]+)')), ps) AS pe, count() AS c "+
+			"if(startsWith(r, '?'), -1, toInt64OrNull(extract(r, '^(-?[0-9]+)'))) AS ps, "+
+			"multiIf(endsWith(r, '-?'), -1, match(r, '^(-?[0-9]+|[?])-'), toInt64OrNull(extract(r, '^(?:-?[0-9]+|[?])-(-?[0-9]+)')), ps) AS pe, "+
+			"count() AS c "+
 			"FROM mutation WHERE g IN (%[2]s) AND ps IS NOT NULL AND pe IS NOT NULL "+
 			"GROUP BY g, r, ps, pe) "+
 			"SELECT ids.e AS entrezGeneId, ids.s AS proteinPosStart, ids.en AS proteinPosEnd, "+

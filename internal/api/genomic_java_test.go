@@ -66,6 +66,10 @@ func TestJavaProteinPositions(t *testing.T) {
 		{"600/766", "MUTATED", 600, -1},
 		{"", "ELREA746del", 746, 746},
 		{"", "KR23", 23, 24},
+		// Positions as transform --from-prod writes production's columns.
+		{"125-125", "T125=", 125, 125},
+		{"125-?", "T125=", 125, -1},
+		{"", "Promoter", -1, -1},
 	}
 	for _, c := range cases {
 		s, e := javaProteinPositions(c.pos, c.pc)

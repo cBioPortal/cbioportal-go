@@ -356,7 +356,7 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 // mutations in the sampleListId sample list, for the entrezGeneId gene.
 func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	where := fmt.Sprintf("study_id = '%s'", sqlLit(profileStudy(r.PathValue("id"))))
+	where := profileMutationsClause(r.PathValue("id"))
 	where += sampleListClause("sample_id", q.Get("sampleListId"))
 	var entrez []int64
 	for _, e := range q["entrezGeneId"] {
@@ -370,6 +370,12 @@ func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 		limit = 100000
 	}
 	s.mutationsWhere(w, r, where, limit)
+}
+
+// profileMutationsClause selects a mutation profile's rows (a study can hold
+// both its MUTATION_EXTENDED and MUTATION_UNCALLED profiles).
+func profileMutationsClause(profileID string) string {
+	return fmt.Sprintf("study_id = '%s' AND molecular_profile_id = '%s'", sqlLit(profileStudy(profileID)), sqlLit(profileID))
 }
 
 // sampleListClause restricts col to the members of a sample list (no-op for
@@ -406,8 +412,7 @@ func geneFilter(entrez []int64) string {
 func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
 	readBody(r, &f)
-	study := sqlLit(profileStudy(r.PathValue("id")))
-	where := fmt.Sprintf("study_id = '%s'", study)
+	where := profileMutationsClause(r.PathValue("id"))
 	// MutationFilter is EITHER explicit sample ids OR a sample list.
 	if len(f.SampleIDs) > 0 {
 		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(f.SampleIDs))
@@ -425,11 +430,11 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 	// list of molecular profiles (all their samples), each with an optional gene
 	// filter. The results view uses the molecularProfileIds form.
 	if len(f.SampleMolecularIdentifiers) > 0 {
-		pairs := make([][2]string, len(f.SampleMolecularIdentifiers))
+		triples := make([][3]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {
-			pairs[i] = [2]string{profileStudy(id.MolecularProfileID), id.SampleID}
+			triples[i] = [3]string{profileStudy(id.MolecularProfileID), id.MolecularProfileID, id.SampleID}
 		}
-		where := fmt.Sprintf("(study_id, sample_id) IN (%s)%s", tupleIn(pairs), geneFilter(f.EntrezGeneIDs))
+		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN (%s)%s", tripleIn(triples), geneFilter(f.EntrezGeneIDs))
 		s.mutationsWhere(w, r, where, 0)
 		return
 	}
@@ -438,7 +443,8 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 		for i, id := range f.MolecularProfileIDs {
 			studies[i] = profileStudy(id)
 		}
-		where := fmt.Sprintf("study_id IN (%s)%s", inList(studies), geneFilter(f.EntrezGeneIDs))
+		where := fmt.Sprintf("study_id IN (%s) AND molecular_profile_id IN (%s)%s",
+			inList(studies), inList(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))
 		s.mutationsWhere(w, r, where, 0)
 		return
 	}

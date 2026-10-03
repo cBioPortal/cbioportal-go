@@ -9,10 +9,38 @@ import (
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
+// filteredSample is a sample as ColumnarStoreStudyViewController's
+// filtered-samples endpoint writes it: the mapper selects ids only, so the
+// sample type and the sequenced / segment flags are absent.
+type filteredSample struct {
+	SampleID         string `json:"sampleId"`
+	PatientID        string `json:"patientId"`
+	StudyID          string `json:"studyId"`
+	UniqueSampleKey  string `json:"uniqueSampleKey"`
+	UniquePatientKey string `json:"uniquePatientKey"`
+}
+
+// filteredSamplesFetch serves POST /api/filtered-samples/fetch: the samples
+// passing the study-view filter, by sample id (negateFilters is
+// accepted and ignored, as in Java).
 func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
-	s.writeSamples(w, fmt.Sprintf("concat(s.study_id, '_', s.sample_id) IN (%s)", s.filterSQL(f)))
+	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
+		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId FROM sample s "+
+			"WHERE concat(s.study_id, '_', s.sample_id) IN (%s) ORDER BY s.sample_id, s.study_id", s.filterSQL(f)))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	out := make([]filteredSample, len(rows))
+	for i, r := range rows {
+		out[i] = filteredSample{
+			SampleID: r.SampleID, PatientID: r.PatientID, StudyID: r.StudyID,
+			UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID), UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
+		}
+	}
+	writeJSON(w, out)
 }
 
 // ---------- Clinical data counts ----------

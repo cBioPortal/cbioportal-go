@@ -354,6 +354,11 @@ type sampleClinicalDataCollection struct {
 	ByUniqueSampleKey map[string][]tableClinicalData `json:"byUniqueSampleKey"`
 }
 
+// clinicalDataTableFetch serves POST /api/clinical-data-table/fetch as
+// StudyViewController does: samples whose sample or patient attribute values
+// or ids contain searchTerm (case-sensitively, LIKE wildcards included),
+// ordered by sampleId, patientId or an attribute (numerically for NUMBER
+// attributes, samples without a value last), then paged.
 func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
@@ -461,7 +466,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	// Sample-level clinical data for the page.
 	sampleData, _ := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-			"FROM clinical_sample WHERE (study_id, sample_id) IN (%s)", tupleIn(samplePairs)))
+			"FROM clinical_sample WHERE (study_id, sample_id) IN (%s) ORDER BY attr_id", tupleIn(samplePairs)))
 	sampleToPatient := map[string]string{}
 	for _, pr := range pageRows {
 		sampleToPatient[pr.StudyID+"\x00"+pr.SampleID] = pr.PatientID
@@ -479,7 +484,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	if len(patientPairs) > 0 {
 		patientData, _ := ch.Query[clinicalRow](s.CH, fmt.Sprintf(
 			"SELECT study_id AS studyId, patient_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
-				"FROM clinical_patient WHERE (study_id, patient_id) IN (%s)", tupleIn(patientPairs)))
+				"FROM clinical_patient WHERE (study_id, patient_id) IN (%s) ORDER BY attr_id", tupleIn(patientPairs)))
 		for _, cr := range patientData {
 			for _, sm := range patientToSamples[cr.StudyID+"\x00"+cr.ID] {
 				key := uniqueKey(sm.StudyID, sm.SampleID)

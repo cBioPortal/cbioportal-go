@@ -119,9 +119,9 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 
 // allPatients serves GET /api/patients (PatientMapper.getPatients). With a
 // keyword, patients are joined to their samples and every space-separated
-// term must occur (case-insensitive, LIKE wildcards) in the patient or the
-// sample id; a patient is listed once per matching sample, patients whose id
-// starts with the whole keyword first, then by patient id.
+// term must occur (LIKE: case-sensitive on ClickHouse, % and _ wildcards) in
+// the patient or the sample id; a patient is listed once per matching sample,
+// patients whose id starts with the whole keyword first, then by patient id.
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	sql := "SELECT study_id AS studyId, patient_id AS patientId FROM patient ORDER BY study_id, patient_id"
@@ -130,11 +130,11 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 		var conds []string
 		for term := range strings.SplitSeq(kw, " ") {
 			t := sqlLit(term)
-			conds = append(conds, fmt.Sprintf("(p.patient_id ILIKE concat('%%', '%s', '%%') OR sm.sample_id ILIKE concat('%%', '%s', '%%'))", t, t))
+			conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', '%s', '%%') OR sm.sample_id LIKE concat('%%', '%s', '%%'))", t, t))
 		}
 		sql = fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
 			"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
-			"ORDER BY if(p.patient_id ILIKE concat('%s', '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
+			"ORDER BY if(p.patient_id LIKE concat('%s', '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
 			strings.Join(conds, " AND "), sqlLit(kw))
 	}
 	rows, err := ch.Query[idRow](s.CH, sql)
@@ -147,8 +147,7 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Bulk genes ----------
 
-// allGenes — GET /api/genes. Optional `keyword` (matches hugo symbol) and
-// `alias` (matches gene_alias). Returns []geneRow.
+// allGenes — GET /api/genes, with GeneMapper's keyword and alias matching.
 func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	conds := []string{"1"}

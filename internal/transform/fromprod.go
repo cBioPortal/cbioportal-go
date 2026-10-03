@@ -232,9 +232,10 @@ func (b *prodBuilder) steps() []prodObject {
 			"INNER JOIN {t}.prod_profile p ON p.genetic_profile_id = sp.genetic_profile_id "+
 			"LEFT JOIN {p}.gene_panel gp ON gp.internal_id = sp.panel_id"))
 
-	// Mutations of MUTATION_EXTENDED profiles, from production's joined
-	// mutation_derived. Protein positions read as the MAF column would give
-	// them: "start", or "start-end" for a range.
+	// Mutations of MUTATION_EXTENDED and MUTATION_UNCALLED profiles, from
+	// production's joined mutation_derived. Protein positions are written as
+	// the MAF column's "start-end", with "?" for an unknown (negative) end,
+	// which the API reads as -1, and nothing when both are unknown.
 	add(b.table("mutation", "(study_id, molecular_profile_id, sample_id)", `SELECT
   m.studyId AS study_id, m.sampleId AS sample_id, ifNull(m.`+"`GENE.hugoGeneSymbol`"+`, '') AS hugo_symbol,
   toString(m.entrezGeneId) AS entrez_gene_id, ifNull(m.chr, '') AS chromosome,
@@ -250,8 +251,9 @@ func (b *prodBuilder) steps() []prodObject {
   ifNull(m.center, '') AS center, ifNull(toString(m.normalAltCount), '') AS n_alt_count,
   ifNull(toString(m.normalRefCount), '') AS n_ref_count, ifNull(m.aminoAcidChange, '') AS amino_acid_change,
   ifNull(m.ncbiBuild, '') AS ncbi_build, ifNull(m.refseqMrnaId, '') AS refseq_mrna_id,
-  multiIf(m.proteinPosStart IS NULL, '', m.proteinPosEnd IS NULL OR m.proteinPosEnd = m.proteinPosStart, toString(m.proteinPosStart),
-    concat(toString(m.proteinPosStart), '-', toString(m.proteinPosEnd))) AS protein_position,
+  if(m.proteinPosStart IS NULL OR (m.proteinPosStart < 0 AND ifNull(m.proteinPosEnd, -1) < 0), '',
+    concat(if(m.proteinPosStart < 0, '?', toString(m.proteinPosStart)), '-',
+      if(ifNull(m.proteinPosEnd, -1) < 0, '?', toString(m.proteinPosEnd)))) AS protein_position,
   ifNull(toString(m.`+"`alleleSpecificCopyNumber.ascnIntegerCopyNumber`"+`), '') AS ascn_integer_copy_number,
   ifNull(m.`+"`alleleSpecificCopyNumber.ascnMethod`"+`, '') AS ascn_method,
   ifNull(toString(m.`+"`alleleSpecificCopyNumber.ccfExpectedCopiesUpper`"+`), '') AS ascn_ccf_expected_copies_upper,
@@ -261,7 +263,8 @@ func (b *prodBuilder) steps() []prodObject {
   ifNull(toString(m.`+"`alleleSpecificCopyNumber.expectedAltCopies`"+`), '') AS ascn_expected_alt_copies,
   ifNull(toString(m.`+"`alleleSpecificCopyNumber.totalCopyNumber`"+`), '') AS ascn_total_copy_number
 FROM {p}.mutation_derived m
-WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile WHERE alteration_type = 'MUTATION_EXTENDED')`))
+WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
+  WHERE alteration_type IN ('MUTATION_EXTENDED', 'MUTATION_UNCALLED'))`))
 
 	// Discrete copy number: production's AMP / HOMDEL events (cna_event, with
 	// their driver annotations) and, for the other levels, the discrete

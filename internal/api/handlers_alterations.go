@@ -439,16 +439,22 @@ func (a alterationSQL) enrichmentClause() string {
 }
 
 // StructuralVariantCount is one gene1::gene2 pair of the study-view
-// structural-variant table (AlterationCountByStructuralVariant).
+// structural-variant table (AlterationCountByStructuralVariant), with the
+// derived entrezGeneIds / hugoGeneSymbols / uniqueEventKey properties Jackson
+// writes from its getters. A site without a gene has entrez id 0 and an empty
+// symbol, as the ClickHouse join yields.
 type StructuralVariantCount struct {
-	Gene1EntrezGeneID     *int64   `json:"gene1EntrezGeneId,omitempty"`
-	Gene1HugoGeneSymbol   string   `json:"gene1HugoGeneSymbol"`
-	Gene2EntrezGeneID     *int64   `json:"gene2EntrezGeneId,omitempty"`
-	Gene2HugoGeneSymbol   string   `json:"gene2HugoGeneSymbol"`
-	NumberOfAlteredCases  uint64   `json:"numberOfAlteredCases"`
-	NumberOfProfiledCases uint64   `json:"numberOfProfiledCases"`
-	TotalCount            uint64   `json:"totalCount"`
-	MatchingGenePanelIDs  []string `json:"matchingGenePanelIds"`
+	Gene1EntrezGeneID     int64     `json:"gene1EntrezGeneId"`
+	Gene1HugoGeneSymbol   string    `json:"gene1HugoGeneSymbol"`
+	Gene2EntrezGeneID     int64     `json:"gene2EntrezGeneId"`
+	Gene2HugoGeneSymbol   string    `json:"gene2HugoGeneSymbol"`
+	NumberOfAlteredCases  uint64    `json:"numberOfAlteredCases"`
+	NumberOfProfiledCases uint64    `json:"numberOfProfiledCases"`
+	TotalCount            uint64    `json:"totalCount"`
+	MatchingGenePanelIDs  []string  `json:"matchingGenePanelIds"`
+	EntrezGeneIDs         [2]int64  `json:"entrezGeneIds"`
+	HugoGeneSymbols       [2]string `json:"hugoGeneSymbols"`
+	UniqueEventKey        string    `json:"uniqueEventKey"`
 }
 
 // svCountsFetch serves POST /api/structuralvariant-counts/fetch: structural
@@ -543,10 +549,20 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		for _, p := range matching {
 			profiled += perPanel[p]
 		}
+		// ProfiledCasesCounter: a pair no panel covers counts the samples
+		// without panel data, or else every profiled sample.
+		if len(matching) == 0 && wesCount == 0 {
+			for _, n := range perPanel {
+				profiled += n
+			}
+		}
+		e1, e2 := derefInt(r.Entrez1), derefInt(r.Entrez2)
 		out = append(out, StructuralVariantCount{
-			Gene1EntrezGeneID: r.Entrez1, Gene1HugoGeneSymbol: r.Hugo1, Gene2EntrezGeneID: r.Entrez2, Gene2HugoGeneSymbol: r.Hugo2,
+			Gene1EntrezGeneID: e1, Gene1HugoGeneSymbol: r.Hugo1, Gene2EntrezGeneID: e2, Gene2HugoGeneSymbol: r.Hugo2,
 			NumberOfAlteredCases: r.Altered, NumberOfProfiledCases: profiled, TotalCount: r.Total,
 			MatchingGenePanelIDs: matching,
+			EntrezGeneIDs:        [2]int64{e1, e2}, HugoGeneSymbols: [2]string{r.Hugo1, r.Hugo2},
+			UniqueEventKey: r.Hugo1 + "::" + r.Hugo2,
 		})
 	}
 	writeJSON(w, out)

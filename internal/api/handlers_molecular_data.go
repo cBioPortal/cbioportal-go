@@ -154,8 +154,10 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 
 // molecularData returns a profile's per-sample gene values, optionally limited
 // to genes and samples (explicit ids or a sample list), sample-major as
-// MolecularDataServiceImpl builds them (samples by stable id). Records are
-// limited to reference genes, as the mapper joins the gene table.
+// MolecularDataServiceImpl builds them (samples by stable id), and within a
+// sample in genetic entity id order, the primary key order of Java's
+// genetic_alteration rows. Records are limited to reference genes, as the
+// mapper joins the gene table.
 func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularData, error) {
 	meta, ok := s.profileMeta(mpid)
 	if !ok {
@@ -179,7 +181,7 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 			"%s AS value FROM (%s) m "+
 			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
-			"WHERE m.entrez IS NOT NULL ORDER BY m.sample_id, m.entrez",
+			"WHERE m.entrez IS NOT NULL ORDER BY m.sample_id, rg.genetic_entity_id, m.entrez",
 		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs)))
 	if err != nil {
 		return nil, err

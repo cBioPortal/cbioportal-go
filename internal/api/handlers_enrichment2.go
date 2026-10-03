@@ -23,23 +23,22 @@ type GroupStatistics struct {
 	StandardDeviation float64 `json:"standardDeviation"`
 }
 
-// GenomicEnrichment is the expression-enrichments response element.
+// GenomicEnrichment is the expression-enrichments response element. As in
+// ExpressionEnrichmentUtil, neither the cytoband nor a q-value is set (the
+// frontend computes q-values itself).
 type GenomicEnrichment struct {
-	Cytoband         string            `json:"cytoband"`
 	EntrezGeneID     int64             `json:"entrezGeneId"`
 	GroupsStatistics []GroupStatistics `json:"groupsStatistics"`
 	HugoGeneSymbol   string            `json:"hugoGeneSymbol"`
 	PValue           float64           `json:"pValue"`
-	QValue           float64           `json:"qValue"`
 }
 
-// GenericAssayEnrichment is the generic-assay-enrichments response element.
+// GenericAssayEnrichment is the generic-assay-enrichments response element
+// (Java sets neither name nor qValue on numeric enrichments).
 type GenericAssayEnrichment struct {
 	GenericEntityMetaProperties map[string]string `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []GroupStatistics `json:"groupsStatistics"`
-	Name                        string            `json:"name"`
 	PValue                      float64           `json:"pValue"`
-	QValue                      float64           `json:"qValue"`
 	StableID                    string            `json:"stableId"`
 }
 
@@ -241,25 +240,6 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 	return out, nil
 }
 
-// benjaminiHochberg returns BH-adjusted q-values for p-values sorted ascending.
-func benjaminiHochberg(sortedP []float64) []float64 {
-	n := len(sortedP)
-	q := make([]float64, n)
-	prev := 1.0
-	for i := n - 1; i >= 0; i-- {
-		v := sortedP[i] * float64(n) / float64(i+1)
-		if v > prev {
-			v = prev
-		}
-		if v > 1 {
-			v = 1
-		}
-		q[i] = v
-		prev = v
-	}
-	return q
-}
-
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -281,11 +261,6 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		fail(w, err)
 		return
 	}
-	ps := make([]float64, len(results))
-	for i, res := range results {
-		ps[i] = res.pValue
-	}
-	qs := benjaminiHochberg(ps)
 	out := make([]GenomicEnrichment, len(results))
 	for i, res := range results {
 		out[i] = GenomicEnrichment{
@@ -293,7 +268,6 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			GroupsStatistics: res.groupsStatistics,
 			HugoGeneSymbol:   res.hugo,
 			PValue:           res.pValue,
-			QValue:           qs[i],
 		}
 	}
 	writeJSON(w, out)
@@ -316,11 +290,6 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		fail(w, err)
 		return
 	}
-	ps := make([]float64, len(results))
-	for i, res := range results {
-		ps[i] = res.pValue
-	}
-	qs := benjaminiHochberg(ps)
 	props := map[string]map[string]string{}
 	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
 		props, _ = s.genericAssayMetaProperties(fmt.Sprintf("(study_id, profile_stable_id) IN (%s)", tupleIn(pairs)))
@@ -334,9 +303,7 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		out[i] = GenericAssayEnrichment{
 			GenericEntityMetaProperties: meta,
 			GroupsStatistics:            res.groupsStatistics,
-			Name:                        res.stable,
 			PValue:                      res.pValue,
-			QValue:                      qs[i],
 			StableID:                    res.stable,
 		}
 	}

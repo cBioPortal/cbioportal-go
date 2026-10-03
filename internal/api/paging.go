@@ -16,9 +16,10 @@ var selfPagedPaths = map[string]bool{
 	"/api/clinical-data-table/fetch": true,
 }
 
-// limitOnlyPaths page with pageSize alone: ColumnStoreStudyController
-// truncates the study list to pageSize and ignores pageNumber.
-var limitOnlyPaths = map[string]bool{
+// oneBasedPaths number their pages from 1: ColumnStoreStudyController
+// returns items pageSize*(pageNumber-1) onwards, treating pageNumber <= 0 (or
+// absent) as the first page.
+var oneBasedPaths = map[string]bool{
 	"/api/studies": true,
 }
 
@@ -39,8 +40,8 @@ func pageList(next http.Handler) http.Handler {
 		}
 		size, sizeErr := strconv.Atoi(strings.TrimSpace(sizeParam))
 		number, _ := strconv.Atoi(strings.TrimSpace(numberParam))
-		if limitOnlyPaths[r.URL.Path] {
-			number = 0
+		if oneBasedPaths[r.URL.Path] {
+			number = max(number-1, 0)
 		}
 		q.Del("pageSize")
 		q.Del("pageNumber")

@@ -35,7 +35,7 @@ type StructuralVariant struct {
 	PatientID                string          `json:"patientId"`
 	StudyID                  string          `json:"studyId"`
 	Site1EntrezGeneID        *int64          `json:"site1EntrezGeneId,omitempty"`
-	Site1HugoSymbol          string          `json:"site1HugoSymbol,omitempty"`
+	Site1HugoSymbol          string          `json:"site1HugoSymbol"`
 	Site1EnsemblTranscriptID string          `json:"site1EnsemblTranscriptId"`
 	Site1Chromosome          string          `json:"site1Chromosome"`
 	Site1Position            int64           `json:"site1Position"`
@@ -44,7 +44,7 @@ type StructuralVariant struct {
 	Site1RegionNumber        int64           `json:"site1RegionNumber"`
 	Site1Description         string          `json:"site1Description"`
 	Site2EntrezGeneID        *int64          `json:"site2EntrezGeneId,omitempty"`
-	Site2HugoSymbol          string          `json:"site2HugoSymbol,omitempty"`
+	Site2HugoSymbol          string          `json:"site2HugoSymbol"`
 	Site2EnsemblTranscriptID string          `json:"site2EnsemblTranscriptId"`
 	Site2Chromosome          string          `json:"site2Chromosome"`
 	Site2Position            int64           `json:"site2Position"`

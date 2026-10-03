@@ -147,29 +147,33 @@ func (s *State) genesetGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, rows[0])
 }
 
-// genesetGenesetVersion is reported when the reference has no gene sets.
-const genesetGenesetVersion = "msigdb.v7.5.1"
-
-// genesetVersion serves GET /api/genesets/version: the loaded collection
-// version as a JSON string, "" when none is recorded.
+// genesetVersion serves GET /api/genesets/version (GenesetMapper
+// .getGenesetVersion, the info table's geneset_version): the version
+// load-genesets recorded, else that of a reference database with cBioPortal's
+// info table (a production clone), else the seed's.
 func (s *State) genesetVersion(w http.ResponseWriter, r *http.Request) {
-	if !s.hasGenesetRef() {
-		writeJSON(w, genesetGenesetVersion)
-		return
-	}
 	type row struct {
 		V string `json:"v"`
 	}
-	rows, err := cachedQuery[row](s, "SELECT geneset_version AS v FROM cbioportal_ref.geneset_info LIMIT 1")
-	if err != nil {
-		fail(w, err)
+	if s.hasGenesetRef() {
+		rows, err := cachedQuery[row](s, "SELECT geneset_version AS v FROM cbioportal_ref.geneset_info LIMIT 1")
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		v := ""
+		if len(rows) > 0 {
+			v = rows[0].V
+		}
+		writeJSON(w, v)
 		return
 	}
-	v := ""
-	if len(rows) > 0 {
-		v = rows[0].V
+	if rows, err := cachedQuery[row](s, "SELECT geneset_version AS v FROM cbioportal_ref.info LIMIT 1"); err == nil &&
+		len(rows) > 0 && rows[0].V != "" {
+		writeJSON(w, rows[0].V)
+		return
 	}
-	writeJSON(w, v)
+	writeJSON(w, seedGenesetVersion)
 }
 
 // ---------- Gene set scores ----------
