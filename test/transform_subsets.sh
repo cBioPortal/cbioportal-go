@@ -144,7 +144,6 @@ exercise() {
   hit POST /api/genesets/fetch '["HALLMARK_APOPTOSIS"]'
   hit POST /api/geneset-hierarchy/fetch "[]"
   hit POST /api/generic-assay-meta/fetch '{"genericAssayStableIds":["x"]}'
-  hit POST /api/generic_assay_meta/generic-assay/fetch '{"genericAssayStableIds":["x"]}'
 
   for s in "${studies[@]}"; do
     local samples=() patients=() profiles=() lists=()

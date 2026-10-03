@@ -376,11 +376,9 @@ func (s *State) routeGenericAssay(mux *http.ServeMux) {
 	// Generic assay data.
 	mux.HandleFunc("POST /api/generic_assay_data/{molecularProfileId}/fetch", s.genericAssayDataInProfileFetch)
 	mux.HandleFunc("POST /api/generic_assay_data/fetch", s.genericAssayDataMultipleFetch)
-	mux.HandleFunc("POST /api/generic-assay-data/fetch", s.genericAssayDataMultipleFetch)
 
 	// Generic assay meta.
 	mux.HandleFunc("POST /api/generic-assay-meta/fetch", s.genericAssayMetaFetch)
-	mux.HandleFunc("POST /api/generic_assay_meta/generic-assay/fetch", s.genericAssayMetaFetch)
 
 	// Genesets.
 	mux.HandleFunc("POST /api/genesets/fetch", s.genesetsFetch)

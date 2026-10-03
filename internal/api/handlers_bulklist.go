@@ -26,10 +26,6 @@ func (s *State) routeBulkList(mux *http.ServeMux) {
 
 	// Data-access tokens — only used if download tokens are enabled; placeholder.
 	mux.HandleFunc("GET /api/data-access-token", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
-	mux.HandleFunc("POST /api/data-access-token", func(w http.ResponseWriter, r *http.Request) {
-		readBody(r, nil)
-		writeJSON(w, map[string]any{})
-	})
 	mux.HandleFunc("GET /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, []any{}) })
 	mux.HandleFunc("POST /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {
 		readBody(r, nil)
