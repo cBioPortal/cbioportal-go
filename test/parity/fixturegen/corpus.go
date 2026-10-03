@@ -176,7 +176,7 @@ func (c *corpus) study(s string) {
 				"attributeIdPrefix": "CUSTOM", "patientIdentifiers": patientIdents,
 				"startEventRequestIdentifier":    map[string]any{"clinicalEventRequests": []any{ends[0]}, "position": pos[0]},
 				"endEventRequestIdentifier":      map[string]any{"clinicalEventRequests": []any{ends[1]}, "position": pos[1]},
-				"censoredEventRequestIdentifier": map[string]any{"clinicalEventRequests": []any{}, "position": "LAST"}})
+				"censoredEventRequestIdentifier": map[string]any{"clinicalEventRequests": []any{ends[1]}, "position": "LAST"}})
 		}
 	}
 
@@ -470,7 +470,8 @@ func (c *corpus) studyView(s string, attrs []map[string]any, mutProfile, cnaProf
 		c.post(n+"clinical-event-type-counts", "/api/clinical-event-type-counts/fetch", f)
 		c.post(n+"treatments-patient-counts", "/api/treatments/patient-counts/fetch?tier=Agent", f)
 		c.post(n+"treatments-sample-counts", "/api/treatments/sample-counts/fetch?tier=Agent", f)
-		c.post(n+"clinical-data-table", "/api/clinical-data-table/fetch?pageSize=20&pageNumber=0&sortBy=SAMPLE_ID&direction=ASC", f)
+		c.post(n+"clinical-data-table", "/api/clinical-data-table/fetch?pageSize=20&pageNumber=0", f)
+		c.post(n+"clinical-data-table-sorted", "/api/clinical-data-table/fetch?pageSize=20&pageNumber=0&sortBy=MUTATION_COUNT&direction=DESC", f)
 		c.post(n+"density-plot", "/api/clinical-data-density-plot/fetch?xAxisAttributeId=MUTATION_COUNT&yAxisAttributeId=FRACTION_GENOME_ALTERED&xAxisBinCount=10&yAxisBinCount=10", f)
 		c.post(n+"violin", "/api/clinical-data-violin-plots/fetch?categoricalAttributeId=CANCER_TYPE_DETAILED&numericalAttributeId=MUTATION_COUNT", f)
 		if mutProfile != "" {

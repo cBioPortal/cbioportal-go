@@ -496,10 +496,32 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		studyID, sampleID string
 		val               float64
 	}
+	// As the Java controller does, the plot shows the numerical attribute's
+	// whole distribution (its own filter removed) while each row counts only
+	// the samples of the full filter.
+	type sampleKey struct {
+		K string `json:"k"`
+	}
+	inFilter := map[string]bool{}
+	keys, _ := ch.Query[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(f)+")")
+	for _, k := range keys {
+		inFilter[k.K] = true
+	}
+	countInFilter := func(lists ...[]point) int {
+		n := 0
+		for _, l := range lists {
+			for _, p := range l {
+				if inFilter[p.studyID+"_"+p.sampleID] {
+					n++
+				}
+			}
+		}
+		return n
+	}
 	// The service walks its sampleId-keyed HashMap of clinical data and adds
 	// categories to another HashMap as it meets them, so both maps' Java
 	// iteration orders decide the row order.
-	pairs := s.scopedAttrPairs(f, numAttr, catAttr)
+	pairs := s.scopedAttrPairs(f.withoutClinical(numAttr), numAttr, catAttr)
 	bySample := map[string][]int{}
 	sampleIDs := make([]string, 0, len(pairs))
 	for i, row := range pairs {
@@ -618,7 +640,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 			BoxData:          clampWhiskers(cb.box, axisStart, axisEnd),
 			CurveData:        []float64{},
 			IndividualPoints: []ClinicalViolinPlotIndividualPoint{},
-			NumSamples:       len(cb.nonOutliers) + len(cb.outliers),
+			NumSamples:       countInFilter(cb.nonOutliers, cb.outliers),
 		}
 		var pointsToRender []point
 		if len(cb.nonOutliers)+len(cb.outliers) <= violinShowOnlyPointsThreshold {

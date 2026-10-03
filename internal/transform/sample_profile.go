@@ -9,14 +9,24 @@ import (
 // mutationFilterSQL is cBioPortal's default MutationFilter (no
 // filtered_mutations override) as a WHERE condition over a MAF staging alias;
 // entrez is the resolved Entrez id expression (5'Flank variants are kept only
-// for the promoter whitelist, TERT = 7015).
+// for the promoter whitelist, TERT = 7015). Records whose chromosome
+// DaoGeneOptimized.normalizeChr does not recognize are skipped too.
 func mutationFilterSQL(a, entrez string) string {
-	return fmt.Sprintf(
+	return normalizedChrSQL(a+".chromosome") + " != '' AND " + fmt.Sprintf(
 		"NOT startsWith(lower(%[1]s.mutation_status), 'none') AND NOT startsWith(lower(%[1]s.mutation_status), 'loh') "+
 			"AND NOT startsWith(lower(%[1]s.mutation_status), 'wildtype') AND NOT startsWith(lower(%[1]s.validation_status), 'redacted') "+
 			"AND lower(%[1]s.variant_classification) NOT IN ('silent', 'intron', '3''utr', '5''utr', '3''flank', 'igr', 'rna') "+
 			"AND ( lower(%[1]s.variant_classification) != '5''flank' OR %[2]s = 7015 )",
 		a, entrez)
+}
+
+// normalizedChrSQL is DaoGeneOptimized.normalizeChr over the upper-cased
+// value: 1-24 with an optional CHR prefix, X and Y as 23 and 24, NA and MT;
+// anything else reads as empty (the importer skips the record).
+func normalizedChrSQL(x string) string {
+	u := fmt.Sprintf("upper(%s)", x)
+	return fmt.Sprintf("multiIf(%[1]s IN ('X', 'CHRX'), '23', %[1]s IN ('Y', 'CHRY'), '24', %[1]s IN ('NA', 'MT'), %[1]s, "+
+		"match(%[1]s, '^(CHR)?([1-9]|1[0-9]|2[0-4])$'), replaceRegexpOne(%[1]s, '^CHR', ''), '')", u)
 }
 
 // sanitizeIdentSQL mirrors parser.SanitizeIdent in SQL so profile stable ids

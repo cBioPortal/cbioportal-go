@@ -166,8 +166,8 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 	}
 	out := make([]DiscreteCopyNumberData, len(rows))
 	for i, r := range rows {
-		d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation,
-			func(v string) string { return v })
+		// CnaUtil reads the driver columns with getPartString: empty is "NA".
+		d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, naString)
 		out[i] = DiscreteCopyNumberData{
 			Alteration:                  derefInt(r.Alteration),
 			EntrezGeneID:                derefInt(r.EntrezGeneID),
@@ -460,9 +460,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 	keywordCount := map[string]int64{}
 	wantKeyword := map[string]bool{}
 	for _, id := range ids {
-		if id.Keyword != "" {
-			wantKeyword[fmt.Sprintf("%d\x00%s", id.EntrezGeneID, id.Keyword)] = true
-		}
+		wantKeyword[fmt.Sprintf("%d\x00%s", id.EntrezGeneID, id.Keyword)] = true
 	}
 	if len(wantKeyword) > 0 {
 		type kr struct {
@@ -483,7 +481,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		for _, r := range rows {
 			kw := mutationKeyword(r.HugoGeneSymbol, r.ProteinChange, naString(r.MutationType))
 			k := fmt.Sprintf("%d\x00%s", derefInt(r.EntrezGeneID), kw)
-			if kw == "" || !wantKeyword[k] {
+			if !wantKeyword[k] {
 				continue
 			}
 			if samples[k] == nil {
@@ -496,8 +494,13 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// VariantCountMapper reads mutation_count_by_keyword, which has a row
+	// only for a gene and keyword (or no keyword) some mutation has.
 	out := make([]VariantCount, 0, len(ids))
 	for _, id := range ids {
+		if keywordCount[fmt.Sprintf("%d\x00%s", id.EntrezGeneID, id.Keyword)] == 0 {
+			continue
+		}
 		out = append(out, VariantCount{
 			EntrezGeneID:                      id.EntrezGeneID,
 			Keyword:                           id.Keyword,
@@ -519,13 +522,6 @@ type MutationCountByPosition struct {
 	ProteinPosStart int64 `json:"proteinPosStart"`
 }
 
-type posCountRow struct {
-	EntrezGeneID    int64 `json:"entrezGeneId"`
-	ProteinPosStart int64 `json:"proteinPosStart"`
-	ProteinPosEnd   int64 `json:"proteinPosEnd"`
-	Count           int64 `json:"count"`
-}
-
 func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []struct {
 		EntrezGeneID    int64 `json:"entrezGeneId"`
@@ -537,47 +533,49 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 		writeJSON(w, []MutationCountByPosition{})
 		return
 	}
-	valTuples := make([]string, len(ids))
 	entrez := make([]int64, len(ids))
 	for i, id := range ids {
-		valTuples[i] = fmt.Sprintf("(%d, %d, %d)", id.EntrezGeneID, id.ProteinPosStart, id.ProteinPosEnd)
 		entrez[i] = id.EntrezGeneID
 	}
-	genes := intListSQL(entrez)
-	// Aggregate the requested genes' mutations (the stored records, under
-	// their resolved gene) to (entrez, protein start, protein end) once, then
-	// count, per requested (gene, start, end), the mutations lying within it
-	// (MutationMapper.getMutationCountByPosition). A protein position is
-	// "start[-end][/length]"; a single position is both start and end, and an
-	// unknown one ("?") is -1.
-	sql := fmt.Sprintf(
-		"WITH mut AS ("+
-			"SELECT toInt64OrNull(entrez_gene_id) AS g, splitByChar('/', protein_position)[1] AS r, "+
-			"if(startsWith(r, '?'), -1, toInt64OrNull(extract(r, '^(-?[0-9]+)'))) AS ps, "+
-			"multiIf(endsWith(r, '-?'), -1, match(r, '^(-?[0-9]+|[?])-'), toInt64OrNull(extract(r, '^(?:-?[0-9]+|[?])-(-?[0-9]+)')), ps) AS pe, "+
-			"count() AS c "+
-			"FROM mutation WHERE g IN (%[2]s) AND ps IS NOT NULL AND pe IS NOT NULL "+
-			"GROUP BY g, r, ps, pe) "+
-			"SELECT ids.e AS entrezGeneId, ids.s AS proteinPosStart, ids.en AS proteinPosEnd, "+
-			"toInt64(sum(if(mut.g = ids.e AND mut.ps >= ids.s AND mut.pe <= ids.en, mut.c, 0))) AS count "+
-			"FROM (SELECT * FROM values('e Int64, s Int64, en Int64', %[1]s)) ids "+
-			"CROSS JOIN mut GROUP BY entrezGeneId, proteinPosStart, proteinPosEnd",
-		strings.Join(valTuples, ", "), genes)
-	rows, err := ch.Query[posCountRow](s.CH, sql)
+	// The requested genes' stored mutations, by distinct protein position and
+	// change; their positions are the importer's (ExtendedMutationUtil
+	// getProteinPosStart / End: the Protein_position column, else parsed from
+	// the protein change). MutationMapper.getMutationCountByPosition then
+	// counts, per requested position in turn, the mutations lying within it.
+	type posRow struct {
+		EntrezGeneID    int64  `json:"entrezGeneId"`
+		ProteinPosition string `json:"proteinPosition"`
+		ProteinChange   string `json:"proteinChange"`
+		Count           int64  `json:"count"`
+	}
+	rows, err := ch.Query[posRow](s.CH, fmt.Sprintf(
+		"SELECT toInt64OrZero(entrez_gene_id) AS entrezGeneId, protein_position AS proteinPosition, "+
+			"protein_change AS proteinChange, count() AS count FROM mutation "+
+			"WHERE toInt64OrZero(entrez_gene_id) IN (%s) GROUP BY entrezGeneId, proteinPosition, proteinChange",
+		intListSQL(entrez)))
 	if err != nil {
 		fail(w, err)
 		return
 	}
-	// Only positions with at least one mutation are returned, mirroring Java.
-	out := make([]MutationCountByPosition, 0, len(rows))
-	for _, r := range rows {
-		if r.Count == 0 {
-			continue
+	type located struct{ gene, start, end, n int64 }
+	muts := make([]located, len(rows))
+	for i, r := range rows {
+		ps, pe := javaProteinPositions(r.ProteinPosition, r.ProteinChange)
+		muts[i] = located{r.EntrezGeneID, ps, pe, r.Count}
+	}
+	// Only positions with at least one mutation are returned.
+	out := []MutationCountByPosition{}
+	for _, id := range ids {
+		var n int64
+		for _, m := range muts {
+			if m.gene == id.EntrezGeneID && m.start >= id.ProteinPosStart && m.end <= id.ProteinPosEnd {
+				n += m.n
+			}
 		}
-		out = append(out, MutationCountByPosition{
-			Count: r.Count, EntrezGeneID: r.EntrezGeneID,
-			ProteinPosEnd: r.ProteinPosEnd, ProteinPosStart: r.ProteinPosStart,
-		})
+		if n > 0 {
+			out = append(out, MutationCountByPosition{Count: n, EntrezGeneID: id.EntrezGeneID,
+				ProteinPosStart: id.ProteinPosStart, ProteinPosEnd: id.ProteinPosEnd})
+		}
 	}
 	writeJSON(w, out)
 }

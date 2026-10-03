@@ -274,3 +274,87 @@ func TestOraclePatientLevelGenericAssayBinsCountPatients(t *testing.T) {
 	get(t, "/api/studies/study_es_0/patients", &patients)
 	wantEq(t, []any{total, na}, []any{len(patients), float64(len(patients) - 2)})
 }
+
+// The importer normalizes MAF chromosomes (DaoGeneOptimized.normalizeChr):
+// X is stored as 23.
+func TestOracleMutationChromosomeNormalized(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	post(t, "/api/mutations/fetch?projection=DETAILED", map[string]any{
+		"sampleMolecularIdentifiers": []map[string]string{{"molecularProfileId": "lgg_ucsf_2014_test_generic_assay_mutations", "sampleId": "P01_Pri"}},
+		"entrezGeneIds":              []int{546},
+	}, &d)
+	if len(d) == 0 {
+		t.Fatal("no ATRX mutation")
+	}
+	for _, m := range d {
+		wantEq(t, m["chr"], "23")
+	}
+}
+
+// Discrete CNA driver columns read as CnaUtil reads them: empty is "NA".
+func TestOracleCnaDriverColumnsNA(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	post(t, "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=HOMDEL_AND_AMP&projection=DETAILED",
+		map[string]any{"sampleIds": []string{"TCGA-A7-A26F-01"}, "entrezGeneIds": []int{2073, 55210}}, &d)
+	got := map[float64][]any{}
+	for _, x := range d {
+		got[x["entrezGeneId"].(float64)] = []any{x["driverFilter"], x["driverFilterAnnotation"], x["driverTiersFilter"]}
+	}
+	wantEq(t, got, map[float64][]any{2073: {"Putative_Driver", "NA", "NA"}, 55210: {"NA", "NA", "Class 2"}})
+}
+
+// Variant counts come from mutation_count_by_keyword: a gene and keyword
+// without mutations has no row.
+func TestOracleVariantCountsOnlyExistingKeywords(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	post(t, "/api/molecular-profiles/study_hg38_mutations/variant-counts/fetch",
+		[]map[string]any{{"entrezGeneId": 7157, "keyword": "TP53 truncating"}}, &d)
+	wantEq(t, len(d), 0)
+}
+
+// Mutation counts by protein position: the importer's positions (parsed
+// from the protein change when the MAF has no Protein_position), in request
+// order.
+func TestOracleMutationCountsByPosition(t *testing.T) {
+	requireAPI(t)
+	var d []map[string]any
+	post(t, "/api/mutation-counts-by-position/fetch", []map[string]int{
+		{"entrezGeneId": 7157, "proteinPosStart": 273, "proteinPosEnd": 273},
+		{"entrezGeneId": 672, "proteinPosStart": 1800, "proteinPosEnd": 1805},
+	}, &d)
+	var got [][2]float64
+	for _, x := range d {
+		got = append(got, [2]float64{x["entrezGeneId"].(float64), x["count"].(float64)})
+	}
+	wantEq(t, got, [][2]float64{{7157, 9}, {672, 1}})
+}
+
+// The violin plot shows the numerical attribute's whole distribution (its
+// own filter removed); each row counts the samples of the full filter.
+func TestOracleViolinIgnoresOwnNumericalFilter(t *testing.T) {
+	requireAPI(t)
+	path := "/api/clinical-data-violin-plots/fetch?categoricalAttributeId=CANCER_TYPE_DETAILED&numericalAttributeId=MUTATION_COUNT"
+	var all, filtered struct {
+		Rows []struct {
+			Category   string `json:"category"`
+			NumSamples int    `json:"numSamples"`
+		} `json:"rows"`
+	}
+	post(t, path, map[string]any{"studyIds": []string{lggGA}}, &all)
+	post(t, path, map[string]any{"studyIds": []string{lggGA}, "clinicalDataFilters": []map[string]any{{
+		"attributeId": "MUTATION_COUNT", "values": []map[string]any{{"start": 0, "end": 30}}}}}, &filtered)
+	if len(all.Rows) == 0 || len(filtered.Rows) != len(all.Rows) {
+		t.Fatalf("rows: all %v, filtered %v", all.Rows, filtered.Rows)
+	}
+	totalAll, totalFiltered := 0, 0
+	for i := range all.Rows {
+		totalAll += all.Rows[i].NumSamples
+		totalFiltered += filtered.Rows[i].NumSamples
+	}
+	if totalFiltered == 0 || totalFiltered >= totalAll {
+		t.Errorf("numSamples: all %d, filtered %d", totalAll, totalFiltered)
+	}
+}

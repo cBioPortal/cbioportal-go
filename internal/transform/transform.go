@@ -242,25 +242,28 @@ func namespaceColumnsExpr(c *client, rawDB string, has map[string]bool, tablePre
 			continue
 		}
 		prefix := strings.ToLower(name) + "_"
-		var subCols, nonEmpty []string
+		var subCols []string
 		for _, col := range sortedColumnNames(has) {
 			if strings.HasPrefix(col, prefix) && len(col) > len(prefix) {
 				sub := col[len(prefix):]
 				// Numeric values are emitted as JSON numbers, as the importer's
-				// namespace parser stores them.
+				// namespace parser stores them; empty values are stored as
+				// null, which the API leaves out.
 				v := tablePrefix + col
 				subCols = append(subCols, fmt.Sprintf(
-					`'"%s":', if(match(%s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %s, toJSONString(%s))`, sub, v, v, v))
-				nonEmpty = append(nonEmpty, fmt.Sprintf("%s%s != ''", tablePrefix, col))
+					`if(%[2]s = '', '', concat('"%[1]s":', if(match(%[2]s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %[2]s, toJSONString(%[2]s))))`, sub, v))
 			}
 		}
 		if len(subCols) == 0 {
 			continue
 		}
-		// concat('"Name":{', '"sub":', toJSONString(col), ',', ..., '}')
-		inner := strings.Join(subCols, ", ',', ")
-		obj := fmt.Sprintf(`concat('"%s":{', %s, '}')`, name, inner)
-		frags = append(frags, fmt.Sprintf("if(%s, %s, '')", strings.Join(nonEmpty, " OR "), obj))
+		// Every record of a profile declaring the namespace carries it, empty
+		// when the record has no value for any of its columns.
+		obj := fmt.Sprintf(`concat('"%s":{', arrayStringConcat(arrayFilter(x -> x != '', [%s]), ','), '}')`,
+			name, strings.Join(subCols, ", "))
+		declares := fmt.Sprintf("(%[1]sstudy_id, %[1]sprofile_stable_id) IN (SELECT study_id, profile_stable_id FROM `%[2]s`.genetic_profile "+
+			"WHERE has(arrayMap(x -> lower(trimBoth(x)), splitByChar(',', namespaces)), '%[3]s'))", tablePrefix, rawDB, strings.ToLower(name))
+		frags = append(frags, fmt.Sprintf("if(%s, %s, '')", declares, obj))
 	}
 	if len(frags) == 0 {
 		return "'{}'"
@@ -346,7 +349,7 @@ func mutationSQL(c *client, rawDB, targetDB string) string {
 	nsCol := namespaceColumnsExpr(c, rawDB, has, "m.")
 	return fmt.Sprintf(
 		"SELECT m.study_id AS study_id, m.tumor_sample_barcode AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
-			"%s AS entrez_gene_id, m.chromosome AS chromosome, m.start_position AS start_position, "+
+			"%s AS entrez_gene_id, "+normalizedChrSQL("m.chromosome")+" AS chromosome, m.start_position AS start_position, "+
 			"m.end_position AS end_position, m.reference_allele AS reference_allele, m.tumor_seq_allele2 AS tumor_seq_allele2, "+
 			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
 			"m.validation_status AS validation_status, "+

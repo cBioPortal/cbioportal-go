@@ -192,8 +192,9 @@ func TestContractMutationNamespaceColumns(t *testing.T) {
 		map[string]any{"molecularProfileIds": []string{"study_es_0_mutations"}}, &d)
 	found := false
 	for _, m := range d {
+		// Records without Zygosity values carry an empty object.
 		z, ok := m.NamespaceColumns["Zygosity"]
-		if !ok {
+		if !ok || len(z) == 0 {
 			continue
 		}
 		found = true

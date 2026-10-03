@@ -43,9 +43,9 @@ func TestContractDiscreteCopyNumberAllReadsProfileValues(t *testing.T) {
 	gene := events[0]["gene"].(map[string]any)
 	wantEq(t, []any{gene["hugoGeneSymbol"], gene["type"]}, []any{"ACAP3", "protein-coding"})
 	wantEq(t, events[1]["driverFilter"], "Putative_Driver")
-	if _, ok := events[1]["namespaceColumns"]; ok {
-		t.Errorf("record without namespace values carries namespaceColumns: %v", events[1])
-	}
+	// A record of a profile declaring namespaces carries each of them, empty
+	// without values (the importer stores the columns as null).
+	wantEq(t, events[1]["namespaceColumns"], map[string]any{"MyNamespace": map[string]any{}, "MyNamespace2": map[string]any{}})
 }
 
 func TestContractDiscreteCopyNumberGetGeneMajor(t *testing.T) {
