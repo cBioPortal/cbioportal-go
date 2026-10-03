@@ -65,26 +65,32 @@ func toFullSample(r sampleFullRow) Sample {
 // sampleFullSelect builds the sample rows plus sampleType / sequenced / seg
 // flags for the given WHERE predicate over alias `s`.
 func sampleFullSelect(where string) string {
+	return sampleFullSelectOrdered(where, "s.study_id, s.sample_id")
+}
+
+func sampleFullSelectOrdered(where, order string) string {
 	return "SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId, " +
 		"ifNull(sd.sample_type, '') AS sampleType, toUInt8(ifNull(sd.sequenced, 0)) AS sequencedFlag, " +
 		"toUInt8(ifNull(sd.copy_number_segment_present, 0)) AS segFlag " +
 		"FROM sample s LEFT JOIN sample_derived sd ON sd.cancer_study_identifier = s.study_id AND sd.sample_stable_id = s.sample_id " +
-		"WHERE " + where + " ORDER BY s.study_id, s.sample_id"
+		"WHERE " + where + " ORDER BY " + order
 }
 
-// allSamples — GET /api/samples. Optional `keyword` (matches sample or patient
-// id) and `studyIds` (comma-separated). Returns []Sample.
+// allSamples serves GET /api/samples (ClickhouseSampleMapper with a keyword):
+// every space-separated term of `keyword` must occur in the sample id
+// (ILIKE, so % and _ are wildcards), and matches whose id starts with the
+// whole keyword come first, each part ordered by sample id.
 func (s *State) allSamples(w http.ResponseWriter, r *http.Request) {
 	conds := []string{"1"}
-	if kw := r.URL.Query().Get("keyword"); kw != "" {
-		lit := sqlLit(kw)
-		conds = append(conds, fmt.Sprintf(
-			"(positionCaseInsensitive(s.sample_id, '%s') > 0 OR positionCaseInsensitive(s.patient_id, '%s') > 0)", lit, lit))
+	order := "s.study_id, s.sample_id"
+	if q := r.URL.Query(); q.Has("keyword") {
+		kw := q.Get("keyword")
+		for term := range strings.SplitSeq(strings.TrimSpace(kw), " ") {
+			conds = append(conds, fmt.Sprintf("s.sample_id ILIKE concat('%%', '%s', '%%')", sqlLit(term)))
+		}
+		order = fmt.Sprintf("if(s.sample_id ILIKE concat('%s', '%%'), 0, 1), s.sample_id", sqlLit(kw))
 	}
-	if sids := r.URL.Query().Get("studyIds"); sids != "" {
-		conds = append(conds, fmt.Sprintf("s.study_id IN (%s)", inList(splitCSV(sids))))
-	}
-	rows, err := ch.Query[sampleFullRow](s.CH, sampleFullSelect(strings.Join(conds, " AND ")))
+	rows, err := ch.Query[sampleFullRow](s.CH, sampleFullSelectOrdered(strings.Join(conds, " AND "), order))
 	if err != nil {
 		fail(w, err)
 		return
@@ -115,19 +121,27 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Bulk patients ----------
 
-// allPatients — GET /api/patients. Optional `keyword` (matches the patient
-// id). Returns []Patient across all studies.
+// allPatients serves GET /api/patients (PatientMapper.getPatients). With a
+// keyword, patients are joined to their samples and every space-separated
+// term must occur (case-insensitive, LIKE wildcards) in the patient or the
+// sample id; a patient is listed once per matching sample, patients whose id
+// starts with the whole keyword first, then by patient id.
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
-	conds := []string{"1"}
-	if kw := r.URL.Query().Get("keyword"); kw != "" {
-		conds = append(conds, fmt.Sprintf("positionCaseInsensitive(patient_id, '%s') > 0", sqlLit(kw)))
+	q := r.URL.Query()
+	sql := "SELECT study_id AS studyId, patient_id AS patientId FROM patient ORDER BY study_id, patient_id"
+	if q.Has("keyword") {
+		kw := q.Get("keyword")
+		var conds []string
+		for term := range strings.SplitSeq(kw, " ") {
+			t := sqlLit(term)
+			conds = append(conds, fmt.Sprintf("(p.patient_id ILIKE concat('%%', '%s', '%%') OR sm.sample_id ILIKE concat('%%', '%s', '%%'))", t, t))
+		}
+		sql = fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
+			"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
+			"ORDER BY if(p.patient_id ILIKE concat('%s', '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
+			strings.Join(conds, " AND "), sqlLit(kw))
 	}
-	if sids := r.URL.Query().Get("studyIds"); sids != "" {
-		conds = append(conds, fmt.Sprintf("study_id IN (%s)", inList(splitCSV(sids))))
-	}
-	rows, err := ch.Query[idRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE %s ORDER BY study_id, patient_id",
-		strings.Join(conds, " AND ")))
+	rows, err := ch.Query[idRow](s.CH, sql)
 	if err != nil {
 		fail(w, err)
 		return
@@ -140,19 +154,27 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 // allGenes — GET /api/genes. Optional `keyword` (matches hugo symbol) and
 // `alias` (matches gene_alias). Returns []geneRow.
 func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
 	conds := []string{"1"}
-	if kw := r.URL.Query().Get("keyword"); kw != "" {
-		conds = append(conds, fmt.Sprintf("positionCaseInsensitive(hugo_gene_symbol, '%s') > 0", sqlLit(kw)))
-	}
-	if alias := r.URL.Query().Get("alias"); alias != "" {
+	if alias, ok := q["alias"]; ok {
 		conds = append(conds, fmt.Sprintf(
-			"entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE positionCaseInsensitive(gene_alias, '%s') > 0)",
-			sqlLit(alias)))
+			"entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = '%s')",
+			sqlLit(alias[0])))
+	}
+	// GeneMapper: every space-separated keyword term is a case-insensitive
+	// symbol prefix; matches of the whole keyword with its exact case come
+	// first. Without a keyword genes come in the gene table's entrez order.
+	order := "entrez_gene_id"
+	if kw, ok := q["keyword"]; ok {
+		for _, term := range strings.Split(kw[0], " ") {
+			conds = append(conds, fmt.Sprintf("hugo_gene_symbol ILIKE '%s%%'", sqlLit(term)))
+		}
+		order = fmt.Sprintf("hugo_gene_symbol LIKE '%s%%' DESC, hugo_gene_symbol", sqlLit(kw[0]))
 	}
 	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type, "+
-			"genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s ORDER BY hugo_gene_symbol",
-		strings.Join(conds, " AND ")))
+			"genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s ORDER BY %s",
+		strings.Join(conds, " AND "), order))
 	if err != nil {
 		fail(w, err)
 		return
@@ -195,7 +217,7 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 // allClinicalAttributes — GET /api/clinical-attributes. Returns
 // []ClinicalAttribute across all studies from clinical_attribute_meta.
 func (s *State) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY study_id, clinical_attribute_id")
+	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY clinical_attribute_id, study_id")
 	if err != nil {
 		fail(w, err)
 		return
@@ -241,18 +263,6 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	writeJSON(w, out)
-}
-
-// splitCSV splits a comma-separated query param, trimming empties.
-func splitCSV(v string) []string {
-	parts := strings.Split(v, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // writeSamples writes the samples matching a predicate over the `sample` view

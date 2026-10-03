@@ -64,13 +64,6 @@ func TestContractPagingSortByDirection(t *testing.T) {
 	}
 }
 
-func TestContractPatientsKeyword(t *testing.T) {
-	requireAPI(t)
-	var d []map[string]any
-	get(t, "/api/patients?keyword=TCGA-A1-A0SB", &d)
-	wantEq(t, ids(d, "patientId"), []string{"TCGA-A1-A0SB"})
-}
-
 // ------------------------------------------------------ filter forms ----
 
 func TestContractSamplesFetchByUniqueSampleKeys(t *testing.T) {

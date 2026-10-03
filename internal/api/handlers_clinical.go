@@ -198,7 +198,8 @@ func (s *State) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribu
 	out := map[string]ClinicalAttribute{}
 	rows, _ := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
-			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN (%s)",
+			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN (%s) "+
+			"ORDER BY clinical_attribute_id, study_id",
 		orEmpty(studyIDs)))
 	for _, r := range rows {
 		out[r.StudyID+"\x00"+r.ClinicalAttributeID] = r.toAttribute()
@@ -235,7 +236,8 @@ func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, err := ch.Query[clinAttrRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
-			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN (%s)",
+			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN (%s) "+
+			"ORDER BY clinical_attribute_id, study_id",
 		inList(studyIDs)))
 	if err != nil {
 		fail(w, err)

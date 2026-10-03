@@ -178,8 +178,8 @@ func TestVirtualStudyAuthorized(t *testing.T) {
 	if got := e.list("/api/session/virtual_study", "bob", nil); len(got) != 0 {
 		t.Errorf("bob after delete: %v", got)
 	}
-	if rec := e.do("GET", "/api/session/virtual_study/add/ffffffffffffffffffffffff", "bob", nil, nil); rec.Code != 404 {
-		t.Errorf("add missing: want 404, got %d", rec.Code)
+	if rec := e.do("GET", "/api/session/virtual_study/add/ffffffffffffffffffffffff", "bob", nil, nil); rec.Code != 500 {
+		t.Errorf("add missing: want 500 (Java dereferences the null session), got %d", rec.Code)
 	}
 }
 

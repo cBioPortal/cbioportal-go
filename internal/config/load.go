@@ -41,6 +41,9 @@ func ClassifyProperties(props map[string]string) (used, ignored []string) {
 	for _, p := range FrontendProperties {
 		known[p.PropertyName] = true
 	}
+	for _, p := range BackendProperties {
+		known[p] = true
+	}
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		if known[k] {
 			used = append(used, k)

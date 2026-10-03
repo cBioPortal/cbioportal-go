@@ -590,6 +590,20 @@ func CommonsTTest(sample1, sample2 []float64) float64 {
 	return 2.0 * cmTCdf(-t, df)
 }
 
+// CommonsCorrelationPValue is FetchCoExpressionsUseCase.computePValue: the
+// two-sided t-test p-value of a correlation r over n samples.
+func CommonsCorrelationPValue(r float64, n int) float64 {
+	if n <= 2 {
+		return 1.0
+	}
+	rSquared := r * r
+	if rSquared >= 1.0 {
+		return 0.0
+	}
+	t := r * math.Sqrt((float64(n)-2.0)/(1.0-rSquared))
+	return 2.0 * cmTCdf(-math.Abs(t), float64(n)-2)
+}
+
 // cmTCdf is TDistribution(df).cumulativeProbability.
 func cmTCdf(x, df float64) float64 {
 	if x == 0 {

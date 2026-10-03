@@ -246,12 +246,14 @@ func derefInt(p *int64) int64 {
 
 // ---------- Discrete copy-number counts ----------
 
+// CopyNumberCount is the legacy model; the altered-sample count is null (left
+// out) for a gene and alteration without events.
 type CopyNumberCount struct {
-	Alteration                          int64  `json:"alteration"`
-	EntrezGeneID                        int64  `json:"entrezGeneId"`
 	MolecularProfileID                  string `json:"molecularProfileId"`
+	EntrezGeneID                        int64  `json:"entrezGeneId"`
+	Alteration                          int64  `json:"alteration"`
 	NumberOfSamples                     int64  `json:"numberOfSamples"`
-	NumberOfSamplesWithAlterationInGene int64  `json:"numberOfSamplesWithAlterationInGene"`
+	NumberOfSamplesWithAlterationInGene *int64 `json:"numberOfSamplesWithAlterationInGene,omitempty"`
 }
 
 type cnCountRow struct {
@@ -267,9 +269,15 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Alteration   int64 `json:"alteration"`
 	}
 	readBody(r, &ids)
+	if len(ids) == 0 || len(ids) > 50000 {
+		writeError(w, http.StatusBadRequest, "copyNumberCountIdentifiers size must be between 1 and 50000")
+		return
+	}
+	// DiscreteCopyNumberServiceImpl.validateMolecularProfile: only a discrete
+	// CNA profile is found (DISCRETE_LONG files are stored as DISCRETE).
 	meta, ok := s.profileMeta(mpid)
-	if !ok || !strings.EqualFold(meta.AlterationType, "COPY_NUMBER_ALTERATION") || len(ids) == 0 {
-		writeJSON(w, []CopyNumberCount{})
+	if !ok || meta.AlterationType != "COPY_NUMBER_ALTERATION" || (meta.Datatype != "DISCRETE" && meta.Datatype != "DISCRETE_LONG") {
+		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(mpid))
 		return
 	}
 
@@ -295,32 +303,36 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]CopyNumberCount, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, CopyNumberCount{
-			Alteration:                          id.Alteration,
-			EntrezGeneID:                        id.EntrezGeneID,
-			MolecularProfileID:                  mpid,
-			NumberOfSamples:                     total,
-			NumberOfSamplesWithAlterationInGene: found[[2]int64{id.EntrezGeneID, id.Alteration}],
-		})
+		c := CopyNumberCount{
+			Alteration:         id.Alteration,
+			EntrezGeneID:       id.EntrezGeneID,
+			MolecularProfileID: mpid,
+			NumberOfSamples:    total,
+		}
+		if n, ok := found[[2]int64{id.EntrezGeneID, id.Alteration}]; ok {
+			c.NumberOfSamplesWithAlterationInGene = &n
+		}
+		out = append(out, c)
 	}
 	writeJSON(w, out)
 }
 
 // ---------- Mutation spectrums ----------
 
+// MutationSpectrum is MutationSpectrumDTO, fields in its record order.
 type MutationSpectrum struct {
+	UniqueSampleKey    string `json:"uniqueSampleKey"`
+	UniquePatientKey   string `json:"uniquePatientKey"`
+	MolecularProfileID string `json:"molecularProfileId"`
+	SampleID           string `json:"sampleId"`
+	PatientID          string `json:"patientId"`
+	StudyID            string `json:"studyId"`
 	CtoA               int64  `json:"CtoA"`
 	CtoG               int64  `json:"CtoG"`
 	CtoT               int64  `json:"CtoT"`
 	TtoA               int64  `json:"TtoA"`
 	TtoC               int64  `json:"TtoC"`
 	TtoG               int64  `json:"TtoG"`
-	MolecularProfileID string `json:"molecularProfileId"`
-	PatientID          string `json:"patientId"`
-	SampleID           string `json:"sampleId"`
-	StudyID            string `json:"studyId"`
-	UniquePatientKey   string `json:"uniquePatientKey"`
-	UniqueSampleKey    string `json:"uniqueSampleKey"`
 }
 
 type spectrumRow struct {
@@ -342,7 +354,11 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	readBody(r, &f)
 	study := profileStudy(mpid)
-	where := fmt.Sprintf("m.study_id = '%s'", sqlLit(study))
+	// MutationSpectrumServiceImpl reads the profile's mutations with snpOnly:
+	// reference and tumor allele are both single bases.
+	where := fmt.Sprintf("m.study_id = '%s' AND m.molecular_profile_id = '%s' "+
+		"AND m.reference_allele IN ('A', 'T', 'C', 'G') AND m.tumor_seq_allele2 IN ('A', 'T', 'C', 'G')",
+		sqlLit(study), sqlLit(mpid))
 	if len(f.SampleIDs) > 0 {
 		where += fmt.Sprintf(" AND m.sample_id IN (%s)", inList(f.SampleIDs))
 	} else if f.SampleListID != "" {
@@ -369,8 +385,17 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	out := make([]MutationSpectrum, len(rows))
+	// One entry per sample, in the iteration order of the HashMap the
+	// mutations are grouped into.
+	bySample := make(map[string]spectrumRow, len(rows))
+	ids := make([]string, len(rows))
 	for i, r := range rows {
+		bySample[r.SampleID] = r
+		ids[i] = r.SampleID
+	}
+	out := make([]MutationSpectrum, len(rows))
+	for i, id := range javaHashMapOrder(ids) {
+		r := bySample[id]
 		out[i] = MutationSpectrum{
 			CtoA: r.CtoA, CtoG: r.CtoG, CtoT: r.CtoT, TtoA: r.TtoA, TtoC: r.TtoC, TtoG: r.TtoG,
 			MolecularProfileID: mpid, PatientID: r.PatientID, SampleID: r.SampleID, StudyID: study,

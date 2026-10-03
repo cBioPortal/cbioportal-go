@@ -373,12 +373,13 @@ func (s *State) referenceGenomeGeneGet(w http.ResponseWriter, r *http.Request) {
 
 // referenceGenomeGenesFetch handles POST /api/reference-genome-genes/{genomeName}/fetch.
 // As in ReferenceGenomeGeneController, the body is read as Entrez ids when its
-// first entry is an integer, else as Hugo symbols.
+// first entry is an integer, else as Hugo symbols matched with their exact
+// case; the list holds 1 to 100000 ids (@Size).
 func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var geneIDs []string
 	readBody(r, &geneIDs)
-	if len(geneIDs) == 0 {
-		writeJSON(w, []ReferenceGenomeGene{})
+	if len(geneIDs) == 0 || len(geneIDs) > 100000 {
+		writeError(w, http.StatusBadRequest, "geneIds size must be between 1 and 100000")
 		return
 	}
 	var where string
@@ -394,7 +395,7 @@ func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request
 		}
 		where = fmt.Sprintf("g.entrez_gene_id IN (%s)", intListSQL(ids))
 	} else {
-		where = fmt.Sprintf("upper(g.hugo_gene_symbol) IN (%s)", inList(upperAll(geneIDs)))
+		where = fmt.Sprintf("g.hugo_gene_symbol IN (%s)", inList(geneIDs))
 	}
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), where)
 	if err != nil {
@@ -402,12 +403,4 @@ func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, out)
-}
-
-func upperAll(in []string) []string {
-	out := make([]string, len(in))
-	for i, v := range in {
-		out[i] = strings.ToUpper(v)
-	}
-	return out
 }

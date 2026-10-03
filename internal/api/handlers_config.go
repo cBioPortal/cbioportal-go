@@ -34,7 +34,7 @@ func (s *State) configService(w http.ResponseWriter, r *http.Request) {
 // customDriverAnnotationReport reports whether the given mutation profiles carry
 // custom driver annotations (binary cbp_driver and/or tier classes), so the
 // settings menu exposes the corresponding filter controls. Values come from the
-// mutation_extended staging columns cbp_driver / cbp_driver_tiers.
+// mutation, CNA and SV events of genomic_event_derived.
 func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	readBody(r, &ids)
@@ -43,14 +43,16 @@ func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 		Tiers     []string `json:"tiers"`
 	}
 	report := map[string]any{"hasBinary": false, "tiers": []string{}}
-	if len(ids) == 0 {
-		writeJSON(w, report)
-		return
+	// AlterationDriverAnnotationMapper drops the profile condition for an
+	// empty list, reporting on every profile.
+	where := "1"
+	if len(ids) > 0 {
+		where = fmt.Sprintf("genetic_profile_stable_id IN (%s)", inList(ids))
 	}
 	rows, _ := ch.Query[row](s.CH, fmt.Sprintf(
 		"SELECT toUInt8(countIf(driver_filter IN ('Putative_Driver', 'Putative_Passenger')) > 0) AS hasBinary, "+
 			"arraySort(groupUniqArrayIf(driver_tiers_filter, driver_tiers_filter NOT IN ('', 'NA'))) AS tiers "+
-			"FROM genomic_event_derived WHERE genetic_profile_stable_id IN (%s)", inList(ids)))
+			"FROM genomic_event_derived WHERE %s", where))
 	if len(rows) > 0 {
 		report["hasBinary"] = rows[0].HasBinary == 1
 		if len(rows[0].Tiers) > 0 {
