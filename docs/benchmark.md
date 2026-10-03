@@ -123,8 +123,8 @@ counted.
 | cbioportal-core (Java importer + Python validator) | ≈ 33,300 — Java 23.5k, Python 7.9k, shell 1.5k, other 0.5k | ≈ 22,700 |
 | **Java stack total** | **≈ 113,000** | ≈ 83,000 |
 
-The Go code is about a quarter of the size, in one language and with no
-third-party dependencies (the Java stack builds on Spring Boot, MyBatis,
+The Go code is about a quarter of the size, in one language and with two
+small dependencies, a YAML parser and `golang.org/x/sync` (the Java stack builds on Spring Boot, MyBatis,
 Jackson, commons-math and a Redis cache). Part of the difference is scope,
 part is structure:
 
@@ -141,7 +141,7 @@ part is structure:
   comparison with www (`cmd/paritydiff`) rather than per-class unit tests.
 
 For maintenance this means one ≈ 26k-line codebase in place of two
-repositories and three languages, with one build (`go build`) and no dependency upgrades to track beyond the
+repositories and three languages, with one build (`go build`) and two small dependencies to track besides the
 Go toolchain. The container image, frontend included, is ≈ 100 MB, against
 1.33 GB for `cbioportal/cbioportal:master`.
 

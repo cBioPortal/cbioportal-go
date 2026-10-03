@@ -2,12 +2,14 @@ package reference
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	"github.com/inodb/cbioportal-go/internal/parser"
 )
 
 // GenesetStats counts what LoadGenesets loaded.
@@ -227,83 +229,50 @@ type yamlEntry struct {
 	list  []string
 }
 
-// parseGenesetTree parses the YAML subset of gene set hierarchy files:
-// block mappings of `key:` lines nested by indentation, whose leaves are
-// block sequences of plain or quoted scalars (`- GENESET_ID`). Comments
-// (`#` at the start of a line or after a space) and blank lines are ignored;
-// flow collections, anchors and multi-line scalars are not supported.
+// parseGenesetTree reads a gene set hierarchy file: nested mappings of
+// category names whose leaves are lists of gene set ids.
 func parseGenesetTree(src string) (*yamlNode, error) {
-	type line struct {
-		indent int
-		text   string
-		no     int
-	}
-	var lines []line
-	for i, raw := range strings.Split(src, "\n") {
-		raw = strings.TrimRight(raw, "\r")
-		if j := strings.Index(raw, " #"); j >= 0 {
-			raw = raw[:j]
-		}
-		t := strings.TrimSpace(raw)
-		if t == "" || strings.HasPrefix(t, "#") || t == "---" {
-			continue
-		}
-		if strings.Contains(raw[:len(raw)-len(strings.TrimLeft(raw, " \t"))], "\t") {
-			return nil, fmt.Errorf("line %d: tabs are not allowed in indentation", i+1)
-		}
-		lines = append(lines, line{len(raw) - len(strings.TrimLeft(raw, " ")), t, i + 1})
-	}
-	pos := 0
-	var parseMap func(indent int) (*yamlNode, error)
-	parseMap = func(indent int) (*yamlNode, error) {
-		n := &yamlNode{}
-		for pos < len(lines) && lines[pos].indent == indent {
-			l := lines[pos]
-			if strings.HasPrefix(l.text, "- ") || l.text == "-" {
-				return nil, fmt.Errorf("line %d: list item where a key was expected", l.no)
-			}
-			key, rest, ok := strings.Cut(l.text, ":")
-			if !ok || strings.TrimSpace(rest) != "" {
-				return nil, fmt.Errorf("line %d: want `key:`", l.no)
-			}
-			e := yamlEntry{key: unquote(strings.TrimSpace(key))}
-			pos++
-			if pos < len(lines) && lines[pos].indent >= indent && strings.HasPrefix(lines[pos].text, "-") {
-				itemIndent := lines[pos].indent
-				for pos < len(lines) && lines[pos].indent == itemIndent && strings.HasPrefix(lines[pos].text, "-") {
-					e.list = append(e.list, unquote(strings.TrimSpace(strings.TrimPrefix(lines[pos].text, "-"))))
-					pos++
-				}
-			} else if pos < len(lines) && lines[pos].indent > indent {
-				child, err := parseMap(lines[pos].indent)
-				if err != nil {
-					return nil, err
-				}
-				e.child = child
-			}
-			n.entries = append(n.entries, e)
-		}
-		if pos < len(lines) && lines[pos].indent > indent {
-			return nil, fmt.Errorf("line %d: unexpected indentation", lines[pos].no)
-		}
-		return n, nil
-	}
-	if len(lines) == 0 {
-		return &yamlNode{}, nil
-	}
-	root, err := parseMap(lines[0].indent)
+	v, err := parser.ParseYAML(src)
 	if err != nil {
 		return nil, err
 	}
-	if pos < len(lines) {
-		return nil, fmt.Errorf("line %d: unexpected indentation", lines[pos].no)
+	if v == nil {
+		return &yamlNode{}, nil
 	}
-	return root, nil
+	m, ok := v.(parser.YAMLMap)
+	if !ok {
+		return nil, fmt.Errorf("the hierarchy must be a mapping of categories")
+	}
+	return genesetTree(m)
 }
 
-func unquote(s string) string {
-	if len(s) >= 2 && (s[0] == '"' && s[len(s)-1] == '"' || s[0] == '\'' && s[len(s)-1] == '\'') {
-		return s[1 : len(s)-1]
+func genesetTree(m parser.YAMLMap) (*yamlNode, error) {
+	n := &yamlNode{}
+	for _, e := range m {
+		entry := yamlEntry{key: e.Key}
+		switch v := e.Value.(type) {
+		case nil:
+		case parser.YAMLMap:
+			child, err := genesetTree(v)
+			if err != nil {
+				return nil, err
+			}
+			entry.child = child
+		case []any:
+			for _, item := range v {
+				switch id := item.(type) {
+				case string:
+					entry.list = append(entry.list, id)
+				case json.Number:
+					entry.list = append(entry.list, string(id))
+				default:
+					return nil, fmt.Errorf("%q: gene set ids must be scalars", e.Key)
+				}
+			}
+		default:
+			return nil, fmt.Errorf("%q: want a nested mapping or a list of gene set ids", e.Key)
+		}
+		n.entries = append(n.entries, entry)
 	}
-	return s
+	return n, nil
 }

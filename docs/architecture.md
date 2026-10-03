@@ -59,6 +59,12 @@ for what the stdlib already covers are avoided. Statistics stay hand-ported:
 results must match the Java backend (commons-math, Datumbox) to the last
 digit. CI runs `govulncheck` on every push.
 
+Current dependencies, neither with transitive dependencies of its own:
+
+- `go.yaml.in/yaml/v3` (the YAML organization's maintained yaml.v3) — study
+  tags and gene set hierarchy files.
+- `golang.org/x/sync` — `singleflight` for the metadata cache.
+
 ## Notes learned porting
 
 - Go's stdlib `flag` stops parsing at the first positional arg, so `ingest <dir>

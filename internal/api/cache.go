@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	"golang.org/x/sync/singleflight"
 )
 
 // metaCache memoizes results of metadata queries (studies, profiles, sample
@@ -19,6 +20,8 @@ type metaCache struct {
 	entries map[string]any
 	version string
 	checked time.Time
+	// inflight collapses concurrent identical queries on a miss.
+	inflight singleflight.Group
 }
 
 const metaCacheRecheck = time.Second
@@ -50,10 +53,14 @@ func cachedQuery[T any](s *State, sql string) ([]T, error) {
 	}
 	version := s.meta.version
 	s.meta.mu.Unlock()
-	rows, err := ch.Query[T](s.CH, sql)
+	// Concurrent misses for the same query share one ClickHouse round trip.
+	v, err, _ := s.meta.inflight.Do(version+"\x00"+sql, func() (any, error) {
+		return ch.Query[T](s.CH, sql)
+	})
 	if err != nil {
 		return nil, err
 	}
+	rows := v.([]T)
 	s.meta.mu.Lock()
 	if s.meta.version != version {
 		s.meta.mu.Unlock()
