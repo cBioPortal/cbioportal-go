@@ -132,8 +132,10 @@ type contStatRow struct {
 }
 
 // computeContinuous returns, per gene/entity, the per-group mean/stddev
-// statistics and a group-comparison p-value, sorted ascending by p-value, as
-// cbioportal's ExpressionEnrichmentUtil computes them: values of rna_seq
+// statistics and a group-comparison p-value as cbioportal's
+// ExpressionEnrichmentUtil computes them, in the order Java iterates the
+// profile's rows: genes by genetic entity id, generic assay entities in
+// storage (file) order. As in Java: values of rna_seq
 // profiles are log2(x+1) transformed (negatives clamped to 0), groups with
 // fewer than two values are left out, and entities need two remaining groups.
 // The p-value is Welch's t-test for two groups and a one-way ANOVA otherwise;
@@ -154,18 +156,24 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		}
 		parts = append(parts, fmt.Sprintf(
 			"SELECT %s, toUInt32(%d) AS grp, "+
-				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v "+
-				"FROM (SELECT *, toFloat64OrNull("+javaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
+				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v, (part_, off_) AS pos_ "+
+				"FROM (SELECT *, _part AS part_, _part_offset AS off_, toFloat64OrNull("+javaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
 				"WHERE (study_id, profile_stable_id, sample_id) IN (%s)) WHERE isFinite(x)",
 			key, gi, table, tripleIn(triples)))
 	}
 	if len(parts) < 2 {
 		return []contResult{}, nil
 	}
-	rows, err := ch.Query[contStatRow](s.CH, fmt.Sprintf(
-		"SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSamp(v) AS var FROM (%s) "+
-			"GROUP BY symbol, entrez, grp",
-		strings.Join(parts, " UNION ALL ")))
+	agg := fmt.Sprintf(
+		"SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSamp(v) AS var, min(pos_) AS pos FROM (%s) "+
+			"GROUP BY symbol, entrez, grp", strings.Join(parts, " UNION ALL "))
+	query := agg + " ORDER BY pos, symbol, grp"
+	if withGene {
+		query = "SELECT a.symbol AS symbol, a.entrez AS entrez, a.grp AS grp, a.n AS n, a.mean AS mean, a.var AS var FROM (" + agg + ") a " +
+			"LEFT JOIN (SELECT entrez_gene_id, genetic_entity_id FROM cbioportal_ref.gene) g ON g.entrez_gene_id = a.entrez " +
+			"ORDER BY g.genetic_entity_id, a.symbol, a.grp"
+	}
+	rows, err := ch.Query[contStatRow](s.CH, query)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +244,6 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		}
 		out = append(out, contResult{hugo: sym, entrez: e, stable: sym, groupsStatistics: gs, pValue: p})
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].pValue < out[j].pValue })
 	return out, nil
 }
 
@@ -249,6 +256,10 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	readBody(r, &groups)
+	if id, ok := s.enrichmentProfileValid(groups, expressionAlterationTypes); !ok {
+		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(id))
+		return
+	}
 	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
 		groups = s.patientCasesToSamples(groups)
 	}
@@ -278,6 +289,10 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	readBody(r, &groups)
+	if id, ok := s.enrichmentProfileValid(groups, map[string]bool{"GENERIC_ASSAY": true}); !ok {
+		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(id))
+		return
+	}
 	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
 		groups = s.patientCasesToSamples(groups)
 	}
@@ -308,6 +323,30 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	writeJSON(w, out)
+}
+
+// expressionAlterationTypes are the profile types ExpressionEnrichmentService
+// computes genomic enrichments for.
+var expressionAlterationTypes = map[string]bool{
+	"MICRO_RNA_EXPRESSION": true, "MRNA_EXPRESSION": true, "MRNA_EXPRESSION_NORMALS": true,
+	"RNA_EXPRESSION": true, "METHYLATION": true, "METHYLATION_BINARY": true, "PHOSPHORYLATION": true,
+	"PROTEIN_LEVEL": true, "PROTEIN_ARRAY_PROTEIN_LEVEL": true, "PROTEIN_ARRAY_PHOSPHORYLATION": true,
+}
+
+// enrichmentProfileValid checks the groups' molecular profile as Java's
+// validateMolecularProfile does: an unknown profile or one of another
+// alteration type is reported (as not found) with its id.
+func (s *State) enrichmentProfileValid(groups []casesGroup, types map[string]bool) (string, bool) {
+	for _, g := range groups {
+		for _, c := range g.MolecularProfileCaseIdentifiers {
+			m, ok := s.profileMeta(c.MolecularProfileID)
+			if !ok || !types[strings.ToUpper(m.AlterationType)] {
+				return c.MolecularProfileID, false
+			}
+			return "", true
+		}
+	}
+	return "", true
 }
 
 // groupProfilePairs lists the (study, profile stable id) of every molecular

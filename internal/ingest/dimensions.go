@@ -132,7 +132,7 @@ func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 			if err != nil {
 				return err
 			}
-			kind, ids = "header", parser.Shape(h.Columns).SampleColumns
+			kind, ids = "header", f.MatrixShape(h.Columns).SampleColumns
 		case f.StageSlug == "mutation_extended" || f.StageSlug == "mutation_uncalled":
 			seq, err := parser.ReadSequencedSamples(f.DataPath)
 			if err != nil {

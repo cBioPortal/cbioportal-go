@@ -218,10 +218,21 @@ var reservedFeature = map[string]bool{
 // Shape splits a matrix header: the leading run of reserved-named columns (at
 // least the first) are identifiers; the rest are per-sample value columns.
 func Shape(columns []string) MatrixShape {
+	return ShapeWithFeatures(columns, nil)
+}
+
+// ShapeWithFeatures is Shape with extra identifier column names, matched
+// case-insensitively as cbioportal-core matches a generic assay file's
+// generic_entity_meta_properties.
+func ShapeWithFeatures(columns, features []string) MatrixShape {
 	san := SanitizeColumns(columns)
+	extra := map[string]bool{}
+	for _, f := range features {
+		extra[strings.ToLower(strings.TrimSpace(f))] = true
+	}
 	idCount := 0
 	for i, s := range san {
-		if i == 0 || reservedFeature[s] {
+		if i == 0 || reservedFeature[s] || extra[strings.ToLower(strings.TrimSpace(columns[i]))] {
 			idCount++
 		} else {
 			break

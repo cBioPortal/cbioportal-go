@@ -46,7 +46,9 @@ func sanitizeIdentSQL(expr string) string {
 // Non-matrix sources take the panel from the meta file's `gene_panel` key.
 // Finally, as prod's derived-table build does, members of a `*_sequenced` case
 // list that are in no MUTATION_EXTENDED profile of their study are added to
-// `<study>_mutations` with a NULL panel. Only samples present in clinical data
+// `<study>_mutations` with a NULL panel (case_list_only = 1: the importer's
+// own sample_profile, which MUTATION_COUNT is computed from, lacks them).
+// Only samples present in clinical data
 // and profiles present in genetic_profile are kept (prod's INNER JOINs).
 //
 // Header ids come from the ingest-captured `profile_sample` staging table; for
@@ -178,7 +180,8 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 	base := fmt.Sprintf(
 		"SELECT a.study_id AS study_id, a.sample_id AS sample_id, gp.profile_stable_id AS profile_stable_id, "+
 			"gp.molecular_profile_id AS molecular_profile_id, gp.alteration_type AS alteration_type, gp.datatype AS datatype, "+
-			"CAST(if(a.p = 0, nullIf(a.mpanel, ''), nullIf(%[1]s, '')) AS Nullable(String)) AS gene_panel_id "+
+			"CAST(if(a.p = 0, nullIf(a.mpanel, ''), nullIf(%[1]s, '')) AS Nullable(String)) AS gene_panel_id, "+
+			"toUInt8(0) AS case_list_only "+
 			"FROM (SELECT study_id, sample_id, profile_stable_id, min(prio) AS p, argMin(panel, prio) AS mpanel "+
 			"FROM (%[2]s) GROUP BY study_id, sample_id, profile_stable_id) a "+
 			"INNER JOIN `%[3]s`.genetic_profile gp ON gp.study_id = a.study_id AND gp.profile_stable_id = a.profile_stable_id "+
@@ -191,7 +194,7 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 	missing := fmt.Sprintf(
 		"SELECT sl.study_id AS study_id, sl.sample_id AS sample_id, gp.profile_stable_id AS profile_stable_id, "+
 			"gp.molecular_profile_id AS molecular_profile_id, gp.alteration_type AS alteration_type, gp.datatype AS datatype, "+
-			"CAST(NULL AS Nullable(String)) AS gene_panel_id "+
+			"CAST(NULL AS Nullable(String)) AS gene_panel_id, toUInt8(1) AS case_list_only "+
 			"FROM (SELECT DISTINCT study_id, sample_id FROM `%[1]s`.sample_list WHERE list_id LIKE '%%_sequenced') sl "+
 			"INNER JOIN `%[1]s`.genetic_profile gp ON gp.study_id = sl.study_id AND gp.molecular_profile_id = concat(sl.study_id, '_mutations') "+
 			"INNER JOIN %[2]s s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id "+

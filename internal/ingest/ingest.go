@@ -164,7 +164,7 @@ func ingestMatrix(c *ch.Client, studyID string, f *parser.DataFile) (FileStat, e
 	if err != nil {
 		return FileStat{}, err
 	}
-	shape := parser.Shape(h.Columns)
+	shape := f.MatrixShape(h.Columns)
 	cols := append(append([]string{}, shape.IDColumns...), "sample_id", "value")
 	var emitted uint64
 	body, err := parser.OpenMatrix(f.DataPath, shape, &emitted)
@@ -228,6 +228,9 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 			return nil, err
 		}
 		stats = append(stats, st)
+	}
+	if err := ingestGenericAssayEntities(c, s); err != nil {
+		return nil, err
 	}
 	mutsig, err := ingestMutSig(c, s)
 	if err != nil {

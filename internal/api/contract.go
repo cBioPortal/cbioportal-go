@@ -302,6 +302,9 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}", exists: []string{"study", "sample"}, fixed: "DETAILED"},
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/samples", params: paged(projectionType, sampleSort), exists: []string{"study", "patient"}, shape: sampleShape},
 	{method: "POST", pattern: "/api/samples/fetch", params: []param{projectionParamOf(projectionType)}, body: sampleFilterBody, shape: sampleShape},
+	// The study view's filtered samples carry the ID fields only (the SampleDTO's
+	// other fields are not selected, so null and not serialized).
+	{method: "POST", pattern: "/api/filtered-samples/fetch", fixed: "ID", shape: sampleShape},
 
 	// Patients.
 	{method: "GET", pattern: "/api/patients", params: paged(legacyProjection, patientSort), shape: patientShape, nest: "cancerStudy"},
