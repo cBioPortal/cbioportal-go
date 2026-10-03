@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // alterationTypeTable maps a molecular alteration type to its unpivoted matrix
@@ -169,20 +167,21 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
 		return []MolecularData{}, nil
 	}
-	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
+	args := newArgs()
+	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
 	if len(f.SampleIDs) > 0 {
-		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(f.SampleIDs))
+		where += " AND sample_id IN " + args.strs(f.SampleIDs)
 	} else if f.SampleListID != "" {
-		where += fmt.Sprintf(" AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(f.SampleListID))
+		where += " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
 	}
-	rows, err := ch.Query[molecularDataRow](s.CH, fmt.Sprintf(
+	rows, err := queryA[molecularDataRow](s.CH, fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
 			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
 			"%s AS value FROM (%s) m "+
 			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL ORDER BY m.sample_id, rg.genetic_entity_id, m.entrez",
-		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs)))
+		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs)), args)
 	if err != nil {
 		return nil, err
 	}
@@ -210,16 +209,16 @@ var geneKeyMapSources = map[string]bool{
 // (entrez id, symbol or unique alias, recorded in gene_key_map) where the
 // transform provides it — rows it could not resolve are dropped — and
 // otherwise the row's entrez id or its symbol's. entrez, if non-empty,
-// restricts the result to those genes.
-func resolvedEntrezSQL(table, src string, meta profileMeta, where string, entrez []int64) string {
+// restricts the result to those genes. Values are bound in args.
+func resolvedEntrezSQL(args *sqlArgs, table, src string, meta profileMeta, where string, entrez []int64) string {
 	ids := make([]string, len(entrez))
 	for i, e := range entrez {
 		ids[i] = fmt.Sprintf("%d", e)
 	}
 	idList := strings.Join(ids, ", ")
 	if geneKeyMapSources[table] {
-		keyFilter := fmt.Sprintf("source = '%s' AND study_id = '%s' AND profile_stable_id = '%s'",
-			table, sqlLit(meta.StudyID), sqlLit(meta.StableID))
+		keyFilter := fmt.Sprintf("source = '%s' AND study_id = %s AND profile_stable_id = %s",
+			table, args.str(meta.StudyID), args.str(meta.StableID))
 		if len(entrez) > 0 {
 			keyFilter += fmt.Sprintf(" AND resolved_entrez_gene_id IN (%s)", idList)
 			// The symbol condition alone is implied by the pair; it lets a

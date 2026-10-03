@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -73,10 +74,10 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		StableID string `json:"stableId"`
 		Datatype string `json:"datatype"`
 	}
-	exprRows, _ := ch.Query[exprProfile](s.CH, fmt.Sprintf(
+	exprRows, _ := ch.QueryP[exprProfile](s.CH,
 		"SELECT molecular_profile_id AS id, profile_stable_id AS stableId, datatype "+
-			"FROM molecular_profile WHERE study_id = '%s' AND molecular_alteration_type = 'MRNA_EXPRESSION' "+
-			"ORDER BY molecular_profile_id", sqlLit(meta.StudyID)))
+			"FROM molecular_profile WHERE study_id = {study:String} AND molecular_alteration_type = 'MRNA_EXPRESSION' "+
+			"ORDER BY molecular_profile_id", ch.Params{"study": meta.StudyID})
 	if len(exprRows) == 0 {
 		writeJSON(w, []GenesetCorrelation{})
 		return
@@ -97,18 +98,21 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		return
 	}
 
+	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID, "geneset": genesetID, "exprProfile": expr.StableID}
 	sampleFilter := ""
 	if len(sampleIDs) > 0 {
-		sampleFilter = fmt.Sprintf(" AND sample_id IN (%s)", inList(sampleIDs))
+		sampleFilter = " AND sample_id IN {samples:Array(String)}"
+		p["samples"] = sampleIDs
 	} else if sampleListID != "" {
-		sampleFilter = fmt.Sprintf(" AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(sampleListID))
+		sampleFilter = " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
+		p["list"] = sampleListID
 	}
 
 	querySub := fmt.Sprintf(
 		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM %s "+
-			"WHERE study_id = '%s' AND profile_stable_id = '%s' AND geneset_id = '%s' "+
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND geneset_id = {geneset:String} "+
 			"AND toFloat64OrNull(value) IS NOT NULL%s",
-		genesetScoreSource(s), sqlLit(meta.StudyID), sqlLit(meta.StableID), sqlLit(genesetID), sampleFilter)
+		genesetScoreSource(s), sampleFilter)
 
 	type corrRow struct {
 		Entrez *int64   `json:"entity"`
@@ -116,15 +120,15 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		N      int      `json:"n"`
 		SC     *float64 `json:"sc"`
 	}
-	rows, err := ch.Query[corrRow](s.CH, spearmanSQL(fmt.Sprintf(
+	rows, err := ch.QueryP[corrRow](s.CH, spearmanSQL(fmt.Sprintf(
 		"SELECT toInt64OrNull(b.entrez_gene_id) AS entity, b.hugo_symbol AS hugo, "+
 			"toFloat64OrZero(b.value) AS x, q.qval AS y "+
 			"FROM %s AS b "+
 			"INNER JOIN (%s) AS q USING (sample_id) "+
-			"WHERE b.study_id = '%s' AND b.profile_stable_id = '%s' "+
+			"WHERE b.study_id = {study:String} AND b.profile_stable_id = {exprProfile:String} "+
 			"AND toFloat64OrNull(b.value) IS NOT NULL",
-		s.rawSource("mrna_expression_matrix", geneMatrixCols...), querySub, sqlLit(meta.StudyID), sqlLit(expr.StableID)),
-		"1", threshold)+" ORDER BY sc DESC")
+		s.rawSource("mrna_expression_matrix", geneMatrixCols...), querySub),
+		"1", threshold)+" ORDER BY sc DESC", p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -180,17 +184,19 @@ func (s *State) geneAliases(w http.ResponseWriter, r *http.Request) {
 // canonical (entrez, hugo) pair from cbioportal_ref.gene.
 func (s *State) resolveRefGene(geneID string) (int64, string, bool) {
 	var where string
+	p := ch.Params{}
 	if n, err := strconv.ParseInt(geneID, 10, 64); err == nil {
 		where = fmt.Sprintf("entrez_gene_id = %d", n)
 	} else {
-		where = fmt.Sprintf("hugo_gene_symbol = '%s'", sqlLit(geneID))
+		where = "hugo_gene_symbol = {gene:String}"
+		p["gene"] = geneID
 	}
 	type geneRow struct {
 		Entrez int64  `json:"entrez"`
 		Hugo   string `json:"hugo"`
 	}
-	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
-		"SELECT entrez_gene_id AS entrez, hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE %s LIMIT 1", where))
+	rows, err := ch.QueryP[geneRow](s.CH,
+		"SELECT entrez_gene_id AS entrez, hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE "+where+" LIMIT 1", p)
 	if err != nil || len(rows) == 0 {
 		return 0, "", false
 	}
@@ -224,9 +230,12 @@ func referenceGenomeIDFor(name string) int64 {
 // refGenomeGenes returns the genes of a reference genome with their location,
 // as ReferenceGenomeGeneMapper does: reference_genome_gene joined to gene and
 // to the reference_genome whose name (hg19, hg38, mm10; case-insensitive)
-// matches. where filters on gene (aliased g). Reference DBs without the
-// reference_genome tables yield every gene with an empty location.
-func (s *State) refGenomeGenes(genomeName, where string) ([]ReferenceGenomeGene, error) {
+// matches. where filters on gene (aliased g), with placeholder values in p.
+// Reference DBs without the reference_genome tables yield every gene with an
+// empty location.
+func (s *State) refGenomeGenes(genomeName, where string, p ch.Params) ([]ReferenceGenomeGene, error) {
+	withGenome := ch.Params{"genome": genomeName}
+	maps.Copy(withGenome, p)
 	type geneRow struct {
 		Entrez     int64  `json:"entrez"`
 		Hugo       string `json:"hugo"`
@@ -236,17 +245,17 @@ func (s *State) refGenomeGenes(genomeName, where string) ([]ReferenceGenomeGene,
 		Start      int64  `json:"start"`
 		End        int64  `json:"end"`
 	}
-	rows, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[geneRow](s.CH, fmt.Sprintf(
 		"SELECT g.entrez_gene_id AS entrez, g.hugo_gene_symbol AS hugo, toInt64(rg.reference_genome_id) AS genomeId, "+
 			"ifNull(rgg.chr, '') AS chromosome, ifNull(rgg.cytoband, '') AS cytoband, ifNull(rgg.start, 0) AS start, ifNull(rgg.end, 0) AS end "+
 			"FROM cbioportal_ref.reference_genome_gene rgg "+
 			"INNER JOIN cbioportal_ref.reference_genome rg ON rg.reference_genome_id = rgg.reference_genome_id "+
 			"INNER JOIN cbioportal_ref.gene g ON g.entrez_gene_id = rgg.entrez_gene_id "+
-			"WHERE lower(rg.name) = lower('%s') AND (%s) ORDER BY g.entrez_gene_id", sqlLit(genomeName), where))
+			"WHERE lower(rg.name) = lower({genome:String}) AND (%s) ORDER BY g.entrez_gene_id", where), withGenome)
 	if err != nil {
-		rows, err = ch.Query[geneRow](s.CH, fmt.Sprintf(
+		rows, err = ch.QueryP[geneRow](s.CH, fmt.Sprintf(
 			"SELECT g.entrez_gene_id AS entrez, g.hugo_gene_symbol AS hugo, toInt64(%d) AS genomeId "+
-				"FROM cbioportal_ref.gene g WHERE %s ORDER BY g.entrez_gene_id", referenceGenomeIDFor(genomeName), where))
+				"FROM cbioportal_ref.gene g WHERE %s ORDER BY g.entrez_gene_id", referenceGenomeIDFor(genomeName), where), p)
 		if err != nil {
 			return nil, err
 		}
@@ -269,7 +278,7 @@ func (s *State) refGenomeGenes(genomeName, where string) ([]ReferenceGenomeGene,
 // referenceGenomeGenes handles GET /api/reference-genome-genes/{genomeName}:
 // every gene of the genome.
 func (s *State) referenceGenomeGenes(w http.ResponseWriter, r *http.Request) {
-	out, err := s.refGenomeGenes(r.PathValue("genomeName"), "1")
+	out, err := s.refGenomeGenes(r.PathValue("genomeName"), "1", nil)
 	if err != nil {
 		fail(w, err)
 		return
@@ -285,7 +294,7 @@ func (s *State) referenceGenomeGeneGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "geneId must be an integer", http.StatusBadRequest)
 		return
 	}
-	out, err := s.refGenomeGenes(r.PathValue("genomeName"), fmt.Sprintf("g.entrez_gene_id = %d", entrez))
+	out, err := s.refGenomeGenes(r.PathValue("genomeName"), fmt.Sprintf("g.entrez_gene_id = %d", entrez), nil)
 	if err != nil {
 		fail(w, err)
 		return
@@ -309,6 +318,7 @@ func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var where string
+	var p ch.Params
 	if _, err := strconv.ParseInt(geneIDs[0], 10, 32); err == nil {
 		ids := make([]int64, 0, len(geneIDs))
 		for _, id := range geneIDs {
@@ -321,9 +331,10 @@ func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request
 		}
 		where = fmt.Sprintf("g.entrez_gene_id IN (%s)", intListSQL(ids))
 	} else {
-		where = fmt.Sprintf("g.hugo_gene_symbol IN (%s)", inList(geneIDs))
+		where = "g.hugo_gene_symbol IN {genes:Array(String)}"
+		p = ch.Params{"genes": geneIDs}
 	}
-	out, err := s.refGenomeGenes(r.PathValue("genomeName"), where)
+	out, err := s.refGenomeGenes(r.PathValue("genomeName"), where, p)
 	if err != nil {
 		fail(w, err)
 		return

@@ -108,9 +108,9 @@ func pagingClause(r *http.Request, sortCols map[string]string, defaultOrder stri
 
 // queryView runs a query against one of the study side-data views, treating a
 // view that does not exist yet (a target DB transformed before these views
-// were added) as empty.
-func queryView[T any](c *ch.Client, sql string) ([]T, error) {
-	rows, err := ch.Query[T](c, sql)
+// were added) as empty. p holds the values of sql's placeholders.
+func queryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
+	rows, err := ch.QueryP[T](c, sql, p)
 	if err != nil && strings.Contains(err.Error(), "UNKNOWN_TABLE") {
 		return []T{}, nil
 	}
@@ -148,9 +148,11 @@ var resourceDefinitionSort = map[string]string{
 	"studyId": "study_id", "customMetaData": "custom_metadata",
 }
 
-func (s *State) writeResourceDefinitions(w http.ResponseWriter, where, tail, projection string) {
+// writeResourceDefinitions writes the definitions matching where, whose
+// placeholders take their values from p.
+func (s *State) writeResourceDefinitions(w http.ResponseWriter, where string, p ch.Params, tail, projection string) {
 	rows, err := queryView[resourceDefinitionRow](s.CH,
-		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE "+where+tail)
+		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE "+where+tail, p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -168,7 +170,7 @@ func (s *State) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Reques
 	if !s.requireStudy(w, studyID) {
 		return
 	}
-	s.writeResourceDefinitions(w, fmt.Sprintf("study_id = '%s'", sqlLit(studyID)),
+	s.writeResourceDefinitions(w, "study_id = {study:String}", ch.Params{"study": studyID},
 		pagingClause(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
 }
 
@@ -179,9 +181,9 @@ func (s *State) resourceDefinitionInStudy(w http.ResponseWriter, r *http.Request
 	if !s.requireStudy(w, studyID) {
 		return
 	}
-	rows, err := queryView[resourceDefinitionRow](s.CH, fmt.Sprintf(
-		"SELECT %s FROM resource_definition WHERE study_id = '%s' AND resource_id = '%s' LIMIT 1",
-		resourceDefinitionCols, sqlLit(studyID), sqlLit(resourceID)))
+	rows, err := queryView[resourceDefinitionRow](s.CH,
+		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE study_id = {study:String} AND resource_id = {resource:String} LIMIT 1",
+		ch.Params{"study": studyID, "resource": resourceID})
 	if err != nil {
 		fail(w, err)
 		return
@@ -201,7 +203,7 @@ func (s *State) resourceDefinitionsFetch(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "studyIds: size must be between 1 and 10000000", http.StatusBadRequest)
 		return
 	}
-	s.writeResourceDefinitions(w, fmt.Sprintf("study_id IN (%s)", inList(ids)),
+	s.writeResourceDefinitions(w, "study_id IN {ids:Array(String)}", ch.Params{"ids": ids},
 		" ORDER BY resource_id ASC, study_id ASC", projectionParam(r))
 }
 
@@ -237,12 +239,15 @@ var (
 // restricts to one patient/sample; resourceID (optional) to one resource.
 func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyID, id string) ([]ResourceData, error) {
 	projection := projectionParam(r)
-	where := []string{fmt.Sprintf("d.study_id = '%s'", sqlLit(studyID))}
+	where := []string{"d.study_id = {study:String}"}
+	p := ch.Params{"study": studyID}
 	if id != "" {
-		where = append(where, fmt.Sprintf("d.%s = '%s'", lvl.idFilter, sqlLit(id)))
+		where = append(where, fmt.Sprintf("d.%s = {id:String}", lvl.idFilter))
+		p["id"] = id
 	}
 	if rid := r.URL.Query().Get("resourceId"); rid != "" {
-		where = append(where, fmt.Sprintf("d.resource_id = '%s'", sqlLit(rid)))
+		where = append(where, "d.resource_id = {resource:String}")
+		p["resource"] = rid
 	}
 	sql := fmt.Sprintf(
 		"SELECT d.study_id AS study_id, %s, d.resource_id AS resource_id, d.url AS url, "+
@@ -253,7 +258,7 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 			"WHERE %s%s",
 		lvl.idCols, lvl.view, strings.Join(where, " AND "),
 		pagingClause(r, resourceDataSort, "d.resource_id ASC, "+lvl.tieBreaker+" ASC"))
-	rows, err := queryView[resourceDataRow](s.CH, sql)
+	rows, err := queryView[resourceDataRow](s.CH, sql, p)
 	if err != nil {
 		return nil, err
 	}

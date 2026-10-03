@@ -2,8 +2,9 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+
+	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
 // routeStudyTags registers the study-tags endpoints (StudyController), served
@@ -29,8 +30,9 @@ type studyTagsRow struct {
 // studyTagsGet — GET /api/studies/{studyId}/tags: the tags as a JSON object,
 // or {} when the study has none.
 func (s *State) studyTagsGet(w http.ResponseWriter, r *http.Request) {
-	rows, err := queryView[studyTagsRow](s.CH, fmt.Sprintf(
-		"SELECT study_id AS studyId, tags FROM cancer_study_tags WHERE study_id = '%s' LIMIT 1", sqlLit(r.PathValue("studyId"))))
+	rows, err := queryView[studyTagsRow](s.CH,
+		"SELECT study_id AS studyId, tags FROM cancer_study_tags WHERE study_id = {study:String} LIMIT 1",
+		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
 		fail(w, err)
 		return
@@ -48,11 +50,13 @@ func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	readBody(r, &ids)
 	where := ""
+	p := ch.Params{}
 	if len(ids) > 0 {
-		where = fmt.Sprintf(" WHERE study_id IN (%s)", inList(ids))
+		where = " WHERE study_id IN {ids:Array(String)}"
+		p["ids"] = ids
 	}
 	rows, err := queryView[studyTagsRow](s.CH,
-		"SELECT study_id AS studyId, tags FROM cancer_study_tags"+where+" ORDER BY study_id")
+		"SELECT study_id AS studyId, tags FROM cancer_study_tags"+where+" ORDER BY study_id", p)
 	if err != nil {
 		fail(w, err)
 		return

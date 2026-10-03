@@ -139,18 +139,21 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 		writeJSON(w, out)
 		return
 	}
-	where := fmt.Sprintf("c.study_id = '%s' AND c.profile_stable_id = '%s' AND toInt64OrNull(c.alteration) IN (%s)",
-		sqlLit(meta.StudyID), sqlLit(meta.StableID), intListSQL(alterations))
+	where := fmt.Sprintf("c.study_id = {study:String} AND c.profile_stable_id = {profile:String} AND toInt64OrNull(c.alteration) IN (%s)",
+		intListSQL(alterations))
+	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID}
 	if len(entrez) > 0 {
 		where += fmt.Sprintf(" AND toInt64OrNull(c.entrez_gene_id) IN (%s)", intListSQL(entrez))
 	}
 	if len(sampleIDs) > 0 {
-		where += fmt.Sprintf(" AND c.sample_id IN (%s)", inList(sampleIDs))
+		where += " AND c.sample_id IN {samples:Array(String)}"
+		p["samples"] = sampleIDs
 	} else if sampleListID != "" {
-		where += fmt.Sprintf(" AND c.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(sampleListID))
+		where += " AND c.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
+		p["list"] = sampleListID
 	}
 	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
-	rows, err := ch.Query[discreteCnaRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[discreteCnaRow](s.CH, fmt.Sprintf(
 		"SELECT c.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"toInt64OrNull(c.entrez_gene_id) AS entrezGeneId, if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, c.hugo_symbol) AS hugoGeneSymbol, "+
 			"rg.type AS geneType, toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns, "+
@@ -159,7 +162,7 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			"FROM cna c LEFT JOIN sample sm "+
 			"ON c.study_id = sm.study_id AND c.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(c.entrez_gene_id) "+
-			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0 ORDER BY entrezGeneId, alteration, c.sample_id", where))
+			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0 ORDER BY entrezGeneId, alteration, c.sample_id", where), p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -229,8 +232,8 @@ func (s *State) profileSampleCount(mpid string) int64 {
 	type c struct {
 		N int64 `json:"n"`
 	}
-	rows, _ := ch.Query[c](s.CH, fmt.Sprintf(
-		"SELECT uniqExact(sample_id) AS n FROM sample_profile WHERE molecular_profile_id = '%s'", sqlLit(mpid)))
+	rows, _ := ch.QueryP[c](s.CH,
+		"SELECT uniqExact(sample_id) AS n FROM sample_profile WHERE molecular_profile_id = {profile:String}", ch.Params{"profile": mpid})
 	if len(rows) == 0 {
 		return 0
 	}
@@ -283,16 +286,16 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 
 	total := s.profileSampleCount(mpid)
 
-	pairs := make([][2]string, len(ids))
+	pairs := make([]string, len(ids))
 	for i, id := range ids {
-		pairs[i] = [2]string{fmt.Sprintf("%d", id.EntrezGeneID), fmt.Sprintf("%d", id.Alteration)}
+		pairs[i] = fmt.Sprintf("(%d, %d)", id.EntrezGeneID, id.Alteration)
 	}
-	rows, err := ch.Query[cnCountRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[cnCountRow](s.CH, fmt.Sprintf(
 		"SELECT entrezGeneId, alteration, uniqExact(sampleId) AS n FROM ("+
 			"SELECT toInt64OrNull(entrez_gene_id) AS entrezGeneId, toInt64OrNull(alteration) AS alteration, sample_id AS sampleId "+
-			"FROM cna WHERE study_id = '%s' AND profile_stable_id = '%s' AND alteration IN ('-2', '2')) "+
+			"FROM cna WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND alteration IN ('-2', '2')) "+
 			"WHERE (entrezGeneId, alteration) IN (%s) GROUP BY entrezGeneId, alteration",
-		sqlLit(meta.StudyID), sqlLit(meta.StableID), tupleIn(pairs)))
+		strings.Join(pairs, ", ")), ch.Params{"study": meta.StudyID, "profile": meta.StableID})
 	if err != nil {
 		fail(w, err)
 		return
@@ -356,13 +359,15 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 	study := profileStudy(mpid)
 	// MutationSpectrumServiceImpl reads the profile's mutations with snpOnly:
 	// reference and tumor allele are both single bases.
-	where := fmt.Sprintf("m.study_id = '%s' AND m.molecular_profile_id = '%s' "+
-		"AND m.reference_allele IN ('A', 'T', 'C', 'G') AND m.tumor_seq_allele2 IN ('A', 'T', 'C', 'G')",
-		sqlLit(study), sqlLit(mpid))
+	where := "m.study_id = {study:String} AND m.molecular_profile_id = {profile:String} " +
+		"AND m.reference_allele IN ('A', 'T', 'C', 'G') AND m.tumor_seq_allele2 IN ('A', 'T', 'C', 'G')"
+	p := ch.Params{"study": study, "profile": mpid}
 	if len(f.SampleIDs) > 0 {
-		where += fmt.Sprintf(" AND m.sample_id IN (%s)", inList(f.SampleIDs))
+		where += " AND m.sample_id IN {samples:Array(String)}"
+		p["samples"] = f.SampleIDs
 	} else if f.SampleListID != "" {
-		where += fmt.Sprintf(" AND m.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = '%s')", sqlLit(f.SampleListID))
+		where += " AND m.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
+		p["list"] = f.SampleListID
 	}
 	// Substitution classes normalised to the pyrimidine strand (C/T reference).
 	classes := map[string]string{
@@ -373,14 +378,14 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		"TtoG": "(m.reference_allele = 'T' AND m.tumor_seq_allele2 = 'G') OR (m.reference_allele = 'A' AND m.tumor_seq_allele2 = 'C')",
 		"TtoA": "(m.reference_allele = 'T' AND m.tumor_seq_allele2 = 'A') OR (m.reference_allele = 'A' AND m.tumor_seq_allele2 = 'T')",
 	}
-	rows, err := ch.Query[spectrumRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[spectrumRow](s.CH, fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"countIf(%s) AS CtoT, countIf(%s) AS CtoG, countIf(%s) AS CtoA, "+
 			"countIf(%s) AS TtoC, countIf(%s) AS TtoG, countIf(%s) AS TtoA "+
 			"FROM mutation m LEFT JOIN sample sm "+
 			"ON m.study_id = sm.study_id AND m.sample_id = sm.sample_id "+
 			"WHERE %s GROUP BY m.sample_id, sm.patient_id ORDER BY m.sample_id",
-		classes["CtoT"], classes["CtoG"], classes["CtoA"], classes["TtoC"], classes["TtoG"], classes["TtoA"], where))
+		classes["CtoT"], classes["CtoG"], classes["CtoA"], classes["TtoC"], classes["TtoG"], classes["TtoA"], where), p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -446,10 +451,10 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 			EntrezGeneID *int64 `json:"entrezGeneId"`
 			N            int64  `json:"n"`
 		}
-		rows, _ := ch.Query[gr](s.CH, fmt.Sprintf(
+		rows, _ := ch.QueryP[gr](s.CH, fmt.Sprintf(
 			"SELECT toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS n "+
-				"FROM mutation WHERE molecular_profile_id = '%s' AND toInt64OrNull(entrez_gene_id) IN (%s) "+
-				"GROUP BY entrezGeneId", sqlLit(mpid), intListSQL(entrez)))
+				"FROM mutation WHERE molecular_profile_id = {profile:String} AND toInt64OrNull(entrez_gene_id) IN (%s) "+
+				"GROUP BY entrezGeneId", intListSQL(entrez)), ch.Params{"profile": mpid})
 		for _, r := range rows {
 			geneCount[derefInt(r.EntrezGeneID)] = r.N
 		}
@@ -470,13 +475,13 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 			ProteinChange  string `json:"proteinChange"`
 			MutationType   string `json:"mutationType"`
 		}
-		rows, _ := ch.Query[kr](s.CH, fmt.Sprintf(
+		rows, _ := ch.QueryP[kr](s.CH, fmt.Sprintf(
 			"SELECT DISTINCT toInt64OrNull(m.entrez_gene_id) AS entrezGeneId, m.sample_id AS sampleId, "+
 				"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, "+
 				"m.protein_change AS proteinChange, m.variant_classification AS mutationType "+
 				"FROM mutation m LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(m.entrez_gene_id) "+
-				"WHERE m.molecular_profile_id = '%s' AND toInt64OrNull(m.entrez_gene_id) IN (%s)",
-			sqlLit(mpid), intListSQL(entrez)))
+				"WHERE m.molecular_profile_id = {profile:String} AND toInt64OrNull(m.entrez_gene_id) IN (%s)",
+			intListSQL(entrez)), ch.Params{"profile": mpid})
 		samples := map[string]map[string]bool{}
 		for _, r := range rows {
 			kw := mutationKeyword(r.HugoGeneSymbol, r.ProteinChange, naString(r.MutationType))
