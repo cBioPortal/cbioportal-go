@@ -97,8 +97,9 @@ ClickHouse Cloud and copies little:
   of the derived tables through these views.
 - **Materialized from the normalized tables** (tens of millions of rows at
   most, sorted for the API's filters): studies, profiles, case lists,
-  patients, samples, long-form clinical data, `sample_profile`, mutations
-  (from `mutation_derived`), AMP/HOMDEL events with their driver annotations
+  patients, samples, long-form clinical data, `sample_profile`, mutations of
+  the mutation and uncalled-mutation profiles (from `mutation_derived`),
+  AMP/HOMDEL events with their driver annotations
   (`cna_event`), structural variants, segments, gene panels, GISTIC, MutSig,
   resources, and the timeline (`clinical_event` with its attributes).
 
@@ -108,11 +109,17 @@ when the portal database has them: a study's `public` flag and import date,
 and a generic-assay profile's pivot threshold, sort order and patient level.
 
 Known differences from www.cbioportal.org on the mirror are those of the API
-itself, not of the data: www's newer Java version returns slimmer
-`filtered-samples` / `clinical-data-table` records, a different
-co-expression response and no `qValue` / `cytoband` in expression
-enrichments; www's study list attaches resource definitions of other studies
-that share a resource id, and its legacy `studies/fetch` reports
-`allSampleCount: 1`. Expression enrichments of a TCGA PanCancer study take a
-few seconds, since genetic_alteration_derived is sorted by gene before
-profile.
+itself, not of the data; `cmd/paritydiff` measures them (see
+[Testing](testing.md#api-parity-with-wwwcbioportalorg)). www's column-store
+co-expression endpoint returns entity ids without correlations; its study list
+attaches resource definitions of other studies that share a resource id; its
+legacy `studies/fetch` reports `allSampleCount: 1`; `/api/timestamps`,
+`clinical-events-meta` and `survival-data` answer HTTP 500 there. Java returns
+several lists in import (internal id) order — patients, clinical data,
+segments, clinical events, sample list members — which the Go model does not
+keep, so those come in id order and ties of a sorted page can differ. Where
+Java attaches a single NA count (or bin) to an arbitrary gene or entity of a
+multi-filter study-view request, or appends panels to a shared list in
+`ProfiledCasesCounter`, results depend on Java's iteration order. Expression
+enrichments of a TCGA PanCancer study take a few seconds, since
+genetic_alteration_derived is sorted by gene before profile.

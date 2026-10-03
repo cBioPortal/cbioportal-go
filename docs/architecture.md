@@ -36,7 +36,8 @@
 ## Code layout
 
 - `cmd/cbioportal-import`, `cmd/cbioportal-api` — the two binaries;
-  `cmd/apibench` times heavy API requests; `cmd/e2ereport` summarizes e2e runs.
+  `cmd/apibench` times heavy API requests; `cmd/e2ereport` summarizes e2e runs;
+  `cmd/paritydiff` compares API responses with another origin (www).
 - `internal/parser`, `internal/ingest` — study file parsing and streaming into
   staging tables.
 - `internal/reference` — genes, aliases, cancer types and reference-genome
