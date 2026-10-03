@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: docker.io/inodb/cbioportal-go
+  IMAGE: docker.io/cbioportal/cbioportal-go
 
 jobs:
   image:

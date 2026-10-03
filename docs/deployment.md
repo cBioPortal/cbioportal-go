@@ -2,7 +2,7 @@
 
 ## Container image
 
-`docker.io/inodb/cbioportal-go` (`latest` and `sha-<7-char commit>`,
+`docker.io/cbioportal/cbioportal-go` (`latest` and `sha-<7-char commit>`,
 linux/amd64 and linux/arm64) is built and pushed by
 `.github/workflows/docker.yml` on every push to `main`. The
 [Dockerfile](../Dockerfile) builds the frontend once on the build platform and
@@ -15,8 +15,8 @@ The image (alpine, non-root uid 10001, `WORKDIR /app`, port 8080) contains
 the deployment scripts in `/app/deploy`.
 
 ```bash
-docker build -t inodb/cbioportal-go:dev --build-arg VERSION="$(git rev-parse --short HEAD) (dev)" .
-docker run --rm --network host inodb/cbioportal-go:dev -db cbioportal
+docker build -t cbioportal/cbioportal-go:dev --build-arg VERSION="$(git rev-parse --short HEAD) (dev)" .
+docker run --rm --network host cbioportal/cbioportal-go:dev -db cbioportal
 ```
 
 The API container is configured with the settings in

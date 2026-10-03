@@ -120,7 +120,7 @@ cbioportal-api -db cbioportal --portal-properties=../cbioportal-docker-compose/c
 docker run --rm --network host \
   -v "$PWD/config/application.properties:/app/application.properties:ro" \
   -e CBIOPORTAL_DB=cbioportal -e PORTAL_PROPERTIES=/app/application.properties \
-  inodb/cbioportal-go
+  cbioportal/cbioportal-go
 ```
 
 Such files also hold the Java backend's own settings (`spring.datasource.*`,
