@@ -207,7 +207,7 @@ func (s *State) genesetScores(meta profileMeta, sampleIDs, genesetIDs []string) 
 		order = "m.sample_id, g.id"
 	}
 	return ch.Query[genesetScore](s.CH, fmt.Sprintf(
-		"SELECT m.geneset_id AS genesetId, m.sample_id AS sampleId, sm.patient_id AS patientId, m.value AS value "+
+		"SELECT m.geneset_id AS genesetId, m.sample_id AS sampleId, sm.patient_id AS patientId, "+javaTruncatedValueSQL("m.value")+" AS value "+
 			"FROM %s m JOIN sample sm ON sm.study_id = m.study_id AND sm.sample_id = m.sample_id %s"+
 			"WHERE %s ORDER BY %s", genesetScoreSource(s), join, where, order))
 }
@@ -287,10 +287,13 @@ func (s *State) sampleListIDs(listID string) ([]string, bool) {
 
 // ---------- Gene set hierarchy ----------
 
+// GenesetHierarchyInfo is a hierarchy node. A top-level node has no parent
+// id and an empty parent name, as the Java backend's ClickHouse LEFT JOIN on
+// the parent node returns them.
 type GenesetHierarchyInfo struct {
 	NodeID         int64     `json:"nodeId"`
 	NodeName       string    `json:"nodeName"`
-	ParentID       int64     `json:"parentId"`
+	ParentID       *int64    `json:"parentId,omitempty"`
 	ParentNodeName *string   `json:"parentNodeName,omitempty"`
 	Genesets       []Geneset `json:"genesets,omitempty"`
 	// hasGenesets marks a node whose gene set list was set (possibly empty),
@@ -310,7 +313,7 @@ func (h GenesetHierarchyInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		NodeID         int64     `json:"nodeId"`
 		NodeName       string    `json:"nodeName"`
-		ParentID       int64     `json:"parentId"`
+		ParentID       *int64    `json:"parentId,omitempty"`
 		ParentNodeName *string   `json:"parentNodeName,omitempty"`
 		Genesets       []Geneset `json:"genesets"`
 	}{h.NodeID, h.NodeName, h.ParentID, h.ParentNodeName, gs})
@@ -490,10 +493,13 @@ func (s *State) genesetHierarchy(scores, pvalues []genesetScore, percentile int,
 		}
 	}
 	info := func(n nodeRow) *GenesetHierarchyInfo {
-		h := &GenesetHierarchyInfo{NodeID: n.NodeID, NodeName: n.NodeName, ParentID: n.ParentID}
-		if name, ok := nameOf[n.ParentID]; ok {
-			h.ParentNodeName = &name
+		h := &GenesetHierarchyInfo{NodeID: n.NodeID, NodeName: n.NodeName}
+		name, ok := nameOf[n.ParentID]
+		if ok {
+			parent := n.ParentID
+			h.ParentID = &parent
 		}
+		h.ParentNodeName = &name
 		return h
 	}
 	// ORDER BY parent node name (none first), node name.
@@ -559,7 +565,9 @@ func (s *State) genesetHierarchy(scores, pvalues []genesetScore, percentile int,
 func referredSuperNodes(superNodes, referring []*GenesetHierarchyInfo) []*GenesetHierarchyInfo {
 	referred := map[int64]bool{}
 	for _, n := range referring {
-		referred[n.ParentID] = true
+		if n.ParentID != nil {
+			referred[*n.ParentID] = true
+		}
 	}
 	contains := func(list []*GenesetHierarchyInfo, n *GenesetHierarchyInfo) bool {
 		for _, x := range list {

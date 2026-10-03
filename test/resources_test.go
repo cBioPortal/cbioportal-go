@@ -163,8 +163,9 @@ func TestContractSignificantCopyNumberRegions(t *testing.T) {
 	if erbb2 == nil {
 		t.Fatal("17q12 region missing")
 	}
+	// The importer parses q-values as Java floats: 8.5344e-137 reads 0.
 	wantEq(t, []any{erbb2.Chromosome, erbb2.WidePeakStart, erbb2.WidePeakEnd, erbb2.QValue},
-		[]any{17, 37863585, 37870539, 8.5344e-137})
+		[]any{17, 37863585, 37870539, 0.0})
 	found := false
 	for _, g := range erbb2.Genes {
 		found = found || (g.HugoGeneSymbol == "ERBB2" && g.EntrezGeneID == 2064)

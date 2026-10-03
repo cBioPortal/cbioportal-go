@@ -54,6 +54,13 @@ func exactFloat(text string, parsed float64) float64 {
 	return parsed
 }
 
+// importerFloat is a GISTIC / MutSig p- or q-value as cbioportal-core stores
+// it: parsed as a Java float (GisticReader, MutSigReader), so it carries
+// float precision and values below its range read 0.
+func importerFloat(text string, parsed float64) float64 {
+	return float64(float32(exactFloat(text, parsed)))
+}
+
 // writeTotalCount answers a META projection: the total-count header, no body.
 func (s *State) writeTotalCount(w http.ResponseWriter, sql string) {
 	rows, err := queryView[struct {
@@ -126,7 +133,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 	for i, g := range regions {
 		out[i] = Gistic{
 			StudyID: studyID, Chromosome: g.Chromosome, Cytoband: g.Cytoband,
-			WidePeakStart: g.WidePeakStart, WidePeakEnd: g.WidePeakEnd, QValue: exactFloat(g.QValueText, g.QValue), Amp: g.Amp != 0,
+			WidePeakStart: g.WidePeakStart, WidePeakEnd: g.WidePeakEnd, QValue: importerFloat(g.QValueText, g.QValue), Amp: g.Amp != 0,
 		}
 		if projection != "ID" {
 			out[i].Genes = genes[g.ID]
@@ -171,8 +178,8 @@ func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request
 	out := make([]MutSig, len(rows))
 	for i, row := range rows {
 		out[i] = row.MutSig
-		out[i].PValue = exactFloat(row.PValueText, row.PValue)
-		out[i].QValue = exactFloat(row.QValueText, row.QValue)
+		out[i].PValue = importerFloat(row.PValueText, row.PValue)
+		out[i].QValue = importerFloat(row.QValueText, row.QValue)
 	}
 	writeJSON(w, out)
 }

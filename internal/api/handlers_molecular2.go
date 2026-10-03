@@ -563,8 +563,9 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 		ps, pe := javaProteinPositions(r.ProteinPosition, r.ProteinChange)
 		muts[i] = located{r.EntrezGeneID, ps, pe, r.Count}
 	}
-	// Only positions with at least one mutation are returned.
-	out := []MutationCountByPosition{}
+	// A position without mutations is null: the mapper's grouped query
+	// returns no row for it.
+	out := make([]*MutationCountByPosition, 0, len(ids))
 	for _, id := range ids {
 		var n int64
 		for _, m := range muts {
@@ -572,10 +573,12 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 				n += m.n
 			}
 		}
-		if n > 0 {
-			out = append(out, MutationCountByPosition{Count: n, EntrezGeneID: id.EntrezGeneID,
-				ProteinPosStart: id.ProteinPosStart, ProteinPosEnd: id.ProteinPosEnd})
+		if n == 0 {
+			out = append(out, nil)
+			continue
 		}
+		out = append(out, &MutationCountByPosition{Count: n, EntrezGeneID: id.EntrezGeneID,
+			ProteinPosStart: id.ProteinPosStart, ProteinPosEnd: id.ProteinPosEnd})
 	}
 	writeJSON(w, out)
 }

@@ -10,7 +10,8 @@ import (
 // study_es_0_genesets.gmt, study_es_0_supp-genesets.txt and
 // study_es_0_tree.yaml, version msigdb_7.5.1), as importGenesetData.pl and
 // importGenesetHierarchy.pl load them for the Java e2e database. Scores are
-// study_es_0's data_gsva_scores.txt / data_gsva_pvalues.txt.
+// study_es_0's data_gsva_scores.txt / data_gsva_pvalues.txt, read as the
+// molecular data mapper truncates them (4 decimals).
 
 // requireGenesets skips unless the API serves the fixture gene set reference.
 func requireGenesets(t *testing.T) {
@@ -80,8 +81,9 @@ func TestContractGenesetHierarchy(t *testing.T) {
 	if len(nodes) != 2 {
 		t.Fatalf("nodes %+v", nodes)
 	}
-	wantEq(t, []any{nodes[0].NodeID, nodes[0].NodeName, nodes[0].ParentID, nodes[0].ParentNodeName},
-		[]any{2, "Different Gene sets from Random Institute", 0, (*string)(nil)})
+	// A top-level node: no parent id and an empty parent name.
+	wantEq(t, []any{nodes[0].NodeID, nodes[0].NodeName, nodes[0].ParentID, *nodes[0].ParentNodeName},
+		[]any{2, "Different Gene sets from Random Institute", 0, ""})
 	wantEq(t, []any{nodes[1].NodeID, nodes[1].NodeName, nodes[1].ParentID, *nodes[1].ParentNodeName},
 		[]any{3, "Institutes Subcategory 1", 2, "Different Gene sets from Random Institute"})
 	g0, g1 := *nodes[0].Genesets, *nodes[1].Genesets
@@ -90,8 +92,8 @@ func TestContractGenesetHierarchy(t *testing.T) {
 	}
 	// ACYLGLYCEROL: 4 negative scores, the 3rd largest (-0.442); ATP: 1 positive.
 	wantEq(t, []any{g0[0].GenesetID, *g0[0].RepresentativeScore, *g0[0].RepresentativePvalue},
-		[]any{"GO_ACYLGLYCEROL_HOMEOSTASIS", -0.442013761895225, 0.00497512437810945})
-	wantEq(t, []any{g1[0].GenesetID, *g1[0].RepresentativeScore}, []any{"GO_ATP_DEPENDENT_CHROMATIN_REMODELING", 0.56919171543422})
+		[]any{"GO_ACYLGLYCEROL_HOMEOSTASIS", -0.442, 0.005})
+	wantEq(t, []any{g1[0].GenesetID, *g1[0].RepresentativeScore}, []any{"GO_ATP_DEPENDENT_CHROMATIN_REMODELING", 0.5692})
 
 	// Without thresholds every node keeps its gene sets, the gene sets of a
 	// node ordered by name.
@@ -126,10 +128,10 @@ func TestContractGenesetHierarchy(t *testing.T) {
 		t.Fatalf("%s: ACYLGLYCEROL not listed", query)
 		return 0
 	}
-	wantEq(t, acyl("&percentile=100", nil), -0.503435483643209)
-	wantEq(t, acyl("&percentile=1", nil), 0.230071239194925)
-	wantEq(t, acyl("", []string{"TCGA-A1-A0SE-01", "TCGA-A1-A0SH-01"}), 0.230071239194925)
-	wantEq(t, acyl("&sampleListId=study_es_0_all", nil), -0.442013761895225)
+	wantEq(t, acyl("&percentile=100", nil), -0.5034)
+	wantEq(t, acyl("&percentile=1", nil), 0.2301)
+	wantEq(t, acyl("", []string{"TCGA-A1-A0SE-01", "TCGA-A1-A0SH-01"}), 0.2301)
+	wantEq(t, acyl("&sampleListId=study_es_0_all", nil), -0.442)
 
 	for path, want := range map[string]string{
 		"?geneticProfileId=study_es_0_gsva_scores&percentile=101":    `{"message":"percentile must be less than or equal to 100"}`,
@@ -154,13 +156,13 @@ func TestContractGenesetGeneticDataShape(t *testing.T) {
 	}, &rows)
 	wantEq(t, rows, []map[string]any{
 		{"geneticProfileId": "study_es_0_gsva_scores", "sampleId": "TCGA-A1-A0SB-01", "patientId": "TCGA-A1-A0SB", "studyId": "study_es_0",
-			"value": "-0.138520488027997", "genesetId": "GO_ACYLGLYCEROL_HOMEOSTASIS"},
+			"value": "-0.1385", "genesetId": "GO_ACYLGLYCEROL_HOMEOSTASIS"},
 		{"geneticProfileId": "study_es_0_gsva_scores", "sampleId": "TCGA-A1-A0SB-01", "patientId": "TCGA-A1-A0SB", "studyId": "study_es_0",
-			"value": "0.0898885015206211", "genesetId": "GO_CARDIAC_CHAMBER_DEVELOPMENT"},
+			"value": "0.0899", "genesetId": "GO_CARDIAC_CHAMBER_DEVELOPMENT"},
 		{"geneticProfileId": "study_es_0_gsva_scores", "sampleId": "TCGA-A2-A04U-01", "patientId": "TCGA-A2-A04U", "studyId": "study_es_0",
-			"value": "-0.503435483643209", "genesetId": "GO_ACYLGLYCEROL_HOMEOSTASIS"},
+			"value": "-0.5034", "genesetId": "GO_ACYLGLYCEROL_HOMEOSTASIS"},
 		{"geneticProfileId": "study_es_0_gsva_scores", "sampleId": "TCGA-A2-A04U-01", "patientId": "TCGA-A2-A04U", "studyId": "study_es_0",
-			"value": "-0.103345910055048", "genesetId": "GO_CARDIAC_CHAMBER_DEVELOPMENT"},
+			"value": "-0.1033", "genesetId": "GO_CARDIAC_CHAMBER_DEVELOPMENT"},
 	})
 	resp, _ := rawDo(t, http.MethodPost, "/api/genetic-profiles/no_such_profile/geneset-genetic-data/fetch", `{}`)
 	wantEq(t, resp.StatusCode, 404)
