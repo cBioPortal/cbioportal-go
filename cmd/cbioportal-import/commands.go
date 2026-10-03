@@ -68,6 +68,20 @@ database. It is needed once, before the first transform.`,
 		setup:    setupLoadReference,
 	},
 	{
+		name: "load-genesets", args: "<genesets.gmt>", minArgs: 1, maxArgs: 1,
+		short: "load gene sets and their hierarchy into the reference database",
+		long: `Load-genesets replaces the gene sets of the reference database, as
+cbioportal-core's importGenesetData.pl --new-version followed by
+importGenesetHierarchy.pl: the GMT file (<id> <ref link> <Entrez ids>... per
+line), an optional supplementary file (<id> <name> <description> per line),
+the collection version, and an optional hierarchy YAML file. GSVA profiles
+reference gene sets by id, so load them before serving such studies.`,
+		examples: []string{
+			"load-genesets genesets.gmt --version msigdb_7.5.1 --supp supp-genesets.txt --hierarchy tree.yaml --db cbioportal_ref",
+		},
+		setup: setupLoadGenesets,
+	},
+	{
 		name: "load-gene-panels", args: "<panels-dir>", minArgs: 1, maxArgs: 1,
 		short: "load gene panel definitions into the raw database",
 		long: `Load-gene-panels loads every gene panel file of a directory (datahub
@@ -235,6 +249,26 @@ func setupLoadReference(fs *flag.FlagSet) func([]string, io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(w, "loaded %d genes and %d aliases into `%s`\n", genes, aliases, *db)
+		return nil
+	}
+}
+
+func setupLoadGenesets(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	db := fs.String("db", "cbioportal_ref", "reference `database` to load into")
+	version := fs.String("version", "", "gene set collection `version` (required), e.g. msigdb_7.5.1")
+	supp := fs.String("supp", "", "supplementary `file` with gene set names and descriptions")
+	hierarchy := fs.String("hierarchy", "", "gene set hierarchy YAML `file`")
+	return func(args []string, w io.Writer) error {
+		if *version == "" {
+			return fmt.Errorf("--version is required")
+		}
+		st, err := reference.LoadGenesets(ch.New(*url, *db), args[0], *supp, *version, *hierarchy)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "loaded %d gene sets (%d genes, %d skipped as unknown) and %d hierarchy nodes (%d leaves) into `%s`\n",
+			st.Genesets, st.Genes, st.SkippedGenes, st.Nodes, st.Leaves, *db)
 		return nil
 	}
 }

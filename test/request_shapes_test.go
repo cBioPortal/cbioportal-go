@@ -176,19 +176,27 @@ func TestContractStructuralVariantCountsPairs(t *testing.T) {
 
 // ------------------------------------------------- endpoint params ----
 
+// The geneset hierarchy takes its samples from sampleListId or a bare
+// sample-id body; with the gene set reference loaded, a profile that is not
+// GSVA-SCORE is Java's unhandled IllegalArgumentException (500).
 func TestContractGenesetHierarchyBody(t *testing.T) {
 	requireAPI(t)
-	var bySampleList, bySamples, notGsva []map[string]any
+	var bySampleList, byStudy, bySamples []map[string]any
 	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_gsva_scores&sampleListId=study_es_0_all", nil, &bySampleList)
+	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_gsva_scores", nil, &byStudy)
 	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_gsva_scores", []string{"TCGA-A1-A0SB-01"}, &bySamples)
-	post(t, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_mrna", []string{}, &notGsva)
-	if len(bySampleList) != 1 || len(bySampleList[0]["genesets"].([]any)) == 0 {
-		t.Fatalf("hierarchy by sample list: %v", bySampleList)
+	if len(bySampleList) == 0 || len(bySampleList) != len(byStudy) {
+		t.Fatalf("hierarchy by sample list %v, by study %v", bySampleList, byStudy)
 	}
-	if len(bySamples) != 1 {
-		t.Fatalf("hierarchy by bare sample-id list: %v", bySamples)
+	if bySamples == nil {
+		t.Fatalf("hierarchy by bare sample-id list: null")
 	}
-	wantEq(t, len(notGsva), 0)
+	var v string
+	get(t, "/api/genesets/version", &v)
+	if v == "msigdb_7.5.1" {
+		resp, _ := rawDo(t, http.MethodPost, "/api/geneset-hierarchy/fetch?geneticProfileId=study_es_0_mrna", "[]")
+		wantEq(t, resp.StatusCode, http.StatusInternalServerError)
+	}
 }
 
 func TestContractTreatmentsDisplay(t *testing.T) {

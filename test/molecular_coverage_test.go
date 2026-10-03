@@ -354,6 +354,26 @@ func TestContractGenesetGeneticData(t *testing.T) {
 func TestContractGenesetExpressionCorrelation(t *testing.T) {
 	requireAPI(t)
 	var rows []map[string]any
+	var version string
+	get(t, "/api/genesets/version", &version)
+	if version == "msigdb_7.5.1" {
+		// With the gene set reference only member genes are correlated:
+		// GO_ACYLGLYCEROL_HOMEOSTASIS has AKT1 and AKT2, which
+		// data_expression_median.txt lacks, so their correlation is 0 — kept
+		// at threshold 0, dropped at 0.3.
+		post(t, "/api/genesets/GO_ACYLGLYCEROL_HOMEOSTASIS/expression-correlation/fetch?geneticProfileId=study_es_0_gsva_scores&correlationThreshold=0.3", nil, &rows)
+		wantEq(t, len(rows), 0)
+		post(t, "/api/genesets/GO_ACYLGLYCEROL_HOMEOSTASIS/expression-correlation/fetch?geneticProfileId=study_es_0_gsva_scores&correlationThreshold=0", nil, &rows)
+		wantEq(t, rows, []map[string]any{
+			{"correlationValue": 0.0, "entrezGeneId": 207.0, "expressionGeneticProfileId": "study_es_0_mrna",
+				"hugoGeneSymbol": "AKT1", "zScoreGeneticProfileId": "study_es_0_mrna_median_Zscores"},
+			{"correlationValue": 0.0, "entrezGeneId": 208.0, "expressionGeneticProfileId": "study_es_0_mrna",
+				"hugoGeneSymbol": "AKT2", "zScoreGeneticProfileId": "study_es_0_mrna_median_Zscores"},
+		})
+		resp, body := rawDo(t, http.MethodPost, "/api/genesets/NOPE/expression-correlation/fetch?geneticProfileId=study_es_0_gsva_scores", "")
+		wantEq(t, []any{resp.StatusCode, string(body)}, []any{404, `{"message":"Gene set not found: NOPE"}`})
+		return
+	}
 	post(t, "/api/genesets/GO_ACYLGLYCEROL_HOMEOSTASIS/expression-correlation/fetch?geneticProfileId=study_es_0_gsva_scores&correlationThreshold=0.3", nil, &rows)
 	want := map[string]float64{"ERCC5": 0.8, "CREB3L1": 0.8, "MMP2": 0.8, "ZHX3": 0.8, "PNMA1": 0.4}
 	if len(rows) != len(want) {

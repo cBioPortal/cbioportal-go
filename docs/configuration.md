@@ -14,6 +14,7 @@ Commands:
   ingest             stage a study's data files in the raw database
   ingest-case-lists  restage only the case lists of one or more studies
   load-reference     load genes, gene aliases and cancer types from a seed dump
+  load-genesets      load gene sets and their hierarchy into the reference database
   load-gene-panels   load gene panel definitions into the raw database
   transform          build the portal database's tables from the raw and reference databases
   version            print the version
@@ -25,9 +26,17 @@ cbioportal-import plan <study-dir>                                  # no ClickHo
 cbioportal-import ingest <study-dir> --db cbioportal_raw
 cbioportal-import ingest-case-lists <study-dir>... --db cbioportal_raw
 cbioportal-import load-reference <seed.sql.gz> --db cbioportal_ref
+cbioportal-import load-genesets <genesets.gmt> --version msigdb_7.5.1 \
+  [--supp <supp-genesets.txt>] [--hierarchy <tree.yaml>] --db cbioportal_ref
 cbioportal-import load-gene-panels <panels-dir> --db cbioportal_raw
 cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
 ```
+
+`load-genesets` replaces the gene sets (GSVA's reference) as cbioportal-core's
+`importGenesetData.pl --new-version` and `importGenesetHierarchy.pl` do; the
+hierarchy file is the importer's YAML tree (nested `Category:` keys with
+`Gene sets:` lists). Without it the API names gene sets after their ids and
+lists them under one hierarchy node.
 
 `cbioportal-import help <command>` (or `<command> -h`) shows a command's flags,
 defaults and examples. Flags may come before or after the arguments, written

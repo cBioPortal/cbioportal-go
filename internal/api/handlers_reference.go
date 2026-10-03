@@ -9,10 +9,9 @@ import (
 	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
 )
 
-// routeReference registers geneset hierarchy/version/correlation, gene-alias
-// resolution, and reference-genome-gene endpoints. Existing geneset endpoints
-// (GET/POST /api/genesets/fetch, GET /api/genesets/{genesetId}, and
-// geneset-genetic-data/fetch) are registered elsewhere and are not re-added.
+// routeReference registers the gene set list, version, hierarchy and
+// correlation endpoints (handlers_genesets.go), gene-alias resolution, and
+// the reference-genome-gene endpoints.
 func (s *State) routeReference(mux *http.ServeMux) {
 	// Genesets.
 	mux.HandleFunc("GET /api/genesets", s.genesetsList)
@@ -25,88 +24,6 @@ func (s *State) routeReference(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/reference-genome-genes/{genomeName}", s.referenceGenomeGenes)
 	mux.HandleFunc("GET /api/reference-genome-genes/{genomeName}/{geneId}", s.referenceGenomeGeneGet)
 	mux.HandleFunc("POST /api/reference-genome-genes/{genomeName}/fetch", s.referenceGenomeGenesFetch)
-}
-
-// genesetGenesetVersion is the GSVA/MSigDB collection version reported to the
-// frontend. No versioned geneset reference is loaded, so this is a static tag.
-const genesetGenesetVersion = "msigdb.v7.5.1"
-
-// ---------- 1. GET /api/genesets ----------
-
-// genesetsList returns all genesets synthesized from the distinct geneset ids in
-// the GSVA score matrix (no separate geneset reference table exists). Shape: []Geneset.
-func (s *State) genesetsList(w http.ResponseWriter, r *http.Request) {
-	out, err := s.genesetsForIDs(nil)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, out)
-}
-
-// ---------- 2. GET /api/genesets/version ----------
-
-// genesetVersion returns the geneset collection version as a bare JSON string,
-// matching the client's Promise<string> contract.
-func (s *State) genesetVersion(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, genesetGenesetVersion)
-}
-
-// ---------- 3. POST /api/geneset-hierarchy/fetch ----------
-
-type GenesetHierarchyInfo struct {
-	Genesets       []Geneset `json:"genesets"`
-	NodeID         int64     `json:"nodeId"`
-	NodeName       string    `json:"nodeName"`
-	ParentID       int64     `json:"parentId"`
-	ParentNodeName string    `json:"parentNodeName"`
-}
-
-// genesetHierarchyFetch returns the geneset hierarchy tree for the GSVA score
-// profile given by the geneticProfileId query param, over the samples in the
-// optional body (a bare list of sample ids) or else the sampleListId sample
-// list (else every sample). No hierarchy metadata (GMT node structure) is
-// loaded, so the profile's genesets are exposed under a single root node.
-// Shape: []GenesetHierarchyInfo.
-func (s *State) genesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
-	var sampleIDs []string
-	readBody(r, &sampleIDs)
-	q := r.URL.Query()
-	meta, ok := s.profileMeta(q.Get("geneticProfileId"))
-	if !ok || !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
-		writeJSON(w, []GenesetHierarchyInfo{})
-		return
-	}
-	where := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s'", sqlLit(meta.StudyID), sqlLit(meta.StableID))
-	if len(sampleIDs) > 0 {
-		where += fmt.Sprintf(" AND sample_id IN (%s)", inList(sampleIDs))
-	} else {
-		where += sampleListClause("sample_id", q.Get("sampleListId"))
-	}
-	type row struct {
-		GenesetID string `json:"genesetId"`
-	}
-	rows, err := ch.Query[row](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where))
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	if len(rows) == 0 {
-		writeJSON(w, []GenesetHierarchyInfo{})
-		return
-	}
-	genesets := make([]Geneset, len(rows))
-	for i, r := range rows {
-		genesets[i] = Geneset{GenesetID: r.GenesetID, Name: r.GenesetID, Description: r.GenesetID}
-	}
-	writeJSON(w, []GenesetHierarchyInfo{{
-		Genesets:       genesets,
-		NodeID:         1,
-		NodeName:       "Gene sets",
-		ParentID:       0,
-		ParentNodeName: "",
-	}})
 }
 
 // ---------- 4. POST /api/genesets/{genesetId}/expression-correlation/fetch ----------
@@ -140,7 +57,11 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 	}
 
 	meta, ok := s.profileMeta(gsvaProfile)
-	if !ok || !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
+	if !ok {
+		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(gsvaProfile))
+		return
+	}
+	if !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
 		writeJSON(w, []GenesetCorrelation{})
 		return
 	}
@@ -169,6 +90,11 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		if strings.Contains(strings.ToUpper(p.Datatype), "Z-SCORE") {
 			zscore = p
 		}
+	}
+
+	if s.hasGenesetRef() {
+		s.genesetMemberCorrelations(w, meta, genesetID, sampleListID, sampleIDs, threshold, expr.ID, expr.StableID, zscore.ID)
+		return
 	}
 
 	sampleFilter := ""
