@@ -206,8 +206,8 @@ func cancerTypeName(name, id string) string {
 // studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
 // keyword search over name / id / cancer type and sorting. The ID projection
 // yields an empty list and META an empty list with the total-count header;
-// pages are numbered from 1 (see pageList). A keyword search is ordered by
-// name unless sortBy is given.
+// pages are numbered from 1 (see pageList). Studies come in import order, a
+// keyword search ordered by name, unless sortBy is given.
 func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
@@ -221,9 +221,12 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		}
 		where = strings.Join(ands, " AND ")
 	}
-	order := "c.study_id"
+	// Unsorted, the mapper returns the studies in cancer_study's storage
+	// order (cancer_study_id, i.e. import order), which also orders ties.
+	importOrder := s.studyOrder("c.study_id")
+	order := importOrder
 	if strings.TrimSpace(q.Get("keyword")) != "" {
-		order = "c.name"
+		order = "c.name, " + importOrder
 	}
 	sortCols := map[string]string{"studyId": "c.study_id", "cancerTypeId": "c.cancer_type_id", "name": "c.name",
 		"description": "c.description", "publicStudy": "publicFlag", "pmid": "c.pmid", "citation": "c.citation",
@@ -233,6 +236,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(q.Get("direction"), "DESC") {
 			order += " DESC"
 		}
+		order += ", " + importOrder
 	}
 	projection := projectionParam(r)
 	if projection == "ID" {
@@ -435,9 +439,19 @@ type Patient struct {
 	UniquePatientKey string `json:"uniquePatientKey"`
 }
 
+// patientOrder orders patient rows as PatientMapper.getPatients returns
+// them: by stable id for the ID projection, else unsorted, i.e. in the patient
+// table's internal id order where the database carries it.
+func (s *State) patientOrder(r *http.Request) string {
+	if projectionOf(r) != "ID" && s.importOrdered() {
+		return "internal_id"
+	}
+	return "patient_id, study_id"
+}
+
 func (s *State) patients(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY patient_id",
+		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY "+s.patientOrder(r),
 		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
 		fail(w, err)
@@ -475,7 +489,7 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := ch.QueryP[idRow](s.CH,
 		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} "+
-			"ORDER BY study_id, patient_id", ch.Params{"ids": pairs})
+			"ORDER BY "+s.patientOrder(r), ch.Params{"ids": pairs})
 	if err != nil {
 		fail(w, err)
 		return

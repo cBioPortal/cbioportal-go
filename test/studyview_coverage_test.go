@@ -90,12 +90,13 @@ func TestContractGenericAssayDataInProfile(t *testing.T) {
 		UniqueSampleKey: javaKey("TCGA-A1-A0SB-01", "study_es_0"), UniquePatientKey: javaKey("TCGA-A1-A0SB", "study_es_0"),
 	})
 
-	// Without a sample filter: every sample of the profile.
+	// Without a sample filter: every sample of the profile, in internal id
+	// (sample file) order, as getSamplesByInternalIds returns them.
 	get(t, "/api/generic-assay-data/study_es_0_treatment_ic50/generic-assay/17-AAG", &rows)
 	wantEq(t, gaCells(rows), []string{
-		"TCGA-A1-A0SB-01 17-AAG 0.2281", "TCGA-A1-A0SD-01 17-AAG 0.3297", "TCGA-A1-A0SE-01 17-AAG 0.053",
-		"TCGA-A1-A0SH-01 17-AAG 0.0708", "TCGA-A2-A04U-01 17-AAG 0.1501", "TCGA-B6-A0RS-01 17-AAG 0.4226",
-		"TCGA-BH-A0HP-01 17-AAG 0.1518", "TCGA-BH-A18P-01 17-AAG 0.2795",
+		"TCGA-A2-A04U-01 17-AAG 0.1501", "TCGA-BH-A18P-01 17-AAG 0.2795", "TCGA-B6-A0RS-01 17-AAG 0.4226",
+		"TCGA-BH-A0HP-01 17-AAG 0.1518", "TCGA-A1-A0SE-01 17-AAG 0.053", "TCGA-A1-A0SD-01 17-AAG 0.3297",
+		"TCGA-A1-A0SH-01 17-AAG 0.0708", "TCGA-A1-A0SB-01 17-AAG 0.2281",
 	})
 }
 

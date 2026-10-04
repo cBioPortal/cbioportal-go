@@ -35,6 +35,14 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 			return err
 		}
 	}
+	// import_time orders the studies as cbioportal-core numbers them: by
+	// import, a re-imported study last.
+	if !existing["import_time"] {
+		if _, err := c.Execute(fmt.Sprintf(
+			"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS import_time DateTime64(6)", c.Database(), table)); err != nil {
+			return err
+		}
+	}
 	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
 
 	values := []string{s.StudyID}
@@ -45,7 +53,7 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 	for i, v := range values {
 		quoted[i] = "'" + ch.SQLLit(v) + "'"
 	}
-	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s) SELECT %s",
+	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s, import_time) SELECT %s, now64(6)",
 		c.Database(), table, backtick(cols), strings.Join(quoted, ", ")))
 	return err
 }
@@ -266,8 +274,10 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 	dir := s.Dir + "/case_lists"
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil // no case_lists dir is fine
+		return recordImportOrder(c, s.StudyID, "case_list", nil) // no case_lists dir is fine
 	}
+	seq := parser.DirOrder(dir)
+	listSeq := map[string]int{}
 	clean := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".txt") {
@@ -281,6 +291,7 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 		if listID == "" {
 			continue
 		}
+		listSeq[listID] = seq[e.Name()]
 		samples := strings.FieldsFunc(meta.Get("case_list_ids"), func(r rune) bool { return r == '\t' })
 		var b strings.Builder
 		for _, s2 := range samples {
@@ -301,7 +312,30 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 			return err
 		}
 	}
-	return nil
+	return recordImportOrder(c, s.StudyID, "case_list", listSeq)
+}
+
+// recordImportOrder replaces a study's entries of one kind in import_order:
+// the position at which cbioportal-core's importer takes each data file
+// ("data", by file name) or case list ("case_list", by list id) among those
+// of its kind, from which the transform numbers rows as the importer does.
+func recordImportOrder(c *ch.Client, studyID, kind string, seq map[string]int) error {
+	table := "import_order"
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, kind String, name String, seq UInt32) ENGINE = MergeTree ORDER BY (study_id, kind, name)",
+		c.Database(), table)); err != nil {
+		return err
+	}
+	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s' AND kind = '%s'", ch.SQLLit(studyID), ch.SQLLit(kind)))
+	if len(seq) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	for name, i := range seq {
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%d\n", studyID, kind, name, i)
+	}
+	return c.InsertStream(fmt.Sprintf("INSERT INTO `%s`.`%s` FORMAT TabSeparated", c.Database(), table),
+		strings.NewReader(b.String()))
 }
 
 func ingestClinicalMeta(c *ch.Client, s *parser.Study) error {

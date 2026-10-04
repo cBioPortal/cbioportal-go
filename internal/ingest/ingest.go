@@ -229,6 +229,13 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		}
 		stats = append(stats, st)
 	}
+	seq := map[string]int{}
+	for _, f := range s.Files {
+		seq[fileName(f.DataPath)] = f.ImportSeq
+	}
+	if err := recordImportOrder(c, s.StudyID, "data", seq); err != nil {
+		return nil, err
+	}
 	if err := ingestGenericAssayEntities(c, s); err != nil {
 		return nil, err
 	}

@@ -115,12 +115,13 @@ itself, not of the data; `cmd/paritydiff` measures them (see
 [Testing](testing.md#api-parity-with-wwwcbioportalorg)). www's study list
 attaches resource definitions of other studies that share a resource id; its
 legacy `studies/fetch` reports `allSampleCount: 1`; `clinical-events-meta`
-and `survival-data` answer HTTP 500 there. Java returns
-several lists in import (internal id) order — patients, clinical data,
-segments, clinical events, sample list members — which the Go model does not
-keep, so those come in id order and ties of a sorted page can differ. Where
-Java attaches a single NA count (or bin) to an arbitrary gene or entity of a
-multi-filter study-view request, or appends panels to a shared list in
-`ProfiledCasesCounter`, results depend on Java's iteration order. Expression
+and `survival-data` answer HTTP 500 there. Java returns many lists in import
+(internal id) order — studies, patients, clinical data, segments, clinical
+events, sample lists and their members — which the mirror keeps through
+production's internal ids (`internal_id`, `seg_id`, `list_internal_id`,
+`clinical_event_id`). Where Java attaches a single NA count (or bin) to an
+arbitrary gene or entity of a multi-filter study-view request, or appends
+panels to a shared list in `ProfiledCasesCounter`, results depend on Java's
+iteration order. Expression
 enrichments of a TCGA PanCancer study take a few seconds, since
 genetic_alteration_derived is sorted by gene before profile.

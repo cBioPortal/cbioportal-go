@@ -18,7 +18,8 @@ import (
 // already exists, which is kept.
 func sampleListSQL(c *client, rawDB string) string {
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
-	empty := "SELECT '' AS study_id, '' AS list_id, '' AS category, '' AS name, '' AS description, '' AS sample_id WHERE 0"
+	empty := "SELECT '' AS study_id, '' AS list_id, '' AS category, '' AS name, '' AS description, '' AS sample_id, " +
+		"toUInt64(0) AS list_internal_id WHERE 0"
 	if !exists("clinical_sample") {
 		return empty
 	}
@@ -51,7 +52,24 @@ func sampleListSQL(c *client, rawDB string) string {
 	if len(parts) == 0 {
 		return empty
 	}
-	return strings.Join(parts, " UNION ALL ")
+	return listInternalIDs(rawDB, strings.Join(parts, " UNION ALL "))
+}
+
+// listInternalIDs adds to sample list rows the list's internal id as
+// cbioportal-core assigns it: studies in import order, a study's case list
+// files in the order the importer reads the case_lists directory, the global
+// "_all" list last.
+func listInternalIDs(rawDB, lists string) string {
+	return fmt.Sprintf(
+		"SELECT l.*, li.list_internal_id AS list_internal_id FROM (%[1]s) l LEFT JOIN ("+
+			"SELECT d.study_id AS study_id, d.list_id AS list_id, "+
+			"toUInt64(row_number() OVER (ORDER BY r.study_rank, o.name = '', o.seq, d.list_id)) AS list_internal_id "+
+			"FROM (SELECT DISTINCT study_id, list_id FROM (%[1]s)) d "+
+			"LEFT JOIN (SELECT study_id, name, seq FROM `%[2]s`.import_order WHERE kind = 'case_list') o "+
+			"ON o.study_id = d.study_id AND o.name = d.list_id "+
+			"LEFT JOIN (%[3]s) r ON r.study_id = d.study_id"+
+			") li ON li.study_id = l.study_id AND li.list_id = l.list_id",
+		lists, rawDB, studyRankSQL(rawDB))
 }
 
 // genePanelSQL builds the `gene_panel` view: each panel gene resolved like

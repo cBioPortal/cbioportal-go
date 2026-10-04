@@ -228,12 +228,13 @@ type resourceDataLevel struct {
 	idCols     string // extra id columns selected from the view
 	idFilter   string // view column the {patientId}/{sampleId} path value filters
 	tieBreaker string // secondary order after resource_id
+	entity     string // the patient / sample table whose internal id orders ties first
 }
 
 var (
 	studyResources   = resourceDataLevel{view: "resource_study", idCols: "'' AS patient_id, '' AS sample_id", tieBreaker: "d.url"}
-	patientResources = resourceDataLevel{view: "resource_patient", idCols: "d.patient_id AS patient_id, '' AS sample_id", idFilter: "patient_id", tieBreaker: "d.patient_id"}
-	sampleResources  = resourceDataLevel{view: "resource_sample", idCols: "d.patient_id AS patient_id, d.sample_id AS sample_id", idFilter: "sample_id", tieBreaker: "d.sample_id"}
+	patientResources = resourceDataLevel{view: "resource_patient", idCols: "d.patient_id AS patient_id, '' AS sample_id", idFilter: "patient_id", tieBreaker: "d.patient_id", entity: "patient"}
+	sampleResources  = resourceDataLevel{view: "resource_sample", idCols: "d.patient_id AS patient_id, d.sample_id AS sample_id", idFilter: "sample_id", tieBreaker: "d.sample_id", entity: "sample"}
 )
 
 // fetchResourceData queries one resource level of a study. id (optional)
@@ -250,15 +251,24 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 		where = append(where, "d.resource_id = {resource:String}")
 		p["resource"] = rid
 	}
+	// ResourceDataMapper orders by resource id only; ties come in the
+	// storage order of resource_patient / resource_sample, i.e. by the
+	// internal id of the patient or sample.
+	join, tie := "", lvl.tieBreaker+" ASC"
+	if lvl.entity != "" && s.importOrdered() {
+		join = fmt.Sprintf(" LEFT JOIN (SELECT %[1]s_id, min(internal_id) AS internal_id FROM %[1]s "+
+			"WHERE study_id = {study:String} GROUP BY %[1]s_id) io ON io.%[1]s_id = d.%[1]s_id", lvl.entity)
+		tie = "io.internal_id ASC, " + tie
+	}
 	sql := fmt.Sprintf(
 		"SELECT d.study_id AS study_id, %s, d.resource_id AS resource_id, d.url AS url, "+
 			"rd.resource_id AS def_resource_id, rd.display_name AS display_name, rd.description AS description, "+
 			"rd.resource_type AS resource_type, rd.open_by_default AS open_by_default, rd.priority AS priority, "+
 			"rd.custom_metadata AS custom_metadata "+
-			"FROM %s d LEFT JOIN resource_definition rd ON d.study_id = rd.study_id AND d.resource_id = rd.resource_id "+
+			"FROM %s d LEFT JOIN resource_definition rd ON d.study_id = rd.study_id AND d.resource_id = rd.resource_id%s "+
 			"WHERE %s%s",
-		lvl.idCols, lvl.view, strings.Join(where, " AND "),
-		pagingClause(r, resourceDataSort, "d.resource_id ASC, "+lvl.tieBreaker+" ASC"))
+		lvl.idCols, lvl.view, join, strings.Join(where, " AND "),
+		pagingClause(r, resourceDataSort, "d.resource_id ASC, "+tie))
 	rows, err := queryView[resourceDataRow](s.CH, sql, p)
 	if err != nil {
 		return nil, err

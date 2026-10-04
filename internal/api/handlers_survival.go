@@ -295,13 +295,19 @@ var timelineFixedCols = map[string]bool{
 // into an attribute keyed by its upper-cased header; a timeline built from a
 // production clone carries the attributes as (KEY, value) pairs in its
 // event_attributes column instead. Without staged timeline data it selects
-// no events.
-func (s *State) timelineSelect() string {
+// no events. order is the ORDER BY of ClinicalEventMapper's
+// clinical_event_id where the timeline carries it (production's, or the
+// importer's numbering: timeline files in import order, rows in file order),
+// else empty.
+func (s *State) timelineSelect() (sql, order string) {
 	cols := s.rawColumns("timeline")
 	if slices.Contains(cols, "event_attributes") {
+		if slices.Contains(cols, "clinical_event_id") {
+			order = "clinical_event_id"
+		}
 		return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
 			"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " +
-			"event_attributes AS attrs FROM cbioportal_raw.timeline"
+			"event_attributes AS attrs FROM cbioportal_raw.timeline", order
 	}
 	var kv []string
 	for _, c := range cols {
@@ -313,9 +319,15 @@ func (s *State) timelineSelect() string {
 	if len(kv) > 0 {
 		attrs = fmt.Sprintf("arrayFilter(x -> x.2 != '', [%s])", strings.Join(kv, ", "))
 	}
+	from := s.rawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
+	if from == "cbioportal_raw.timeline" && slices.Contains(cols, "source_file") && len(s.rawColumns("import_order")) > 0 {
+		from += " LEFT JOIN (SELECT study_id AS o_study, name AS o_file, seq AS o_seq FROM cbioportal_raw.import_order " +
+			"WHERE kind = 'data') o ON o.o_study = timeline.study_id AND o.o_file = timeline.source_file"
+		order = "o_seq, toUInt64OrZero(splitByChar('_', timeline._part)[2]), timeline._part_offset"
+	}
 	return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
 		"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " + attrs +
-		" AS attrs FROM " + s.rawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
+		" AS attrs FROM " + from, order
 }
 
 // ClinicalEventMeta is an event type with the distinct (lower-cased)
@@ -381,15 +393,41 @@ func (s *State) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
 // writeClinicalEvents writes the timeline events matching where, whose
 // placeholders take their values from p.
 func (s *State) writeClinicalEvents(w http.ResponseWriter, where string, p ch.Params) {
-	rows, err := ch.QueryP[timelineRow](s.CH, fmt.Sprintf(
-		"%s WHERE %s ORDER BY patientId, startDate, eventType", s.timelineSelect(), where), p)
+	sel, order := s.timelineSelect()
+	if order == "" {
+		order = "patientId, startDate, eventType"
+	}
+	rows, err := ch.QueryP[timelineRow](s.CH, fmt.Sprintf("%s WHERE %s ORDER BY %s", sel, where, order), p)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	// ImportTimelineData collects a staged event's attributes in a HashMap,
+	// so they are stored (and read back) in its iteration order; events of a
+	// production clone carry their stored order.
+	staged := !slices.Contains(s.rawColumns("timeline"), "event_attributes")
 	out := make([]ClinicalEvent, len(rows))
 	for i, row := range rows {
+		if staged {
+			row.Attrs = javaHashMapAttrs(row.Attrs)
+		}
 		out[i] = row.toEvent()
 	}
 	writeJSON(w, out)
+}
+
+// javaHashMapAttrs orders (key, value) attributes as a java.util.HashMap
+// they were put into in the given order iterates them.
+func javaHashMapAttrs(attrs [][2]string) [][2]string {
+	keys := make([]string, len(attrs))
+	value := make(map[string]string, len(attrs))
+	for i, kv := range attrs {
+		keys[i] = kv[0]
+		value[kv[0]] = kv[1]
+	}
+	out := make([][2]string, 0, len(attrs))
+	for _, k := range javaHashMapOrder(keys) {
+		out = append(out, [2]string{k, value[k]})
+	}
+	return out
 }

@@ -108,10 +108,12 @@ func (s *State) gaLoadProfile(meta profileMeta, entityIDs, sampleIDs []string) (
 }
 
 // genericAssayData ports GenericAssayServiceImpl.fetchGenericAssayData: the
-// samples (all of the profiles' samples when samplesByStudy is nil, else the
-// listed samples of each profile's study) in sample-id order, and for each, every requested profile of its study that holds the
-// sample, one entry per entity in matrix order. Cells without a value (empty
-// or NA) are left out, as the controllers filter them.
+// samples (all of the profiles' samples when samplesByStudy is nil, in
+// internal id order as getSamplesByInternalIds returns them, else the listed
+// samples of each profile's study in sample-id order, as fetchSamples with the
+// ID projection returns them), and for each, every requested profile of its
+// study that holds the sample, one entry per entity in matrix order. Cells
+// without a value (empty or NA) are left out, as the controllers filter them.
 func (s *State) genericAssayData(profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) ([]GenericAssayData, error) {
 	ids := slices.Clone(profileIDs)
 	slices.Sort(ids)
@@ -133,7 +135,6 @@ func (s *State) genericAssayData(profileIDs []string, samplesByStudy map[string]
 		d.id = mpid
 		profiles = append(profiles, d)
 	}
-	type sampleKey struct{ study, sample string }
 	seen := map[sampleKey]bool{}
 	var samples []sampleKey
 	for _, p := range profiles {
@@ -145,12 +146,16 @@ func (s *State) genericAssayData(profileIDs []string, samplesByStudy map[string]
 			}
 		}
 	}
-	sort.Slice(samples, func(i, j int) bool {
-		if samples[i].sample != samples[j].sample {
-			return samples[i].sample < samples[j].sample
-		}
-		return samples[i].study < samples[j].study
-	})
+	if samplesByStudy == nil {
+		s.sortSamplesByImport(samples)
+	} else {
+		sort.Slice(samples, func(i, j int) bool {
+			if samples[i].sample != samples[j].sample {
+				return samples[i].sample < samples[j].sample
+			}
+			return samples[i].study < samples[j].study
+		})
+	}
 	out := []GenericAssayData{}
 	for _, sm := range samples {
 		for _, p := range profiles {

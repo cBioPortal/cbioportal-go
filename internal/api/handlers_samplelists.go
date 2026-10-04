@@ -27,9 +27,17 @@ type SampleList struct {
 	SampleIDs    []string `json:"sampleIds"`
 }
 
-const sampleListSelect = "SELECT list_id AS sampleListId, any(category) AS category, any(name) AS name, " +
-	"any(description) AS description, study_id AS studyId, groupArray(sample_id) AS sampleIds " +
-	"FROM sample_list"
+// sampleListSelect selects the lists of sample_list (to be grouped by study
+// and list), each list's samples in SampleListMapper's order: by internal id
+// (the storage order of sample_list_list) where the database carries them.
+func (s *State) sampleListSelect() string {
+	ids := "groupArray(sample_id)"
+	if s.importOrdered() {
+		ids = "arrayMap(x -> x.2, arraySort(groupArray((internal_id, sample_id))))"
+	}
+	return "SELECT list_id AS sampleListId, any(category) AS category, any(name) AS name, " +
+		"any(description) AS description, study_id AS studyId, " + ids + " AS sampleIds FROM sample_list"
+}
 
 func toSampleList(r sampleListRow) SampleList {
 	return SampleList{
@@ -39,13 +47,19 @@ func toSampleList(r sampleListRow) SampleList {
 }
 
 // sampleListsQuery writes the sample lists matching where, whose placeholders
-// take their values from p.
-func (s *State) sampleListsQuery(w http.ResponseWriter, where string, p ch.Params) {
-	sql := sampleListSelect
+// take their values from p, by stable id or, with byInternalID, in the order
+// of their internal ids (SampleListMapper.getSampleLists has no ORDER BY)
+// where the database carries them.
+func (s *State) sampleListsQuery(w http.ResponseWriter, where string, p ch.Params, byInternalID bool) {
+	sql := s.sampleListSelect()
 	if where != "" {
 		sql += " WHERE " + where
 	}
-	sql += " GROUP BY study_id, list_id ORDER BY list_id"
+	order := "list_id"
+	if byInternalID && s.modelHasColumn("sample_list", "list_internal_id") {
+		order = "any(list_internal_id), list_id"
+	}
+	sql += " GROUP BY study_id, list_id ORDER BY " + order
 	rows, err := ch.QueryP[sampleListRow](s.CH, sql, p)
 	if err != nil {
 		fail(w, err)
@@ -59,13 +73,13 @@ func (s *State) sampleListsQuery(w http.ResponseWriter, where string, p ch.Param
 }
 
 func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
+	s.sampleListsQuery(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")}, false)
 }
 
 // sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
 func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	rows, err := ch.QueryP[sampleListRow](s.CH, sampleListSelect+" WHERE list_id = {list:String} GROUP BY study_id, list_id",
+	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect()+" WHERE list_id = {list:String} GROUP BY study_id, list_id",
 		ch.Params{"list": id})
 	if err != nil {
 		fail(w, err)
@@ -85,5 +99,5 @@ func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []SampleList{})
 		return
 	}
-	s.sampleListsQuery(w, "list_id IN {ids:Array(String)}", ch.Params{"ids": ids})
+	s.sampleListsQuery(w, "list_id IN {ids:Array(String)}", ch.Params{"ids": ids}, true)
 }

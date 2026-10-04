@@ -24,6 +24,10 @@
   tables with SQL, applying cbioportal-core's import rules (gene resolution,
   case lists, mutation filtering, computed clinical attributes). Every table the
   API reads exists for any mix of data types, empty when the data is absent.
+  Studies, patients, samples, sample lists and segments carry the internal
+  ids the importer would assign them (studies in ingest order, then the order
+  in which it reads a study's directory and files), since the Java backend
+  returns many lists in that order.
   `transform --from-prod` builds the same objects from a clone of cBioPortal's
   production ClickHouse database instead, mostly as views over its `*_derived`
   tables (see [Deployment](deployment.md#mirroring-production)).

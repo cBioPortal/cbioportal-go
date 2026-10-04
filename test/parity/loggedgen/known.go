@@ -31,7 +31,6 @@ var (
 	isAPIDocs        = pathIs(`^/api/(v2|v3)/api-docs(/|$)`)
 	isStudyList      = pathIs(`^/api/studies/?$`)
 	isStudiesFetch   = pathIs(`^/api/studies/fetch$`)
-	isClinicalData   = pathIs(`^/api/studies/[^/]+/(clinical-data|(patients|samples)/[^/]+/clinical-data)$`)
 	isSampleList     = pathIs(`^/api/samples/?$`)
 	isClinicalTable  = pathIs(`^/api/clinical-data-table/fetch$`)
 	isProfileSamples = pathIs(`^/api/molecular-profile-sample-counts/fetch$`)
@@ -70,12 +69,6 @@ var expectations = []expectation{
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isStudiesFetch(p) },
 		options: `known="www legacy studies/fetch reports allSampleCount 1"`,
-	},
-	{
-		match: func(m, p string, q url.Values, b string) bool {
-			return m == "GET" && isClinicalData(p) && q.Has("pageSize") && q.Get("sortBy") == ""
-		},
-		options: `known="Java pages clinical data in import (internal id) order, we in sample id order, so a page holds other samples"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {

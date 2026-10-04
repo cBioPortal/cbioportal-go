@@ -115,10 +115,9 @@ endpoint's volume, and marks the requests whose difference is expected
 custom-data ids exist only there), deployment-specific fields (`/api/info`
 versions, the API documentation's origin), www bugs (resource definitions of
 other studies in the study list, `allSampleCount` 1 in `studies/fetch`) and
-pages whose boundary falls in ties Java leaves unordered or in Java's import
-order (clinical data by internal id, samples of the same id in several
-studies, clinical-table sort values). `-annotate` marks them in an existing
-corpus. Compare it against api.cbioportal.org with an API serving a mirror
+pages whose boundary falls in ties Java leaves unordered (samples of the same
+id in several studies, clinical-table sort values). `-annotate` marks them in
+an existing corpus. Compare it against api.cbioportal.org with an API serving a mirror
 built by `transform --from-prod`:
 
 ```bash
@@ -163,11 +162,15 @@ comparison fixed; running the whole contract suite against the Java backend
 also shows where a test asserts something else than Java does (the session
 and configuration tests fail there by design: no session service).
 
-On 2026-10-03: 1,089 of 1,447 requests identical (798 before the fixes it
-prompted). Most of the rest are known classes: row order (~220: Java returns
-samples and entities in import order, i.e. internal id order, where we sort
-by id), the study `status` (the Java importer stores 1 = AVAILABLE,
-production and we report 0) and `groups` order (a Java HashSet's), and Java
+On 2026-10-04: 1,123 of 1,447 requests identical (798 before the fixes it
+prompted, 1,090 before the API followed the importer's internal id order).
+Most of the rest are known classes: row order (~180) that comes from
+ClickHouse rather than from the data — the output order of a `GROUP BY` or
+of a hash join's matches (study-view counts, gene panel data), ties of an
+unstable sort (mutations of a gene in a sample, attributes of a sample's
+clinical data) — or from a Java `HashMap`; the study `status` (the Java
+importer stores 1 = AVAILABLE, production and we report 0) and `groups`
+order (a Java HashSet's), and Java
 bugs on these fixtures — a numeric filter on a patient-level generic assay
 profile is ignored, `/clinical-events-meta/fetch` and `/survival-data/fetch`
 answer 500 (a MyBatis expression calls a missing
