@@ -66,6 +66,9 @@ type DataFile struct {
 	EntityMetaProperties []string
 	Layout               Layout
 	StageSlug            string
+	// ImportSeq is the meta file's position in directory order, the order in
+	// which cbioportal-core's importer takes files of the same kind.
+	ImportSeq int
 }
 
 // MatrixShape splits the file's header into identifier and sample columns;
@@ -154,6 +157,7 @@ func Scan(dir string) (*Study, error) {
 		}
 	}
 	sort.Strings(metas)
+	seq := DirOrder(dir)
 
 	s := &Study{Dir: dir, Meta: map[string]string{}}
 	for _, mp := range metas {
@@ -177,7 +181,7 @@ func Scan(dir string) (*Study, error) {
 			if _, err := os.Stat(dataPath); err == nil {
 				s.Files = append(s.Files, DataFile{
 					MetaPath: mp, DataPath: dataPath, AlterationType: "RESOURCE", Datatype: strings.ToUpper(rt),
-					Layout: Record, StageSlug: "resource_" + strings.ToLower(rt),
+					Layout: Record, StageSlug: "resource_" + strings.ToLower(rt), ImportSeq: seq[filepath.Base(mp)],
 				})
 			}
 			continue
@@ -208,12 +212,30 @@ func Scan(dir string) (*Study, error) {
 			EntityMetaProperties: splitList(meta.Get("generic_entity_meta_properties")),
 			Layout:               layout,
 			StageSlug:            slug,
+			ImportSeq:            seq[filepath.Base(mp)],
 		})
 	}
 	if s.StudyID == "" {
 		s.StudyID = filepath.Base(dir)
 	}
 	return s, nil
+}
+
+// DirOrder maps the entries of a directory to their position in directory
+// order, unsorted, as Python's os.listdir returns them: cbioportal-core's
+// importer takes a study's meta files and case lists in that order.
+func DirOrder(dir string) map[string]int {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	names, _ := f.Readdirnames(-1)
+	out := make(map[string]int, len(names))
+	for i, n := range names {
+		out[n] = i
+	}
+	return out
 }
 
 // splitList splits a comma-separated meta value, dropping empty items.

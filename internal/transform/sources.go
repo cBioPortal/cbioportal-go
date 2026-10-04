@@ -36,6 +36,7 @@ var stagingSources = map[string][]sourceColumn{
 	"genetic_profile": strCols("molecular_profile_id", "study_id", "profile_stable_id", "alteration_type", "datatype",
 		"name", "description", "show_in_analysis", "generic_assay_type"),
 	"sample_list":      strCols("study_id", "list_id", "category", "name", "description", "sample_id"),
+	"import_order":     append(strCols("study_id", "kind", "name"), sourceColumn{"seq", "UInt32"}),
 	"clinical_sample":  strCols("study_id", "sample_id", "patient_id"),
 	"clinical_patient": strCols("study_id", "patient_id"),
 	"gene_panel":       strCols("study_id", "gene_panel_id", "description", "hugo_symbol"),

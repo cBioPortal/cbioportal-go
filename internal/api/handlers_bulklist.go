@@ -184,7 +184,7 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 
 // allSampleLists — GET /api/sample-lists. Returns []SampleList across studies.
 func (s *State) allSampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, "", nil)
+	s.sampleListsQuery(w, "", nil, false)
 }
 
 // sampleListSampleIDs — GET /api/sample-lists/{sampleListId}/sample-ids.

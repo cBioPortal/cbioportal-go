@@ -206,8 +206,8 @@ func cancerTypeName(name, id string) string {
 // studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
 // keyword search over name / id / cancer type and sorting. The ID projection
 // yields an empty list and META an empty list with the total-count header;
-// pages are numbered from 1 (see pageList). A keyword search is ordered by
-// name unless sortBy is given.
+// pages are numbered from 1 (see pageList). Studies come in import order, a
+// keyword search ordered by name, unless sortBy is given.
 func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
@@ -221,9 +221,12 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		}
 		where = strings.Join(ands, " AND ")
 	}
-	order := "c.study_id"
+	// Unsorted, the mapper returns the studies in cancer_study's storage
+	// order (cancer_study_id, i.e. import order), which also orders ties.
+	importOrder := s.studyOrder("c.study_id")
+	order := importOrder
 	if strings.TrimSpace(q.Get("keyword")) != "" {
-		order = "c.name"
+		order = "c.name, " + importOrder
 	}
 	sortCols := map[string]string{"studyId": "c.study_id", "cancerTypeId": "c.cancer_type_id", "name": "c.name",
 		"description": "c.description", "publicStudy": "publicFlag", "pmid": "c.pmid", "citation": "c.citation",
@@ -233,6 +236,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(q.Get("direction"), "DESC") {
 			order += " DESC"
 		}
+		order += ", " + importOrder
 	}
 	projection := projectionParam(r)
 	if projection == "ID" {

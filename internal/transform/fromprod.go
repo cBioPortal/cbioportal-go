@@ -202,7 +202,8 @@ func (b *prodBuilder) steps() []prodObject {
 			"SELECT study_id, sample_id, patient_id, toUInt64(internal_id) AS internal_id FROM {t}.prod_sample"),
 		b.table("sample_list", "(study_id, list_id, sample_id)",
 			"SELECT cs.study_id AS study_id, sl.stable_id AS list_id, sl.category AS category, sl.name AS name, "+
-				"ifNull(sl.description, '') AS description, s.sample_id AS sample_id, toUInt64(s.internal_id) AS internal_id "+
+				"ifNull(sl.description, '') AS description, s.sample_id AS sample_id, toUInt64(s.internal_id) AS internal_id, "+
+				"toUInt64(sl.list_id) AS list_internal_id "+
 				"FROM {p}.sample_list sl INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = sl.cancer_study_id "+
 				"INNER JOIN {p}.sample_list_list sll ON sll.list_id = sl.list_id "+
 				"INNER JOIN {t}.prod_sample s ON s.internal_id = sll.sample_id"),
@@ -468,7 +469,7 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 	add(b.rawTable("timeline", "(study_id, patient_id)",
 		"SELECT p.study_id AS study_id, p.patient_id AS patient_id, e.event_type AS event_type, "+
 			"toString(e.start_date) AS start_date, ifNull(toString(e.stop_date), '') AS stop_date, "+
-			"ifNull(d.attrs, []) AS event_attributes "+
+			"ifNull(d.attrs, []) AS event_attributes, toUInt64(e.clinical_event_id) AS clinical_event_id "+
 			"FROM {p}.clinical_event e INNER JOIN {t}.prod_patient p ON p.internal_id = e.patient_id "+
 			"LEFT JOIN (SELECT clinical_event_id, groupArray((key, value)) AS attrs FROM "+
 			"(SELECT clinical_event_id, key, value FROM {p}.clinical_event_data WHERE value != '' ORDER BY clinical_event_id, _part, _part_offset) "+
