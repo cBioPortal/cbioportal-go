@@ -124,7 +124,7 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	args := newArgs()
-	sql := "SELECT study_id AS studyId, patient_id AS patientId FROM patient ORDER BY study_id, patient_id"
+	sql := "SELECT study_id AS studyId, patient_id AS patientId FROM patient ORDER BY " + s.patientOrder(r)
 	if q.Has("keyword") {
 		kw := q.Get("keyword")
 		var conds []string
@@ -188,13 +188,17 @@ func (s *State) allSampleLists(w http.ResponseWriter, r *http.Request) {
 }
 
 // sampleListSampleIDs — GET /api/sample-lists/{sampleListId}/sample-ids.
-// Returns []string of sample ids in the list.
+// Returns []string of sample ids in the list, in the list's order.
 func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		SampleID string `json:"sampleId"`
 	}
+	order := "sample_id"
+	if s.importOrdered() {
+		order = "internal_id, sample_id"
+	}
 	rows, err := ch.QueryP[row](s.CH,
-		"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String} ORDER BY sample_id",
+		"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String} ORDER BY "+order,
 		ch.Params{"list": r.PathValue("sampleListId")})
 	if err != nil {
 		fail(w, err)
@@ -212,7 +216,7 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 // allClinicalAttributes — GET /api/clinical-attributes. Returns
 // []ClinicalAttribute across all studies from clinical_attribute_meta.
 func (s *State) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY clinical_attribute_id, study_id")
+	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY clinical_attribute_id, "+s.studyOrder("study_id"))
 	if err != nil {
 		fail(w, err)
 		return
@@ -241,7 +245,8 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 			"g.chrom AS chromosome, toInt64OrZero(g.start) AS start, toInt64OrZero(g.end) AS end, "+
 			"toInt64OrZero(g.num_probes) AS numberOfProbes, toFloat64OrZero(g.segment_mean) AS segmentMean "+
 			"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id "+
-			"WHERE g.study_id = {study:String} AND g.sample_id = {sample:String}%s ORDER BY g.chrom, start", chrom), p)
+			"WHERE g.study_id = {study:String} AND g.sample_id = {sample:String}%s ORDER BY %s",
+		chrom, s.segOrder("g.chrom, start")), p)
 	if err != nil {
 		fail(w, err)
 		return

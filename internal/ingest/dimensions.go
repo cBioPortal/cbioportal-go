@@ -35,6 +35,14 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 			return err
 		}
 	}
+	// import_time orders the studies as cbioportal-core numbers them: by
+	// import, a re-imported study last.
+	if !existing["import_time"] {
+		if _, err := c.Execute(fmt.Sprintf(
+			"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS import_time DateTime64(6)", c.Database(), table)); err != nil {
+			return err
+		}
+	}
 	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
 
 	values := []string{s.StudyID}
@@ -45,7 +53,7 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 	for i, v := range values {
 		quoted[i] = "'" + ch.SQLLit(v) + "'"
 	}
-	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s) SELECT %s",
+	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s, import_time) SELECT %s, now64(6)",
 		c.Database(), table, backtick(cols), strings.Join(quoted, ", ")))
 	return err
 }

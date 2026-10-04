@@ -524,8 +524,10 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 // ---------- Multi-study numeric molecular data ----------
 
 // molecularDataMultipleStudyFetch is MolecularDataServiceImpl.getMolecularDataInMultipleMolecularProfiles:
-// sample-major (samples by stable id); for each sample every requested
-// profile of its study, then the genes in request order.
+// sample-major (requested samples by stable id, as fetchSamples with the ID
+// projection returns them, all samples of the profiles by internal id, as
+// getSamplesByInternalIds does); for each sample every requested profile of
+// its study, then the genes in request order.
 func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		EntrezGeneIDs              []int64  `json:"entrezGeneIds"`
@@ -594,16 +596,20 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 			sampleSet[sampleRef{study, d.SampleID}] = true
 		}
 	}
-	samples := make([]sampleRef, 0, len(sampleSet))
+	samples := make([]sampleKey, 0, len(sampleSet))
 	for sr := range sampleSet {
-		samples = append(samples, sr)
+		samples = append(samples, sampleKey(sr))
 	}
-	sort.Slice(samples, func(i, j int) bool {
-		if samples[i].sample != samples[j].sample {
-			return samples[i].sample < samples[j].sample
-		}
-		return samples[i].study < samples[j].study
-	})
+	if len(f.SampleMolecularIdentifiers) > 0 {
+		sort.Slice(samples, func(i, j int) bool {
+			if samples[i].sample != samples[j].sample {
+				return samples[i].sample < samples[j].sample
+			}
+			return samples[i].study < samples[j].study
+		})
+	} else {
+		s.sortSamplesByImport(samples)
+	}
 	var out []MolecularData
 	for _, sr := range samples {
 		for _, p := range profiles {

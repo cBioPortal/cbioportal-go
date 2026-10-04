@@ -52,15 +52,22 @@ func toClinicalData(rows []clinicalRow, patient bool) []ClinicalData {
 
 // clinicalSQL selects clinical rows (sample- or patient-level) matching where,
 // which may reference study_id, the entity id column (sample_id / patient_id)
-// and attr_id. Sample rows carry their patient id.
-func clinicalSQL(patient bool, where string) string {
+// and attr_id. Sample rows carry their patient id. Rows are in
+// ClinicalDataMapper's order where the database carries internal ids: by the
+// internal id of their sample or patient, then attribute (the storage order
+// of clinical_sample / clinical_patient).
+func clinicalSQL(patient, importOrder bool, where string) string {
+	order := " ORDER BY studyId, id, clinicalAttributeId"
+	if importOrder {
+		order = " ORDER BY c.internal_id, studyId, id, clinicalAttributeId"
+	}
 	if patient {
-		return "SELECT study_id AS studyId, patient_id AS id, patient_id AS patientId, attr_id AS clinicalAttributeId, " +
-			"attr_value AS value FROM clinical_patient WHERE " + where + " ORDER BY studyId, id, clinicalAttributeId"
+		return "SELECT c.study_id AS studyId, c.patient_id AS id, c.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
+			"c.attr_value AS value FROM clinical_patient c WHERE " + where + order
 	}
 	return "SELECT c.study_id AS studyId, c.sample_id AS id, s.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 		"c.attr_value AS value FROM (SELECT * FROM clinical_sample WHERE " + where + ") c " +
-		"LEFT JOIN sample s ON s.study_id = c.study_id AND s.sample_id = c.sample_id ORDER BY studyId, id, clinicalAttributeId"
+		"LEFT JOIN sample s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
 }
 
 // clinicalDataOut is a legacy ClinicalData record as Jackson writes it
@@ -101,7 +108,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	rows, err := queryA[clinicalRow](s.CH, clinicalSQL(patient, where), args)
+	rows, err := queryA[clinicalRow](s.CH, clinicalSQL(patient, s.importOrdered(), where), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -232,7 +239,7 @@ type ClinicalAttribute struct {
 }
 
 // clinicalAttributesFetch serves POST /api/clinical-attributes/fetch, ordered
-// by attribute id as in Java (which then orders by its internal study id).
+// as ClinicalAttributeMapper does: by attribute id, then internal study id.
 func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	readBody(r, &studyIDs)
@@ -243,7 +250,7 @@ func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) 
 	rows, err := ch.QueryP[clinAttrRow](s.CH,
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
-			"ORDER BY clinical_attribute_id, study_id",
+			"ORDER BY clinical_attribute_id, "+s.studyOrder("study_id"),
 		ch.Params{"studies": studyIDs})
 	if err != nil {
 		fail(w, err)

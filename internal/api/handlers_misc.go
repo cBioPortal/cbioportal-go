@@ -104,7 +104,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 	sql := "SELECT g.study_id, g.sample_id, ifNull(sp.patient_id, ''), g.chrom, toInt64OrZero(g.start) AS start, " +
 		"toInt64OrZero(g.end), toInt64OrZero(g.num_probes), toFloat64OrZero(g.segment_mean) " +
 		"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id " +
-		"WHERE " + where + " ORDER BY g.study_id, g.sample_id, g.chrom, start"
+		"WHERE " + where + " ORDER BY " + s.segOrder("g.study_id, g.sample_id, g.chrom, start")
 	body, err := s.CH.QueryStreamP(r.Context(), sql, "RowBinary", args.params(sql))
 	if err != nil {
 		fail(w, err)
@@ -117,6 +117,15 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		// truncated transfer rather than a well-formed partial list.
 		panic(http.ErrAbortHandler)
 	}
+}
+
+// segOrder is the ORDER BY of segment rows (seg, alias g): CopyNumberSegmentMapper's
+// seg_id (file order) where the database carries it, else fallback.
+func (s *State) segOrder(fallback string) string {
+	if s.modelHasColumn("seg", "seg_id") {
+		return "g.seg_id"
+	}
+	return fallback
 }
 
 // segSampleWhere restricts seg (alias g) to the identified samples, one

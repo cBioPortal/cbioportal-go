@@ -154,8 +154,10 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 
 // molecularData returns a profile's per-sample gene values, optionally limited
 // to genes and samples (explicit ids or a sample list), sample-major as
-// MolecularDataServiceImpl builds them (samples by stable id), and within a
-// sample in genetic entity id order, the primary key order of Java's
+// MolecularDataServiceImpl builds them: requested samples (ids or a list) by
+// stable id, as fetchSamples with the ID projection returns them, all of the
+// profile's samples by internal id (getSamplesByInternalIds); within a sample
+// in genetic entity id order, the primary key order of Java's
 // genetic_alteration rows. Records are limited to reference genes, as the
 // mapper joins the gene table.
 func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularData, error) {
@@ -171,10 +173,13 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 	}
 	args := newArgs()
 	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
+	sampleOrder := s.sampleOrder("s", "m.sample_id")
 	if len(f.SampleIDs) > 0 {
 		where += " AND sample_id IN " + args.strs(f.SampleIDs)
+		sampleOrder = "m.sample_id"
 	} else if f.SampleListID != "" {
 		where += " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
+		sampleOrder = "m.sample_id"
 	}
 	rows, err := queryA[molecularDataRow](s.CH, fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
@@ -182,8 +187,9 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 			"%s AS value FROM (%s) m "+
 			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
-			"WHERE m.entrez IS NOT NULL ORDER BY m.sample_id, rg.genetic_entity_id, m.entrez",
-		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs)), args)
+			"WHERE m.entrez IS NOT NULL ORDER BY %s, rg.genetic_entity_id, m.entrez",
+		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
+		sampleOrder), args)
 	if err != nil {
 		return nil, err
 	}

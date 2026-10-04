@@ -28,8 +28,9 @@ func strCols(names ...string) []sourceColumn {
 // every view and table the API queries is still built, with the same column
 // names and types as when the data is present.
 var stagingSources = map[string][]sourceColumn{
-	"cancer_study": strCols("study_id", "type_of_cancer", "name", "short_name", "description", "groups",
+	"cancer_study": append(strCols("study_id", "type_of_cancer", "name", "short_name", "description", "groups",
 		"pmid", "citation", "reference_genome", "add_global_case_list", "status"),
+		sourceColumn{"import_time", "DateTime64(6)"}),
 	"clinical_attribute_meta": append(strCols("study_id", "attr_id", "display_name", "description", "datatype", "priority"),
 		sourceColumn{"patient_attribute", "UInt8"}),
 	"genetic_profile": strCols("molecular_profile_id", "study_id", "profile_stable_id", "alteration_type", "datatype",
@@ -51,6 +52,12 @@ var stagingSources = map[string][]sourceColumn{
 	"cna_seg":                strCols("study_id", "id", "chrom", "loc_start", "loc_end", "num_mark", "seg_mean"),
 	"timeline": strCols("study_id", "patient_id", "sample_id", "event_type", "start_date", "stop_date",
 		"surgery", "status", "event_type_detailed", "treatment_type", "subtype", "agent"),
+}
+
+// positionedSources are the staging tables whose rows the transform reads in
+// file order (fileOrderSQL): their stand-ins carry the part name and offset.
+var positionedSources = map[string]bool{
+	"cancer_study": true, "clinical_sample": true, "clinical_patient": true, "cna_seg": true,
 }
 
 // client is the ClickHouse client the transform runs its SQL through: every
@@ -81,6 +88,9 @@ func newClient(c *ch.Client, rawDB string) *client {
 			for i, col := range cols {
 				sel[i] = fmt.Sprintf("CAST(defaultValueOfTypeName('%s') AS %s) AS `%s`", col.typ, col.typ, col.name)
 			}
+			if positionedSources[table] {
+				sel = append(sel, "'' AS _part", "toUInt64(0) AS _part_offset")
+			}
 			with = "(SELECT " + strings.Join(sel, ", ") + " WHERE 0)"
 		} else {
 			var add []string
@@ -91,6 +101,9 @@ func newClient(c *ch.Client, rawDB string) *client {
 			}
 			if len(add) == 0 {
 				continue
+			}
+			if positionedSources[table] {
+				add = append([]string{"_part", "_part_offset"}, add...)
 			}
 			with = fmt.Sprintf("(SELECT *, %s FROM `%s`.`%s`)", strings.Join(add, ", "), rawDB, table)
 		}

@@ -177,8 +177,8 @@ func (b *prodBuilder) steps() []prodObject {
 			"SELECT cs.study_id AS study_id, c.name AS name, '' AS short_name, c.description AS description, "+
 				"c.type_of_cancer_id AS cancer_type_id, ifNull(c.groups, '') AS groups, ifNull(c.pmid, '') AS pmid, "+
 				"ifNull(c.citation, '') AS citation, ifNull(rg.name, '') AS reference_genome, toUInt8(0) AS add_global_case_list, "+
-				"c.import_date AS import_date, toUInt8(c.public = 1) AS public_study, toInt64(ifNull(c.status, 1)) AS status "+
-				"FROM {p}.cancer_study c INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = c.cancer_study_id "+
+				"c.import_date AS import_date, toUInt8(c.public = 1) AS public_study, toInt64(ifNull(c.status, 1)) AS status, "+
+				"toUInt64(c.cancer_study_id) AS internal_id FROM {p}.cancer_study c INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = c.cancer_study_id "+
 				"LEFT JOIN {p}.reference_genome rg ON rg.reference_genome_id = c.reference_genome_id"),
 		// Every cancer type is in the reference type_of_cancer.
 		b.view("type_of_cancer",
@@ -197,11 +197,12 @@ func (b *prodBuilder) steps() []prodObject {
 				"p.profile_stable_id AS profile_stable_id, ifNull(gp.generic_assay_type, '') AS generic_assay_type, "+
 				"toFloat64OrNull(toString(toFloat32(gp.pivot_threshold))) AS pivot_threshold, gp.sort_order AS sort_order, toUInt8(p.patient_level) AS patient_level "+
 				"FROM {p}.genetic_profile gp INNER JOIN {t}.prod_profile p ON p.genetic_profile_id = gp.genetic_profile_id"),
-		b.table("patient", "(study_id, patient_id)", "SELECT study_id, patient_id FROM {t}.prod_patient"),
-		b.table("sample", "(study_id, sample_id)", "SELECT study_id, sample_id, patient_id FROM {t}.prod_sample"),
+		b.table("patient", "(study_id, patient_id)", "SELECT study_id, patient_id, toUInt64(internal_id) AS internal_id FROM {t}.prod_patient"),
+		b.table("sample", "(study_id, sample_id)",
+			"SELECT study_id, sample_id, patient_id, toUInt64(internal_id) AS internal_id FROM {t}.prod_sample"),
 		b.table("sample_list", "(study_id, list_id, sample_id)",
 			"SELECT cs.study_id AS study_id, sl.stable_id AS list_id, sl.category AS category, sl.name AS name, "+
-				"ifNull(sl.description, '') AS description, s.sample_id AS sample_id "+
+				"ifNull(sl.description, '') AS description, s.sample_id AS sample_id, toUInt64(s.internal_id) AS internal_id "+
 				"FROM {p}.sample_list sl INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = sl.cancer_study_id "+
 				"INNER JOIN {p}.sample_list_list sll ON sll.list_id = sl.list_id "+
 				"INNER JOIN {t}.prod_sample s ON s.internal_id = sll.sample_id"),
@@ -216,11 +217,11 @@ func (b *prodBuilder) steps() []prodObject {
 	// Clinical data in long form (attributes with a stored value).
 	add(
 		b.table("clinical_sample", "(study_id, sample_id, attr_id)",
-			"SELECT s.study_id AS study_id, s.sample_id AS sample_id, c.attr_id AS attr_id, c.attr_value AS attr_value "+
-				"FROM {p}.clinical_sample c FINAL INNER JOIN {t}.prod_sample s ON s.internal_id = c.internal_id"),
+			"SELECT s.study_id AS study_id, s.sample_id AS sample_id, c.attr_id AS attr_id, c.attr_value AS attr_value, "+
+				"toUInt64(c.internal_id) AS internal_id FROM {p}.clinical_sample c FINAL INNER JOIN {t}.prod_sample s ON s.internal_id = c.internal_id"),
 		b.table("clinical_patient", "(study_id, patient_id, attr_id)",
-			"SELECT p.study_id AS study_id, p.patient_id AS patient_id, c.attr_id AS attr_id, c.attr_value AS attr_value "+
-				"FROM {p}.clinical_patient c FINAL INNER JOIN {t}.prod_patient p ON p.internal_id = c.internal_id"),
+			"SELECT p.study_id AS study_id, p.patient_id AS patient_id, c.attr_id AS attr_id, c.attr_value AS attr_value, "+
+				"toUInt64(c.internal_id) AS internal_id FROM {p}.clinical_patient c FINAL INNER JOIN {t}.prod_patient p ON p.internal_id = c.internal_id"),
 	)
 
 	// Profiled samples with their gene panel (NULL: whole exome / genome).
@@ -339,8 +340,8 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 
 	add(b.table("seg", "(study_id, sample_id)",
 		"SELECT s.study_id AS study_id, s.sample_id AS sample_id, c.chr AS chrom, toString(c.start) AS start, "+
-			"toString(c.end) AS end, toString(c.num_probes) AS num_probes, toString(c.segment_mean) AS segment_mean "+
-			"FROM {p}.copy_number_seg c INNER JOIN {t}.prod_sample s ON s.internal_id = c.sample_id"))
+			"toString(c.end) AS end, toString(c.num_probes) AS num_probes, toString(c.segment_mean) AS segment_mean, "+
+			"toUInt64(c.seg_id) AS seg_id FROM {p}.copy_number_seg c INNER JOIN {t}.prod_sample s ON s.internal_id = c.sample_id"))
 
 	// The gene keys of the matrix views: each gene of the reference under
 	// its own symbol and Entrez id, for every gene-keyed matrix profile.

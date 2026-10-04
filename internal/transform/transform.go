@@ -77,10 +77,14 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	}
 
 	// status is cbioportal-core's DaoCancerStudy.Status ordinal: 1 (AVAILABLE)
-	// once a study is loaded, unless staging marks it otherwise.
+	// once a study is loaded, unless staging marks it otherwise; internal_id
+	// numbers the studies in import order.
 	if err := make("cancer_study", fmt.Sprintf(
-		"SELECT study_id, name, short_name, description, type_of_cancer AS cancer_type_id, groups, pmid, citation, reference_genome, add_global_case_list = 'true' AS add_global_case_list, "+
-			"toInt64OrDefault(status, toInt64(1)) AS status FROM `%s`.cancer_study", rawDB)); err != nil {
+		"SELECT c.study_id AS study_id, c.name AS name, c.short_name AS short_name, c.description AS description, "+
+			"c.type_of_cancer AS cancer_type_id, c.groups AS groups, c.pmid AS pmid, c.citation AS citation, "+
+			"c.reference_genome AS reference_genome, c.add_global_case_list = 'true' AS add_global_case_list, "+
+			"toInt64OrDefault(c.status, toInt64(1)) AS status, r.study_rank AS internal_id "+
+			"FROM `%s`.cancer_study c LEFT JOIN (%s) r ON r.study_id = c.study_id", rawDB, studyRankSQL(rawDB))); err != nil {
 		return nil, err
 	}
 	// type_of_cancer holds the study-supplied cancer types (cbioportal-core
@@ -97,16 +101,29 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	if err := make("type_of_cancer", tocSQL); err != nil {
 		return nil, err
 	}
+	// Samples and patients carry the internal ids cbioportal-core assigns
+	// them; the clinical tables and derived tables built below read them.
+	for _, t := range []struct{ name, key, sql string }{
+		{"sample", "(study_id, sample_id)", sampleSQL(rawDB)},
+		{"patient", "(study_id, patient_id)", patientSQL(rawDB)},
+	} {
+		if engineOf(t.name) == "View" {
+			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, t.name)); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := c.Execute(fmt.Sprintf(
+			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s AS %s", targetDB, t.name, t.key, t.sql)); err != nil {
+			return nil, fmt.Errorf("creating table %s: %w", t.name, err)
+		}
+		created = append(created, t.name)
+	}
 	for _, v := range []view{
 		{"clinical_attribute_meta", fmt.Sprintf(
 			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)},
 		{"molecular_profile", molecularProfileSQL(c, rawDB)},
 		{"sample_list", sampleListSQL(c, rawDB)},
 		{"gene_panel", genePanelSQL(rawDB, refDB, hasRef)},
-		{"patient", fmt.Sprintf(
-			"SELECT DISTINCT study_id, patient_id FROM `%s`.clinical_patient WHERE patient_id != ''", rawDB)},
-		{"sample", fmt.Sprintf(
-			"SELECT DISTINCT study_id, sample_id, patient_id FROM `%s`.clinical_sample WHERE sample_id != ''", rawDB)},
 		{"mutation", mutationSQL(c, rawDB, targetDB)},
 		{"structural_variant", structuralVariantSQL(c, rawDB, targetDB)},
 	} {
@@ -120,8 +137,14 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	if err := make("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong || !cnaMatrix)); err != nil {
 		return nil, err
 	}
+	// seg_id numbers the segments as the importer stores them: in file order,
+	// study by study.
 	if err := make("seg", fmt.Sprintf(
-		"SELECT study_id, id AS sample_id, chrom, loc_start AS start, loc_end AS end, num_mark AS num_probes, seg_mean AS segment_mean FROM `%s`.cna_seg", rawDB)); err != nil {
+		"SELECT g.study_id AS study_id, g.id AS sample_id, g.chrom AS chrom, g.loc_start AS start, g.loc_end AS end, "+
+			"g.num_mark AS num_probes, g.seg_mean AS segment_mean, "+
+			"toUInt64(row_number() OVER (ORDER BY r.study_rank, g.pos)) AS seg_id "+
+			"FROM (SELECT *, %s AS pos FROM `%s`.cna_seg) g LEFT JOIN (%s) r ON r.study_id = g.study_id",
+		fileOrderSQL, rawDB, studyRankSQL(rawDB))); err != nil {
 		return nil, err
 	}
 	if err := clinicalLong(c, rawDB, targetDB, "clinical_sample", "sample_id"); err != nil {
@@ -187,7 +210,7 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 		if engineOf(m.name) != "View" {
 			continue
 		}
-		if err := snapshotView(c, targetDB, m.name, m.key); err != nil {
+		if err := snapshotView(c, targetDB, m.name, m.key, m.idFrom); err != nil {
 			return nil, err
 		}
 	}
@@ -202,21 +225,32 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	return counts, nil
 }
 
-// snapshotted lists the views Apply turns into tables, with their sort keys.
-var snapshotted = []struct{ name, key string }{
-	{"clinical_attribute_meta", "(study_id, clinical_attribute_id)"},
-	{"clinical_sample", "(study_id, sample_id, attr_id)"},
-	{"clinical_patient", "(study_id, patient_id, attr_id)"},
-	{"mutation", "(study_id, molecular_profile_id, sample_id)"},
-	{"cna", "(study_id, profile_stable_id, sample_id)"},
-	{"structural_variant", "(study_id, profile_stable_id, sample_id)"},
+// snapshotted lists the views Apply turns into tables, with their sort keys
+// and, for rows of a sample or patient, the table and id column their
+// internal id (that of the sample or patient) comes from.
+var snapshotted = []struct{ name, key, idFrom string }{
+	{"clinical_attribute_meta", "(study_id, clinical_attribute_id)", ""},
+	{"clinical_sample", "(study_id, sample_id, attr_id)", "sample.sample_id"},
+	{"clinical_patient", "(study_id, patient_id, attr_id)", "patient.patient_id"},
+	{"sample_list", "(study_id, list_id, sample_id)", "sample.sample_id"},
+	{"mutation", "(study_id, molecular_profile_id, sample_id)", ""},
+	{"cna", "(study_id, profile_stable_id, sample_id)", ""},
+	{"structural_variant", "(study_id, profile_stable_id, sample_id)", ""},
+	{"seg", "(study_id, sample_id)", ""},
 }
 
-// snapshotView replaces a view with a MergeTree table holding its rows.
-func snapshotView(c *client, db, name, orderBy string) error {
+// snapshotView replaces a view with a MergeTree table holding its rows, with
+// the internal_id of idFrom ("table.id_column") added when set.
+func snapshotView(c *client, db, name, orderBy, idFrom string) error {
 	tmp := "__snapshot_" + name
+	src := fmt.Sprintf("SELECT * FROM `%s`.`%s`", db, name)
+	if table, col, ok := strings.Cut(idFrom, "."); ok {
+		src = fmt.Sprintf("SELECT v.*, i.internal_id AS internal_id FROM `%[1]s`.`%[2]s` v "+
+			"LEFT JOIN (SELECT study_id, %[4]s, min(internal_id) AS internal_id FROM `%[1]s`.`%[3]s` GROUP BY study_id, %[4]s) i "+
+			"ON i.study_id = v.study_id AND i.%[4]s = v.%[4]s", db, name, table, col)
+	}
 	stmts := []string{
-		fmt.Sprintf("CREATE OR REPLACE TABLE `%[1]s`.`%[2]s` ENGINE = MergeTree ORDER BY %[3]s AS SELECT * FROM `%[1]s`.`%[4]s`", db, tmp, orderBy, name),
+		fmt.Sprintf("CREATE OR REPLACE TABLE `%[1]s`.`%[2]s` ENGINE = MergeTree ORDER BY %[3]s AS %[4]s", db, tmp, orderBy, src),
 		fmt.Sprintf("DROP VIEW `%s`.`%s`", db, name),
 		fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, tmp, name),
 	}
