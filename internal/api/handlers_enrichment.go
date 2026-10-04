@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/inodb/cbioportal-go/internal/stats"
+	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
 
 type caseIdentifier struct {

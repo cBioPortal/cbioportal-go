@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/stats"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
 
 // routeStudyView3 registers study-view endpoints for clinical-data enrichments,

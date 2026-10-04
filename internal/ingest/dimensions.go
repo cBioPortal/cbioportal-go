@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/parser"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
 var studyMetaFields = []string{

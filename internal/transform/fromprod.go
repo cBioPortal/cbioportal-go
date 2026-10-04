@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // ApplyFromProd builds every object the API reads from a clone of

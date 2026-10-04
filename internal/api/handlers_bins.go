@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/inodb/cbioportal-go/internal/databin"
+	"github.com/cbioportal/cbioportal-go/internal/databin"
 )
 
 // Study-view histogram endpoints. Values are gathered twice: over the study /

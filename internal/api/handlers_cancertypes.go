@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeCancerTypes registers the single cancer type lookup; the list endpoint

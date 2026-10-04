@@ -17,10 +17,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/inodb/cbioportal-go/internal/api"
-	"github.com/inodb/cbioportal-go/internal/buildinfo"
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/config"
+	"github.com/cbioportal/cbioportal-go/internal/api"
+	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
 const name = "cbioportal-api"

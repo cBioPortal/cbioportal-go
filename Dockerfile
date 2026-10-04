@@ -34,9 +34,9 @@ COPY internal/ internal/
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags "-s -w -X 'github.com/inodb/cbioportal-go/internal/buildinfo.stamp=${VERSION}'" -o /out/cbioportal-api ./cmd/cbioportal-api \
+    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}'" -o /out/cbioportal-api ./cmd/cbioportal-api \
  && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags "-s -w -X 'github.com/inodb/cbioportal-go/internal/buildinfo.stamp=${VERSION}'" -o /out/cbioportal-import ./cmd/cbioportal-import
+    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}'" -o /out/cbioportal-import ./cmd/cbioportal-import
 
 FROM alpine:${ALPINE_VERSION}
 RUN apk add --no-cache bash git git-lfs curl ca-certificates \

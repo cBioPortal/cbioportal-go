@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeStudyTags registers the study-tags endpoints (StudyController), served

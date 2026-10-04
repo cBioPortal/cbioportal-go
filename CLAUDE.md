@@ -60,7 +60,7 @@ Statistics stay hand-ported: exact Java parity requires it. CI runs
 
 ## GitHub
 
-Private repo: <https://github.com/inodb/cbioportal-go> (`origin`, default
+Repo: <https://github.com/cBioPortal/cbioportal-go> (`origin`, default
 branch `main`). Commit directly to `main`.
 
 ## Dev environment

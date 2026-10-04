@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeSignificance registers the per-study GISTIC and MutSig endpoints

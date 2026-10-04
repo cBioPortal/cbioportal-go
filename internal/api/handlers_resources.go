@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeResources registers the resource-definition and resource-data

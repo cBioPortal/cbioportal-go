@@ -20,8 +20,8 @@ import (
 	"strings"
 	"sync"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/config"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
 type State struct {

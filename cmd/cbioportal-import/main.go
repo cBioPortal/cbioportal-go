@@ -12,7 +12,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/inodb/cbioportal-go/internal/buildinfo"
+	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
 )
 
 const name = "cbioportal-import"

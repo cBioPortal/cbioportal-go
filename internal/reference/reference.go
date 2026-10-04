@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // LoadReference loads gene, gene_alias, type_of_cancer, reference_genome and

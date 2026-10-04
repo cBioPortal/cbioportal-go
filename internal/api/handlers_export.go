@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/databin"
-	"github.com/inodb/cbioportal-go/internal/transform"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/databin"
+	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
 
 // Study export: GET /export/study/{studyId}.zip, cBioPortal's study file

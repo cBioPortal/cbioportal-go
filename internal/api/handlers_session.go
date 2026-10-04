@@ -21,7 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // Session service: an embedded replacement for the external cBioPortal

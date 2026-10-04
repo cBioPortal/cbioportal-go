@@ -1,6 +1,6 @@
 # cbioportal-go
 
-[![CI](https://github.com/inodb/cbioportal-go/actions/workflows/ci.yml/badge.svg)](https://github.com/inodb/cbioportal-go/actions/workflows/ci.yml)
+[![CI](https://github.com/cBioPortal/cbioportal-go/actions/workflows/ci.yml/badge.svg)](https://github.com/cBioPortal/cbioportal-go/actions/workflows/ci.yml)
 
 > [!WARNING]
 > **Experimental.** This is an experiment to reimplement
@@ -83,12 +83,17 @@ weekly.
   carry over from existing portals.
 - **Importer coverage.** Tested on a handful of studies; needs validation
   against all of datahub and cbioportal-core's validator rules.
-- **API parity.** See [API coverage](docs/api-coverage.md): data-access
-  tokens, login pages, the URL shortener and MatchMiner remain; the API still
-  reads the staging database for a few per-gene matrices.
-- **Performance.** Whole-profile reads of large studies (expression
-  enrichments, co-expression on TCGA PanCancer), RowBinary decoding for large
-  responses, projections applied in the handlers instead of a middleware.
+- **API parity.** 167 of the Java backend's 188 endpoints are served (see
+  [API coverage](docs/api-coverage.md)); data access tokens, MatchMiner, the
+  URL shortener and MSK-only endpoints remain. On real production traffic
+  every response matches www or has a documented reason
+  ([Benchmark](docs/benchmark.md)); the main remaining difference is the
+  order of tied rows, which follows the Java importer's insertion order (an
+  import-order column in both transforms would close it).
+- **Performance.** The embeddings tab and the gnomAD tooltip are slower than
+  on www; whole-profile reads of large studies (expression enrichments,
+  co-expression on TCGA PanCancer) take seconds; ClickHouse cost per request
+  without Redis is to be measured on real traffic.
 
 ## Documentation
 

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // sqlArgs collects request values as ClickHouse query parameters while a

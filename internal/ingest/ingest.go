@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
-	"github.com/inodb/cbioportal-go/internal/parser"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
 var provColumns = [5]string{"study_id", "source_file", "alteration_type", "datatype", "profile_stable_id"}

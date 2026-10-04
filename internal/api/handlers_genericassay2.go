@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeGenericAssay2 registers the generic-assay study-view aggregation

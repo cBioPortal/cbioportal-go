@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeMisc registers the view-backed endpoints implemented in this file.

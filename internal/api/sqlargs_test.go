@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 func TestSQLArgs(t *testing.T) {

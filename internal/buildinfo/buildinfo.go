@@ -10,7 +10,7 @@ import (
 
 // stamp, when set at link time, is the version for builds without VCS
 // information, such as container images built from a source tree without
-// .git: go build -ldflags "-X github.com/inodb/cbioportal-go/internal/buildinfo.stamp=6b38ed6 (2026-10-02T09:15:00Z)".
+// .git: go build -ldflags "-X github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=6b38ed6 (2026-10-02T09:15:00Z)".
 var stamp string
 
 // Version describes the running binary, e.g. "6b38ed6+dirty (2026-10-02T09:15:00Z)"

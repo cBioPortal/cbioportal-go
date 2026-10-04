@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeBulkList registers the bulk GET list endpoints, single-resource GETs

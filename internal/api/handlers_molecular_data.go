@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // alterationTypeTable maps a molecular alteration type to its unpivoted matrix

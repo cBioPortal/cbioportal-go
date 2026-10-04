@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // routeStatus registers the server-status, static-data timestamp, cache

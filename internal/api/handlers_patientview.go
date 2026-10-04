@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // samplesOfPatient — GET /api/studies/{studyId}/patients/{patientId}/samples

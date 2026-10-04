@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // Namespace attributes are the custom MAF / SV / discrete-CNA columns a study

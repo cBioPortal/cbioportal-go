@@ -7,7 +7,7 @@ import (
 )
 
 func info(version string, settings ...string) *debug.BuildInfo {
-	bi := &debug.BuildInfo{Main: debug.Module{Path: "github.com/inodb/cbioportal-go", Version: version}}
+	bi := &debug.BuildInfo{Main: debug.Module{Path: "github.com/cbioportal/cbioportal-go", Version: version}}
 	for i := 0; i+1 < len(settings); i += 2 {
 		bi.Settings = append(bi.Settings, debug.BuildSetting{Key: settings[i], Value: settings[i+1]})
 	}

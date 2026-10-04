@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // studyViewFilter mirrors cBioPortal's StudyViewFilter. The sample set it

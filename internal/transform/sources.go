@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	ch "github.com/inodb/cbioportal-go/internal/clickhouse"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // sourceColumn is a staging column the transform SQL reads unconditionally.
