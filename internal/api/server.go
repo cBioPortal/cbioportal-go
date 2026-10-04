@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -46,6 +47,8 @@ type State struct {
 	// authorization; nil login serves every study anonymously.
 	login  *oauth2Login
 	access accessPolicy
+	// dat serves and verifies data access tokens (dat.method=oauth2).
+	dat *datProvider
 }
 
 // ConfigureAuth sets up the login and study authorization the portal
@@ -53,12 +56,32 @@ type State struct {
 func (s *State) ConfigureAuth() error {
 	props := config.EffectiveProperties(s.Props, s.PropsReplaceDefaults)
 	cfg, err := loadOAuth2Config(props)
-	if err != nil || cfg == nil {
+	if err != nil {
 		return err
+	}
+	datCfg, err := loadDATConfig(props)
+	if err != nil {
+		return err
+	}
+	if datCfg != nil {
+		if cfg == nil {
+			return errors.New("dat.method=oauth2 needs authenticate=oauth2")
+		}
+		if loadAuthConfig().Enabled {
+			return errors.New("dat.method=oauth2 verifies bearer tokens itself; unset AUTH_ENABLED")
+		}
+	}
+	if cfg == nil {
+		return nil
 	}
 	s.login = newOAuth2Login(cfg)
 	s.access = newAccessPolicy(props)
 	log.Printf("authenticate=oauth2: login through %s (client %s)", cfg.IssuerURI, cfg.ClientID)
+	if datCfg != nil {
+		s.dat = newDATProvider(datCfg)
+		s.login.dat = s.dat
+		log.Printf("dat.method=oauth2: data access tokens from %s (client %s)", datCfg.Issuer, datCfg.ClientID)
+	}
 	return nil
 }
 
@@ -73,9 +96,9 @@ func NewState(c *ch.Client) *State {
 	return s
 }
 
-// NewRouter builds the API handler with CORS, the OAuth2 login and study
-// authorization (authenticate=oauth2), optional bearer-token auth (disabled
-// by default), and a body-draining catch-all.
+// NewRouter builds the API handler with CORS, the OAuth2 login, data access
+// tokens and study authorization (authenticate=oauth2), optional HS256
+// bearer-token auth (disabled by default), and a body-draining catch-all.
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)

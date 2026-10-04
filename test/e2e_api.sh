@@ -6,6 +6,7 @@
 #
 #   test/e2e_api.sh             # foreground, on :18090
 #   KEYCLOAK=false test/e2e_api.sh   # anonymous, AUTH_DEFAULT_USER=testuser
+#   DAT=true test/e2e_api.sh    # also data access tokens (dat.method=oauth2)
 #
 # Anonymous mode is the contract tests' backend: it serves study_hg38, which
 # the e2e portal properties lock (study_availability.enabled), since the
@@ -31,6 +32,20 @@ if [ "${KEYCLOAK:-true}" != false ]; then
     --spring.security.oauth2.client.provider.keycloak.issuer-uri=http://localhost:$KC_PORT/auth/realms/cbio
     --spring.security.oauth2.client.provider.keycloak.user-name-attribute=email
   )
+  if [ "${DAT:-false}" = true ]; then
+    realm=http://localhost:$KC_PORT/auth/realms/cbio
+    oidc=$realm/protocol/openid-connect
+    auth+=(
+      --dat.method=oauth2
+      --dat.oauth2.clientId=cbioportal_oauth2
+      --dat.oauth2.clientSecret=client_secret
+      --dat.oauth2.issuer=$realm
+      --dat.oauth2.accessTokenUri=$oidc/token
+      --dat.oauth2.userAuthorizationUri=$oidc/auth
+      --dat.oauth2.jwkUrl=$oidc/certs
+      --dat.oauth2.redirectUri=http://localhost:$PORT/api/data-access-token/oauth2
+    )
+  fi
 else
   export AUTH_DEFAULT_USER=testuser
   auth=(--study_availability.enabled=false)

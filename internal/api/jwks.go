@@ -3,7 +3,8 @@ package api
 import (
 	"crypto"
 	"crypto/rsa"
-	"crypto/sha256"
+	_ "crypto/sha256"
+	_ "crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,9 +16,9 @@ import (
 	"time"
 )
 
-// jwks verifies RS256-signed JWTs against an OpenID provider's JSON Web Key
-// Set, fetched on first use and again when a token names an unknown key id
-// (the provider rotated its keys).
+// jwks verifies RSA-signed JWTs (RS256, RS384, RS512) against an OpenID
+// provider's JSON Web Key Set, fetched on first use and again when a token
+// names an unknown key id (the provider rotated its keys).
 type jwks struct {
 	url    string
 	client *http.Client
@@ -45,7 +46,15 @@ func (k *jwks) verify(token string) (map[string]any, error) {
 	if err := decodeSegment(parts[0], &header); err != nil {
 		return nil, fmt.Errorf("token header: %w", err)
 	}
-	if header.Alg != "RS256" {
+	var hash crypto.Hash
+	switch header.Alg {
+	case "RS256":
+		hash = crypto.SHA256
+	case "RS384":
+		hash = crypto.SHA384
+	case "RS512":
+		hash = crypto.SHA512
+	default:
 		return nil, fmt.Errorf("unsupported token algorithm %q", header.Alg)
 	}
 	key, err := k.key(header.Kid)
@@ -56,8 +65,9 @@ func (k *jwks) verify(token string) (map[string]any, error) {
 	if err != nil {
 		return nil, errors.New("token signature encoding")
 	}
-	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, sum[:], sig); err != nil {
+	h := hash.New()
+	h.Write([]byte(parts[0] + "." + parts[1]))
+	if err := rsa.VerifyPKCS1v15(key, hash, h.Sum(nil), sig); err != nil {
 		return nil, errors.New("token signature mismatch")
 	}
 	var claims map[string]any

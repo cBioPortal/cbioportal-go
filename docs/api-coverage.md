@@ -2,7 +2,7 @@
 
 Endpoints of the Java backend ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) `master`, controllers under `org.cbioportal.legacy.web` and `org.cbioportal.application`) and their status here. Generated from the controllers' request mappings; `params` lists the projection, paging and other request parameters Java accepts.
 
-**188 endpoints** (method + path, aliases below not counted): 167 implemented, 6 stubs, 15 missing; 154 covered by tests (`Tested`).
+**188 endpoints** (method + path, aliases below not counted): 174 implemented, 0 stubs, 14 missing; 158 covered by tests (`Tested`).
 
 The 33 `/api/legacy/…` and `/api/not-ready-yet/…` aliases (legacy MyBatis and unfinished column-store controllers) are served by the `/api/…` handler of the same name.
 
@@ -208,13 +208,13 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/api/data-access-token` |  |  | stub |  | token download needs user auth + token store |
-| GET | `/api/data-access-token/oauth2` |  |  | missing |  | OAuth2 token exchange (Keycloak offline tokens) |
-| POST | `/api/data-access-tokens` |  |  | stub | yes | returns {} |
-| GET | `/api/data-access-tokens` |  |  | stub | yes | returns [] |
-| GET | `/api/data-access-tokens/{token}` |  |  | stub |  | returns {} |
-| DELETE | `/api/data-access-tokens` |  |  | stub | yes | no-op |
-| DELETE | `/api/data-access-tokens/{token}` |  |  | stub |  | no-op |
+| GET | `/api/data-access-token` |  |  | implemented | yes | with `dat.method=oauth2`: redirects to the provider for an offline token (docs/configuration.md); otherwise a placeholder |
+| GET | `/api/data-access-token/oauth2` |  | code | implemented | yes | with `dat.method=oauth2`: downloads the offline token |
+| POST | `/api/data-access-tokens` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise returns {} |
+| GET | `/api/data-access-tokens` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise returns [] |
+| GET | `/api/data-access-tokens/{token}` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise returns {} |
+| DELETE | `/api/data-access-tokens` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise a no-op |
+| DELETE | `/api/data-access-tokens/{token}` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise a no-op |
 | POST | `/login` |  |  | implemented |  | with `authenticate=oauth2`: redirects to the provider (see docs/configuration.md) |
 | GET | `/login` |  |  | implemented |  | with `authenticate=oauth2`: redirects to the provider, or explains a refused login (`?logout_failure`) |
 | GET | `/restful_login` |  |  | missing |  | SAML/basic login page (SAML not supported) |
@@ -261,9 +261,9 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 
 ## Not ported, and why
 
-- **Data-access tokens** (`/api/data-access-token*`): need user authentication
-  and a token store; the endpoints answer placeholders.
-- **Login pages, OAuth2 token download, MSK entity translation, MatchMiner**:
+- **Data-access tokens other than `dat.method=oauth2`** (`uuid`, `jwt`): need
+  a token store; without `dat.method=oauth2` the endpoints answer placeholders.
+- **SAML login pages, MSK entity translation, MatchMiner**:
   depend on Spring Security / deployment-specific services.
 - **`/api/getexternalpage.json`**: fetches any URL for any caller; left out on
   purpose.

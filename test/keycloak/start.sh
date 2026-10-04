@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Starts the Keycloak the e2e suite logs in through, as upstream CI does:
 # Keycloak 16.1.1 (on :8084; CI uses :8081) under /auth, realm "cbio", user testuser /
-# P@ssword1, with one "cbioportal" client role per study in STUDIES.
+# P@ssword1, with one "cbioportal" client role per study in STUDIES; datuser /
+# P@ssword1 has only the first (test/dat_keycloak_test.go).
 #
 #   test/keycloak/start.sh            # (re)start with a fresh realm
 #   test/keycloak/start.sh stop
@@ -27,7 +28,8 @@ for _ in $(seq 1 30); do docker inspect "$NAME" >/dev/null 2>&1 || break; sleep 
 realm="$(cd "$(dirname "$0")" && pwd)/realm.generated.json"
 jq --arg s "$STUDIES" '($s | split(" ") | map(select(. != ""))) as $ids
   | .roles.client.cbioportal = ($ids | map({name: .}))
-  | .groups |= map(if .name == "PUBLIC_STUDIES" then .clientRoles.cbioportal = $ids else . end)' \
+  | .groups |= map(if .name == "PUBLIC_STUDIES" then .clientRoles.cbioportal = $ids else . end)
+  | .users |= map(if .username == "datuser" then .clientRoles.cbioportal = $ids[:1] else . end)' \
   "$(dirname "$0")/realm.json" >"$realm"
 chmod 644 "$realm"
 

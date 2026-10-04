@@ -15,12 +15,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 // fakeProvider is a minimal OpenID provider: discovery, JWKS, an authorize
-// endpoint that logs the user in at once, token and userinfo endpoints.
+// endpoint that logs the user in at once, token and userinfo endpoints. The
+// token endpoint also issues an offline (refresh) token per code, which
+// refresh_token grants trade for access tokens.
 type fakeProvider struct {
 	*httptest.Server
 	key      *rsa.PrivateKey
@@ -28,6 +31,12 @@ type fakeProvider struct {
 	codes    map[string]string // code -> nonce
 	tamper   func(claims map[string]any)
 	tokenReq url.Values
+
+	mu           sync.Mutex
+	offline      map[string]bool // issued offline tokens
+	refreshes    int             // refresh_token grants answered
+	accessTTL    time.Duration   // lifetime of refreshed access tokens
+	tamperAccess func(claims map[string]any)
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -35,7 +44,7 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &fakeProvider{key: key, codes: map[string]string{}}
+	p := &fakeProvider{key: key, codes: map[string]string{}, offline: map[string]bool{}, accessTTL: 5 * time.Minute}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/realms/cbio/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := p.URL + "/realms/cbio"
@@ -54,13 +63,22 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	mux.HandleFunc("/realms/cbio/auth", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		code := randomToken()
+		p.mu.Lock()
 		p.codes[code] = q.Get("nonce")
+		p.mu.Unlock()
 		http.Redirect(w, r, q.Get("redirect_uri")+"?"+url.Values{"code": {code}, "state": {q.Get("state")}}.Encode(), http.StatusFound)
 	})
 	mux.HandleFunc("/realms/cbio/token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
+		p.mu.Lock()
+		defer p.mu.Unlock()
 		p.tokenReq = r.PostForm
-		nonce, ok := p.codes[r.PostForm.Get("code")]
+		if r.PostForm.Get("grant_type") == "refresh_token" {
+			p.refresh(t, w, r.PostForm)
+			return
+		}
+		code := r.PostForm.Get("code")
+		nonce, ok := p.codes[code]
 		if !ok || r.PostForm.Get("client_secret") != "secret" {
 			w.WriteHeader(http.StatusBadRequest)
 			writeJSON(w, map[string]string{"error": "invalid_grant"})
@@ -74,7 +92,9 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		if p.tamper != nil {
 			p.tamper(claims)
 		}
-		writeJSON(w, map[string]string{"access_token": "at", "id_token": p.sign(t, claims)})
+		offline := "offline-" + code
+		p.offline[offline] = true
+		writeJSON(w, map[string]string{"access_token": "at", "id_token": p.sign(t, claims), "refresh_token": offline})
 	})
 	mux.HandleFunc("/realms/cbio/userinfo", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer at" {
@@ -86,6 +106,25 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	p.Server = httptest.NewServer(mux)
 	t.Cleanup(p.Close)
 	return p
+}
+
+// refresh answers a refresh_token grant; the caller holds p.mu.
+func (p *fakeProvider) refresh(t *testing.T, w http.ResponseWriter, form url.Values) {
+	if !p.offline[form.Get("refresh_token")] || form.Get("client_id") != "portal" || form.Get("client_secret") != "secret" {
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]string{"error": "invalid_grant"})
+		return
+	}
+	p.refreshes++
+	claims := map[string]any{
+		"iss": p.URL + "/realms/cbio", "aud": "account", "sub": "u1",
+		"exp":             time.Now().Add(p.accessTTL).Unix(),
+		"resource_access": map[string]any{"cbioportal": map[string]any{"roles": p.roles}},
+	}
+	if p.tamperAccess != nil {
+		p.tamperAccess(claims)
+	}
+	writeJSON(w, map[string]string{"access_token": p.sign(t, claims), "refresh_token": form.Get("refresh_token")})
 }
 
 func (p *fakeProvider) sign(t *testing.T, claims map[string]any) string {

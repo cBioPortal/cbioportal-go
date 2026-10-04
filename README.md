@@ -73,9 +73,9 @@ weekly.
 ## TODO for a full reimplementation
 
 - **Authentication.** OAuth2/OpenID Connect login (`authenticate=oauth2`,
-  e.g. Keycloak) and study authorization from the user's roles work as in the
-  Java portal (see [Configuration](docs/configuration.md)). Still needed:
-  data access tokens for API clients (`dat.method`), SAML and
+  e.g. Keycloak), study authorization from the user's roles and data access
+  tokens for API clients (`dat.method=oauth2`) work as in the Java portal (see
+  [Configuration](docs/configuration.md)). Still needed: SAML and
   `optional_oauth2`, and sessions that survive a restart or span replicas.
 - **Session service.** Sessions (virtual studies, groups, custom data,
   settings) live in a JSON file in one process. Needed: a durable shared store,

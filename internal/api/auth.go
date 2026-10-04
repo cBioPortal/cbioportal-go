@@ -48,8 +48,8 @@ func loadAuthConfig() AuthConfig {
 // default (AUTH_ENABLED unset/false), so local and e2e runs — which use no
 // session auth — work unchanged. When enabled it validates an HS256-signed JWT
 // (shared secret) and extracts the user + Keycloak realm roles into the request
-// context. The design mirrors the Java Spring-Security bearer flow; OIDC/JWKS
-// (RS256) can be layered on the same middleware later.
+// context. Bearer tokens of the login's OpenID provider are data access
+// tokens instead (dat.method=oauth2, dat.go), which excludes AUTH_ENABLED.
 func auth(cfg AuthConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := GetUser(r.Context()); ok {

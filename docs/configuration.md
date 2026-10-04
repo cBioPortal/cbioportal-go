@@ -69,7 +69,7 @@ line the flags are usually handier.
 | `-oncokb-url` | `ONCOKB_URL` | `https://public.api.oncokb.org/api/v1` | OncoKB API behind the frontend's `/proxy/...` endpoint |
 | `-site-banner`, `-site-banner-link` | `SITE_BANNER`, `SITE_BANNER_LINK` | | notice bar (and link) at the top of every portal page, e.g. for a preview deployment |
 | `-session-store` | `SESSION_STORE_FILE` | | persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory |
-| `-auth-enabled` | `AUTH_ENABLED` | `false` | require HS256 bearer tokens |
+| `-auth-enabled` | `AUTH_ENABLED` | `false` | require HS256 bearer tokens (not with `dat.method=oauth2`) |
 | `-auth-default-user` | `AUTH_DEFAULT_USER` | | single-user development login for requests without a token (not with `authenticate=oauth2`) |
 | `-portal-properties` | `PORTAL_PROPERTIES` | | portal properties file, see below |
 
@@ -188,5 +188,55 @@ Behind a TLS-terminating proxy, the proxy must send `X-Forwarded-Proto`.
   restart logs everyone out.
 
 Other `authenticate` values (`saml`, `optional_oauth2`) are not supported and
-stop the server at startup rather than serve the portal open. Data access
-tokens (`dat.method`) are not implemented yet.
+stop the server at startup rather than serve the portal open.
+
+### Data access tokens
+
+With `dat.method=oauth2` (and `authenticate=oauth2`) logged-in users download
+a data access token for API clients from the portal's "Data Access Token"
+button, as in the Java portal. The token is the provider's offline (refresh)
+token:
+
+```properties
+dat.method=oauth2
+dat.oauth2.clientId=cbioportal_oauth2
+dat.oauth2.clientSecret=<secret>
+dat.oauth2.issuer=https://keycloak.example.org/auth/realms/cbio
+dat.oauth2.accessTokenUri=https://keycloak.example.org/auth/realms/cbio/protocol/openid-connect/token
+dat.oauth2.userAuthorizationUri=https://keycloak.example.org/auth/realms/cbio/protocol/openid-connect/auth
+dat.oauth2.jwkUrl=https://keycloak.example.org/auth/realms/cbio/protocol/openid-connect/certs
+dat.oauth2.redirectUri=https://cbioportal.example.org/api/data-access-token/oauth2
+# where the provider puts the user's roles in access tokens (default shown)
+dat.oauth2.jwtRolesPath=resource_access::cbioportal::roles
+# optional: only users with this authority may download a token
+dat.filter_user_role=ROLE_<role>
+```
+
+- `GET /api/data-access-token` redirects to the provider asking for scope
+  `openid offline_access` (the client must allow `offline_access`, and
+  `redirectUri` must be one of its redirect URIs). The provider returns to
+  `/api/data-access-token/oauth2`, which downloads
+  `cbioportal_data_access_token.txt` (`token: <offline token>`).
+  `dat.filter_user_role` is matched against `ROLE_<role>` for each of the
+  user's roles; others get `401`.
+- An `/api/**` request with an `Authorization: Bearer <token>` header is
+  authenticated by the token alone: the server trades it for an access token
+  at `accessTokenUri` (refresh-token grant) and checks that token's signature
+  (`jwkUrl`), issuer and expiry. The user is its `sub` claim, the roles are at
+  `jwtRolesPath`, and study authorization applies as for a session. A missing,
+  revoked or invalid token gets `401`, on the open API paths too. Verified
+  tokens are cached (by hash, at most 1024) until 30 seconds before the access
+  token expires, so revoking a token at the provider takes effect within an
+  access token's lifetime.
+- `/api/data-access-tokens*` (token listing and revocation) answer `501`;
+  tokens are revoked at the provider (e.g. Keycloak's account console,
+  "Applications" → offline access).
+- `dat.method=oauth2` without `authenticate=oauth2`, together with
+  `AUTH_ENABLED`, or other `dat.method` values (`uuid`, `jwt`) stop the server
+  at startup. `dat.ttl_seconds`, `dat.unauth_users` and the `uuid`/`jwt`
+  settings apply to those methods only.
+
+```bash
+curl -H "Authorization: Bearer $(sed -n 's/^token: //p' cbioportal_data_access_token.txt)" \
+  https://cbioportal.example.org/api/studies
+```

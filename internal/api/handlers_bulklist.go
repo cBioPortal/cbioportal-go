@@ -9,7 +9,7 @@ import (
 )
 
 // routeBulkList registers the bulk GET list endpoints, single-resource GETs
-// and the data-access-token placeholders. Paging query params are applied by pageList.
+// and the data-access-token endpoints (dat.go) or their placeholders. Paging query params are applied by pageList.
 // All filtering is pushed into ClickHouse.
 func (s *State) routeBulkList(mux *http.ServeMux) {
 	// Bulk GET list endpoints (no study scope).
@@ -24,7 +24,11 @@ func (s *State) routeBulkList(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}", s.sampleInStudy)
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/copy-number-segments", s.sampleCopyNumberSegments)
 
-	// Data-access tokens — only used if download tokens are enabled; placeholder.
+	if s.dat != nil {
+		s.routeDataAccessTokens(mux, s.dat)
+		return
+	}
+	// Data-access tokens without dat.method=oauth2: placeholders.
 	mux.HandleFunc("GET /api/data-access-token", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
 	mux.HandleFunc("GET /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, []any{}) })
 	mux.HandleFunc("POST /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {

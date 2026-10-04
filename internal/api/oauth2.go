@@ -32,6 +32,8 @@ import (
 //     the browser back to the page it first asked for (re-posting a form
 //     that was posted before the login).
 //   - /logout ends the session and the provider's (RP-initiated logout).
+//   - With dat.method=oauth2, API requests with an Authorization header are
+//     authenticated by their data access token instead (dat.go).
 //   - Roles come from the ID token and userinfo claims at
 //     spring.security.oauth2.client.jwt-roles-path (default
 //     resource_access::cbioportal::roles) and decide which studies the user
@@ -175,6 +177,10 @@ type oauth2Login struct {
 	mu       sync.Mutex
 	sessions map[string]*authSession
 	pending  map[string]*loginAttempt // by browser login cookie
+
+	// dat authenticates API requests that carry an Authorization header
+	// (dat.method=oauth2); nil leaves them to the session.
+	dat *datProvider
 }
 
 func newOAuth2Login(cfg *oauth2Config) *oauth2Login {
@@ -266,6 +272,10 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 			return
 		case p == "/logout":
 			o.logout(w, r)
+			return
+		}
+		if o.dat != nil && isAPIPath(r.URL.Path) && r.Header.Get("Authorization") != "" {
+			o.dat.tokenAuth(w, r, next)
 			return
 		}
 		if sess := o.session(r); sess != nil {

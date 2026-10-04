@@ -59,6 +59,16 @@ Three tiers, fastest first:
    fixture study) and runs the API with `authenticate=oauth2`. Docker must
    be available; `KEYCLOAK=false` runs the API anonymously instead.
 
+   Data access tokens (`dat.method=oauth2`) have their own end-to-end test
+   against that Keycloak, skipped unless `DAT_KEYCLOAK` is set. It logs in
+   as `datuser` (granted one study), downloads a token and calls the API
+   with it:
+
+   ```bash
+   DAT=true PORT=18096 test/e2e_api.sh
+   DAT_KEYCLOAK=1 API=http://localhost:18096 go test -run DATKeycloak ./test/
+   ```
+
 CI (`.github/workflows/ci.yml`) runs gofmt, vet and the unit tests, then the
 contract tests against a ClickHouse service loaded with the fixture studies,
 on every push and pull request. The full frontend e2e suite

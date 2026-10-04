@@ -81,11 +81,11 @@ func abbreviate(keys []string, max int) string {
 }
 
 // backendProperty reports the non-frontend properties this server reads:
-// authentication and study authorization.
+// authentication, data access tokens and study authorization.
 func backendProperty(k string) bool {
 	switch k {
-	case "filter_groups_by_appname", "always_show_study_group":
+	case "filter_groups_by_appname", "always_show_study_group", "dat.filter_user_role":
 		return true
 	}
-	return strings.HasPrefix(k, "spring.security.oauth2.client.")
+	return strings.HasPrefix(k, "spring.security.oauth2.client.") || strings.HasPrefix(k, "dat.oauth2.")
 }

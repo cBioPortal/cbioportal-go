@@ -21,8 +21,8 @@ var frontendAPIDocs = []string{
 
 var pathParam = regexp.MustCompile(`\{[^}]+\}`)
 
-// conditionalOperations are registered by Java only under configuration this
-// backend does not offer (dat.method=oauth2); Java answers 404 without it.
+// conditionalOperations are registered only with dat.method=oauth2, as in
+// Java, which answers 404 without it.
 var conditionalOperations = map[string]bool{
 	"GET /api/data-access-token/oauth2": true,
 }
