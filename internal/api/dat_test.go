@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// datOf is the data access token provider of each datPortal.
+var datOf = map[*httptest.Server]*datProvider{}
+
 // datPortal is a portal with the OAuth2 login and dat.method=oauth2 whose
 // other routes echo the request they receive.
 func datPortal(t *testing.T, p *fakeProvider, extra map[string]string) *httptest.Server {
@@ -50,6 +53,7 @@ func datPortal(t *testing.T, p *fakeProvider, extra map[string]string) *httptest
 	})
 	srv.Config.Handler = s.login.middleware(mux)
 	srv.Start()
+	datOf[srv] = s.dat
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -82,9 +86,9 @@ func downloadToken(t *testing.T, p *fakeProvider, portal *httptest.Server) strin
 		t.Fatalf("data-access-token did not redirect")
 	}
 	want := p.URL + "/realms/cbio/auth?response_type=code&scope=openid+offline_access&client_id=portal&redirect_uri=" +
-		url.QueryEscape(portal.URL+"/api/data-access-token/oauth2")
-	if got := first.Header.Get("Location"); got != want {
-		t.Errorf("Location %q, want %q", got, want)
+		url.QueryEscape(portal.URL+"/api/data-access-token/oauth2") + "&state="
+	if got := first.Header.Get("Location"); !strings.HasPrefix(got, want) || len(got) == len(want) {
+		t.Errorf("Location %q, want %q<state>", got, want)
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("token download: %d %q", resp.StatusCode, body)
@@ -163,13 +167,105 @@ func TestDATDownloadNeedsLogin(t *testing.T) {
 	}
 }
 
+// startDownload logs a browser in and starts a token download without
+// following it to the provider, returning the browser and the state.
+func startDownload(t *testing.T, portal *httptest.Server) (*http.Client, string) {
+	t.Helper()
+	c := browser(t)
+	mustBody(t)(c.Get(portal.URL + "/"))
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, _ := getWith(t, c, portal.URL+"/api/data-access-token", "")
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusFound || err != nil || loc.Query().Get("state") == "" {
+		t.Fatalf("download start: %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	return c, loc.Query().Get("state")
+}
+
+// issueCode has the provider issue an authorization code.
+func issueCode(p *fakeProvider) string {
+	code := randomToken()
+	p.mu.Lock()
+	p.codes[code] = ""
+	p.mu.Unlock()
+	return code
+}
+
 func TestDATBadCode(t *testing.T) {
 	p := newFakeProvider(t)
 	portal := datPortal(t, p, nil)
-	c := browser(t)
-	mustBody(t)(c.Get(portal.URL + "/"))
-	if resp, body := getWith(t, c, portal.URL+"/api/data-access-token/oauth2?code=forged", ""); resp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("forged code: %d %q, want 401", resp.StatusCode, body)
+	c, state := startDownload(t, portal)
+	resp, body := getWith(t, c, portal.URL+"/api/data-access-token/oauth2?"+url.Values{"code": {"forged"}, "state": {state}}.Encode(), "")
+	if resp.StatusCode != http.StatusUnauthorized || body != "" {
+		t.Errorf("forged code: %d %q, want empty 401", resp.StatusCode, body)
+	}
+	if p.tokenReq.Get("code") != "forged" {
+		t.Error("the code was not sent to the provider")
+	}
+}
+
+// The callback needs the browser's own download in progress: its cookie and
+// state, once.
+func TestDATCallbackState(t *testing.T) {
+	p := newFakeProvider(t)
+	portal := datPortal(t, p, nil)
+	callback := func(c *http.Client, code, state string) (int, string) {
+		q := url.Values{"code": {code}}
+		if state != "" {
+			q.Set("state", state)
+		}
+		resp, body := getWith(t, c, portal.URL+"/api/data-access-token/oauth2?"+q.Encode(), "")
+		return resp.StatusCode, body
+	}
+
+	// Logged in, but no download started.
+	c, _ := startDownload(t, portal)
+	other := browser(t)
+	mustBody(t)(other.Get(portal.URL + "/"))
+	if st, body := callback(other, issueCode(p), "x"); st != http.StatusUnauthorized || body != "" {
+		t.Errorf("no download in progress: %d %q", st, body)
+	}
+
+	// Missing or wrong state; the attempt is then used up.
+	c, state := startDownload(t, portal)
+	if st, _ := callback(c, issueCode(p), ""); st != http.StatusUnauthorized {
+		t.Errorf("no state: %d", st)
+	}
+	if st, _ := callback(c, issueCode(p), state); st != http.StatusUnauthorized {
+		t.Errorf("state after a failed callback: %d", st)
+	}
+	c, state = startDownload(t, portal)
+	if st, _ := callback(c, issueCode(p), state+"x"); st != http.StatusUnauthorized {
+		t.Errorf("wrong state: %d", st)
+	}
+
+	// Another browser's state does not fit this browser's cookie.
+	c, _ = startDownload(t, portal)
+	_, state = startDownload(t, portal)
+	if st, _ := callback(c, issueCode(p), state); st != http.StatusUnauthorized {
+		t.Errorf("another browser's state: %d", st)
+	}
+
+	// The right state works once; a replay is refused.
+	c, state = startDownload(t, portal)
+	if st, body := callback(c, issueCode(p), state); st != http.StatusOK || !strings.HasPrefix(body, "token: ") {
+		t.Fatalf("matching state: %d %q", st, body)
+	}
+	if st, _ := callback(c, issueCode(p), state); st != http.StatusUnauthorized {
+		t.Errorf("replay: %d", st)
+	}
+
+	// An expired attempt is refused.
+	c, state = startDownload(t, portal)
+	d := datOf[portal]
+	d.mu.Lock()
+	for k, a := range d.pending {
+		a.expires = time.Now().Add(-time.Second)
+		d.pending[k] = a
+	}
+	d.mu.Unlock()
+	if st, _ := callback(c, issueCode(p), state); st != http.StatusUnauthorized {
+		t.Errorf("expired: %d", st)
 	}
 }
 

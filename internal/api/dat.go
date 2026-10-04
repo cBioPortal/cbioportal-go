@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -34,11 +35,16 @@ import (
 //     logged-in session. Any failure is a 401.
 //   - The token management endpoints (/api/data-access-tokens*) answer 501.
 //
+// Unlike Java, the download round trip carries an OAuth2 state bound to the
+// browser by a short-lived cookie, so a forged callback cannot hand a user
+// someone else's token.
+//
 // Verified users are cached by token hash until shortly before the access
 // token expires, so the provider is not asked on every request.
 
 const (
 	datFileName = "cbioportal_data_access_token.txt"
+	datCookie   = "CBIOPORTAL_DAT"
 	datScope    = "openid offline_access"
 	// datCacheSize bounds the number of tokens whose users are cached.
 	datCacheSize = 1024
@@ -123,16 +129,23 @@ type datProvider struct {
 	mu       sync.Mutex
 	cache    map[string]datEntry // by token hash
 	inflight singleflight.Group
+	pending  map[string]datAttempt // token downloads in progress, by cookie
+}
+
+type datAttempt struct {
+	state   string
+	expires time.Time
 }
 
 func newDATProvider(cfg *datConfig) *datProvider {
 	client := &http.Client{Timeout: 15 * time.Second}
 	return &datProvider{
-		cfg:    cfg,
-		client: client,
-		keys:   newJWKS(cfg.JWKURL, client),
-		now:    time.Now,
-		cache:  map[string]datEntry{},
+		cfg:     cfg,
+		client:  client,
+		keys:    newJWKS(cfg.JWKURL, client),
+		now:     time.Now,
+		cache:   map[string]datEntry{},
+		pending: map[string]datAttempt{},
 	}
 }
 
@@ -260,11 +273,55 @@ func (d *datProvider) tokenRequest(ctx context.Context, form url.Values) (tokenR
 	return tok, nil
 }
 
-// authorizationURL is where a token download starts, built as Java builds it.
-func (d *datProvider) authorizationURL() string {
-	return fmt.Sprintf("%s?response_type=code&scope=%s&client_id=%s&redirect_uri=%s",
+// authorizationURL is where a token download starts, built as Java builds
+// it, plus the state.
+func (d *datProvider) authorizationURL(state string) string {
+	return fmt.Sprintf("%s?response_type=code&scope=%s&client_id=%s&redirect_uri=%s&state=%s",
 		d.cfg.UserAuthorizationURI, url.QueryEscape(datScope),
-		url.QueryEscape(d.cfg.ClientID), url.QueryEscape(d.cfg.RedirectURI))
+		url.QueryEscape(d.cfg.ClientID), url.QueryEscape(d.cfg.RedirectURI), url.QueryEscape(state))
+}
+
+// begin records a download in progress and binds it to the browser.
+func (d *datProvider) begin(w http.ResponseWriter, r *http.Request) string {
+	id, state := randomToken(), randomToken()
+	now := d.now()
+	d.mu.Lock()
+	for k, a := range d.pending {
+		if now.After(a.expires) {
+			delete(d.pending, k)
+		}
+	}
+	d.pending[id] = datAttempt{state: state, expires: now.Add(loginTimeout)}
+	d.mu.Unlock()
+	setDATCookie(w, r, id, loginTimeout)
+	return state
+}
+
+// finish consumes the browser's download in progress and reports whether
+// the callback's state is its own.
+func (d *datProvider) finish(w http.ResponseWriter, r *http.Request) bool {
+	c, err := r.Cookie(datCookie)
+	if err != nil {
+		return false
+	}
+	setDATCookie(w, r, "", -1)
+	d.mu.Lock()
+	a, ok := d.pending[c.Value]
+	delete(d.pending, c.Value)
+	d.mu.Unlock()
+	return ok && !d.now().After(a.expires) &&
+		subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(a.state)) == 1
+}
+
+func setDATCookie(w http.ResponseWriter, r *http.Request, value string, maxAge time.Duration) {
+	c := &http.Cookie{
+		Name: datCookie, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Secure: strings.HasPrefix(baseURL(r), "https:"), MaxAge: int(maxAge.Seconds()),
+	}
+	if maxAge < 0 {
+		c.MaxAge = -1
+	}
+	http.SetCookie(w, c)
 }
 
 // routeDataAccessTokens registers the dat.method=oauth2 endpoints.
@@ -294,7 +351,7 @@ func (d *datProvider) download(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, msgDATProhibited)
 		return
 	}
-	w.Header().Set("Location", d.authorizationURL())
+	w.Header().Set("Location", d.authorizationURL(d.begin(w, r)))
 	w.WriteHeader(http.StatusFound)
 }
 
@@ -312,6 +369,11 @@ func hasAuthority(u User, authority string) bool {
 // callback redeems the provider's code for an offline token and returns it
 // as a download.
 func (d *datProvider) callback(w http.ResponseWriter, r *http.Request) {
+	if !d.finish(w, r) {
+		log.Print("data access token: callback without a matching download in progress")
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
 	tok, err := d.tokenRequest(r.Context(), url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {r.URL.Query().Get("code")},

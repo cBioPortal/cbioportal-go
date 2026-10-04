@@ -74,6 +74,10 @@ func TestDATKeycloak(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || resp.Request.URL.Path != "/api/data-access-token/oauth2" {
 		t.Fatalf("token download ended at %s with %d: %.200q", resp.Request.URL, resp.StatusCode, body)
 	}
+	callback := resp.Request.URL.String()
+	if resp.Request.URL.Query().Get("state") == "" {
+		t.Errorf("callback %s carries no state", callback)
+	}
 	if cd := resp.Header.Get("Content-Disposition"); cd != "attachment; filename=cbioportal_data_access_token.txt" {
 		t.Errorf("Content-Disposition %q", cd)
 	}
@@ -82,6 +86,15 @@ func TestDATKeycloak(t *testing.T) {
 		t.Fatalf("token file %.80q", body)
 	}
 	tok = "Bearer " + strings.TrimSuffix(tok, "\n")
+
+	// The callback works once.
+	resp, err = browser.Get(callback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readAll(resp); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("replayed callback: %d, want 401", resp.StatusCode)
+	}
 
 	// The token alone, without the session, sees the studies the user's
 	// roles grant, as the session does; the second call is served from the

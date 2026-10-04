@@ -216,7 +216,10 @@ dat.filter_user_role=ROLE_<role>
   `openid offline_access` (the client must allow `offline_access`, and
   `redirectUri` must be one of its redirect URIs). The provider returns to
   `/api/data-access-token/oauth2`, which downloads
-  `cbioportal_data_access_token.txt` (`token: <offline token>`).
+  `cbioportal_data_access_token.txt` (`token: <offline token>`). Unlike
+  the Java portal, the round trip carries an OAuth2 `state` bound to the
+  browser by a 10-minute cookie: a callback without the cookie and its
+  state, or a second use of them, gets `401`.
   `dat.filter_user_role` is matched against `ROLE_<role>` for each of the
   user's roles; others get `401`.
 - An `/api/**` request with an `Authorization: Bearer <token>` header is
