@@ -251,12 +251,14 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	}
 	shape := studyShape{summary: true, detailed: projection == "DETAILED", columnStore: true}
 	dates := s.studyImportDates()
+	availability := s.studyAvailabilityEnabled()
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
 		out[i] = toCancerStudy(r, shape, dates)
 		// CancerStudyMetadataMapper.toDtos maps readPermission from publicStudy;
-		// nobody can read a study that is being (re)imported.
-		out[i].ReadPermission = r.PublicFlag != 0 && r.Status == 1
+		// with study_availability.enabled, nobody can read a study that is being
+		// (re)imported.
+		out[i].ReadPermission = r.PublicFlag != 0 && (!availability || r.Status == 1)
 	}
 	writeJSON(w, s.withResourceCounts(out))
 }

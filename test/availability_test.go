@@ -10,9 +10,9 @@ import (
 )
 
 // Study availability (cBioPortal/cbioportal#12349): study_hg38 has
-// cancer_study.status 0 in the test database. The study list marks it
-// unreadable whatever the settings; with study_availability.enabled requests
-// naming it, its profiles, sample lists or unique keys get 423.
+// cancer_study.status 0 in the test database. Status is ignored by default;
+// with study_availability.enabled the study list marks it unreadable and
+// requests naming it, its profiles, sample lists or unique keys get 423.
 func TestContractStudyAvailability(t *testing.T) {
 	requireAPI(t)
 	var studies []map[string]any
@@ -24,12 +24,12 @@ func TestContractStudyAvailability(t *testing.T) {
 	if byID["study_hg38"] == nil || byID["study_es_0"] == nil {
 		t.Fatalf("study list lacks study_hg38 or study_es_0")
 	}
-	wantEq(t, []any{byID["study_hg38"]["status"], byID["study_hg38"]["readPermission"]}, []any{float64(0), false})
-	wantEq(t, []any{byID["study_es_0"]["status"], byID["study_es_0"]["readPermission"]}, []any{float64(1), true})
-
 	var cfg map[string]any
 	get(t, "/config_service", &cfg)
 	enabled := cfg["study_availability_enabled"] == true
+
+	wantEq(t, []any{byID["study_hg38"]["status"], byID["study_hg38"]["readPermission"]}, []any{float64(0), !enabled})
+	wantEq(t, []any{byID["study_es_0"]["status"], byID["study_es_0"]["readPermission"]}, []any{float64(1), true})
 
 	call := func(method, path string, body any) (int, string) {
 		var r io.Reader
