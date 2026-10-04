@@ -9,9 +9,9 @@ import (
 // imports them (internal ids), and many of the Java backend's queries return
 // rows in that order: they have no ORDER BY, or order by the internal id, and
 // ClickHouse reads the tables in their sort key order. The transform carries
-// the internal ids (sample.internal_id, patient.internal_id, the clinical
-// tables' internal_id, seg.seg_id); databases built before it fall back to
-// stable id order.
+// the internal ids (internal_id of cancer_study, patient, sample and the
+// clinical tables, seg.seg_id, sample_list.list_internal_id); on a database
+// without them the API falls back to stable id order.
 
 // importOrdered reports whether the database carries the internal ids.
 func (s *State) importOrdered() bool {

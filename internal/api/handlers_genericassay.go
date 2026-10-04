@@ -112,8 +112,8 @@ func (s *State) gaLoadProfile(meta profileMeta, entityIDs, sampleIDs []string) (
 // internal id order as getSamplesByInternalIds returns them, else the listed
 // samples of each profile's study in sample-id order, as fetchSamples with the
 // ID projection returns them), and for each, every requested profile of its
-// study that holds the sample, one entry per entity in matrix order. Cells without a value (empty
-// or NA) are left out, as the controllers filter them.
+// study that holds the sample, one entry per entity in matrix order. Cells
+// without a value (empty or NA) are left out, as the controllers filter them.
 func (s *State) genericAssayData(profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) ([]GenericAssayData, error) {
 	ids := slices.Clone(profileIDs)
 	slices.Sort(ids)
