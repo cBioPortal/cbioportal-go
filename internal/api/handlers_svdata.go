@@ -182,22 +182,18 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cols := svSelectColumns(s.svViewColumns())
-	rows, err := queryA[map[string]any](s.CH, fmt.Sprintf(
+	query := fmt.Sprintf(
 		"SELECT %s FROM (%s) sv "+
 			"LEFT JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 			"WHERE %s ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId",
-		strings.Join(cols, ", "), svSiteEntrezSQL, scope), args)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]StructuralVariant, len(rows))
-	for i, r := range rows {
-		out[i] = toStructuralVariant(r)
-	}
-	writeJSON(w, out)
+		strings.Join(cols, ", "), svSiteEntrezSQL, scope)
+	out := newJSONArray(w)
+	err := ch.QueryEachP(s.CH, query, args.params(query), func(r *map[string]any) error {
+		return out.add(toStructuralVariant(*r))
+	})
+	out.finish(err)
 }
 
 // svTextColumns are the structural_variant view columns (left) a fetched SV
