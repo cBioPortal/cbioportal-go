@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,12 +21,11 @@ import (
 // arrives in ClickHouse's columnar Native format over the same HTTP endpoint,
 // transport, credentials and settings as every other request.
 
-const (
-	// maxDriverURLParams bounds the encoded size of the parameters the driver
-	// sends in the request URL; larger array parameters go as external
-	// tables.
-	maxDriverURLParams = 8 << 10
-)
+// maxDriverURLParams bounds the encoded size of the parameters the driver
+// sends in the request URL, within ClickHouse's 1 MiB http_max_uri_size.
+// Arrays longer than a form field (maxFieldParam) go as external tables, as
+// on the multipart path; past this total, so do the largest of the rest.
+const maxDriverURLParams = 512 << 10
 
 // nativeReads is false when CLICKHOUSE_DECODE=json, which decodes every
 // result from JSONEachRow instead.
@@ -62,7 +62,7 @@ func (c *Client) openDriver() (driver.Conn, error) {
 		// Credentials, log_comment and metrics come from the client's own
 		// transport chain, shared with the other requests.
 		TransportFunc: func(*http.Transport) (http.RoundTripper, error) {
-			return c.http.Transport, nil
+			return driverTransport{c.http.Transport}, nil
 		},
 		DialTimeout:     30 * time.Second,
 		MaxOpenConns:    1024,
@@ -73,6 +73,22 @@ func (c *Client) openDriver() (driver.Conn, error) {
 		opt.TLS = &tls.Config{ServerName: u.Hostname()}
 	}
 	return clickhouse.Open(opt)
+}
+
+// driverTransport drops the driver's own authentication (its default user,
+// basic auth or certificate-auth header), so requests authenticate exactly as
+// the client's other requests do.
+type driverTransport struct {
+	base http.RoundTripper
+}
+
+func (d driverTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.URL.User = nil
+	for _, h := range []string{"Authorization", "X-ClickHouse-User", "X-ClickHouse-Key", "X-ClickHouse-SSL-Certificate-Auth"} {
+		r.Header.Del(h)
+	}
+	return d.base.RoundTrip(r)
 }
 
 // driverQuery prepares sql and its parameters for the driver: parameters in
@@ -194,20 +210,18 @@ func driverTable(t extTable, v any) (*ext.Table, error) {
 	return tbl, nil
 }
 
-// queryRows runs sql through the driver. ok is false when the request should
+// queryRows runs sql through the driver. An error means the request should
 // go through the JSON path instead.
-func (c *Client) queryRows(ctx context.Context, sql string, p Params) (driver.Rows, bool) {
+func (c *Client) queryRows(ctx context.Context, sql string, p Params) (driver.Rows, error) {
 	conn, err := c.driverConn()
 	if err != nil {
-		return nil, false
+		return nil, err
 	}
 	q, opts, ok := driverQuery(c.rewrite(sql), p)
 	if !ok {
-		return nil, false
+		return nil, errLargeRequest
 	}
-	rows, err := conn.Query(clickhouse.Context(ctx, opts...), q)
-	if err != nil {
-		return nil, false
-	}
-	return rows, true
+	return conn.Query(clickhouse.Context(ctx, opts...), q)
 }
+
+var errLargeRequest = errors.New("parameters need the multipart request")

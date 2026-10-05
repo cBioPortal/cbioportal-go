@@ -12,39 +12,18 @@ import (
 	"unsafe"
 )
 
-func TestParseCHType(t *testing.T) {
-	cases := map[string]string{
-		"String":                           "string",
-		"LowCardinality(String)":           "string",
-		"LowCardinality(Nullable(String))": "*string",
-		"FixedString(3)":                   "string",
-		"Enum8('a' = 1, 'b,c' = 2)":        "string",
-		"Int8":                             "int8",
-		"UInt64":                           "uint64",
-		"Float32":                          "float32",
-		"Bool":                             "bool",
-		"Nullable(Float64)":                "*float64",
-		"Array(Nullable(String))":          "[]*string",
-		"Array(Array(UInt32))":             "[][]uint32",
-		"Map(String, Int64)":               "map[string]int64",
-		"Map(LowCardinality(String), Array(String))": "map[string][]string",
-		"Date":                  "time.Time",
-		"DateTime('UTC')":       "time.Time",
-		"Decimal(18, 2)":        "decimal.Decimal",
-		"DateTime64(3)":         "<nil>",
-		"UUID":                  "<nil>",
-		"Tuple(String, String)": "<nil>",
-		"Nullable(Nothing)":     "<nil>",
-		"Map(Int32, String)":    "<nil>",
-		"Int128":                "<nil>",
-	}
-	for in, want := range cases {
-		got := "<nil>"
-		if nt := nativeType(parseCHType(in)); nt != nil {
-			got = nt.String()
-		}
-		if got != want {
-			t.Errorf("%s: %s, want %s", in, got, want)
+func TestPlainType(t *testing.T) {
+	for typ, want := range map[string]bool{
+		"String": true, "LowCardinality(String)": true, "LowCardinality(Nullable(String))": true,
+		"FixedString(3)": true, "Enum8('a' = 1, 'b,c' = 2)": true, "Int8": true, "UInt64": true,
+		"Float32": true, "Bool": true, "Nullable(Float64)": true, "Array(Nullable(String))": true,
+		"Array(Array(UInt32))": true, "Array(LowCardinality(String))": true,
+		"Map(String, Int64)": false, "Date": false, "DateTime('UTC')": false, "Decimal(18, 2)": false,
+		"UUID": false, "IPv4": false, "Tuple(String, String)": false, "Array(Tuple(String, String))": false,
+		"Nullable(Nothing)": false, "Int128": false, "JSON": false,
+	} {
+		if plainType.MatchString(typ) != want {
+			t.Errorf("%s: %v", typ, !want)
 		}
 	}
 }
@@ -56,51 +35,59 @@ func TestJSONFields(t *testing.T) {
 		A    string `json:"a"`
 		Deep string
 	}
-	type Other struct {
-		Tied string
-		Deep string `json:"deep"`
-	}
-	type Third struct {
-		Tied string
+	type inner2 struct {
+		Low string `json:"low"`
 	}
 	type row struct {
 		Inner
-		Other
-		Third
-		B       int64 `json:"b"`
+		inner2
+		Deep    string
 		Plain   string
 		Skipped string `json:"-"`
 		hidden  string
 		Hyphen  string `json:"-,"`
 		Opt     string `json:"opt,omitempty"`
-		A2      string `json:"A"`
 	}
-	fields := jsonFields(reflect.TypeFor[row]())
-	keys := []string{"a", "A", "deep", "DEEP", "dup", "tied", "b", "B", "plain", "PLAIN", "skipped", "hidden", "-", "opt", "OPT", "missing"}
+	fields, ok := jsonFields(reflect.TypeFor[row](), 0)
+	if !ok {
+		t.Fatal("unresolved")
+	}
+	keys := []string{"a", "A", "deep", "DEEP", "low", "plain", "PLAIN", "skipped", "Skipped", "hidden", "-", "opt", "OPT", "missing"}
 	for _, key := range keys {
-		var want row
+		var want, got row
 		if err := json.Unmarshal([]byte(`{"`+key+`":"x"}`), &want); err != nil {
-			// a type error: only b is an int
-			if key != "b" && key != "B" {
-				t.Fatalf("%s: %v", key, err)
+			t.Fatalf("%s: %v", key, err)
+		}
+		for _, f := range fields {
+			if f.name == key || strings.EqualFold(f.name, key) {
+				*(*string)(unsafe.Add(unsafe.Pointer(&got), f.offset)) = "x"
+				break
 			}
-		}
-		var got row
-		f, ok := matchField(fields, key)
-		if !ok {
-			t.Fatalf("%s: unresolved", key)
-		}
-		if f != nil && f.typ.Kind() == reflect.String {
-			*(*string)(unsafe.Add(unsafe.Pointer(&got), f.offset)) = "x"
-		}
-		if f != nil && f.typ.Kind() == reflect.Int64 {
-			if f.name != "b" {
-				t.Errorf("%s: matched %s", key, f.name)
-			}
-			continue
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("key %s: got %+v, want %+v", key, got, want)
+		}
+	}
+	type Other struct{ Deep string }
+	type conflict struct {
+		Inner
+		Other
+	}
+	type foldConflict struct {
+		Inner
+		DEEP string
+	}
+	type quoted struct {
+		N int64 `json:"n,string"`
+	}
+	type folded struct {
+		A  string `json:"a"`
+		A2 string `json:"A"`
+	}
+	type ptr struct{ *Inner }
+	for _, typ := range []reflect.Type{reflect.TypeFor[conflict](), reflect.TypeFor[foldConflict](), reflect.TypeFor[quoted](), reflect.TypeFor[folded](), reflect.TypeFor[ptr]()} {
+		if _, ok := jsonFields(typ, 0); ok {
+			t.Errorf("%s should go through encoding/json", typ)
 		}
 	}
 }
@@ -138,8 +125,7 @@ func TestJSONString(t *testing.T) {
 func TestConversions(t *testing.T) {
 	check := func(ctName string, src any, text string, target any) {
 		t.Helper()
-		ct := parseCHType(ctName)
-		nt := nativeType(ct)
+		nt := reflect.TypeOf(src)
 		ft := reflect.TypeOf(target).Elem()
 		sv := reflect.New(nt)
 		sv.Elem().Set(reflect.ValueOf(src))
@@ -148,20 +134,12 @@ func TestConversions(t *testing.T) {
 		wantErr := json.Unmarshal([]byte(`{"v":`+text+`}`), wrapped.Interface())
 		want.Elem().Set(wrapped.Elem().Field(0))
 		got := reflect.New(ft)
-		var gotErr error
-		if fix, ok := direct(ct, nt, ft); ok {
-			got.Elem().Set(sv.Elem())
-			if fix != nil {
-				fix(got.UnsafePointer())
-			}
-		} else {
-			conv, ok := buildConv(ct, nt, ft)
-			if !ok {
-				t.Errorf("%s -> %s: no conversion", ctName, ft)
-				return
-			}
-			_, gotErr = conv(sv.UnsafePointer(), got.UnsafePointer())
+		conv, ok := buildConv(nt, ft)
+		if !ok {
+			t.Errorf("%s -> %s: no conversion", ctName, ft)
+			return
 		}
+		_, gotErr := conv(sv.UnsafePointer(), got.UnsafePointer())
 		if (gotErr != nil) != (wantErr != nil) {
 			t.Errorf("%s %s -> %s: error %v, want %v", ctName, text, ft, gotErr, wantErr)
 			return
@@ -214,28 +192,44 @@ func TestConversions(t *testing.T) {
 	check("Array(Nullable(Float64))", []*float64{f(0.5), f(math.NaN()), nil}, "[0.5,null,null]", new([]*float64))
 	check("Array(Nullable(String))", []*string{nil, s("x")}, `[null,"x"]`, new([]string))
 	check("Array(Array(String))", [][]string{{}, {"a"}}, `[[],["a"]]`, new([][]string))
-	check("Map(String, UInt64)", map[string]uint64{"a": 1}, `{"a":1}`, new(map[string]int64))
-	check("Map(String, String)", map[string]string{}, `{}`, new(map[string]string))
 }
 
 func TestDriverQuery(t *testing.T) {
-	small := []string{"a", "b"}
-	big := make([]string, 3000)
-	for i := range big {
-		big[i] = "SAMPLE-" + strconv.Itoa(i)
+	ids := func(n int) []string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "SAMPLE-" + strconv.Itoa(i)
+		}
+		return out
 	}
-	sql, opts, ok := driverQuery("SELECT 1 WHERE x IN {ids:Array(String)} AND y = {s:String}", Params{"ids": small, "s": "v"})
-	if !ok || len(opts) != 1 || !strings.Contains(sql, "{ids:Array(String)}") {
-		t.Fatalf("small: %v %s %d", ok, sql, len(opts))
+	const q = "SELECT 1 WHERE x IN {ids:Array(String)} AND y = {s:String}"
+	// Up to a form field's size, arrays ride in the URL.
+	sql, opts, ok := driverQuery(q, Params{"ids": ids(3000), "s": "v"})
+	if !ok || len(opts) != 1 || sql != q {
+		t.Fatalf("medium: %v %s %d", ok, sql, len(opts))
 	}
-	sql, opts, ok = driverQuery("SELECT 1 WHERE x IN {ids:Array(String)} AND y = {s:String}", Params{"ids": big, "s": "v"})
+	// Longer ones are external tables.
+	sql, opts, ok = driverQuery(q, Params{"ids": ids(10000), "s": "v"})
 	if !ok || len(opts) != 2 || !strings.Contains(sql, "(SELECT v FROM _param_ids)") || !strings.Contains(sql, "{s:String}") {
 		t.Fatalf("big: %v %s %d", ok, sql, len(opts))
 	}
-	if _, _, ok = driverQuery("SELECT {s:String}", Params{"s": strings.Repeat("x", 20000)}); ok {
-		t.Fatal("a large scalar should go through newRequest")
+	// Past the URL budget, the largest arrays move to external tables.
+	p := Params{}
+	var sb strings.Builder
+	sb.WriteString("SELECT 1")
+	for i := range 12 {
+		name := "a" + strconv.Itoa(i)
+		p[name] = ids(3000 + i)
+		sb.WriteString(" AND x IN {" + name + ":Array(String)}")
 	}
-	if _, _, ok = driverQuery("SELECT 1 WHERE x IN {ids:Array(String)}"+strings.Repeat(" ", maxFormQuery), Params{"ids": big}); ok {
+	sql, opts, ok = driverQuery(sb.String(), p)
+	if !ok || len(opts) != 2 || !strings.Contains(sql, "_param_a11") || !strings.Contains(sql, "{a0:Array(String)}") {
+		t.Fatalf("budget: %v %s %d", ok, sql, len(opts))
+	}
+	if _, _, ok = driverQuery("SELECT {s:String}", Params{"s": strings.Repeat("x", maxDriverURLParams+1)}); ok {
+		t.Fatal("a scalar past the URL budget should go through newRequest")
+	}
+	if _, _, ok = driverQuery(q+strings.Repeat(" ", maxFormQuery), Params{"ids": ids(10000)}); ok {
 		t.Fatal("a long statement with external tables should go through newRequest")
 	}
 }
@@ -282,51 +276,45 @@ type liveEmbedded struct {
 
 type liveRow struct {
 	liveEmbedded
-	I8       int8               `json:"i8"`
-	I16      int                `json:"i16"`
-	I32      int32              `json:"i32"`
-	I64      int64              `json:"i64"`
-	I64F     float64            `json:"i64f"`
-	U8       uint8              `json:"u8"`
-	U16      uint16             `json:"u16"`
-	U32      int64              `json:"u32"`
-	U64      uint64             `json:"u64"`
-	Cnt      int64              `json:"cnt"`
-	CntP     *int64             `json:"cntp"`
-	F32      float32            `json:"f32"`
-	F32D     float64            `json:"f32d"`
-	F64      float64            `json:"f64"`
-	F32Nan   *float64           `json:"f32nan"`
-	F64Inf   float64            `json:"f64inf"`
-	NegZero  float64            `json:"negzero"`
-	S        string             `json:"s"`
-	Bad      string             `json:"bad"`
-	FS       string             `json:"fs"`
-	LC       string             `json:"lc"`
-	En       string             `json:"en"`
-	B        bool               `json:"b"`
-	NS       string             `json:"ns"`
-	NSP      *string            `json:"nsp"`
-	NS2      *string            `json:"ns2"`
-	NI       *int64             `json:"ni"`
-	NIV      int64              `json:"niv"`
-	NF       *float64           `json:"nf"`
-	NFV      float64            `json:"nfv"`
-	Arr      []string           `json:"arr"`
-	EArr     []string           `json:"earr"`
-	IArr     []int64            `json:"iarr"`
-	UArr     []int64            `json:"uarr"`
-	FArr     []float64          `json:"farr"`
-	NArr     []*string          `json:"narr"`
-	AArr     [][]uint32         `json:"aarr"`
-	M        map[string]int64   `json:"m"`
-	EM       map[string]string  `json:"em"`
-	MA       map[string][]int64 `json:"ma"`
-	Dec      float64            `json:"dec"`
-	D        string             `json:"d"`
-	DT       string             `json:"dt"`
-	LCN      *string            `json:"lcn"`
-	Missing  string             `json:"missing"`
+	I8       int8       `json:"i8"`
+	I16      int        `json:"i16"`
+	I32      int32      `json:"i32"`
+	I64      int64      `json:"i64"`
+	I64F     float64    `json:"i64f"`
+	U8       uint8      `json:"u8"`
+	U16      uint16     `json:"u16"`
+	U32      int64      `json:"u32"`
+	U64      uint64     `json:"u64"`
+	Cnt      int64      `json:"cnt"`
+	CntP     *int64     `json:"cntp"`
+	F32      float32    `json:"f32"`
+	F32D     float64    `json:"f32d"`
+	F64      float64    `json:"f64"`
+	F32Nan   *float64   `json:"f32nan"`
+	F64Inf   float64    `json:"f64inf"`
+	NegZero  float64    `json:"negzero"`
+	S        string     `json:"s"`
+	Bad      string     `json:"bad"`
+	FS       string     `json:"fs"`
+	LC       string     `json:"lc"`
+	En       string     `json:"en"`
+	B        bool       `json:"b"`
+	NS       string     `json:"ns"`
+	NSP      *string    `json:"nsp"`
+	NS2      *string    `json:"ns2"`
+	NI       *int64     `json:"ni"`
+	NIV      int64      `json:"niv"`
+	NF       *float64   `json:"nf"`
+	NFV      float64    `json:"nfv"`
+	Arr      []string   `json:"arr"`
+	EArr     []string   `json:"earr"`
+	IArr     []int64    `json:"iarr"`
+	UArr     []int64    `json:"uarr"`
+	FArr     []float64  `json:"farr"`
+	NArr     []*string  `json:"narr"`
+	AArr     [][]uint32 `json:"aarr"`
+	LCN      *string    `json:"lcn"`
+	Missing  string     `json:"missing"`
 	MixedCas string
 }
 
@@ -343,8 +331,6 @@ const liveSelect = `SELECT
 	CAST(nan, 'Nullable(Float64)') AS nf, CAST(NULL, 'Nullable(Float64)') AS nfv,
 	['a', '', unhex('FF')] AS arr, CAST([], 'Array(String)') AS earr, CAST([1, -2], 'Array(Int64)') AS iarr, CAST([1, 2], 'Array(UInt64)') AS uarr,
 	[0.5, nan, inf] AS farr, CAST([NULL, 'x'], 'Array(Nullable(String))') AS narr, CAST([[1], [], [2, 3]], 'Array(Array(UInt32))') AS aarr,
-	map('k', 1, 'j', 2) AS m, CAST(map(), 'Map(String, String)') AS em, map('a', [1, 2]) AS ma,
-	toDecimal64(1.50, 2) AS dec, toDate('2024-01-02') AS d, toDateTime('2024-01-02 03:04:05') AS dt,
 	toLowCardinality(CAST(NULL, 'Nullable(String)')) AS lcn, 'ignored' AS unmatched`
 
 func liveClient(t *testing.T) *Client {
@@ -402,6 +388,15 @@ func TestLiveFallback(t *testing.T) {
 	compareLive[strRow](t, c, "SELECT toUUID('61f0c404-5cb3-11e7-907b-a6006ad3dba0') AS v", nil, true)
 	compareLive[strRow](t, c, "SELECT 1 AS v", nil, true) // number into string: JSON error
 	compareLive[strRow](t, c, "SELECT toDateTime64(0, 3) AS v", nil, true)
+	compareLive[strRow](t, c, "SELECT toDate('2024-01-02') AS v", nil, true)
+	type floatRow struct {
+		V float64 `json:"v"`
+	}
+	compareLive[floatRow](t, c, "SELECT toDecimal64(1.50, 2) AS v", nil, true)
+	type mapRow struct {
+		V map[string]int64 `json:"v"`
+	}
+	compareLive[mapRow](t, c, "SELECT map('k', 1) AS v", nil, true)
 	type intRow struct {
 		V int64 `json:"v"`
 	}
@@ -429,7 +424,7 @@ func TestLiveNativeParams(t *testing.T) {
 		First string `json:"first"`
 		Len   uint64 `json:"len"`
 	}
-	for _, n := range []int{0, 3, 2000, 20000} {
+	for _, n := range []int{0, 3, 2000, 6000, 20000} {
 		ids := make([]string, n)
 		for i := range ids {
 			ids[i] = "id'\\\t" + strconv.Itoa(i)

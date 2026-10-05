@@ -55,9 +55,9 @@
   (clickhouse-go, Native format over the same HTTP endpoint, transport,
   credentials and metrics), mapping columns to fields by their `json` names
   and reproducing exactly the values encoding/json decodes from JSONEachRow;
-  a result whose columns do not map exactly (tuples, `any`/map rows,
-  `json.RawMessage` or custom-unmarshaler fields, types such as UUID or
-  DateTime64) and every error go through JSONEachRow instead
+  a result with other column types (Tuple, Map, Date/DateTime, Decimal,
+  UUID, ...) in a field, `any`/map rows, `json.RawMessage` or
+  custom-unmarshaler fields, and every error go through JSONEachRow instead
   (`CLICKHOUSE_DECODE=json` forces it, `=log` logs each such statement).
   DDL, inserts and text reads stay plain HTTP. Request values reach ClickHouse
   as server-side query parameters (`{name:Type}` placeholders, `ch.QueryP`;

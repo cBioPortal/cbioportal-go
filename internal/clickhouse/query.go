@@ -104,9 +104,15 @@ func setJSONOnly(k planKey, reason error) {
 		jsonOnly.m = map[planKey]bool{}
 	}
 	jsonOnly.m[k] = true
-	jsonDecodes.Inc()
+	logFallback("columns", k, reason)
+}
+
+// logFallback counts (and with CLICKHOUSE_DECODE=log, logs) a statement
+// answered through the JSON path.
+func logFallback(reason string, k planKey, err error) {
+	jsonDecodes.Inc(reason)
 	if logFallbacks {
-		log.Printf("clickhouse: JSON decode for %s: %v: %s", k.t, reason, insertSQLHead(k.sig))
+		log.Printf("clickhouse: JSON decode (%s) for %s: %v: %s", reason, k.t, err, insertSQLHead(k.sig))
 	}
 }
 
@@ -127,8 +133,13 @@ func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
-	rows, ok := c.queryRows(ctx, sql, p)
-	if !ok {
+	rows, err := c.queryRows(ctx, sql, p)
+	if err != nil {
+		reason := "error"
+		if err == errLargeRequest {
+			reason = "request"
+		}
+		logFallback(reason, key, err)
 		return nil, false
 	}
 	defer rows.Close()
@@ -145,10 +156,12 @@ func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
 		out = append(out, zero)
 		if err := st.scanRow(rows, unsafe.Pointer(&out[len(out)-1])); err != nil {
 			cancel()
+			logFallback("error", key, err)
 			return nil, false
 		}
 	}
-	if rows.Err() != nil {
+	if err := rows.Err(); err != nil {
+		logFallback("error", key, err)
 		return nil, false
 	}
 	return out, true

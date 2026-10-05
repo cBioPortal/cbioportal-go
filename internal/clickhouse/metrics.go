@@ -18,8 +18,8 @@ var (
 		"ClickHouse request time, until the response body is read.", metrics.DurationBuckets)
 	readRows = metrics.NewCounterVec("cbioportal_clickhouse_read_rows_total",
 		"Rows ClickHouse read, from X-ClickHouse-Summary (where the server reports it).")
-	jsonDecodes = metrics.NewCounterVec("cbioportal_clickhouse_json_decoded_statements_total",
-		"Statements whose struct rows are decoded from JSONEachRow because their columns do not map exactly onto the driver's values.")
+	jsonDecodes = metrics.NewCounterVec("cbioportal_clickhouse_json_decoded_total",
+		"Struct-row queries answered through JSONEachRow, by reason (columns: a result shape the driver path does not reproduce exactly, request: parameters too large for its request, error: a failed query).", "reason")
 	readBytes = metrics.NewCounterVec("cbioportal_clickhouse_read_bytes_total",
 		"Bytes ClickHouse read, from X-ClickHouse-Summary (where the server reports it).")
 )
