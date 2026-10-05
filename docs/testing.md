@@ -8,7 +8,8 @@ Three tiers, fastest first:
    Java-recorded scenarios in `internal/databin/testdata`. With
    `CLICKHOUSE_TEST_URL=http://localhost:18123`, `internal/clickhouse` also
    round-trips query parameters (escaping, URL / form / external-table
-   transport) through a live server.
+   transport) through a live server and checks that the driver path decodes
+   every supported column type exactly as the JSONEachRow path does.
 2. **API contract tests** — `make contract` (`go test ./test/`, ~5s) against a
    running API (`API=http://host:port`, default `http://localhost:18090`;
    skipped when unreachable). They pin the exact endpoint behaviour the

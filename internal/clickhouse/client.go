@@ -11,7 +11,10 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
 type Client struct {
@@ -21,6 +24,10 @@ type Client struct {
 	// aliases rewrites references to the default staging and reference
 	// databases (cbioportal_raw., 'cbioportal_raw', ...) in SQL text.
 	aliases *strings.Replacer
+
+	drvOnce sync.Once
+	drv     driver.Conn
+	drvErr  error
 }
 
 // SetDatabaseAliases points SQL that names the default staging/reference
