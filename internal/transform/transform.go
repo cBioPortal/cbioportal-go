@@ -473,7 +473,7 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 		"datatype": true, "profile_stable_id": true, "patient_id": true, "sample_id": true}
 	var names []string
 	for n := range cols {
-		if !skip[n] {
+		if !skip[n] && !OrderColumns[n] {
 			names = append(names, n)
 		}
 	}

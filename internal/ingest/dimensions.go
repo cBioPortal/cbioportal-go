@@ -116,12 +116,20 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 // on a MAF's `#sequenced_samples:` header lines. The transform's sample_profile
 // view unions these with the ids present in the record tables to reproduce
 // cbioportal-core's sample_profile membership. kind is "header" or
-// "sequenced_samples".
+// "sequenced_samples". file_num and row_num give each id's position: its
+// file's among the study's data files and its own among the file's ids.
 func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 	table := "profile_sample"
 	if _, err := c.Execute(fmt.Sprintf(
-		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, profile_stable_id String, kind String, sample_id String) ENGINE = MergeTree ORDER BY (study_id, profile_stable_id)",
-		c.Database(), table)); err != nil {
+		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, profile_stable_id String, kind String, sample_id String, %s) ENGINE = MergeTree ORDER BY (study_id, profile_stable_id)",
+		c.Database(), table, strings.Join(orderColumnDefs[:], ", "))); err != nil {
+		return err
+	}
+	existing, err := c.TableColumns(table)
+	if err != nil {
+		return err
+	}
+	if err := addOrderColumns(c, table, existing); err != nil {
 		return err
 	}
 	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
@@ -150,18 +158,21 @@ func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 		default:
 			continue
 		}
+		row := 0
 		for _, id := range ids {
 			if id == "" || strings.ContainsAny(id, "\t\n\r") {
 				continue
 			}
-			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\n", s.StudyID, fileName(f.DataPath), f.StableID, kind, id)
+			row++
+			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%d\t%d\n", s.StudyID, fileName(f.DataPath), f.StableID, kind, id, i+1, row)
 		}
 	}
 	if b.Len() == 0 {
 		return nil
 	}
 	return c.InsertStream(
-		fmt.Sprintf("INSERT INTO `%s`.`%s` FORMAT TabSeparatedRaw", c.Database(), table),
+		fmt.Sprintf("INSERT INTO `%s`.`%s` (study_id, source_file, profile_stable_id, kind, sample_id, %s, %s) FORMAT TabSeparatedRaw",
+			c.Database(), table, fileNumColumn, rowNumColumn),
 		strings.NewReader(b.String()))
 }
 

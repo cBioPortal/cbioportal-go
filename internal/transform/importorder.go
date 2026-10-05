@@ -7,15 +7,34 @@ import "fmt"
 // order. The transform reproduces the numbering from the staged files:
 // studies in import order, each study's rows in file order.
 
-// fileOrderSQL is a staging row's position in the files of its table: the
-// insert block of its part, then its offset in the part. Rows of one file keep
-// their order through merges (parts merge in block order and the sort key,
-// study and file, ties within a file).
-const fileOrderSQL = "(toUInt64OrZero(splitByChar('_', _part)[2]), _part_offset)"
+// OrderColumns are the staging columns the ingest writes to position a row
+// in its study's files: file_num, the file among the study's data files, and
+// row_num, the row among the file's rows. They are bookkeeping, not data.
+var OrderColumns = map[string]bool{"file_num": true, "row_num": true}
+
+// StagingOrderSQL is the expression ordering a staging table's rows of one
+// study as its files list them: (file_num, row_num), then the row's storage
+// position (insert block of its part, offset in the part). The storage
+// position is the fallback for rows staged before file_num and row_num were
+// written, which read 0 for both (or, when the table lacks the columns,
+// hasOrderColumns is false). prefix qualifies the columns (e.g. "m.").
+func StagingOrderSQL(prefix string, hasOrderColumns bool) string {
+	storage := fmt.Sprintf("toUInt64OrZero(splitByChar('_', %[1]s_part)[2]), %[1]s_part_offset", prefix)
+	if !hasOrderColumns {
+		return "(toUInt32(0), toUInt64(0), " + storage + ")"
+	}
+	return fmt.Sprintf("(%[1]sfile_num, %[1]srow_num, %[2]s)", prefix, storage)
+}
+
+// fileOrderSQL is StagingOrderSQL for the positionedSources, whose stand-ins
+// supply the order columns where the table lacks them.
+var fileOrderSQL = StagingOrderSQL("", true)
 
 // studyRankSQL numbers the staged studies in import order (study_id,
 // study_rank): by the time the study was ingested (a re-ingested study comes
-// last, as a re-imported one does), else by the position of its row.
+// last, as a re-imported one does), else by the position of its row. Only
+// studies staged before import_time was recorded tie on it; cancer_study has
+// no order columns, so its row position is the storage position.
 func studyRankSQL(rawDB string) string {
 	return fmt.Sprintf(
 		"SELECT study_id, toUInt64(row_number() OVER (ORDER BY t, pos, study_id)) AS study_rank FROM ("+

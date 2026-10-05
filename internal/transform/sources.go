@@ -56,7 +56,8 @@ var stagingSources = map[string][]sourceColumn{
 }
 
 // positionedSources are the staging tables whose rows the transform reads in
-// file order (fileOrderSQL): their stand-ins carry the part name and offset.
+// file order (fileOrderSQL): their stand-ins carry the part name and offset,
+// and file_num and row_num (0) where the table lacks them.
 var positionedSources = map[string]bool{
 	"cancer_study": true, "clinical_sample": true, "clinical_patient": true, "cna_seg": true,
 }
@@ -90,7 +91,7 @@ func newClient(c *ch.Client, rawDB string) *client {
 				sel[i] = fmt.Sprintf("CAST(defaultValueOfTypeName('%s') AS %s) AS `%s`", col.typ, col.typ, col.name)
 			}
 			if positionedSources[table] {
-				sel = append(sel, "'' AS _part", "toUInt64(0) AS _part_offset")
+				sel = append(sel, "'' AS _part", "toUInt64(0) AS _part_offset", "toUInt32(0) AS file_num", "toUInt64(0) AS row_num")
 			}
 			with = "(SELECT " + strings.Join(sel, ", ") + " WHERE 0)"
 		} else {
@@ -98,6 +99,14 @@ func newClient(c *ch.Client, rawDB string) *client {
 			for _, col := range cols {
 				if !have[col.name] {
 					add = append(add, fmt.Sprintf("CAST(defaultValueOfTypeName('%s') AS %s) AS `%s`", col.typ, col.typ, col.name))
+				}
+			}
+			if positionedSources[table] {
+				if !have["file_num"] {
+					add = append(add, "toUInt32(0) AS file_num")
+				}
+				if !have["row_num"] {
+					add = append(add, "toUInt64(0) AS row_num")
 				}
 			}
 			if len(add) == 0 {

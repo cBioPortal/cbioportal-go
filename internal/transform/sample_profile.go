@@ -90,7 +90,7 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 			"datatype": true, "profile_stable_id": true, "sample_id": true}
 		var names []string
 		for n := range cols {
-			if !skip[n] {
+			if !skip[n] && !OrderColumns[n] {
 				names = append(names, n)
 			}
 		}

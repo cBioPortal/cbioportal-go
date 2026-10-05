@@ -117,11 +117,11 @@ func ingestMutSig(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		}
 		deleteExisting(c, f, s.StudyID)
 		emitted := uint64(len(rows))
-		body := strings.Join(rows, "\n")
-		if body != "" {
-			body += "\n"
+		var body strings.Builder
+		for j, r := range rows {
+			fmt.Fprintf(&body, "%d\t%s\n", j+1, r)
 		}
-		st, err := runInsert(c, f, s.StudyID, mutSigColumns, strings.NewReader(body), &emitted)
+		st, err := runInsert(c, f, s.StudyID, i+1, mutSigColumns, strings.NewReader(body.String()), &emitted)
 		if err != nil {
 			return nil, err
 		}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
 
 // routeSurvival registers survival-data and clinical-event (timeline) endpoints.
@@ -311,7 +312,7 @@ func (s *State) timelineSelect() (sql, order string) {
 	}
 	var kv []string
 	for _, c := range cols {
-		if !timelineFixedCols[c] {
+		if !timelineFixedCols[c] && !transform.OrderColumns[c] {
 			kv = append(kv, fmt.Sprintf("('%s', toString(`%s`))", sqlLit(strings.ToUpper(c)), c))
 		}
 	}
@@ -323,7 +324,7 @@ func (s *State) timelineSelect() (sql, order string) {
 	if from == "cbioportal_raw.timeline" && slices.Contains(cols, "source_file") && len(s.rawColumns("import_order")) > 0 {
 		from += " LEFT JOIN (SELECT study_id AS o_study, name AS o_file, seq AS o_seq FROM cbioportal_raw.import_order " +
 			"WHERE kind = 'data') o ON o.o_study = timeline.study_id AND o.o_file = timeline.source_file"
-		order = "o_seq, toUInt64OrZero(splitByChar('_', timeline._part)[2]), timeline._part_offset"
+		order = "o_seq, " + s.rawFileOrder("timeline", "timeline.")
 	}
 	return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
 		"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " + attrs +

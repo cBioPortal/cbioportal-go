@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"testing"
 )
 
@@ -50,20 +49,54 @@ func TestMatrixShape(t *testing.T) {
 func TestMatrixUnpivot(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "m.txt")
-	os.WriteFile(path, []byte("Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\nTP53\t7157\t-2\t0\nEGFR\t1956\t\t1\n"), 0o644)
+	os.WriteFile(path, []byte("#comment\nHugo_Symbol\tEntrez_Gene_Id\tS1\tS2\nTP53\t7157\t-2\t0\n\n#note\nEGFR\t1956\t\t1\nKRAS\t3845\t\t\nBRAF\t673\t5\t6"), 0o644)
 	h, _ := ReadHeader(path)
 	shape := Shape(h.Columns)
 	var emitted uint64
 	r, _ := OpenMatrix(path, shape, &emitted)
 	out, _ := io.ReadAll(r)
 	lines := splitLines(string(out))
-	sort.Strings(lines)
-	want := []string{"EGFR\t1956\tS2\t1", "TP53\t7157\tS1\t-2", "TP53\t7157\tS2\t0"}
+	// Cells are numbered in file order: row by row, each row's cells in
+	// column order, empty cells skipped.
+	want := []string{"1\tTP53\t7157\tS1\t-2", "2\tTP53\t7157\tS2\t0", "3\tEGFR\t1956\tS2\t1",
+		"4\tBRAF\t673\tS1\t5", "5\tBRAF\t673\tS2\t6"}
 	if !reflect.DeepEqual(lines, want) {
-		t.Errorf("unpivot got %v want %v", lines, want)
+		t.Errorf("unpivot got %q want %q", lines, want)
 	}
-	if emitted != 3 {
-		t.Errorf("emitted = %d want 3", emitted)
+	if emitted != 5 {
+		t.Errorf("emitted = %d want 5", emitted)
+	}
+}
+
+func TestBodyReaderNumbersDataRows(t *testing.T) {
+	body := "#Patient Identifier\tSample Identifier\n#STRING\tSTRING\n" +
+		"PATIENT_ID\tSAMPLE_ID\n" +
+		"P1\tS1\n\n\r\n#mid-file comment\nP2\tS2\r\nP3\tS3"
+	path := filepath.Join(t.TempDir(), "data_clinical_sample.txt")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	read := func(skipHeader bool) ([]string, uint64) {
+		var emitted uint64
+		r, err := OpenBody(path, skipHeader, &emitted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitLines(string(out)), emitted
+	}
+	got, n := read(true)
+	want := []string{"1\tP1\tS1", "2\tP2\tS2\r", "3\tP3\tS3"}
+	if !reflect.DeepEqual(got, want) || n != 3 {
+		t.Errorf("with header: got %q (%d) want %q (3)", got, n, want)
+	}
+	got, n = read(false)
+	want = append([]string{"1\tPATIENT_ID\tSAMPLE_ID"}, "2\tP1\tS1", "3\tP2\tS2\r", "4\tP3\tS3")
+	if !reflect.DeepEqual(got, want) || n != 4 {
+		t.Errorf("headerless: got %q (%d) want %q (4)", got, n, want)
 	}
 }
 

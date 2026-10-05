@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync/atomic"
 )
@@ -105,9 +106,11 @@ func SanitizeColumns(columns []string) []string {
 	return out
 }
 
-// BodyReader is an io.Reader over a data file that drops `#` lines and,
-// optionally, the header line, yielding the pure data body for a FORMAT
-// TabSeparatedRaw insert. It optionally counts emitted data lines.
+// BodyReader is an io.Reader over a data file that drops `#` lines, blank
+// lines and, optionally, the header line, yielding the pure data body for a
+// FORMAT TabSeparatedRaw insert. Each emitted line is prefixed with its row
+// number (1-based, counting data rows only, in file order) as an extra
+// leading column. It optionally counts emitted data lines.
 type BodyReader struct {
 	inner      *bufio.Reader
 	f          *os.File
@@ -116,6 +119,7 @@ type BodyReader struct {
 	buf        []byte
 	pos        int
 	done       bool
+	rows       uint64
 	emitted    *uint64
 }
 
@@ -167,7 +171,9 @@ func (b *BodyReader) fill() bool {
 		if b.emitted != nil {
 			atomic.AddUint64(b.emitted, 1)
 		}
-		b.buf = line
+		b.rows++
+		b.buf = strconv.AppendUint(b.buf[:0], b.rows, 10)
+		b.buf = append(append(b.buf, '\t'), line...)
 		b.pos = 0
 		return true
 	}
@@ -246,14 +252,17 @@ func ShapeWithFeatures(columns, features []string) MatrixShape {
 }
 
 // MatrixUnpivotReader is an io.Reader that unpivots a wide gene×sample matrix
-// into long-form TSV rows (`<id fields…>\t<sample_id>\t<value>` per non-empty
-// cell). Comment and header lines are consumed at construction.
+// into long-form TSV rows (`<row_num>\t<id fields…>\t<sample_id>\t<value>`
+// per non-empty cell), where row_num numbers the emitted cells from 1 in file
+// order (row by row, each row's cells in column order). Comment and header
+// lines are consumed at construction.
 type MatrixUnpivotReader struct {
 	inner       *bufio.Reader
 	f           *os.File
 	idCount     int
 	sampleNames [][]byte
 	out         bytes.Buffer
+	num         []byte // the last cell's number, in decimal
 	line        []byte
 	eof         bool
 	emitted     *uint64
@@ -322,6 +331,9 @@ func (m *MatrixUnpivotReader) fill() bool {
 			if idx >= len(fields) || len(fields[idx]) == 0 {
 				continue
 			}
+			m.num = incDecimal(m.num)
+			m.out.Write(m.num)
+			m.out.WriteByte('\t')
 			m.out.Write(prefix)
 			m.out.WriteByte('\t')
 			m.out.Write(sample)
@@ -349,4 +361,16 @@ func (m *MatrixUnpivotReader) Read(p []byte) (int, error) {
 		}
 	}
 	return m.out.Read(p)
+}
+
+// incDecimal increments the decimal number in num (empty is 0) in place.
+func incDecimal(num []byte) []byte {
+	for i := len(num) - 1; i >= 0; i-- {
+		if num[i] < '9' {
+			num[i]++
+			return num
+		}
+		num[i] = '0'
+	}
+	return append([]byte{'1'}, num...)
 }

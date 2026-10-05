@@ -17,6 +17,21 @@ import (
 
 var provColumns = [5]string{"study_id", "source_file", "alteration_type", "datatype", "profile_stable_id"}
 
+// Every staged data row records where it came from: file_num is its file's
+// position among the study's data files in ingest order (1-based) and
+// row_num its position among the rows the file yields (1-based, in file
+// order). Together they order a study's rows as its files list them,
+// independently of how ClickHouse stores them.
+const (
+	fileNumColumn = "file_num"
+	rowNumColumn  = "row_num"
+)
+
+// orderColumnDefs declare the order columns. A file's rows keep their order
+// within its part (the sort key, study and file, ties within a file), so
+// row_num ascends by 1 and delta-encodes to almost nothing.
+var orderColumnDefs = [2]string{"`" + fileNumColumn + "` UInt32", "`" + rowNumColumn + "` UInt64 CODEC(Delta, LZ4)"}
+
 type FileStat struct {
 	Table        string
 	SourceFile   string
@@ -57,8 +72,8 @@ func backtick(cols []string) string {
 	return strings.Join(q, ", ")
 }
 
-// ensureSchema creates the staging table (provenance + data columns as String)
-// or adds any missing columns to an existing one.
+// ensureSchema creates the staging table (provenance, file_num, row_num and
+// the data columns as String) or adds any missing columns to an existing one.
 func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 	existing, err := c.TableColumns(table)
 	if err != nil {
@@ -66,13 +81,20 @@ func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 	}
 	all := append(append([]string{}, provColumns[:]...), dataColumns...)
 	if len(existing) == 0 {
-		defs := make([]string, len(all))
-		for i, col := range all {
-			defs[i] = fmt.Sprintf("`%s` String", col)
+		defs := make([]string, 0, len(all)+len(orderColumnDefs))
+		for _, col := range provColumns {
+			defs = append(defs, fmt.Sprintf("`%s` String", col))
+		}
+		defs = append(defs, orderColumnDefs[:]...)
+		for _, col := range dataColumns {
+			defs = append(defs, fmt.Sprintf("`%s` String", col))
 		}
 		ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY (study_id, source_file)",
 			c.Database(), table, strings.Join(defs, ", "))
 		_, err := c.Execute(ddl)
+		return err
+	}
+	if err := addOrderColumns(c, table, existing); err != nil {
 		return err
 	}
 	for _, col := range all {
@@ -87,22 +109,41 @@ func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 	return nil
 }
 
-func insertSQL(c *ch.Client, table string, prov [5]string, dataColumns []string) string {
-	colList := backtick(append(append([]string{}, provColumns[:]...), dataColumns...))
-	consts := make([]string, len(prov))
+// addOrderColumns adds file_num and row_num to a staging table created
+// without them; its existing rows read 0 for both.
+func addOrderColumns(c *ch.Client, table string, existing map[string]bool) error {
+	for i, col := range []string{fileNumColumn, rowNumColumn} {
+		if !existing[col] {
+			if _, err := c.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS %s",
+				c.Database(), table, orderColumnDefs[i])); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// insertSQL inserts a numbered body (row_num, then the data columns) with
+// the provenance and file_num as constants.
+func insertSQL(c *ch.Client, table string, prov [5]string, fileNum int, dataColumns []string) string {
+	colList := backtick(append(append(append([]string{}, provColumns[:]...), fileNumColumn, rowNumColumn), dataColumns...))
+	consts := make([]string, len(prov), len(prov)+1)
 	for i, v := range prov {
 		consts[i] = "'" + ch.SQLLit(v) + "'"
 	}
-	inputStruct := make([]string, len(dataColumns))
-	for i, col := range dataColumns {
-		inputStruct[i] = fmt.Sprintf("`%s` String", col)
+	consts = append(consts, fmt.Sprintf("toUInt32(%d)", fileNum))
+	inputStruct := make([]string, 0, len(dataColumns)+1)
+	inputStruct = append(inputStruct, "`"+rowNumColumn+"` UInt64")
+	for _, col := range dataColumns {
+		inputStruct = append(inputStruct, fmt.Sprintf("`%s` String", col))
 	}
 	return fmt.Sprintf(
 		"INSERT INTO `%s`.`%s` (%s) SELECT %s, * FROM input('%s') FORMAT TabSeparatedRaw",
 		c.Database(), table, colList, strings.Join(consts, ", "), strings.Join(inputStruct, ", "))
 }
 
-func runInsert(c *ch.Client, f *parser.DataFile, studyID string, dataColumns []string, body io.Reader, emitted *uint64) (FileStat, error) {
+// runInsert streams a numbered body (see insertSQL) into f's staging table.
+func runInsert(c *ch.Client, f *parser.DataFile, studyID string, fileNum int, dataColumns []string, body io.Reader, emitted *uint64) (FileStat, error) {
 	table := f.StageSlug
 	source := fileName(f.DataPath)
 	var size int64
@@ -112,7 +153,7 @@ func runInsert(c *ch.Client, f *parser.DataFile, studyID string, dataColumns []s
 	if err := ensureSchema(c, table, dataColumns); err != nil {
 		return FileStat{}, err
 	}
-	sql := insertSQL(c, table, provenance(studyID, f), dataColumns)
+	sql := insertSQL(c, table, provenance(studyID, f), fileNum, dataColumns)
 	start := time.Now()
 	if err := c.InsertStream(sql, body); err != nil {
 		return FileStat{}, fmt.Errorf("streaming %s: %w", f.DataPath, err)
@@ -125,7 +166,7 @@ func runInsert(c *ch.Client, f *parser.DataFile, studyID string, dataColumns []s
 	return FileStat{Table: table, SourceFile: source, RowsLoaded: loaded, RowsExpected: *emitted, Bytes: size, Secs: secs}, nil
 }
 
-func ingestRecord(c *ch.Client, studyID string, f *parser.DataFile) (FileStat, error) {
+func ingestRecord(c *ch.Client, studyID string, fileNum int, f *parser.DataFile) (FileStat, error) {
 	h, err := parser.ReadHeader(f.DataPath)
 	if err != nil {
 		return FileStat{}, err
@@ -136,10 +177,10 @@ func ingestRecord(c *ch.Client, studyID string, f *parser.DataFile) (FileStat, e
 	if err != nil {
 		return FileStat{}, err
 	}
-	return runInsert(c, f, studyID, cols, body, &emitted)
+	return runInsert(c, f, studyID, fileNum, cols, body, &emitted)
 }
 
-func ingestHeaderless(c *ch.Client, studyID string, f *parser.DataFile) (FileStat, error) {
+func ingestHeaderless(c *ch.Client, studyID string, fileNum int, f *parser.DataFile) (FileStat, error) {
 	var cols []string
 	switch f.StageSlug {
 	case "type_of_cancer":
@@ -156,10 +197,10 @@ func ingestHeaderless(c *ch.Client, studyID string, f *parser.DataFile) (FileSta
 	if err != nil {
 		return FileStat{}, err
 	}
-	return runInsert(c, f, studyID, cols, body, &emitted)
+	return runInsert(c, f, studyID, fileNum, cols, body, &emitted)
 }
 
-func ingestMatrix(c *ch.Client, studyID string, f *parser.DataFile) (FileStat, error) {
+func ingestMatrix(c *ch.Client, studyID string, fileNum int, f *parser.DataFile) (FileStat, error) {
 	h, err := parser.ReadHeader(f.DataPath)
 	if err != nil {
 		return FileStat{}, err
@@ -171,7 +212,7 @@ func ingestMatrix(c *ch.Client, studyID string, f *parser.DataFile) (FileStat, e
 	if err != nil {
 		return FileStat{}, err
 	}
-	return runInsert(c, f, studyID, cols, body, &emitted)
+	return runInsert(c, f, studyID, fileNum, cols, body, &emitted)
 }
 
 func deleteExisting(c *ch.Client, f *parser.DataFile, studyID string) {
@@ -211,7 +252,7 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	var stats []FileStat
 	for i := range s.Files {
 		f := &s.Files[i]
-		var fn func(*ch.Client, string, *parser.DataFile) (FileStat, error)
+		var fn func(*ch.Client, string, int, *parser.DataFile) (FileStat, error)
 		switch f.Layout {
 		case parser.Record:
 			fn = ingestRecord
@@ -223,7 +264,7 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 			continue
 		}
 		deleteExisting(c, f, s.StudyID)
-		st, err := fn(c, s.StudyID, f)
+		st, err := fn(c, s.StudyID, i+1, f)
 		if err != nil {
 			return nil, err
 		}

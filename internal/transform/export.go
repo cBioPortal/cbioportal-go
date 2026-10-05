@@ -22,7 +22,7 @@ var MafExportColumns = []string{
 // MutationFilter as the `mutation` table — with every MafExportColumns column
 // (empty when the staged file lacks it), the reference gene as hugo / entrez,
 // the stored protein_change, and the record's position in the staged file
-// (blk, off). table is the staging table (mutation_extended or
+// (ord, StagingOrderSQL). table is the staging table (mutation_extended or
 // mutation_uncalled) as referenced in SQL; has lists its columns. The study
 // and profile are the query parameters {study:String} and {profile:String}.
 func MafRecordsSQL(table, source, targetDB string, has map[string]bool) string {
@@ -36,9 +36,9 @@ func MafRecordsSQL(table, source, targetDB string, has map[string]bool) string {
 	}
 	return fmt.Sprintf(
 		"SELECT %s, gk.resolved_hugo_gene_symbol AS hugo, gk.resolved_entrez_gene_id AS entrez, %s AS protein_change, "+
-			"toUInt64OrZero(splitByChar('_', m._part)[2]) AS blk, m._part_offset AS off "+
+			"%s AS ord "+
 			"FROM %s m%s WHERE m.study_id = {study:String} AND m.profile_stable_id = {profile:String} AND %s",
-		strings.Join(cols, ", "), proteinChangeSQL(has), table,
+		strings.Join(cols, ", "), proteinChangeSQL(has), StagingOrderSQL("m.", has["row_num"]), table,
 		geneKeyJoin(targetDB, source, "m", "hugo_symbol", "entrez_gene_id"),
 		mutationFilterSQL("m", "gk.resolved_entrez_gene_id"))
 }

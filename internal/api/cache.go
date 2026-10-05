@@ -9,6 +9,7 @@ import (
 	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/transform"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -145,6 +146,13 @@ func (s *State) modelHasColumn(table, column string) bool {
 // least the given columns: the table itself when it has them all, the table
 // with each missing column added as an empty string, or an empty relation of
 // those columns when the table is absent.
+// rawFileOrder is the expression ordering a raw staging table's rows of one
+// study as its files list them (transform.StagingOrderSQL); prefix qualifies
+// the columns (e.g. "t.").
+func (s *State) rawFileOrder(table, prefix string) string {
+	return transform.StagingOrderSQL(prefix, slices.Contains(s.rawColumns(table), "row_num"))
+}
+
 func (s *State) rawSource(table string, cols ...string) string {
 	have := s.rawColumns(table)
 	if len(have) == 0 {

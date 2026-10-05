@@ -178,7 +178,7 @@ func structuralVariantSQL(c *client, rawDB, targetDB string) string {
 		handled[n] = true
 	}
 	for _, n := range sortedColumnNames(svc) {
-		if !handled[n] {
+		if !handled[n] && !OrderColumns[n] {
 			sel = append(sel, "v.`"+n+"` AS `"+n+"`")
 		}
 	}

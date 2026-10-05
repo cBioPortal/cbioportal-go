@@ -427,37 +427,40 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 			"FROM {t}.prod_profile p INNER JOIN {p}.genetic_profile gp ON gp.genetic_profile_id = p.genetic_profile_id"))
 	// The samples of each matrix profile in matrix order (production's
 	// genetic_profile_samples, internal sample ids with a trailing comma),
-	// shaped like the ingest's header rows and stored in matrix order.
+	// shaped like the ingest's header rows, numbered and stored in matrix order.
 	add(b.rawTable("profile_sample", "(study_id, profile_stable_id, position)",
 		"SELECT p.study_id AS study_id, '' AS source_file, p.profile_stable_id AS profile_stable_id, "+
-			"'header' AS kind, s.sample_id AS sample_id, gps.position AS position "+
+			"'header' AS kind, s.sample_id AS sample_id, gps.position AS position, "+
+			"toUInt32(0) AS file_num, toUInt64(gps.position) AS row_num "+
 			"FROM (SELECT genetic_profile_id, toInt64(id) AS internal_id, position "+
 			"FROM (SELECT genetic_profile_id, arrayFilter(x -> x != '', splitByChar(',', ordered_sample_list)) AS ids "+
 			"FROM {p}.genetic_profile_samples FINAL) ARRAY JOIN ids AS id, arrayEnumerate(ids) AS position) gps "+
 			"INNER JOIN {t}.prod_profile p ON p.genetic_profile_id = gps.genetic_profile_id "+
 			"INNER JOIN {t}.prod_sample s ON s.internal_id = gps.internal_id"))
 	// Gene matrices: one row per sample x gene x profile with a stored value.
-	// Rows are ordered by gene, so the storage-order columns the API orders
-	// by are constant.
+	// Rows are ordered by gene, so the file-order columns the API orders by
+	// are constant.
 	for _, m := range matrixTables {
 		add(b.rawView(m[1], fmt.Sprintf(
 			"SELECT ga.cancer_study_identifier AS study_id, ga.profile_type AS profile_stable_id, "+
 				"ga.hugo_gene_symbol AS hugo_symbol, toString(g.entrez_gene_id) AS entrez_gene_id, "+
 				"substring(ga.sample_unique_id, length(ga.cancer_study_identifier) + 2) AS sample_id, "+
-				"ifNull(ga.alteration_value, '') AS value, '%s' AS alteration_type, '' AS _part, toUInt64(0) AS _part_offset "+
+				"ifNull(ga.alteration_value, '') AS value, '%s' AS alteration_type, "+
+				"toUInt32(0) AS file_num, toUInt64(0) AS row_num, '' AS _part, toUInt64(0) AS _part_offset "+
 				"FROM {p}.genetic_alteration_derived ga LEFT JOIN (SELECT entrez_gene_id, hugo_gene_symbol FROM {p}.gene) g "+
 				"ON g.hugo_gene_symbol = ga.hugo_gene_symbol "+
 				"WHERE (ga.cancer_study_identifier, ga.profile_type) IN "+
 				"(SELECT study_id, profile_stable_id FROM {t}.prod_profile WHERE alteration_type = '%s')", m[0], m[0])))
 	}
-	// Generic assay cells; entities read in sort order, so the storage-order
+	// Generic assay cells; entities read in sort order, so the file-order
 	// columns the API orders entities by are constant.
 	add(
 		b.rawView("generic_assay_matrix",
 			"SELECT left(d.profile_stable_id, length(d.profile_stable_id) - length(d.profile_type) - 1) AS study_id, "+
 				"d.profile_type AS profile_stable_id, d.entity_stable_id AS entity_stable_id, "+
 				"substring(d.sample_unique_id, length(d.profile_stable_id) - length(d.profile_type) + 1) AS sample_id, "+
-				"d.value AS value, '' AS name, '' AS description, '' AS url, '' AS _part, toUInt64(0) AS _part_offset "+
+				"d.value AS value, '' AS name, '' AS description, '' AS url, "+
+				"toUInt32(0) AS file_num, toUInt64(0) AS row_num, '' AS _part, toUInt64(0) AS _part_offset "+
 				"FROM {p}.generic_assay_data_derived d"),
 		b.rawView("generic_assay_profile_entity",
 			"SELECT p.study_id AS study_id, p.profile_stable_id AS profile_stable_id, e.entity_stable_id AS entity_stable_id "+

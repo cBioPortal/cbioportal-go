@@ -220,9 +220,6 @@ func (s *State) exportStudyMetadata(studyID string) (*exportStudyMeta, error) {
 	return &rows[0], nil
 }
 
-// rawFileOrder orders a staging table's rows as they appear in the study files.
-const rawFileOrder = "toUInt64OrZero(splitByChar('_', _part)[2]), _part_offset"
-
 // hasRaw reports whether the raw staging database holds table.
 func (e *studyExport) hasRaw(table string) bool { return len(e.s.rawColumns(table)) > 0 }
 
@@ -246,11 +243,11 @@ func (e *studyExport) loadCases() error {
 	if e.hasRaw("clinical_sample") && e.hasRaw("clinical_patient") {
 		samples, err = ch.QueryP[sampleRow](e.s.CH,
 			"SELECT sample_id, patient_id FROM cbioportal_raw.clinical_sample WHERE study_id = {study:String} AND sample_id != '' ORDER BY "+
-				rawFileOrder, p)
+				e.s.rawFileOrder("clinical_sample", ""), p)
 		if err == nil {
 			patients, err = ch.QueryP[patientRow](e.s.CH,
 				"SELECT patient_id FROM cbioportal_raw.clinical_patient WHERE study_id = {study:String} AND patient_id != '' ORDER BY "+
-					rawFileOrder, p)
+					e.s.rawFileOrder("clinical_patient", ""), p)
 		}
 	} else {
 		samples, err = ch.QueryP[sampleRow](e.s.CH,
@@ -570,14 +567,14 @@ func (e *studyExport) clinicalTimeline() error {
 		if c == "stop_date" {
 			sel = append(sel, c)
 		}
-		if !timelineFixedColumns[c] {
+		if !timelineFixedColumns[c] && !transform.OrderColumns[c] {
 			keys = append(keys, c)
 			sel = append(sel, "`"+c+"`")
 		}
 	}
 	rows, err := ch.QueryP[map[string]string](e.s.CH, fmt.Sprintf(
 		"SELECT %s FROM cbioportal_raw.timeline WHERE study_id = {study:String} ORDER BY source_file, %s",
-		strings.Join(sel, ", "), rawFileOrder), ch.Params{"study": e.studyID})
+		strings.Join(sel, ", "), e.s.rawFileOrder("timeline", "")), ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}
@@ -736,9 +733,9 @@ func (e *studyExport) maf(alterationType, table string) error {
 		}
 		var rows []map[string]string
 		if len(cols) > 0 {
-			rows, err = ch.QueryP[map[string]string](e.s.CH, "SELECT * EXCEPT (entrez, blk, off), toString(entrez) AS entrez FROM ("+
+			rows, err = ch.QueryP[map[string]string](e.s.CH, "SELECT * EXCEPT (entrez, ord), toString(entrez) AS entrez FROM ("+
 				transform.MafRecordsSQL("cbioportal_raw."+table, table, e.s.CH.Database(), has)+
-				") ORDER BY blk, off", ch.Params{"study": e.studyID, "profile": p.StableID})
+				") ORDER BY ord", ch.Params{"study": e.studyID, "profile": p.StableID})
 			if err != nil {
 				return err
 			}
@@ -933,7 +930,7 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 				"ON gk.hugo_symbol = t.hugo_symbol AND gk.entrez_gene_id = t.entrez_gene_id "+
 				"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = gk.resolved_entrez_gene_id "+
 				"ORDER BY t.ord",
-			"tuple("+rawFileOrder+")", table, table), ch.Params{"study": e.studyID, "profile": p.StableID})
+			e.s.rawFileOrder(table, ""), table, table), ch.Params{"study": e.studyID, "profile": p.StableID})
 		if err != nil {
 			return err
 		}
@@ -1023,7 +1020,7 @@ func (e *studyExport) matrixHeader(stableID string, known map[string]bool) ([]st
 	}
 	rows, err := ch.QueryP[row](e.s.CH,
 		"SELECT sample_id FROM cbioportal_raw.profile_sample WHERE study_id = {study:String} AND profile_stable_id = {profile:String} "+
-			"AND kind = 'header' ORDER BY "+rawFileOrder, ch.Params{"study": e.studyID, "profile": stableID})
+			"AND kind = 'header' ORDER BY "+e.s.rawFileOrder("profile_sample", ""), ch.Params{"study": e.studyID, "profile": stableID})
 	if err != nil {
 		return nil, err
 	}
@@ -1088,7 +1085,7 @@ func (e *studyExport) copyNumberSegments() error {
 	}
 	rows, err := ch.QueryP[segRow](e.s.CH,
 		"SELECT id, chrom, loc_start, loc_end, num_mark, seg_mean FROM cbioportal_raw.cna_seg WHERE study_id = {study:String} ORDER BY "+
-			rawFileOrder, ch.Params{"study": e.studyID})
+			e.s.rawFileOrder("cna_seg", ""), ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}

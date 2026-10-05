@@ -241,7 +241,7 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 	}
 	ents, err := queryA[entityRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS e FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
-			"GROUP BY entity_stable_id ORDER BY min((_part, _part_offset)), entity_stable_id", where), args)
+			"GROUP BY entity_stable_id ORDER BY min(%s), entity_stable_id", where, s.rawFileOrder("generic_assay_matrix", "")), args)
 	if err != nil {
 		return nil, nil, err
 	}
