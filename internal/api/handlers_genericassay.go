@@ -31,157 +31,103 @@ type genericAssayFilter struct {
 	SampleListID          string   `json:"sampleListId"`
 }
 
-type genericAssayMatrixRow struct {
-	SampleID  string `json:"sampleId"`
-	StableID  string `json:"stableId"`
-	PatientID string `json:"patientId"`
-	Value     string `json:"value"`
+type genericAssayDataRow struct {
+	SampleID           string `json:"sampleId"`
+	StableID           string `json:"stableId"`
+	PatientID          string `json:"patientId"`
+	Value              string `json:"value"`
+	MolecularProfileID string `json:"molecularProfileId"`
+	StudyID            string `json:"studyId"`
 }
 
-// gaProfileData is one generic-assay profile's cells, keyed by sample, with
-// its entities in matrix (import) order.
-type gaProfileData struct {
-	id           string
-	meta         profileMeta
-	patientLevel bool
-	entities     []string
-	cells        map[string]map[string]string // sample id -> entity -> value
-	patientOf    map[string]string
-}
-
-// gaLoadProfile reads the cells of one generic-assay profile, restricted to
-// the given entities and samples (nil: all). A patient-level profile's
-// matrix columns are patients; every sample of the patient carries the
-// patient's value, as the importer links all of a patient's samples to the
-// profile. Values read as the Java mapper truncates them.
-func (s *State) gaLoadProfile(meta profileMeta, entityIDs, sampleIDs []string) (*gaProfileData, error) {
-	d := &gaProfileData{meta: meta, patientLevel: s.gaProfilePatientLevel(meta),
-		cells: map[string]map[string]string{}, patientOf: map[string]string{}}
-	args := newArgs()
-	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
-	if entityIDs != nil {
-		if len(entityIDs) == 0 {
-			return d, nil
-		}
-		where += " AND entity_stable_id IN " + args.strs(entityIDs)
+// genericAssayDataEach ports GenericAssayServiceImpl.fetchGenericAssayData,
+// calling fn with each record in order: the samples (all of the profiles'
+// samples when samplesByStudy is nil, in internal id order as
+// getSamplesByInternalIds returns them, else the listed samples of each
+// profile's study in sample-id order, as fetchSamples with the ID projection
+// returns them), and for each, every requested profile of its study that
+// holds the sample, by stable id, one entry per entity in matrix order.
+// Entities are restricted to entityIDs unless nil. A patient-level
+// profile's matrix columns are patients; every sample of the patient
+// carries the patient's value, as the importer links all of a patient's
+// samples to the profile. Values read as the Java mapper truncates them;
+// cells without a value (empty or NA) are left out, as the controllers
+// filter them. One query orders the profiles' cells so.
+func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[string][]string, entityIDs []string, fn func(GenericAssayData) error) error {
+	if entityIDs != nil && len(entityIDs) == 0 {
+		return nil
 	}
-	type entityRow struct {
-		E string `json:"e"`
-	}
-	ents, err := queryA[entityRow](s.CH, fmt.Sprintf(
-		"SELECT entity_stable_id AS e FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
-			"GROUP BY entity_stable_id ORDER BY min(%s), entity_stable_id", where, s.rawFileOrder("generic_assay_matrix", "")), args)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range ents {
-		d.entities = append(d.entities, e.E)
-	}
-	join := "s.sample_id = m.sample_id"
-	if d.patientLevel {
-		join = "s.patient_id = m.sample_id"
-	}
-	sampleCond := ""
-	if sampleIDs != nil {
-		if len(sampleIDs) == 0 {
-			return d, nil
-		}
-		sampleCond = " AND s.sample_id IN " + args.strs(sampleIDs)
-	}
-	rows, err := queryA[genericAssayMatrixRow](s.CH, fmt.Sprintf(
-		"SELECT s.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, %s AS value "+
-			"FROM (SELECT * FROM %s WHERE %s) m JOIN sample s ON s.study_id = m.study_id AND %s%s",
-		javaTruncatedValueSQL("m.value"), genericAssaySource(s), where, join, sampleCond), args)
-	if err != nil {
-		return nil, err
-	}
-	for _, r := range rows {
-		c := d.cells[r.SampleID]
-		if c == nil {
-			c = map[string]string{}
-			d.cells[r.SampleID] = c
-		}
-		c[r.StableID] = r.Value
-		d.patientOf[r.SampleID] = r.PatientID
-	}
-	return d, nil
-}
-
-// genericAssayData ports GenericAssayServiceImpl.fetchGenericAssayData: the
-// samples (all of the profiles' samples when samplesByStudy is nil, in
-// internal id order as getSamplesByInternalIds returns them, else the listed
-// samples of each profile's study in sample-id order, as fetchSamples with the
-// ID projection returns them), and for each, every requested profile of its
-// study that holds the sample, one entry per entity in matrix order. Cells
-// without a value (empty or NA) are left out, as the controllers filter them.
-func (s *State) genericAssayData(profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) ([]GenericAssayData, error) {
 	ids := slices.Clone(profileIDs)
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
-	var profiles []*gaProfileData
+	// Samples sort by internal id (where the database carries them) unless
+	// requested by id, then by stable id and study.
+	sampleRank := "toUInt64(0)"
+	if samplesByStudy == nil && s.importOrdered() {
+		sampleRank = "toUInt64(s.internal_id)"
+	}
+	args := newArgs()
+	patientLevel := map[string]bool{}
+	var parts []string
 	for _, mpid := range ids {
 		meta, ok := s.profileMeta(mpid)
 		if !ok || !strings.EqualFold(meta.AlterationType, "GENERIC_ASSAY") {
 			continue
 		}
-		var sampleIDs []string
+		sampleCond := ""
 		if samplesByStudy != nil {
-			sampleIDs = append([]string{}, samplesByStudy[meta.StudyID]...)
-		}
-		d, err := s.gaLoadProfile(meta, entityIDs, sampleIDs)
-		if err != nil {
-			return nil, err
-		}
-		d.id = mpid
-		profiles = append(profiles, d)
-	}
-	seen := map[sampleKey]bool{}
-	var samples []sampleKey
-	for _, p := range profiles {
-		for sm := range p.cells {
-			k := sampleKey{p.meta.StudyID, sm}
-			if !seen[k] {
-				seen[k] = true
-				samples = append(samples, k)
+			sampleIDs := samplesByStudy[meta.StudyID]
+			if len(sampleIDs) == 0 {
+				continue
 			}
+			sampleCond = " AND s.sample_id IN " + args.strs(sampleIDs)
 		}
+		where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
+		if entityIDs != nil {
+			where += " AND entity_stable_id IN " + args.strs(entityIDs)
+		}
+		join := "s.sample_id = m.sample_id"
+		if s.gaProfilePatientLevel(meta) {
+			join = "s.patient_id = m.sample_id"
+			patientLevel[mpid] = true
+		}
+		parts = append(parts, fmt.Sprintf(
+			"SELECT s.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, %s AS value, "+
+				"%s AS molecularProfileId, %s AS studyId, %s AS sampleRank, en.o AS entityRank "+
+				"FROM (SELECT * FROM %s WHERE %s) m JOIN sample s ON s.study_id = m.study_id AND %s%s "+
+				"JOIN (SELECT entity_stable_id AS e, min(%s) AS o FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
+				"GROUP BY entity_stable_id) en ON en.e = m.entity_stable_id",
+			javaTruncatedValueSQL("m.value"), args.str(mpid), args.str(meta.StudyID), sampleRank,
+			genericAssaySource(s), where, join, sampleCond, s.rawFileOrder("generic_assay_matrix", ""), where))
 	}
-	if samplesByStudy == nil {
-		s.sortSamplesByImport(samples)
-	} else {
-		sort.Slice(samples, func(i, j int) bool {
-			if samples[i].sample != samples[j].sample {
-				return samples[i].sample < samples[j].sample
-			}
-			return samples[i].study < samples[j].study
+	if len(parts) == 0 {
+		return nil
+	}
+	// A matrix lists each entity of a sample once; LIMIT BY keeps one should
+	// it repeat.
+	query := "SELECT sampleId, stableId, patientId, value, molecularProfileId, studyId FROM (" +
+		strings.Join(parts, " UNION ALL ") + ") ORDER BY sampleRank, sampleId, studyId, molecularProfileId, entityRank, stableId " +
+		"LIMIT 1 BY molecularProfileId, sampleId, stableId"
+	return ch.QueryEachP(s.CH, query, args.params(query), func(r *genericAssayDataRow) error {
+		if r.Value == "" || r.Value == "NA" {
+			return nil
+		}
+		return fn(GenericAssayData{
+			GenericAssayStableID: r.StableID, MolecularProfileID: r.MolecularProfileID, PatientID: r.PatientID,
+			PatientLevel: patientLevel[r.MolecularProfileID], SampleID: r.SampleID, StableID: r.StableID,
+			StudyID: r.StudyID, Value: r.Value,
+			UniqueSampleKey:  uniqueKey(r.StudyID, r.SampleID),
+			UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
 		})
-	}
-	out := []GenericAssayData{}
-	for _, sm := range samples {
-		for _, p := range profiles {
-			if p.meta.StudyID != sm.study {
-				continue
-			}
-			cells, ok := p.cells[sm.sample]
-			if !ok {
-				continue
-			}
-			patient := p.patientOf[sm.sample]
-			for _, e := range p.entities {
-				v, ok := cells[e]
-				if !ok || v == "" || v == "NA" {
-					continue
-				}
-				out = append(out, GenericAssayData{
-					GenericAssayStableID: e, MolecularProfileID: p.id, PatientID: patient,
-					PatientLevel: p.patientLevel, SampleID: sm.sample, StableID: e, StudyID: sm.study, Value: v,
-					UniqueSampleKey:  uniqueKey(sm.study, sm.sample),
-					UniquePatientKey: uniqueKey(sm.study, patient),
-				})
-			}
-		}
-	}
-	return out, nil
+	})
+}
+
+// writeGenericAssayData streams genericAssayDataEach's records.
+func (s *State) writeGenericAssayData(w http.ResponseWriter, profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) {
+	out := newJSONArray(w)
+	out.finish(s.genericAssayDataEach(profileIDs, samplesByStudy, entityIDs, func(d GenericAssayData) error {
+		return out.add(d)
+	}))
 }
 
 // genericAssayDataInProfileFetch handles POST /api/generic_assay_data/{molecularProfileId}/fetch:
@@ -215,12 +161,7 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 		meta, _ := s.profileMeta(mpid)
 		byStudy = map[string][]string{meta.StudyID: sampleIDs}
 	}
-	out, err := s.genericAssayData([]string{mpid}, byStudy, f.GenericAssayStableIDs)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, out)
+	s.writeGenericAssayData(w, []string{mpid}, byStudy, f.GenericAssayStableIDs)
 }
 
 type genericAssayMultipleStudyFilter struct {
@@ -244,26 +185,19 @@ func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Req
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	var out []GenericAssayData
-	var err error
 	if len(f.MolecularProfileIDs) > 0 {
-		out, err = s.genericAssayData(f.MolecularProfileIDs, nil, f.GenericAssayStableIDs)
-	} else {
-		var profiles []string
-		byStudy := map[string][]string{}
-		for _, smi := range f.SampleMolecularIdentifiers {
-			profiles = append(profiles, smi.MolecularProfileID)
-			if meta, ok := s.profileMeta(smi.MolecularProfileID); ok {
-				byStudy[meta.StudyID] = append(byStudy[meta.StudyID], smi.SampleID)
-			}
-		}
-		out, err = s.genericAssayData(profiles, byStudy, f.GenericAssayStableIDs)
-	}
-	if err != nil {
-		fail(w, err)
+		s.writeGenericAssayData(w, f.MolecularProfileIDs, nil, f.GenericAssayStableIDs)
 		return
 	}
-	writeJSON(w, out)
+	var profiles []string
+	byStudy := map[string][]string{}
+	for _, smi := range f.SampleMolecularIdentifiers {
+		profiles = append(profiles, smi.MolecularProfileID)
+		if meta, ok := s.profileMeta(smi.MolecularProfileID); ok {
+			byStudy[meta.StudyID] = append(byStudy[meta.StudyID], smi.SampleID)
+		}
+	}
+	s.writeGenericAssayData(w, profiles, byStudy, f.GenericAssayStableIDs)
 }
 
 // ---------- Generic assay meta ----------

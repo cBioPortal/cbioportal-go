@@ -178,12 +178,7 @@ func leadingInt(s string) uint64 {
 func (s *State) genericAssayDataInProfileGet(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("molecularProfileId")
 	stableID := r.PathValue("genericAssayStableId")
-	out, err := s.genericAssayData([]string{mpid}, nil, []string{stableID})
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, out)
+	s.writeGenericAssayData(w, []string{mpid}, nil, []string{stableID})
 }
 
 // ---------- Single-entity metadata GETs ----------
