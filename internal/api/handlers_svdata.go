@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -527,7 +526,8 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 // sample-major (requested samples by stable id, as fetchSamples with the ID
 // projection returns them, all samples of the profiles by internal id, as
 // getSamplesByInternalIds does); for each sample every requested profile of
-// its study, then the genes in request order.
+// its study by stable id (getMolecularProfiles), then the genes in request
+// order. One query orders the profiles' records so, and they are streamed.
 func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		EntrezGeneIDs              []int64  `json:"entrezGeneIds"`
@@ -566,16 +566,14 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	geneRank := map[int64]int{}
-	for _, e := range f.EntrezGeneIDs {
-		if _, seen := geneRank[e]; !seen {
-			geneRank[e] = len(geneRank)
-		}
+	// Samples sort by internal id (where the database carries them) unless
+	// requested by id, then by stable id and study.
+	sampleRank := "toUInt64(0)"
+	if len(f.SampleMolecularIdentifiers) == 0 && s.importOrdered() {
+		sampleRank = "toUInt64(s.internal_id)"
 	}
-	type cellKey struct{ profile, sample string }
-	cells := map[cellKey][]MolecularData{}
-	type sampleRef struct{ study, sample string }
-	sampleSet := map[sampleRef]bool{}
+	args := newArgs()
+	var parts []string
 	for _, p := range profiles {
 		study, ok := studyOf[p]
 		if !ok {
@@ -585,47 +583,52 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 		if len(f.SampleMolecularIdentifiers) > 0 {
 			sampleIDs = sortedKeys(samplesByStudy[study])
 		}
-		data, err := s.molecularData(p, molecularDataFilter{EntrezGeneIDs: f.EntrezGeneIDs, SampleIDs: sampleIDs})
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		for _, d := range data {
-			k := cellKey{p, d.SampleID}
-			cells[k] = append(cells[k], d)
-			sampleSet[sampleRef{study, d.SampleID}] = true
+		extra := fmt.Sprintf(", %s AS molecularProfileId, %s AS studyId, %s AS sampleRank, rg.genetic_entity_id AS entityRank",
+			args.str(p), args.str(study), sampleRank)
+		if sel, _, ok := s.molecularDataSelect(args, p, molecularDataFilter{EntrezGeneIDs: f.EntrezGeneIDs, SampleIDs: sampleIDs}, extra); ok {
+			parts = append(parts, sel)
 		}
 	}
-	samples := make([]sampleKey, 0, len(sampleSet))
-	for sr := range sampleSet {
-		samples = append(samples, sampleKey(sr))
+	out := newJSONArray(w)
+	if len(parts) == 0 {
+		out.finish(nil)
+		return
 	}
-	if len(f.SampleMolecularIdentifiers) > 0 {
-		sort.Slice(samples, func(i, j int) bool {
-			if samples[i].sample != samples[j].sample {
-				return samples[i].sample < samples[j].sample
-			}
-			return samples[i].study < samples[j].study
-		})
-	} else {
-		s.sortSamplesByImport(samples)
+	// Within a cell, genes in request order (their first occurrence), else
+	// as a single profile orders them.
+	geneOrder := ""
+	if len(f.EntrezGeneIDs) > 0 {
+		geneOrder = "indexOf([" + intListSQL(f.EntrezGeneIDs) + "], entrezGeneId), "
 	}
-	var out []MolecularData
-	for _, sr := range samples {
-		for _, p := range profiles {
-			if studyOf[p] != sr.study {
-				continue
-			}
-			rows := cells[cellKey{p, sr.sample}]
-			if len(geneRank) > 0 {
-				sort.SliceStable(rows, func(i, j int) bool {
-					return geneRank[derefInt(rows[i].EntrezGeneID)] < geneRank[derefInt(rows[j].EntrezGeneID)]
-				})
-			}
-			out = append(out, rows...)
+	query := "SELECT sampleId, patientId, entrezGeneId, hugoGeneSymbol, geneType, value, molecularProfileId, studyId FROM (" +
+		strings.Join(parts, " UNION ALL ") + ") ORDER BY sampleRank, sampleId, studyId, molecularProfileId, " +
+		geneOrder + "entityRank, entrezGeneId"
+	projection := projectionOf(r)
+	err := ch.QueryEachP(s.CH, query, args.params(query), func(row *molecularDataMultiRow) error {
+		d := MolecularData{
+			MolecularProfileID: row.MolecularProfileID, SampleID: row.SampleID, PatientID: row.PatientID, EntrezGeneID: row.EntrezGeneID,
+			Gene:    Gene{EntrezGeneID: row.EntrezGeneID, HugoGeneSymbol: row.HugoGeneSymbol, Type: row.GeneType},
+			StudyID: row.StudyID, Value: row.Value,
+			UniqueSampleKey: uniqueKey(row.StudyID, row.SampleID), UniquePatientKey: uniqueKey(row.StudyID, row.PatientID),
 		}
-	}
-	writeJSON(w, numericMolecularData(out, projectionOf(r)))
+		if rec, ok := numericRecord(d, projection); ok {
+			return out.add(rec)
+		}
+		return nil
+	})
+	out.finish(err)
+}
+
+// molecularDataMultiRow is a molecularDataRow with its profile and study.
+type molecularDataMultiRow struct {
+	SampleID           string `json:"sampleId"`
+	PatientID          string `json:"patientId"`
+	EntrezGeneID       *int64 `json:"entrezGeneId"`
+	HugoGeneSymbol     string `json:"hugoGeneSymbol"`
+	GeneType           string `json:"geneType"`
+	Value              string `json:"value"`
+	MolecularProfileID string `json:"molecularProfileId"`
+	StudyID            string `json:"studyId"`
 }
 
 // svViewColumns lists the columns of the structural_variant view (the staged

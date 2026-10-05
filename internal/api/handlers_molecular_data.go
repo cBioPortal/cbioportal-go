@@ -187,35 +187,16 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 // molecularDataEach calls fn with each record of molecularData, in order,
 // without holding them.
 func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(MolecularData) error) error {
-	meta, ok := s.profileMeta(mpid)
+	args := newArgs()
+	sel, meta, ok := s.molecularDataSelect(args, mpid, f, "")
 	if !ok {
 		return nil
 	}
-	table := meta.dataTable()
-	// Gene-keyed data only: geneset scores and generic assays have their own
-	// endpoints.
-	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
-		return nil
-	}
-	args := newArgs()
-	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
 	sampleOrder := s.sampleOrder("s", "m.sample_id")
-	if len(f.SampleIDs) > 0 {
-		where += " AND sample_id IN " + args.strs(f.SampleIDs)
-		sampleOrder = "m.sample_id"
-	} else if f.SampleListID != "" {
-		where += " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
+	if len(f.SampleIDs) > 0 || f.SampleListID != "" {
 		sampleOrder = "m.sample_id"
 	}
-	query := fmt.Sprintf(
-		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
-			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
-			"%s AS value FROM (%s) m "+
-			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
-			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
-			"WHERE m.entrez IS NOT NULL ORDER BY %s, rg.genetic_entity_id, m.entrez",
-		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
-		sampleOrder)
+	query := fmt.Sprintf("%s ORDER BY %s, rg.genetic_entity_id, m.entrez", sel, sampleOrder)
 	return ch.QueryEachP(s.CH, query, args.params(query), func(r *molecularDataRow) error {
 		return fn(MolecularData{
 			MolecularProfileID: mpid, SampleID: r.SampleID, PatientID: r.PatientID, EntrezGeneID: r.EntrezGeneID,
@@ -224,6 +205,39 @@ func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(Mo
 			UniqueSampleKey: uniqueKey(meta.StudyID, r.SampleID), UniquePatientKey: uniqueKey(meta.StudyID, r.PatientID),
 		})
 	})
+}
+
+// molecularDataSelect is the SELECT (without ORDER BY) of a profile's gene
+// values for molecularDataEach, the columns of molecularDataRow over the
+// aliases m (the values), s (their sample) and rg (their reference gene),
+// plus extra columns if any. ok is false for a profile without gene-keyed
+// values. Values are bound in args.
+func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataFilter, extra string) (string, profileMeta, bool) {
+	meta, ok := s.profileMeta(mpid)
+	if !ok {
+		return "", meta, false
+	}
+	table := meta.dataTable()
+	// Gene-keyed data only: geneset scores and generic assays have their own
+	// endpoints.
+	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
+		return "", meta, false
+	}
+	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
+	if len(f.SampleIDs) > 0 {
+		where += " AND sample_id IN " + args.strs(f.SampleIDs)
+	} else if f.SampleListID != "" {
+		where += " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
+	}
+	return fmt.Sprintf(
+		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
+			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
+			"%s AS value%s FROM (%s) m "+
+			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
+			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
+			"WHERE m.entrez IS NOT NULL",
+		javaTruncatedValueSQL("m.value"), extra,
+		resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs)), meta, true
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the
