@@ -7,7 +7,9 @@ package ingest
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -215,6 +217,50 @@ func ingestMatrix(c *ch.Client, studyID string, fileNum int, f *parser.DataFile)
 	return runInsert(c, f, studyID, fileNum, cols, body, &emitted)
 }
 
+// pruneRemovedFiles deletes the study's staged rows whose source file is no
+// longer in the study directory (removed or renamed since its last ingest),
+// in every staging table that records source files, so a re-ingested study
+// holds only its current files' rows. It runs before anything is loaded.
+func pruneRemovedFiles(c *ch.Client, s *parser.Study) error {
+	current := map[string]bool{}
+	err := filepath.WalkDir(s.Dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			current[d.Name()] = true
+		}
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	type tableRow struct {
+		Table string `json:"table"`
+	}
+	tables, err := ch.QueryP[tableRow](c,
+		"SELECT table FROM system.columns WHERE database = {db:String} AND name IN ('study_id', 'source_file') "+
+			"GROUP BY table HAVING count() = 2 ORDER BY table", ch.Params{"db": c.Database()})
+	if err != nil {
+		return err
+	}
+	type fileRow struct {
+		File string `json:"file"`
+	}
+	for _, t := range tables {
+		files, err := ch.QueryP[fileRow](c, fmt.Sprintf(
+			"SELECT DISTINCT source_file AS file FROM `%s`.`%s` WHERE study_id = {study:String}", c.Database(), t.Table),
+			ch.Params{"study": s.StudyID})
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if f.File != "" && !current[f.File] {
+				c.DeleteWhere(t.Table, fmt.Sprintf("study_id = '%s' AND source_file = '%s'",
+					ch.SQLLit(s.StudyID), ch.SQLLit(f.File)))
+			}
+		}
+	}
+	return nil
+}
+
 func deleteExisting(c *ch.Client, f *parser.DataFile, studyID string) {
 	c.DeleteWhere(f.StageSlug, fmt.Sprintf(
 		"study_id = '%s' AND source_file = '%s'", ch.SQLLit(studyID), ch.SQLLit(fileName(f.DataPath))))
@@ -225,6 +271,9 @@ func deleteExisting(c *ch.Client, f *parser.DataFile, studyID string) {
 // before loading.
 func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	if err := c.CreateDatabase(); err != nil {
+		return nil, err
+	}
+	if err := pruneRemovedFiles(c, s); err != nil {
 		return nil, err
 	}
 	if err := ingestStudyMeta(c, s); err != nil {

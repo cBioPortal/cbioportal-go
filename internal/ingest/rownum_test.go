@@ -115,4 +115,28 @@ func TestIngestRowNumbers(t *testing.T) {
 		}
 		check(round)
 	}
+
+	// Removing a file drops its rows on the next ingest, and only its rows.
+	for _, f := range []string{"meta_expression.txt", "data_expression.txt"} {
+		if err := os.Remove(filepath.Join(dir, f)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := parser.Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := IngestStudy(c, s); err != nil {
+		t.Fatalf("after removal: %v", err)
+	}
+	if got := query("SELECT count() FROM `" + db + "`.mrna_expression_matrix WHERE study_id = 'rn_study'"); got[0] != "0" {
+		t.Errorf("removed matrix file still staged: %v rows", got)
+	}
+	if got := query("SELECT count() FROM `" + db + "`.profile_sample WHERE study_id = 'rn_study'"); got[0] != "0" {
+		t.Errorf("removed matrix file's profile samples still staged: %v rows", got)
+	}
+	got := query("SELECT study_id, sample_id FROM `" + db + "`.clinical_sample ORDER BY study_id, file_num, row_num")
+	if want := []string{"old\tSO", "rn_study\tS3", "rn_study\tS1", "rn_study\tS2"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("after removal: clinical_sample %q, want %q", got, want)
+	}
 }
