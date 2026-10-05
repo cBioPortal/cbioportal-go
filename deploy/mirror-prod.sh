@@ -35,12 +35,15 @@ EXCLUDED_SUBSTRINGS="'_backup','token','oauth','session','login','password','cre
 log() { printf '[mirror %s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 # Credentials travel as headers, so they appear in neither URLs nor logs.
+# Transient failures (DNS, connection, timeouts) are retried; every statement
+# here is safe to repeat.
 ch() {
   local auth=()
   if [ -n "${CLICKHOUSE_USER:-}" ]; then
     auth=(-H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD:-}")
   fi
-  curl -sS --fail-with-body "${auth[@]}" "$CLICKHOUSE_URL/" --data-binary "$1"
+  curl -sS --fail-with-body --connect-timeout 30 --retry 5 --retry-delay 10 --retry-all-errors \
+    "${auth[@]}" "$CLICKHOUSE_URL/" --data-binary "$1"
 }
 
 # 1) Production color.
@@ -79,7 +82,7 @@ log "cloning $N tables from $SRC_DB into $REF_DB"
 i=0
 for t in $TABLES; do
   i=$((i + 1))
-  ch "CREATE TABLE \`$REF_DB\`.\`$t\` CLONE AS \`$SRC_DB\`.\`$t\`" >/dev/null
+  ch "CREATE TABLE IF NOT EXISTS \`$REF_DB\`.\`$t\` CLONE AS \`$SRC_DB\`.\`$t\`" >/dev/null
   log "  [$i/$N] $t"
 done
 
