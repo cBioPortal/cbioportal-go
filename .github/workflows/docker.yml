@@ -3,6 +3,13 @@ name: Docker image
 on:
   push:
     branches: [main]
+    # Docs-only and CI-only pushes don't change the image; skipping them
+    # avoids restarting the deployments for nothing.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/e2e.yml'
   workflow_dispatch:
 
 concurrency:
