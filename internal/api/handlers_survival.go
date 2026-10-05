@@ -391,30 +391,25 @@ func (s *State) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
 		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
 }
 
-// writeClinicalEvents writes the timeline events matching where, whose
+// writeClinicalEvents streams the timeline events matching where, whose
 // placeholders take their values from p.
 func (s *State) writeClinicalEvents(w http.ResponseWriter, where string, p ch.Params) {
 	sel, order := s.timelineSelect()
 	if order == "" {
 		order = "patientId, startDate, eventType"
 	}
-	rows, err := ch.QueryP[timelineRow](s.CH, fmt.Sprintf("%s WHERE %s ORDER BY %s", sel, where, order), p)
-	if err != nil {
-		fail(w, err)
-		return
-	}
 	// ImportTimelineData collects a staged event's attributes in a HashMap,
 	// so they are stored (and read back) in its iteration order; events of a
 	// production clone carry their stored order.
 	staged := !slices.Contains(s.rawColumns("timeline"), "event_attributes")
-	out := make([]ClinicalEvent, len(rows))
-	for i, row := range rows {
+	out := newJSONArray(w)
+	err := ch.QueryEachP(s.CH, fmt.Sprintf("%s WHERE %s ORDER BY %s", sel, where, order), p, func(row *timelineRow) error {
 		if staged {
 			row.Attrs = javaHashMapAttrs(row.Attrs)
 		}
-		out[i] = row.toEvent()
-	}
-	writeJSON(w, out)
+		return out.add(row.toEvent())
+	})
+	out.finish(err)
 }
 
 // javaHashMapAttrs orders (key, value) attributes as a java.util.HashMap
