@@ -5,8 +5,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/url"
 	"os"
@@ -25,29 +25,40 @@ func (c *Client) QueryJSONLines(sql string) ([][]byte, error) {
 
 // QueryJSONLinesP is QueryJSONLines with query parameters.
 func (c *Client) QueryJSONLinesP(sql string, p Params) ([][]byte, error) {
+	var lines [][]byte
+	err := c.eachJSONLine(sql, p, func(line []byte) error {
+		lines = append(lines, append([]byte(nil), line...))
+		return nil
+	})
+	return lines, err
+}
+
+// eachJSONLine runs a SELECT as JSONEachRow and calls fn with each row as it
+// arrives (the slice is reused).
+func (c *Client) eachJSONLine(sql string, p Params, fn func([]byte) error) error {
 	q := url.Values{
 		"database": {c.database},
 		"output_format_json_quote_64bit_integers": {"0"},
 	}
 	req, err := c.newRequest(context.Background(), q, c.rewrite(sql)+" FORMAT JSONEachRow", p)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	rc, err := c.do(req, "")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer rc.Close()
-	body, _ := io.ReadAll(rc)
-	var lines [][]byte
-	sc := bufio.NewScanner(bytes.NewReader(body))
+	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	for sc.Scan() {
 		if line := sc.Bytes(); len(bytes.TrimSpace(line)) > 0 {
-			lines = append(lines, append([]byte(nil), line...))
+			if err := fn(line); err != nil {
+				return err
+			}
 		}
 	}
-	return lines, sc.Err()
+	return sc.Err()
 }
 
 // Query runs a SELECT and decodes each row into T.
@@ -66,20 +77,43 @@ func QueryP[T any](c *Client, sql string, p Params) ([]T, error) {
 	return queryJSON[T](c, sql, p)
 }
 
+// QueryEachP is QueryP for results too large to hold: it calls fn with each
+// row in order (the *T is reused between calls) and keeps none. An error
+// before the first call is the error QueryP returns; one after it (the
+// query failing mid-stream, or fn's own) ends the stream.
+func QueryEachP[T any](c *Client, sql string, p Params, fn func(*T) error) error {
+	called := false
+	counted := func(v *T) error {
+		called = true
+		return fn(v)
+	}
+	err, ok := eachNative(c, sql, p, counted)
+	if ok || called {
+		return err
+	}
+	return eachJSON(c, sql, p, fn)
+}
+
 func queryJSON[T any](c *Client, sql string, p Params) ([]T, error) {
-	lines, err := c.QueryJSONLinesP(sql, p)
+	out := []T{}
+	err := eachJSON(c, sql, p, func(v *T) error {
+		out = append(out, *v)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]T, 0, len(lines))
-	for _, line := range lines {
+	return out, nil
+}
+
+func eachJSON[T any](c *Client, sql string, p Params, fn func(*T) error) error {
+	return c.eachJSONLine(sql, p, func(line []byte) error {
 		var v T
 		if err := json.Unmarshal(line, &v); err != nil {
-			return nil, fmt.Errorf("decoding row: %w", err)
+			return fmt.Errorf("decoding row: %w", err)
 		}
-		out = append(out, v)
-	}
-	return out, nil
+		return fn(&v)
+	})
 }
 
 // jsonOnly remembers statements whose results the JSON path decodes, so they
@@ -123,6 +157,26 @@ var logFallbacks = os.Getenv("CLICKHOUSE_DECODE") == "log"
 // queryNative decodes the rows of a struct type T from the driver. ok is
 // false when the JSON path must answer instead.
 func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
+	out = []T{}
+	err, ok := eachNative(c, sql, p, func(v *T) error {
+		out = append(out, *v)
+		return nil
+	})
+	if !ok || err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// errStream marks a failure of the driver's stream itself, as opposed to an
+// error returned by the row callback.
+var errStream = errors.New("clickhouse: driver stream")
+
+// eachNative calls fn for each row of a struct type T decoded from the
+// driver. ok is false when the JSON path must answer instead (nothing could
+// be decoded here, or the stream failed); err is then the reason, or else
+// fn's error.
+func eachNative[T any](c *Client, sql string, p Params, fn func(*T) error) (err error, ok bool) {
 	t := reflect.TypeFor[T]()
 	if !nativeReads || t.Kind() != reflect.Struct {
 		return nil, false
@@ -140,29 +194,32 @@ func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
 			reason = "request"
 		}
 		logFallback(reason, key, err)
-		return nil, false
+		return err, false
 	}
 	defer rows.Close()
 	plan, err := planFor(t, rows.Columns(), rows.ColumnTypes())
 	if err != nil {
 		cancel()
 		setJSONOnly(key, err)
-		return nil, false
+		return err, false
 	}
 	st := plan.newState()
-	out = []T{}
-	var zero T
+	var v, zero T
 	for rows.Next() {
-		out = append(out, zero)
-		if err := st.scanRow(rows, unsafe.Pointer(&out[len(out)-1])); err != nil {
+		v = zero
+		if err := st.scanRow(rows, unsafe.Pointer(&v)); err != nil {
 			cancel()
 			logFallback("error", key, err)
-			return nil, false
+			return fmt.Errorf("%w: %w", errStream, err), false
+		}
+		if err := fn(&v); err != nil {
+			cancel()
+			return err, true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		logFallback("error", key, err)
-		return nil, false
+		return fmt.Errorf("%w: %w", errStream, err), false
 	}
-	return out, true
+	return nil, true
 }

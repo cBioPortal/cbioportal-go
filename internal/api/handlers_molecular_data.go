@@ -99,22 +99,30 @@ type NumericGeneMolecularData struct {
 func numericMolecularData(data []MolecularData, projection string) []NumericGeneMolecularData {
 	out := make([]NumericGeneMolecularData, 0, len(data))
 	for _, d := range data {
-		v, ok := javaDecimal(d.Value)
-		if !ok {
-			continue
+		if rec, ok := numericRecord(d, projection); ok {
+			out = append(out, rec)
 		}
-		rec := NumericGeneMolecularData{
-			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, EntrezGeneID: d.EntrezGeneID,
-			MolecularProfileID: d.MolecularProfileID, SampleID: d.SampleID, PatientID: d.PatientID, StudyID: d.StudyID,
-			Value: v,
-		}
-		if projection == "DETAILED" {
-			g := d.Gene
-			rec.Gene = &g
-		}
-		out = append(out, rec)
 	}
 	return out
+}
+
+// numericRecord is one record of numericMolecularData; ok is false for a
+// value that is not a number.
+func numericRecord(d MolecularData, projection string) (NumericGeneMolecularData, bool) {
+	v, ok := javaDecimal(d.Value)
+	if !ok {
+		return NumericGeneMolecularData{}, false
+	}
+	rec := NumericGeneMolecularData{
+		UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, EntrezGeneID: d.EntrezGeneID,
+		MolecularProfileID: d.MolecularProfileID, SampleID: d.SampleID, PatientID: d.PatientID, StudyID: d.StudyID,
+		Value: v,
+	}
+	if projection == "DETAILED" {
+		g := d.Gene
+		rec.Gene = &g
+	}
+	return rec, true
 }
 
 type molecularDataFilter struct {
@@ -126,12 +134,7 @@ type molecularDataFilter struct {
 func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f molecularDataFilter
 	readBody(r, &f)
-	out, err := s.molecularData(r.PathValue("id"), f)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, numericMolecularData(out, projectionOf(r)))
+	s.streamMolecularData(w, r, r.PathValue("id"), f)
 }
 
 // molecularDataGet serves GET /api/molecular-profiles/{id}/molecular-data
@@ -144,12 +147,21 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 			f.EntrezGeneIDs = append(f.EntrezGeneIDs, id)
 		}
 	}
-	out, err := s.molecularData(r.PathValue("id"), f)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, numericMolecularData(out, projectionOf(r)))
+	s.streamMolecularData(w, r, r.PathValue("id"), f)
+}
+
+// streamMolecularData writes a profile's numeric records as they are read:
+// a whole profile can be millions of records.
+func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid string, f molecularDataFilter) {
+	projection := projectionOf(r)
+	out := newJSONArray(w)
+	err := s.molecularDataEach(mpid, f, func(d MolecularData) error {
+		if rec, ok := numericRecord(d, projection); ok {
+			return out.add(rec)
+		}
+		return nil
+	})
+	out.finish(err)
 }
 
 // molecularData returns a profile's per-sample gene values, optionally limited
@@ -161,15 +173,29 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 // genetic_alteration rows. Records are limited to reference genes, as the
 // mapper joins the gene table.
 func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularData, error) {
+	out := []MolecularData{}
+	err := s.molecularDataEach(mpid, f, func(d MolecularData) error {
+		out = append(out, d)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// molecularDataEach calls fn with each record of molecularData, in order,
+// without holding them.
+func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(MolecularData) error) error {
 	meta, ok := s.profileMeta(mpid)
 	if !ok {
-		return []MolecularData{}, nil
+		return nil
 	}
 	table := meta.dataTable()
 	// Gene-keyed data only: geneset scores and generic assays have their own
 	// endpoints.
 	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
-		return []MolecularData{}, nil
+		return nil
 	}
 	args := newArgs()
 	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
@@ -181,7 +207,7 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 		where += " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
 		sampleOrder = "m.sample_id"
 	}
-	rows, err := queryA[molecularDataRow](s.CH, fmt.Sprintf(
+	query := fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
 			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
 			"%s AS value FROM (%s) m "+
@@ -189,20 +215,15 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL ORDER BY %s, rg.genetic_entity_id, m.entrez",
 		javaTruncatedValueSQL("m.value"), resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
-		sampleOrder), args)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]MolecularData, len(rows))
-	for i, r := range rows {
-		out[i] = MolecularData{
+		sampleOrder)
+	return ch.QueryEachP(s.CH, query, args.params(query), func(r *molecularDataRow) error {
+		return fn(MolecularData{
 			MolecularProfileID: mpid, SampleID: r.SampleID, PatientID: r.PatientID, EntrezGeneID: r.EntrezGeneID,
 			Gene:    Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol, Type: r.GeneType},
 			StudyID: meta.StudyID, Value: r.Value,
 			UniqueSampleKey: uniqueKey(meta.StudyID, r.SampleID), UniquePatientKey: uniqueKey(meta.StudyID, r.PatientID),
-		}
-	}
-	return out, nil
+		})
+	})
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the

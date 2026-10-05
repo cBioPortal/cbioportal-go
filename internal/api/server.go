@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
@@ -184,6 +185,55 @@ func cors(next http.Handler) http.Handler {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// jsonArray writes a JSON array element by element, byte for byte as
+// writeJSON writes the whole slice. Nothing is sent before the first element,
+// so an error until then still answers as fail does.
+type jsonArray struct {
+	w   http.ResponseWriter
+	bw  *bufio.Writer
+	buf bytes.Buffer
+	enc *json.Encoder
+}
+
+func newJSONArray(w http.ResponseWriter) *jsonArray {
+	a := &jsonArray{w: w}
+	a.enc = json.NewEncoder(&a.buf)
+	return a
+}
+
+func (a *jsonArray) add(v any) error {
+	a.buf.Reset()
+	if err := a.enc.Encode(v); err != nil {
+		return err
+	}
+	if a.bw == nil {
+		a.w.Header().Set("Content-Type", "application/json")
+		a.bw = bufio.NewWriterSize(a.w, 64<<10)
+		a.bw.WriteByte('[')
+	} else {
+		a.bw.WriteByte(',')
+	}
+	_, err := a.bw.Write(a.buf.Bytes()[:a.buf.Len()-1]) // without Encode's newline
+	return err
+}
+
+// finish ends the array, or reports err: as fail before the first element,
+// by aborting the response after it.
+func (a *jsonArray) finish(err error) {
+	switch {
+	case err != nil && a.bw == nil:
+		fail(a.w, err)
+	case err != nil:
+		log.Printf("streamed response aborted: %v", err)
+		panic(http.ErrAbortHandler)
+	case a.bw == nil:
+		writeJSON(a.w, []struct{}{})
+	default:
+		a.bw.WriteString("]\n")
+		a.bw.Flush()
+	}
 }
 
 func fail(w http.ResponseWriter, err error) {

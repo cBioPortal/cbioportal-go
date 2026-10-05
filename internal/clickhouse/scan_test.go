@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -414,6 +415,47 @@ func TestLiveFallback(t *testing.T) {
 	_, err := QueryP[strRow](c, "SELECT v FROM no_such_table_xyz", nil)
 	if err == nil || !strings.Contains(err.Error(), "UNKNOWN_TABLE") {
 		t.Fatalf("error %v", err)
+	}
+}
+
+// TestLiveQueryEach checks that streaming yields QueryP's rows, through the
+// driver and through the JSON path, and its error contract.
+func TestLiveQueryEach(t *testing.T) {
+	c := liveClient(t)
+	type row struct {
+		N uint64  `json:"n"`
+		S *string `json:"s"`
+	}
+	type anyRow struct {
+		N any `json:"n"`
+	}
+	const sql = "SELECT number AS n, if(number % 2 = 0, NULL, toString(number)) AS s FROM numbers(200000)"
+	each := func(sql string) ([]row, error) {
+		var out []row
+		err := QueryEachP(c, sql, nil, func(r *row) error {
+			out = append(out, *r)
+			return nil
+		})
+		return out, err
+	}
+	want, err := QueryP[row](c, sql, nil)
+	got, err2 := each(sql)
+	if err != nil || err2 != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("driver path: %v %v, %d vs %d rows", err, err2, len(got), len(want))
+	}
+	wantAny, _ := QueryP[anyRow](c, sql, nil)
+	var gotAny []anyRow
+	if err := QueryEachP(c, sql, nil, func(r *anyRow) error { gotAny = append(gotAny, *r); return nil }); err != nil || !reflect.DeepEqual(gotAny, wantAny) {
+		t.Fatalf("JSON path: %v", err)
+	}
+	_, wantErr := QueryP[row](c, "SELECT n FROM no_such_table_xyz", nil)
+	if _, err := each("SELECT n FROM no_such_table_xyz"); err == nil || err.Error() != wantErr.Error() {
+		t.Fatalf("error %v, want %v", err, wantErr)
+	}
+	stop := errors.New("stop")
+	calls := 0
+	if err := QueryEachP(c, sql, nil, func(*row) error { calls++; return stop }); err != stop || calls != 1 {
+		t.Fatalf("callback error: %v after %d calls", err, calls)
 	}
 }
 
