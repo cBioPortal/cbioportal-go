@@ -57,6 +57,7 @@ func New(baseURL, database string) *Client {
 	if comment := os.Getenv("CLICKHOUSE_LOG_COMMENT"); comment != "" {
 		rt = commentTransport{base: rt, comment: comment}
 	}
+	rt = observedTransport{base: rt}
 	return &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		database: database,

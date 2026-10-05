@@ -68,6 +68,14 @@ func main() {
 	log.Printf("%s listening on %s (clickhouse %s, db %s, raw-db %s, ref-db %s)",
 		buildinfo.String(name), addr, v["clickhouse-url"], v["db"], v["raw-db"], v["ref-db"])
 	log.Print(config.PropertiesSummary(props, 8))
+	if m := v["metrics-addr"]; m != "" {
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", api.MetricsHandler())
+		go func() {
+			log.Printf("metrics on %s/metrics", m)
+			log.Print(http.ListenAndServe(m, mux))
+		}()
+	}
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatal(err)
 	}

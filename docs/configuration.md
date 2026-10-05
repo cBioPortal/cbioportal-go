@@ -71,6 +71,8 @@ line the flags are usually handier.
 | `-session-store` | `SESSION_STORE_FILE` | | persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory |
 | `-auth-enabled` | `AUTH_ENABLED` | `false` | require HS256 bearer tokens (not with `dat.method=oauth2`) |
 | `-auth-default-user` | `AUTH_DEFAULT_USER` | | single-user development login for requests without a token (not with `authenticate=oauth2`) |
+| `-metrics-addr` | `METRICS_ADDR` | | serve Prometheus metrics at `/metrics` on this address (e.g. `:9090`), apart from the API |
+| `-access-log` | `ACCESS_LOG` | `false` | write one JSON access log line per request to stdout |
 | `-portal-properties` | `PORTAL_PROPERTIES` | | portal properties file, see below |
 
 Secrets have no flag, because command-line arguments are visible to every user
@@ -242,4 +244,38 @@ dat.filter_user_role=ROLE_<role>
 ```bash
 curl -H "Authorization: Bearer $(sed -n 's/^token: //p' cbioportal_data_access_token.txt)" \
   https://cbioportal.example.org/api/studies
+```
+
+## Metrics and logs
+
+With `-metrics-addr`, `/metrics` on that address serves Prometheus text
+format (scraped by Prometheus or Datadog's OpenMetrics check); it is a
+separate listener, so the metrics are never public through the API's
+ingress. Requests are labelled by the route pattern they match (e.g.
+`GET /api/studies/{studyId}`), which keeps the number of series bounded.
+
+| Metric | Meaning |
+|---|---|
+| `cbioportal_http_requests_total{route,code}` | requests by route and status code |
+| `cbioportal_http_request_duration_seconds{route}` | request time histogram |
+| `cbioportal_http_requests_in_flight` | requests being served |
+| `cbioportal_clickhouse_queries_total{outcome}` | ClickHouse requests (`ok`, `error`, `transport`) |
+| `cbioportal_clickhouse_query_duration_seconds` | ClickHouse time until the result is read |
+| `cbioportal_clickhouse_read_rows_total`, `…_read_bytes_total` | what ClickHouse reports reading |
+| `cbioportal_metadata_cache_lookups_total{result}` | metadata cache hits and misses |
+| `cbioportal_logins_total{outcome}` | OAuth2 logins |
+| `cbioportal_data_access_token_checks_total{result}` | data access tokens: cached, refreshed, rejected |
+| `go_*`, `process_*` | Go runtime and process (memory, GC, goroutines, CPU, file descriptors) |
+
+With `-access-log`, each request is logged to stdout as JSON (`method`,
+`route`, `path`, `status`, `bytes`, `duration_ms`, `remote`, and `user` when
+logged in) for log collection. `-clickhouse-log-comment` tags the
+deployment's queries in ClickHouse's own `system.query_log`.
+
+In Kubernetes, Datadog collects the metrics with pod annotations such as:
+
+```yaml
+ad.datadoghq.com/cbioportal-go.checks: |
+  {"openmetrics": {"instances": [{"openmetrics_endpoint": "http://%%host%%:9090/metrics",
+    "namespace": "cbioportal_go", "metrics": [".*"]}]}}
 ```

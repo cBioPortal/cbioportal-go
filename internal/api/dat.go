@@ -171,13 +171,16 @@ func (d *datProvider) authenticate(ctx context.Context, offlineToken string) (Us
 	}
 	d.mu.Unlock()
 	if ok {
+		datChecks.Inc("cached")
 		return e.user, nil
 	}
 	v, err, _ := d.inflight.Do(key, func() (any, error) {
 		user, expires, err := d.refresh(context.WithoutCancel(ctx), offlineToken)
 		if err != nil {
+			datChecks.Inc("rejected")
 			return User{}, err
 		}
+		datChecks.Inc("refreshed")
 		d.store(key, datEntry{user: user, expires: expires.Add(-datCacheMargin)})
 		return user, nil
 	})
@@ -411,5 +414,5 @@ func (d *datProvider) tokenAuth(w http.ResponseWriter, r *http.Request, next htt
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey{}, user)))
+	next.ServeHTTP(w, withUser(r, user))
 }

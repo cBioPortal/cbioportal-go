@@ -58,7 +58,7 @@ func auth(cfg AuthConfig, next http.Handler) http.Handler {
 		}
 		if !cfg.Enabled {
 			if cfg.DefaultUser != "" {
-				r = r.WithContext(context.WithValue(r.Context(), userCtxKey{}, User{Name: cfg.DefaultUser}))
+				r = withUser(r, User{Name: cfg.DefaultUser})
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -69,7 +69,7 @@ func auth(cfg AuthConfig, next http.Handler) http.Handler {
 			http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey{}, user)))
+		next.ServeHTTP(w, withUser(r, user))
 	})
 }
 

@@ -65,8 +65,10 @@ func cachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
 	s.meta.mu.Lock()
 	if v, ok := s.meta.entries[key]; ok {
 		s.meta.mu.Unlock()
+		metaCacheLookups.Inc("hit")
 		return slices.Clone(v.([]T)), nil
 	}
+	metaCacheLookups.Inc("miss")
 	version := s.meta.version
 	s.meta.mu.Unlock()
 	// Concurrent misses for the same query share one ClickHouse round trip.

@@ -110,7 +110,7 @@ func NewRouter(s *State) http.Handler {
 	if s.login != nil {
 		h = s.login.middleware(s.studyAccess(s.access, h))
 	}
-	return cors(gzipResponse(gunzipBody(h)))
+	return s.observe(cors(gzipResponse(gunzipBody(h))))
 }
 
 // gunzipBody transparently decompresses gzip-encoded request bodies. The

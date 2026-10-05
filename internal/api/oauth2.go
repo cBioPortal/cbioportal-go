@@ -280,7 +280,7 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 		}
 		if sess := o.session(r); sess != nil {
 			r = o.replay(r, sess)
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey{}, sess.user)))
+			next.ServeHTTP(w, withUser(r, sess.user))
 			return
 		}
 		switch {
@@ -418,6 +418,7 @@ func (o *oauth2Login) authorize(w http.ResponseWriter, r *http.Request) {
 // and starts the session.
 func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request) {
 	fail := func(format string, args ...any) {
+		loginsTotal.Inc("failure")
 		log.Printf("oauth2: login failed: "+format, args...)
 		http.Redirect(w, r, "/login?logout_failure", http.StatusFound)
 	}
@@ -463,6 +464,7 @@ func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request) {
 	o.sessions[id] = sess
 	o.mu.Unlock()
 	o.setCookie(w, r, sessionCookie, id, 0)
+	loginsTotal.Inc("success")
 	http.Redirect(w, r, target, http.StatusFound)
 }
 

@@ -48,6 +48,8 @@ var sections = []section{
 		{name: "session-store", arg: "file", env: "SESSION_STORE_FILE", usage: "persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory", export: true},
 		{name: "auth-enabled", env: "AUTH_ENABLED", def: "false", usage: "require HS256 bearer tokens signed with $AUTH_JWT_SECRET", isBool: true, export: true},
 		{name: "auth-default-user", arg: "user", env: "AUTH_DEFAULT_USER", usage: "single-user development login for requests without a token", export: true},
+		{name: "metrics-addr", arg: "addr", env: "METRICS_ADDR", usage: "serve Prometheus metrics at /metrics on this address, e.g. :9090 (apart from the API)"},
+		{name: "access-log", arg: "bool", env: "ACCESS_LOG", usage: "write a JSON access log line per request to stdout", export: true},
 	}},
 	{"Portal properties", []option{
 		{name: "portal-properties", arg: "file", env: "PORTAL_PROPERTIES", usage: "application.properties or legacy portal.properties file (same key=value syntax)"},
