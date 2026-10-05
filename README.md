@@ -90,17 +90,21 @@ weekly.
   timestamps (and adds the filter's `uniqueStudyIds`).
 - **Importer coverage.** Tested on a handful of studies; needs validation
   against all of datahub and cbioportal-core's validator rules.
-- **API parity.** 167 of the Java backend's 188 endpoints are served (see
-  [API coverage](docs/api-coverage.md)); data access tokens, MatchMiner, the
-  URL shortener and MSK-only endpoints remain. On real production traffic
-  every response matches www or has a documented reason
-  ([Benchmark](docs/benchmark.md)); the main remaining difference is the
-  order of tied rows, which follows the Java importer's insertion order (an
-  import-order column in both transforms would close it).
-- **Performance.** The embeddings tab and the gnomAD tooltip are slower than
-  on www; whole-profile reads of large studies (expression enrichments,
-  co-expression on TCGA PanCancer) take seconds; ClickHouse cost per request
-  without Redis is to be measured on real traffic.
+- **API parity.** 174 of the Java backend's 188 endpoints are served (see
+  [API coverage](docs/api-coverage.md)). Not served: the SAML login page,
+  MatchMiner, the URL shortener and legacy proxies (unused by the frontend),
+  MSK-internal entity translation, and `getexternalpage.json` (an open URL
+  fetch, left out on purpose). On real production traffic every response
+  matches www or has a documented reason ([Benchmark](docs/benchmark.md));
+  the main remaining difference is the order of tied rows, which follows the
+  Java importer's insertion order.
+- **Performance.** Large responses (clinical data, mutations, molecular and
+  generic-assay data, copy number, structural variants, clinical events) are
+  streamed row by row, so a whole-study request of a 50k-sample cohort stays
+  under 100 MB of memory. Still held in memory: pages sorted with `sortBy`,
+  and the projection-reshaped lists (samples, sample lists, profiles). Whole-
+  profile reads of large studies (expression enrichments, co-expression on
+  TCGA PanCancer) take seconds.
 
 ## Documentation
 

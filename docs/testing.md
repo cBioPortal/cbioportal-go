@@ -50,8 +50,11 @@ Three tiers, fastest first:
 
    The runner mirrors the reference CI job: `CI=1` (one retry per test;
    tests that pass on retry are reported as flaky), `LOCALDEV=1`, and the
-   config's 120s test timeout. 3 workers matches CI; on a 4-core box shared
-   with ClickHouse, expect occasional load-induced flakes above that.
+   config's 120s test timeout. Locally 3 workers is the practical ceiling on
+   a 4-core box shared with ClickHouse. The GitHub workflow uses 2: the
+   private repo's runner has 2 vCPUs, and 3 workers there make specs miss
+   their 5s waits (the IGV-heavy study-view download-controls test is still
+   timing-sensitive on that runner).
    `go run ./cmd/e2ereport --fails` summarizes the last run.
 
    As in upstream CI, the suite logs in through Keycloak:
