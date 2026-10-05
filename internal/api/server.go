@@ -263,35 +263,158 @@ func metaProjection(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
+		rec := &metaCounter{header: http.Header{}, status: http.StatusOK}
+		defer rec.close()
 		next.ServeHTTP(rec, r)
 		maps.Copy(w.Header(), rec.header)
-		if rec.header.Get("total-count") == "" && rec.status == http.StatusOK {
-			var items []struct {
-				UniqueSampleKey string `json:"uniqueSampleKey"`
-			}
-			if json.Unmarshal(rec.body.Bytes(), &items) == nil {
-				w.Header().Del("Content-Type")
-				w.Header().Del("Content-Length")
-				w.Header().Set("total-count", fmt.Sprint(len(items)))
-				// Mutation META also reports the distinct samples (MutationMeta);
-				// no other endpoint sets sample-count.
-				if strings.Contains(r.URL.Path, "/mutations") {
-					samples := map[string]bool{}
-					for _, it := range items {
-						if it.UniqueSampleKey != "" {
-							samples[it.UniqueSampleKey] = true
-						}
-					}
-					w.Header().Set("sample-count", fmt.Sprint(len(samples)))
-				}
-				w.WriteHeader(http.StatusOK)
-				return
+		n, samples, ok := rec.count()
+		if !ok {
+			w.WriteHeader(rec.status)
+			w.Write(rec.raw.Bytes())
+			return
+		}
+		w.Header().Del("Content-Type")
+		w.Header().Del("Content-Length")
+		w.Header().Set("total-count", fmt.Sprint(n))
+		// Mutation META also reports the distinct samples (MutationMeta);
+		// no other endpoint sets sample-count.
+		if strings.Contains(r.URL.Path, "/mutations") {
+			w.Header().Set("sample-count", fmt.Sprint(samples))
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
+// metaCounter receives a handler's response for metaProjection. A successful
+// JSON array of objects without a total-count header is counted as it is
+// written (its elements and their distinct uniqueSampleKeys) and not kept, so
+// counting a large list costs no more memory than one element; any other
+// response is kept in raw to be passed on as it is.
+type metaCounter struct {
+	header   http.Header
+	status   int
+	raw      bytes.Buffer
+	counting bool
+	pw       *io.PipeWriter
+	done     chan metaCount
+}
+
+type metaCount struct {
+	n, samples int
+	err        error
+}
+
+func (m *metaCounter) Header() http.Header { return m.header }
+
+func (m *metaCounter) WriteHeader(code int) {
+	if m.raw.Len() == 0 && !m.counting {
+		m.status = code
+	}
+}
+
+func (m *metaCounter) Write(p []byte) (int, error) {
+	if m.counting {
+		return m.pw.Write(p)
+	}
+	m.raw.Write(p)
+	if m.status == http.StatusOK && m.header.Get("total-count") == "" && objectArrayStart(m.raw.Bytes()) {
+		m.counting = true
+		pr, pw := io.Pipe()
+		m.pw, m.done = pw, make(chan metaCount, 1)
+		go countArray(pr, m.done)
+		_, err := pw.Write(m.raw.Bytes())
+		m.raw.Reset()
+		if err != nil {
+			return 0, err
+		}
+	}
+	return len(p), nil
+}
+
+// count reports the array's length and distinct sample keys; ok is false
+// when raw holds the response to pass on instead: a response that is no
+// array, or a counted array that failed to decode (no longer held, it
+// answers 500).
+func (m *metaCounter) count() (n, samples int, ok bool) {
+	if !m.counting {
+		if m.status != http.StatusOK || m.header.Get("total-count") != "" {
+			return 0, 0, false
+		}
+		var items []struct {
+			UniqueSampleKey string `json:"uniqueSampleKey"`
+		}
+		if json.Unmarshal(m.raw.Bytes(), &items) != nil {
+			return 0, 0, false
+		}
+		samples := map[string]bool{}
+		for _, it := range items {
+			if it.UniqueSampleKey != "" {
+				samples[it.UniqueSampleKey] = true
 			}
 		}
-		w.WriteHeader(rec.status)
-		w.Write(rec.body.Bytes())
-	})
+		return len(items), len(samples), true
+	}
+	m.pw.Close()
+	c := <-m.done
+	if c.err != nil {
+		log.Printf("projection=META: counting the response: %v", c.err)
+		m.status = http.StatusInternalServerError
+		m.raw.Reset()
+		m.raw.WriteString(c.err.Error() + "\n")
+		m.header.Set("Content-Type", "text/plain; charset=utf-8")
+		return 0, 0, false
+	}
+	return c.n, c.samples, true
+}
+
+// close ends the counting of a handler that stopped writing early (an
+// aborted response).
+func (m *metaCounter) close() {
+	if m.pw != nil {
+		m.pw.Close()
+	}
+}
+
+// objectArrayStart reports whether b begins a JSON array whose first token
+// after '[' is an object or the closing bracket.
+func objectArrayStart(b []byte) bool {
+	b = bytes.TrimLeft(b, " \t\r\n")
+	if len(b) == 0 || b[0] != '[' {
+		return false
+	}
+	b = bytes.TrimLeft(b[1:], " \t\r\n")
+	return len(b) > 0 && (b[0] == '{' || b[0] == ']')
+}
+
+// countArray decodes a JSON array of objects from r element by element,
+// then drains r.
+func countArray(r *io.PipeReader, done chan<- metaCount) {
+	var c metaCount
+	defer func() {
+		io.Copy(io.Discard, r)
+		done <- c
+	}()
+	dec := json.NewDecoder(r)
+	if _, c.err = dec.Token(); c.err != nil {
+		return
+	}
+	samples := map[string]bool{}
+	for dec.More() {
+		var it struct {
+			UniqueSampleKey string `json:"uniqueSampleKey"`
+		}
+		if c.err = dec.Decode(&it); c.err != nil {
+			return
+		}
+		c.n++
+		if it.UniqueSampleKey != "" {
+			samples[it.UniqueSampleKey] = true
+		}
+	}
+	if _, c.err = dec.Token(); c.err != nil {
+		return
+	}
+	c.samples = len(samples)
 }
 
 type bufferedResponse struct {

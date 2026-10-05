@@ -325,34 +325,24 @@ func projectionOf(r *http.Request) string {
 	return "SUMMARY"
 }
 
-// mutationsWhere writes the mutations matching where, whose placeholders are
-// bound in args.
+// mutationsWhere streams the mutations matching where, whose placeholders
+// are bound in args.
 func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs, limit int) {
 	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", mutationSelect, where, mutationOrder)
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
 	}
-	rows, err := queryA[mutationRow](s.CH, sql, args)
-	if err != nil {
-		fail(w, err)
-		return
-	}
 	projection := projectionOf(r)
-	if projection == "ID" {
-		out := make([]MutationID, len(rows))
-		for i, row := range rows {
-			m := toMutation(row, false)
-			out[i] = MutationID{MolecularProfileID: m.MolecularProfileID, SampleID: m.SampleID, PatientID: m.PatientID,
-				EntrezGeneID: m.EntrezGeneID, StudyID: m.StudyID, UniqueSampleKey: m.UniqueSampleKey, UniquePatientKey: m.UniquePatientKey}
+	out := newJSONArray(w)
+	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *mutationRow) error {
+		if projection == "ID" {
+			m := toMutation(*row, false)
+			return out.add(MutationID{MolecularProfileID: m.MolecularProfileID, SampleID: m.SampleID, PatientID: m.PatientID,
+				EntrezGeneID: m.EntrezGeneID, StudyID: m.StudyID, UniqueSampleKey: m.UniqueSampleKey, UniquePatientKey: m.UniquePatientKey})
 		}
-		writeJSON(w, out)
-		return
-	}
-	out := make([]Mutation, len(rows))
-	for i, row := range rows {
-		out[i] = toMutation(row, projection == "DETAILED")
-	}
-	writeJSON(w, out)
+		return out.add(toMutation(*row, projection == "DETAILED"))
+	})
+	out.finish(err)
 }
 
 // mutations serves GET /api/molecular-profiles/{id}/mutations: the profile's

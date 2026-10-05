@@ -212,7 +212,7 @@ func driverTable(t extTable, v any) (*ext.Table, error) {
 
 // queryRows runs sql through the driver. An error means the request should
 // go through the JSON path instead.
-func (c *Client) queryRows(ctx context.Context, sql string, p Params) (driver.Rows, error) {
+func (c *Client) queryRows(ctx context.Context, sql string, p Params, settings clickhouse.Settings) (driver.Rows, error) {
 	conn, err := c.driverConn()
 	if err != nil {
 		return nil, err
@@ -221,7 +221,15 @@ func (c *Client) queryRows(ctx context.Context, sql string, p Params) (driver.Ro
 	if !ok {
 		return nil, errLargeRequest
 	}
+	if settings != nil {
+		opts = append(opts, clickhouse.WithSettings(settings))
+	}
 	return conn.Query(clickhouse.Context(ctx, opts...), q)
 }
+
+// streamSettings apply to streamed reads (QueryEachP): the driver holds one
+// decoded block at a time, so smaller blocks bound the memory of a long
+// result with wide string columns.
+var streamSettings = clickhouse.Settings{"max_block_size": 8192}
 
 var errLargeRequest = errors.New("parameters need the multipart request")

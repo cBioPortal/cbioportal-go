@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 // QueryJSONLines runs a SELECT and returns each result row as raw JSON. The
@@ -87,7 +89,7 @@ func QueryEachP[T any](c *Client, sql string, p Params, fn func(*T) error) error
 		called = true
 		return fn(v)
 	}
-	err, ok := eachNative(c, sql, p, counted)
+	err, ok := eachNative(c, sql, p, streamSettings, counted)
 	if ok || called {
 		return err
 	}
@@ -158,7 +160,7 @@ var logFallbacks = os.Getenv("CLICKHOUSE_DECODE") == "log"
 // false when the JSON path must answer instead.
 func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
 	out = []T{}
-	err, ok := eachNative(c, sql, p, func(v *T) error {
+	err, ok := eachNative(c, sql, p, nil, func(v *T) error {
 		out = append(out, *v)
 		return nil
 	})
@@ -175,8 +177,8 @@ var errStream = errors.New("clickhouse: driver stream")
 // eachNative calls fn for each row of a struct type T decoded from the
 // driver. ok is false when the JSON path must answer instead (nothing could
 // be decoded here, or the stream failed); err is then the reason, or else
-// fn's error.
-func eachNative[T any](c *Client, sql string, p Params, fn func(*T) error) (err error, ok bool) {
+// fn's error. settings, if any, apply to the query.
+func eachNative[T any](c *Client, sql string, p Params, settings clickhouse.Settings, fn func(*T) error) (err error, ok bool) {
 	t := reflect.TypeFor[T]()
 	if !nativeReads || t.Kind() != reflect.Struct {
 		return nil, false
@@ -187,7 +189,7 @@ func eachNative[T any](c *Client, sql string, p Params, fn func(*T) error) (err 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
-	rows, err := c.queryRows(ctx, sql, p)
+	rows, err := c.queryRows(ctx, sql, p, settings)
 	if err != nil {
 		reason := "error"
 		if err == errLargeRequest {
