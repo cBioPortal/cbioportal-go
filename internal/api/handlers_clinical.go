@@ -32,22 +32,19 @@ func isPatient(r *http.Request) bool {
 	return strings.EqualFold(r.URL.Query().Get("clinicalDataType"), "PATIENT")
 }
 
-func toClinicalData(rows []clinicalRow, patient bool) []ClinicalData {
-	out := make([]ClinicalData, len(rows))
-	for i, r := range rows {
-		d := ClinicalData{
-			ClinicalAttributeID: r.ClinicalAttributeID, Value: r.Value, StudyID: r.StudyID, PatientAttribute: patient,
-		}
-		if patient {
-			d.PatientID = r.ID
-		} else {
-			d.SampleID, d.PatientID = r.ID, r.PatientID
-			d.UniqueSampleKey = uniqueKey(r.StudyID, r.ID)
-		}
-		d.UniquePatientKey = uniqueKey(r.StudyID, d.PatientID)
-		out[i] = d
+// toClinicalData maps a clinical row to its record.
+func toClinicalData(r *clinicalRow, patient bool) ClinicalData {
+	d := ClinicalData{
+		ClinicalAttributeID: r.ClinicalAttributeID, Value: r.Value, StudyID: r.StudyID, PatientAttribute: patient,
 	}
-	return out
+	if patient {
+		d.PatientID = r.ID
+	} else {
+		d.SampleID, d.PatientID = r.ID, r.PatientID
+		d.UniqueSampleKey = uniqueKey(r.StudyID, r.ID)
+	}
+	d.UniquePatientKey = uniqueKey(r.StudyID, d.PatientID)
+	return d
 }
 
 // clinicalSQL selects clinical rows (sample- or patient-level) matching where,
@@ -86,10 +83,11 @@ type clinicalDataOut struct {
 	Value               *string            `json:"value,omitempty"`
 }
 
-// writeClinical runs the query and writes it in the requested projection
-// (ID, SUMMARY, DETAILED with the attribute metadata, or META as a count header).
-// where may hold placeholders bound in args.
-func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, where string, args *sqlArgs) {
+// writeClinical streams the query's rows in the requested projection (ID,
+// SUMMARY, DETAILED with the attribute metadata of studies, the studies the
+// rows can belong to, or META as a count header). where may hold
+// placeholders bound in args.
+func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, studies []string, where string, args *sqlArgs) {
 	projection := projectionParam(r)
 	if projection == "META" {
 		type c struct {
@@ -108,36 +106,28 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	rows, err := queryA[clinicalRow](s.CH, clinicalSQL(patient, s.importOrdered(), where), args)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	data := toClinicalData(rows, patient)
 	var attrs map[string]ClinicalAttribute
-	if projection == "DETAILED" && len(data) > 0 {
-		studies := map[string]bool{}
-		for _, d := range data {
-			studies[d.StudyID] = true
-		}
-		attrs = s.clinicalAttributes(sortedKeys(studies))
+	if projection == "DETAILED" {
+		attrs = s.clinicalAttributes(studies)
 	}
-	out := make([]clinicalDataOut, len(data))
-	for i, d := range data {
+	out := newJSONArray(w)
+	sql := clinicalSQL(patient, s.importOrdered(), where)
+	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *clinicalRow) error {
+		d := toClinicalData(row, patient)
 		o := clinicalDataOut{
 			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, SampleID: d.SampleID,
 			PatientID: d.PatientID, StudyID: d.StudyID, ClinicalAttributeID: d.ClinicalAttributeID,
 		}
 		if projection != "ID" {
-			o.Value = &data[i].Value
+			o.Value = &d.Value
 		}
 		if a, ok := attrs[d.StudyID+"\x00"+d.ClinicalAttributeID]; ok {
 			o.ClinicalAttribute = &a
 			o.PatientAttribute = &a.PatientAttribute
 		}
-		out[i] = o
-	}
-	writeJSON(w, out)
+		return out.add(o)
+	})
+	out.finish(err)
 }
 
 func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +136,7 @@ func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
 	if a := r.URL.Query().Get("attributeId"); a != "" {
 		where += " AND attr_id = " + args.str(a)
 	}
-	s.writeClinical(w, r, isPatient(r), where, args)
+	s.writeClinical(w, r, isPatient(r), []string{r.PathValue("studyId")}, where, args)
 }
 
 func (s *State) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +158,7 @@ func (s *State) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
 	if len(f.AttributeIDs) > 0 {
 		where += " AND attr_id IN " + args.strs(f.AttributeIDs)
 	}
-	s.writeClinical(w, r, patient, where, args)
+	s.writeClinical(w, r, patient, []string{r.PathValue("studyId")}, where, args)
 }
 
 // clinicalDataFetch serves POST /api/clinical-data/fetch: clinical data for
@@ -193,15 +183,17 @@ func (s *State) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 		idCol = "patient_id"
 	}
 	pairs := make([][2]string, len(f.Identifiers))
+	studies := map[string]bool{}
 	for i, id := range f.Identifiers {
 		pairs[i] = [2]string{id.StudyID, id.EntityID}
+		studies[id.StudyID] = true
 	}
 	args := newArgs()
 	where := fmt.Sprintf("(study_id, %s) IN %s", idCol, args.pairs(pairs))
 	if len(f.AttributeIDs) > 0 {
 		where += " AND attr_id IN " + args.strs(f.AttributeIDs)
 	}
-	s.writeClinical(w, r, patient, where, args)
+	s.writeClinical(w, r, patient, sortedKeys(studies), where, args)
 }
 
 // clinicalAttributes indexes the studies' attribute metadata by study and id.

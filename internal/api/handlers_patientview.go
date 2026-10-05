@@ -16,14 +16,14 @@ func (s *State) samplesOfPatient(w http.ResponseWriter, r *http.Request) {
 // patientClinicalData — GET /api/studies/{studyId}/patients/{patientId}/clinical-data
 func (s *State) patientClinicalData(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
-	s.writeClinical(w, r, true, fmt.Sprintf("study_id = %s AND patient_id = %s%s",
+	s.writeClinical(w, r, true, []string{r.PathValue("studyId")}, fmt.Sprintf("study_id = %s AND patient_id = %s%s",
 		args.str(r.PathValue("studyId")), args.str(r.PathValue("patientId")), attributeIDClause(r, args)), args)
 }
 
 // sampleClinicalData — GET /api/studies/{studyId}/samples/{sampleId}/clinical-data
 func (s *State) sampleClinicalData(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
-	s.writeClinical(w, r, false, fmt.Sprintf("study_id = %s AND sample_id = %s%s",
+	s.writeClinical(w, r, false, []string{r.PathValue("studyId")}, fmt.Sprintf("study_id = %s AND sample_id = %s%s",
 		args.str(r.PathValue("studyId")), args.str(r.PathValue("sampleId")), attributeIDClause(r, args)), args)
 }
 
