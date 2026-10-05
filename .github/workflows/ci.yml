@@ -88,3 +88,12 @@ jobs:
       - name: API log
         if: failure()
         run: cat api.log
+
+  image-build:
+    name: Image builds (Go stage)
+    # The Docker image builds from a copy of the sources (Dockerfile COPY
+    # lines); building its Go stage catches files the image misses.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target go .
