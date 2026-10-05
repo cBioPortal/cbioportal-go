@@ -45,7 +45,7 @@ var sections = []section{
 		{name: "site-banner-link", arg: "url", env: "SITE_BANNER_LINK", usage: "link for the site banner", export: true},
 	}},
 	{"Sessions and auth", []option{
-		{name: "session-store", arg: "file", env: "SESSION_STORE_FILE", usage: "persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory", export: true},
+		{name: "session-store", arg: "file", env: "SESSION_STORE_FILE", usage: "persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory (unused with the session.service.url property)", export: true},
 		{name: "auth-enabled", env: "AUTH_ENABLED", def: "false", usage: "require HS256 bearer tokens signed with $AUTH_JWT_SECRET", isBool: true, export: true},
 		{name: "auth-default-user", arg: "user", env: "AUTH_DEFAULT_USER", usage: "single-user development login for requests without a token", export: true},
 		{name: "metrics-addr", arg: "addr", env: "METRICS_ADDR", usage: "serve Prometheus metrics at /metrics on this address, e.g. :9090 (apart from the API)"},
@@ -63,7 +63,8 @@ var envOnly = [][2]string{
 	{"CLICKHOUSE_USER, CLICKHOUSE_PASSWORD", "ClickHouse credentials (unset: the default user)"},
 	{"ONCOKB_TOKEN", "OncoKB API token sent by the /proxy/ endpoint"},
 	{"AUTH_JWT_SECRET", "HS256 secret that bearer tokens are verified with"},
-	{"PUBLISHER_API_KEY", "key required by /api/public_virtual_studies publish/unpublish"},
+	{"PUBLISHER_API_KEY", "key required by /api/public_virtual_studies publish/unpublish (or the\n    \tsession.endpoint.publisher-api-key property)"},
+	{"SESSION_SERVICE_URL, SESSION_SERVICE_USER, SESSION_SERVICE_PASSWORD", "cBioPortal session service and its basic authentication, when the\n    \tsession.service.url/user/password properties are unset"},
 	{"CBIOPORTAL_PPROF_ADDR", "serve net/http/pprof on this address, e.g. 127.0.0.1:6060"},
 }
 

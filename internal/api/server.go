@@ -27,7 +27,7 @@ import (
 
 type State struct {
 	CH           *ch.Client
-	sessions     *sessionStore
+	sessions     sessionStore
 	sessionsOnce sync.Once
 	meta         metaCache
 	// frontend serves every non-API path — a built frontend (FRONTEND_DIR) or a
@@ -85,9 +85,10 @@ func (s *State) ConfigureAuth() error {
 	return nil
 }
 
-// NewState loads the session store (SESSION_STORE_FILE, if set) at startup.
+// NewState returns the API state over ClickHouse client c; ConfigureAuth and
+// ConfigureSessions apply the portal properties.
 func NewState(c *ch.Client) *State {
-	s := &State{CH: c, sessions: newSessionStoreFromEnv()}
+	s := &State{CH: c}
 	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
 		s.frontend = spaHandler(dir)
 	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {

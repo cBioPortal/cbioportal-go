@@ -62,6 +62,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
 		os.Exit(1)
 	}
+	if err := state.ConfigureSessions(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", name, err)
+		os.Exit(1)
+	}
 	handler := api.NewRouter(state)
 
 	addr := "0.0.0.0:" + v["port"]

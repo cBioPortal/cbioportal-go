@@ -77,10 +77,13 @@ weekly.
   tokens for API clients (`dat.method=oauth2`) work as in the Java portal (see
   [Configuration](docs/configuration.md)). Still needed: SAML and
   `optional_oauth2`, and sessions that survive a restart or span replicas.
-- **Session service.** Sessions (virtual studies, groups, custom data,
-  settings) live in a JSON file in one process. Needed: a durable shared store,
-  or compatibility with cBioPortal's session service so sessions — and links —
-  carry over from existing portals.
+- **Session service.** Sessions are kept in cBioPortal's session service
+  (`session.service.url`), shared with existing portals and across replicas,
+  or in the built-in single-process store (see
+  [Configuration](docs/configuration.md#sessions)). Still different from
+  Java: a virtual study or custom data read by id is served with all its
+  stored fields, where Java's response leaves out owner, users, version and
+  timestamps (and adds the filter's `uniqueStudyIds`).
 - **Importer coverage.** Tested on a handful of studies; needs validation
   against all of datahub and cbioportal-core's validator rules.
 - **API parity.** 167 of the Java backend's 188 endpoints are served (see

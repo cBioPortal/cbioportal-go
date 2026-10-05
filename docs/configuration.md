@@ -68,7 +68,7 @@ line the flags are usually handier.
 | `-frontend-url` | `FRONTEND_URL` | | reverse-proxy every non-`/api/` path to this frontend dev server instead |
 | `-oncokb-url` | `ONCOKB_URL` | `https://public.api.oncokb.org/api/v1` | OncoKB API behind the frontend's `/proxy/...` endpoint |
 | `-site-banner`, `-site-banner-link` | `SITE_BANNER`, `SITE_BANNER_LINK` | | notice bar (and link) at the top of every portal page, e.g. for a preview deployment |
-| `-session-store` | `SESSION_STORE_FILE` | | persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory |
+| `-session-store` | `SESSION_STORE_FILE` | | persist sessions (virtual studies, groups, custom data) to this JSON file; unset keeps them in memory. Not used with a session service, see [Sessions](#sessions) |
 | `-auth-enabled` | `AUTH_ENABLED` | `false` | require HS256 bearer tokens (not with `dat.method=oauth2`) |
 | `-auth-default-user` | `AUTH_DEFAULT_USER` | | single-user development login for requests without a token (not with `authenticate=oauth2`) |
 | `-metrics-addr` | `METRICS_ADDR` | | serve Prometheus metrics at `/metrics` on this address (e.g. `:9090`), apart from the API |
@@ -83,7 +83,8 @@ of the machine through the process list (`ps`):
 | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | ClickHouse credentials (unset: the default user); also used by `cbioportal-import` |
 | `ONCOKB_TOKEN` | OncoKB API token sent by the `/proxy/...` endpoint |
 | `AUTH_JWT_SECRET` | HS256 secret bearer tokens are verified with |
-| `PUBLISHER_API_KEY` | key required by `/api/public_virtual_studies` publish/unpublish |
+| `PUBLISHER_API_KEY` | key required by `/api/public_virtual_studies` publish/unpublish (or the `session.endpoint.publisher-api-key` property) |
+| `SESSION_SERVICE_URL`, `SESSION_SERVICE_USER`, `SESSION_SERVICE_PASSWORD` | cBioPortal session service and its basic authentication when the `session.service.*` properties are unset, see [Sessions](#sessions) |
 | `CBIOPORTAL_PPROF_ADDR` | serve `net/http/pprof` on this address, e.g. `127.0.0.1:6060` |
 
 ```bash
@@ -94,6 +95,7 @@ PORT=8080 CBIOPORTAL_DB=cbioportal FRONTEND_DIR=frontend/dist cbioportal-api   #
 At startup the server logs its version and the effective settings:
 
 ```
+sessions: session service http://session-service:5000/api/sessions/my_portal/
 cbioportal-api 6b38ed6 (2026-10-02T09:15:00Z) listening on 0.0.0.0:8080 (clickhouse http://localhost:18123, db cbioportal, raw-db cbioportal_raw, ref-db cbioportal_ref)
 portal properties: 5 used (authenticate, quick_search.enabled, session.service.url, skin.blurb, skin.title), 3 ignored (not used by this server: db.user, spring.datasource.password, spring.datasource.url)
 ```
@@ -245,6 +247,54 @@ dat.filter_user_role=ROLE_<role>
 curl -H "Authorization: Bearer $(sed -n 's/^token: //p' cbioportal_data_access_token.txt)" \
   https://cbioportal.example.org/api/studies
 ```
+
+## Sessions
+
+Virtual studies, groups, comparison and results-view sessions, page
+settings, custom data and gene lists (`/api/session/…`,
+`/api/public_virtual_studies`) are kept in one of two stores:
+
+- **Built-in** (default): in the server's memory, or in the JSON file
+  `SESSION_STORE_FILE`. It serves a single process.
+- **cBioPortal's [session service](https://github.com/cBioPortal/session-service)**,
+  configured with the Java portal's properties:
+
+  ```properties
+  session.service.url=http://session-service:5000/api/sessions/my_portal/
+  # only when the session service requires basic authentication
+  session.service.user=user
+  session.service.password=pass
+  ```
+
+  Sessions are then shared by every replica of this server and by Java
+  portals using the same session service and portal instance (`my_portal`
+  above), so existing links, saved virtual studies and settings carry over.
+  Without a properties file the environment variables `SESSION_SERVICE_URL`,
+  `SESSION_SERVICE_USER` and `SESSION_SERVICE_PASSWORD` set the same;
+  `SESSION_STORE_FILE` is then not used. The startup log names the store
+  (`sessions: session service http://…`), never the password.
+
+With the session service, requests go to it as the Java backend's
+`SessionServiceController` sends them:
+
+- The service generates the ids and returns the id of an existing session
+  for identical data. Sessions are served with the service's `source` (the
+  portal instance) and without `checksum`; the built-in store's source is
+  `cbioportal`.
+- The per-user lists (saved virtual studies, groups and custom data of the
+  study, gene lists, page settings) query the user name as Java does: a
+  case-insensitive match anywhere in `data.users` (`data.owner` for
+  settings), so a user `ann` is also served studies shared with
+  `joanne@example.org`. The built-in store matches whole names.
+- When the service fails or cannot be reached (30 seconds per request), the
+  endpoints answer as Java's: `500` with Spring's error body, a bare `500`
+  for `GET /api/session/{type}/{id}` and the user's virtual studies, and a
+  bare `400` for `/api/session/settings/fetch`. An unknown id is a `404`.
+  Failures are logged without credentials.
+
+Publishing virtual studies (`/api/public_virtual_studies/{id}`) requires the
+key `session.endpoint.publisher-api-key`, or `PUBLISHER_API_KEY`, in the
+`X-PUBLISHER-API-KEY` header, with either store.
 
 ## Metrics and logs
 

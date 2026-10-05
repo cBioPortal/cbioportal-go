@@ -23,7 +23,8 @@ The API container is configured with the settings in
 [Configuration](configuration.md): `PORT=8080`, `FRONTEND_DIR=/app/frontend`,
 `CLICKHOUSE_URL` / `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD`, `CBIOPORTAL_DB` /
 `CBIOPORTAL_RAW_DB` / `CBIOPORTAL_REF_DB`, and `SESSION_STORE_FILE` on a
-persistent volume. Health check: `GET /health`.
+persistent volume — or, for more than one replica, cBioPortal's session
+service (`SESSION_SERVICE_URL`, see [Sessions](configuration.md#sessions)). Health check: `GET /health`.
 
 ## go.cbioportal.org
 

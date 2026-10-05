@@ -407,8 +407,13 @@ func TestContractMainSessionRoundTrip(t *testing.T) {
 		Data   map[string]any `json:"data"`
 	}
 	get(t, "/api/session/main_session/"+created.ID, &got)
-	wantEq(t, []any{got.ID, got.Source, got.Type, got.Data["gene_list"]},
-		[]any{created.ID, "cbioportal", "main_session", "TP53"})
+	wantEq(t, []any{got.ID, got.Type, got.Data["gene_list"]},
+		[]any{created.ID, "main_session", "TP53"})
+	// The source is the store's: the session service's portal instance, or
+	// "cbioportal" for the built-in store.
+	if got.Source == "" {
+		t.Errorf("session without source")
+	}
 }
 
 // A created (not saved) virtual study gets the requester as owner ("anonymous"

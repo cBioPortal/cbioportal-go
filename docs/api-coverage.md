@@ -196,7 +196,7 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | GET | `/api/session/virtual_study` |  |  | implemented | yes | anonymous: [] (Java: 500) |
 | POST | `/api/session/{type}` | JSONObject |  | implemented | yes |  |
 | POST | `/api/session/virtual_study/save` | JSONObject |  | implemented | yes |  |
-| GET | `/api/session/{type:virtual_study\|group\|custom_data\|custom_gene_list}/{operation}/{id}` |  |  | implemented | yes | session store (SESSION_STORE_FILE) |
+| GET | `/api/session/{type:virtual_study\|group\|custom_data\|custom_gene_list}/{operation}/{id}` |  |  | implemented | yes | built-in store or session service |
 | POST | `/api/session/groups/fetch` | List&lt;String&gt; |  | implemented | yes |  |
 | POST | `/api/session/settings` | PageSettingsData |  | implemented | yes |  |
 | POST | `/api/session/settings/fetch` | PageSettingsIdentifier |  | implemented | yes |  |
