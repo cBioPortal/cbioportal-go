@@ -28,7 +28,7 @@ ARG TARGETARCH
 # Version stamp for builds without .git, e.g. "6b38ed6 (2026-10-02T21:00:00Z)".
 ARG VERSION=""
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY cmd/ cmd/
 COPY internal/ internal/
 RUN --mount=type=cache,target=/root/.cache/go-build \
