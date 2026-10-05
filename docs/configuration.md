@@ -123,6 +123,23 @@ cbioportal-api --skin.title="My portal" --quick_search.enabled=true
 cbioportal-api --portal-properties=./portal.properties --skin.title="Preview"
 ```
 
+**Secrets from the environment.** Values may contain Spring placeholders,
+`${NAME}` or `${NAME:default}`, resolved at startup as Spring Boot does: from
+the arguments, then the environment (`NAME` as written, then upper-cased with
+`.` and `-` as `_`), then the file. Secrets such as OAuth2 client secrets and
+the Redis password can so come from environment variables (in Kubernetes,
+from a Secret) while the arguments or the image's properties file carry only
+the placeholder — out of the image, the process list and the logs:
+
+```bash
+cbioportal-api --spring.security.oauth2.client.registration.google.clientSecret='${GOOGLE_PLUS_CONSUMER_SECRET}'
+```
+
+A placeholder that is not set and has no default stops the server at
+startup with an error naming the property and the placeholder (never a
+value). Kubernetes expands only `$(NAME)` in container arguments, so
+`${NAME}` reaches the server unchanged.
+
 **Reusing a cbioportal-docker-compose setup.** Point the server at the
 properties file the docker-compose setup already has — `config/application.properties`
 in current versions (mounted into the Java container as `application.properties`),
@@ -169,16 +186,25 @@ spring.security.oauth2.client.provider.keycloak.user-name-attribute=email
 spring.security.oauth2.client.jwt-roles-path=resource_access::cbioportal::roles
 ```
 
-Keep the client secret in the properties file, not on the command line.
+Keep the client secret out of the command line: in the properties file, or
+in the environment through a placeholder
+(`client-secret=${KEYCLOAK_CLIENT_SECRET}`, see
+[Portal properties](#portal-properties)).
 `redirect-uri` defaults to `{baseUrl}/login/oauth2/code/{registrationId}`; the
 provider endpoints are discovered from `issuer-uri` (or set
 `authorization-uri`, `token-uri`, `user-info-uri` and `jwk-set-uri`).
-Behind a TLS-terminating proxy, the proxy must send `X-Forwarded-Proto`.
+Property names bind as in Spring (`clientId`, `client_id` and `client-id`
+alike). `{baseUrl}` is the origin the browser uses: behind a
+TLS-terminating proxy or ingress, the proxy must send `X-Forwarded-Proto`
+(and `X-Forwarded-Host` unless it passes the `Host` header on).
 
 - Pages redirect to the provider's login and return to the page asked for
   (a form posted before the login is re-posted). `/api/**` requests without
   a session get `401`. `/api/health` and `/api/public_virtual_studies` stay
   open. `/logout` ends the session at the portal and the provider.
+- Every registration with a `client-id` is offered: `/login` goes straight
+  to the provider when there is one (unless
+  `security.force_redirect_on_one_idp=false`) and lists them otherwise.
 - A user's roles name the studies they may read, as in the Java portal: a
   study id, one of the study's `groups`, `ALL`, `ALL_TCGA` or
   `ALL_NCI_TARGET`. With `filter_groups_by_appname=true` (the default) only
@@ -188,11 +214,81 @@ Behind a TLS-terminating proxy, the proxy must send `X-Forwarded-Proto`.
   attributes leave unreadable studies out
   (`skin.home_page.show_unauthorized_studies=true` lists them on the home
   page as not readable). Requests naming an unreadable study get `403`.
-- Sessions are kept in the server's memory for 30 minutes of inactivity; a
-  restart logs everyone out.
+- Login sessions end after 30 minutes of inactivity. They are kept in the
+  server's memory (a restart logs everyone out), or in Redis, see
+  [Login sessions in Redis](#login-sessions-in-redis).
 
-Other `authenticate` values (`saml`, `optional_oauth2`) are not supported and
-stop the server at startup rather than serve the portal open.
+Other `authenticate` values (`saml`, `saml_plus_basic`) and
+`authorization=true` (users and their authorities from the database) are
+not supported and stop the server at startup rather than serve the portal
+open.
+
+### Optional sign-in (optional_oauth2)
+
+`authenticate=optional_oauth2` keeps the portal open, as on
+www.cbioportal.org: anonymous requests are served exactly as with
+`authenticate=false`, and signing in is optional. Signed-in users save
+virtual studies, groups and page settings to their account in the session
+store. The registrations are configured as for `oauth2`; Google needs only
+its client id and secret, since Spring's built-in Google provider settings
+apply:
+
+```properties
+authenticate=optional_oauth2
+authorization=false
+security.method_authorization_enabled=false
+spring.security.oauth2.client.registration.google.clientId=${GOOGLE_PLUS_CONSUMER_KEY}
+spring.security.oauth2.client.registration.google.clientSecret=${GOOGLE_PLUS_CONSUMER_SECRET}
+spring.security.oauth2.client.provider.google.user-name-attribute=email
+```
+
+- A registration (or its `provider`) named `google` defaults to Google's
+  endpoints (`https://accounts.google.com/o/oauth2/v2/auth`,
+  `https://www.googleapis.com/oauth2/v4/token`, the JWKs at
+  `https://www.googleapis.com/oauth2/v3/certs`, userinfo at
+  `https://www.googleapis.com/oauth2/v3/userinfo`), issuer
+  `https://accounts.google.com`, scopes `openid,profile,email`, the user named
+  by `sub`, and the redirect URI `{baseUrl}/login/oauth2/code/google`, which
+  must be registered with Google (e.g.
+  `https://go.cbioportal.org/login/oauth2/code/google`). Properties that are
+  set override these. GitHub and Facebook, which have no OpenID Connect, are
+  not supported.
+- `/config_service` reports `authenticationMethod: optional_oauth2`, so the
+  frontend shows its sign-in button, and the signed-in user in
+  `user_display_name` / `user_email_address` (`anonymousUser` otherwise).
+  The button opens `/login` in a window; after the login the provider
+  returns to `/login/oauth2/code/{registrationId}`, which sends the window to
+  `/` — the frontend then closes it and reloads its configuration.
+- `/logout` ends the session and returns to `/` (the provider's session is
+  kept, as in Java).
+- Signing in grants no study access: every study stays open to everyone.
+  With `security.method_authorization_enabled=true` study authorization
+  applies as with `oauth2`, to signed-in users by their roles and to
+  anonymous ones by `always_show_study_group` alone.
+- `dat.method=oauth2` needs `authenticate=oauth2`.
+
+### Login sessions in Redis
+
+With Spring Session's Redis properties login sessions (and logins in
+progress) are kept in Redis, so they survive a restart and are shared by
+every replica:
+
+```properties
+spring.session.store-type=redis
+spring.data.redis.host=redis.example.org
+spring.data.redis.port=6379
+spring.data.redis.password=${REDIS_SESSION_PASSWORD}
+# optional: spring.data.redis.username, .database, .ssl.enabled=true,
+# .timeout (default 5s), or spring.data.redis.url=rediss://user:pass@host:6380/0
+```
+
+The keys are `cbioportal-go:login:…`, JSON with a 30-minute expiry renewed
+by use; Spring Session's own (Java-serialized) sessions are left alone, so a
+Redis can be shared with Java portals but logins are not. Without
+`spring.session.store-type=redis` sessions stay in memory. The startup log
+names the store (`login sessions: redis host:6379`), never the password.
+When Redis cannot be reached, `optional_oauth2` serves requests anonymously
+and `oauth2` answers `503`; both log the error.
 
 ### Data access tokens
 

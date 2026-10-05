@@ -73,10 +73,14 @@ weekly.
 ## TODO for a full reimplementation
 
 - **Authentication.** OAuth2/OpenID Connect login (`authenticate=oauth2`,
-  e.g. Keycloak), study authorization from the user's roles and data access
-  tokens for API clients (`dat.method=oauth2`) work as in the Java portal (see
-  [Configuration](docs/configuration.md)). Still needed: SAML and
-  `optional_oauth2`, and sessions that survive a restart or span replicas.
+  e.g. Keycloak), optional sign-in on an open portal
+  (`authenticate=optional_oauth2`, e.g. Google as on www), study
+  authorization from the user's roles, data access tokens for API clients
+  (`dat.method=oauth2`) and login sessions in Redis
+  (`spring.session.store-type=redis`) work as in the Java portal (see
+  [Configuration](docs/configuration.md#login-and-study-authorization)).
+  Still needed: SAML, `authorization=true` (users from the database) and
+  non-OpenID providers (GitHub, Facebook).
 - **Session service.** Sessions are kept in cBioPortal's session service
   (`session.service.url`), shared with existing portals and across replicas,
   or in the built-in single-process store (see

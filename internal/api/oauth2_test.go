@@ -156,7 +156,7 @@ func loginPortal(t *testing.T, p *fakeProvider) *httptest.Server {
 	if err != nil || cfg == nil {
 		t.Fatalf("config: %v", err)
 	}
-	login := newOAuth2Login(cfg)
+	login := newOAuth2Login(cfg, nil)
 	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, _ := GetUser(r.Context())
 		r.ParseForm()
@@ -283,7 +283,7 @@ func TestLoadOAuth2Config(t *testing.T) {
 	if c, err := loadOAuth2Config(map[string]string{"authenticate": "false"}); c != nil || err != nil {
 		t.Fatalf("authenticate=false: %v %v", c, err)
 	}
-	for _, method := range []string{"saml", "optional_oauth2", "ad"} {
+	for _, method := range []string{"saml", "saml_plus_basic", "ad"} {
 		if _, err := loadOAuth2Config(map[string]string{"authenticate": method}); err == nil {
 			t.Errorf("authenticate=%s accepted; an unsupported method must not serve the portal open", method)
 		}

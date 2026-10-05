@@ -15,22 +15,24 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
-// OAuth2 login (authenticate=oauth2), as the Java portal's Spring Security
-// oauth2Login: an OpenID Connect authorization-code flow against one provider
-// (Keycloak in cBioPortal deployments), configured with the same
-// spring.security.oauth2.client.* properties.
+// OAuth2 login, as the Java portal's Spring Security oauth2Login: an OpenID
+// Connect authorization-code flow against the client registrations of the
+// spring.security.oauth2.client.* properties (Keycloak, Google, …).
 //
+// authenticate=oauth2 makes the portal private:
 //   - Unauthenticated /api/** requests get an empty 401; other pages redirect
 //     to /login, which redirects to /oauth2/authorization/{registrationId}
-//     and on to the provider. The provider returns to
-//     /login/oauth2/code/{registrationId}, which starts a session and sends
-//     the browser back to the page it first asked for (re-posting a form
-//     that was posted before the login).
+//     (or lists the registrations when there are several) and on to the
+//     provider. The provider returns to /login/oauth2/code/{registrationId},
+//     which starts a session and sends the browser back to the page it first
+//     asked for (re-posting a form that was posted before the login).
 //   - /logout ends the session and the provider's (RP-initiated logout).
 //   - With dat.method=oauth2, API requests with an Authorization header are
 //     authenticated by their data access token instead (dat.go).
@@ -39,98 +41,246 @@ import (
 //     resource_access::cbioportal::roles) and decide which studies the user
 //     may read (see access.go).
 //
-// Sessions live in memory: a restart signs everyone out.
+// authenticate=optional_oauth2 keeps the portal open, as Java's
+// OptionalOAuth2SecurityConfig: every request is served, anonymous ones as
+// with authenticate=false; signing in (the frontend opens /login) makes the
+// user known to the API, e.g. to save virtual studies and settings. After the
+// login the browser lands on /, and /logout returns there. Study
+// authorization applies only with security.method_authorization_enabled=true.
+//
+// Sessions and logins in progress live in a loginStore: memory by default,
+// Redis with spring.session.store-type=redis.
 
 const (
 	sessionCookie  = "JSESSIONID"
 	loginCookie    = "CBIOPORTAL_LOGIN"
 	sessionTimeout = 30 * time.Minute
 	loginTimeout   = 10 * time.Minute
+	// sessionRefresh is how stale a session's expiry may get before a request
+	// extends it, sparing the store a write per request.
+	sessionRefresh = time.Minute
 )
 
-type oauth2Config struct {
-	RegistrationID    string
-	ClientID          string
-	ClientSecret      string
-	Scopes            []string
-	RedirectURI       string // may contain {baseUrl} and {registrationId}
-	ClientAuthPost    bool   // client_secret_post instead of client_secret_basic
-	IssuerURI         string
+// oauth2Registration is one spring.security.oauth2.client.registration.{id}
+// with its provider.
+type oauth2Registration struct {
+	ID             string
+	ClientID       string
+	ClientSecret   string
+	Scopes         []string
+	RedirectURI    string // may contain {baseUrl}, {action} and {registrationId}
+	ClientAuthPost bool   // client_secret_post instead of client_secret_basic
+	IssuerURI      string
+	// Discover is set when issuer-uri is configured: the provider's endpoints
+	// then come from its OpenID discovery document.
+	Discover          bool
 	AuthorizationURI  string
 	TokenURI          string
 	UserInfoURI       string
 	JWKSetURI         string
 	UserNameAttribute string
-	RolesPath         []string
+	// Issuers are further ID token issuers accepted besides IssuerURI.
+	Issuers []string
+}
+
+type oauth2Config struct {
+	Method        string // oauth2 or optional_oauth2
+	Registrations []*oauth2Registration
+	RolesPath     []string
+	// ForceRedirect sends /login straight to the provider when there is one
+	// registration (security.force_redirect_on_one_idp, default true).
+	ForceRedirect bool
+	// MethodAuthorization applies study authorization: always with oauth2,
+	// with optional_oauth2 when security.method_authorization_enabled=true.
+	MethodAuthorization bool
+}
+
+func (c *oauth2Config) optional() bool { return c.Method == "optional_oauth2" }
+
+func (c *oauth2Config) registration(id string) *oauth2Registration {
+	for _, r := range c.Registrations {
+		if r.ID == id {
+			return r
+		}
+	}
+	return nil
+}
+
+// commonProviders are the defaults Spring's CommonOAuth2Provider gives a
+// registration whose provider (or id) names it; set properties override them.
+var commonProviders = map[string]oauth2Registration{
+	"google": {
+		Scopes:            []string{"openid", "profile", "email"},
+		AuthorizationURI:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURI:          "https://www.googleapis.com/oauth2/v4/token",
+		JWKSetURI:         "https://www.googleapis.com/oauth2/v3/certs",
+		IssuerURI:         "https://accounts.google.com",
+		UserInfoURI:       "https://www.googleapis.com/oauth2/v3/userinfo",
+		UserNameAttribute: "sub",
+		// Google's documented alternative form of its issuer.
+		Issuers: []string{"accounts.google.com"},
+	},
+}
+
+// Spring's CommonOAuth2Provider entries without OpenID Connect, which this
+// server's login (it verifies an ID token) does not support.
+var nonOIDCProviders = map[string]bool{"github": true, "facebook": true}
+
+// relaxedName is the canonical (lower-case, dash-separated) form of a
+// property name segment, as Spring's relaxed binding reads clientId,
+// client_id and client-id alike.
+func relaxedName(s string) string {
+	var b strings.Builder
+	for i, r := range s {
+		switch {
+		case r == '_':
+			b.WriteByte('-')
+		case unicode.IsUpper(r):
+			if i > 0 && s[i-1] != '-' && s[i-1] != '_' && s[i-1] != '.' {
+				b.WriteByte('-')
+			}
+			b.WriteRune(unicode.ToLower(r))
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // loadOAuth2Config reads the spring.security.oauth2.client.* properties. It
-// returns nil when authenticate is not oauth2, and an error for an
+// returns nil when authenticate asks for no login, and an error for an
 // authentication method this server does not implement, so a portal meant to
 // be private never starts open.
 func loadOAuth2Config(props map[string]string) (*oauth2Config, error) {
-	switch method := strings.TrimSpace(props["authenticate"]); method {
+	method := strings.TrimSpace(props["authenticate"])
+	switch method {
 	case "", "false", "noauthsessionservice":
 		return nil, nil
-	case "oauth2":
+	case "oauth2", "optional_oauth2":
 	default:
-		return nil, fmt.Errorf("authenticate=%s is not supported (use oauth2 or false)", method)
+		return nil, fmt.Errorf("authenticate=%s is not supported (use oauth2, optional_oauth2 or false)", method)
 	}
-	const reg = "spring.security.oauth2.client.registration."
+	flag := func(k string, def bool) (bool, error) {
+		v := strings.TrimSpace(props[k])
+		if v == "" {
+			return def, nil
+		}
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return false, fmt.Errorf("%s=%s is not true or false", k, v)
+		}
+		return b, nil
+	}
+	if authz, err := flag("authorization", false); err != nil {
+		return nil, err
+	} else if authz {
+		return nil, errors.New("authorization=true (users and authorities from the database) is not supported")
+	}
+	c := &oauth2Config{Method: method, MethodAuthorization: method == "oauth2"}
+	var err error
+	if c.ForceRedirect, err = flag("security.force_redirect_on_one_idp", true); err != nil {
+		return nil, err
+	}
+	if c.optional() {
+		if c.MethodAuthorization, err = flag("security.method_authorization_enabled", false); err != nil {
+			return nil, err
+		}
+	}
+
+	// Registration and provider settings by id, their names relaxed.
+	const prefix = "spring.security.oauth2.client."
+	regs, providers := map[string]map[string]string{}, map[string]map[string]string{}
+	for k, v := range props {
+		rest, ok := strings.CutPrefix(k, prefix)
+		if !ok {
+			continue
+		}
+		kind, rest, _ := strings.Cut(rest, ".")
+		id, name, ok := strings.Cut(rest, ".")
+		if !ok {
+			continue
+		}
+		var m map[string]map[string]string
+		switch kind {
+		case "registration":
+			m = regs
+		case "provider":
+			m = providers
+		default:
+			continue
+		}
+		if m[id] == nil {
+			m[id] = map[string]string{}
+		}
+		m[id][relaxedName(name)] = strings.TrimSpace(v)
+	}
 	var ids []string
-	for k := range props {
-		if id, ok := strings.CutSuffix(strings.TrimPrefix(k, reg), ".client-id"); ok && strings.HasPrefix(k, reg) {
+	for id, r := range regs {
+		if r["client-id"] != "" {
 			ids = append(ids, id)
 		}
 	}
 	if len(ids) == 0 {
-		return nil, errors.New("authenticate=oauth2 needs " + reg + "<id>.client-id")
+		return nil, fmt.Errorf("authenticate=%s needs %sregistration.<id>.client-id", method, prefix)
 	}
 	slices.Sort(ids)
-	id := ids[0]
-	r := func(k string) string { return strings.TrimSpace(props[reg+id+"."+k]) }
-	provider := r("provider")
-	if provider == "" {
-		provider = id
-	}
-	p := func(k string) string {
-		return strings.TrimSpace(props["spring.security.oauth2.client.provider."+provider+"."+k])
-	}
-	c := &oauth2Config{
-		RegistrationID:    id,
-		ClientID:          r("client-id"),
-		ClientSecret:      r("client-secret"),
-		RedirectURI:       r("redirect-uri"),
-		ClientAuthPost:    r("client-authentication-method") == "client_secret_post",
-		IssuerURI:         strings.TrimSuffix(p("issuer-uri"), "/"),
-		AuthorizationURI:  p("authorization-uri"),
-		TokenURI:          p("token-uri"),
-		UserInfoURI:       p("user-info-uri"),
-		JWKSetURI:         p("jwk-set-uri"),
-		UserNameAttribute: p("user-name-attribute"),
-	}
-	for _, s := range strings.Split(r("scope"), ",") {
-		if s = strings.TrimSpace(s); s != "" {
-			c.Scopes = append(c.Scopes, s)
+	for _, id := range ids {
+		r := regs[id]
+		provider := r["provider"]
+		if provider == "" {
+			provider = id
 		}
-	}
-	if len(c.Scopes) == 0 {
-		c.Scopes = []string{"openid"}
-	}
-	if c.RedirectURI == "" {
-		c.RedirectURI = "{baseUrl}/login/oauth2/code/{registrationId}"
-	}
-	if c.UserNameAttribute == "" {
-		c.UserNameAttribute = "sub"
+		p := providers[provider]
+		if nonOIDCProviders[strings.ToLower(provider)] {
+			return nil, fmt.Errorf("registration %s: provider %s does not support OpenID Connect", id, provider)
+		}
+		reg := commonProviders[strings.ToLower(provider)]
+		reg.ID, reg.ClientID, reg.ClientSecret = id, r["client-id"], r["client-secret"]
+		reg.RedirectURI = r["redirect-uri"]
+		reg.ClientAuthPost = r["client-authentication-method"] == "client_secret_post"
+		if v := p["issuer-uri"]; v != "" {
+			reg.IssuerURI, reg.Discover, reg.Issuers = strings.TrimSuffix(v, "/"), true, nil
+		}
+		for _, e := range []struct {
+			dst *string
+			key string
+		}{
+			{&reg.AuthorizationURI, "authorization-uri"}, {&reg.TokenURI, "token-uri"},
+			{&reg.UserInfoURI, "user-info-uri"}, {&reg.JWKSetURI, "jwk-set-uri"},
+			{&reg.UserNameAttribute, "user-name-attribute"},
+		} {
+			if v := p[e.key]; v != "" {
+				*e.dst = v
+			}
+		}
+		if v := r["scope"]; v != "" {
+			reg.Scopes = nil
+			for _, s := range strings.Split(v, ",") {
+				if s = strings.TrimSpace(s); s != "" {
+					reg.Scopes = append(reg.Scopes, s)
+				}
+			}
+		}
+		reg.Scopes = slices.Clone(reg.Scopes)
+		if len(reg.Scopes) == 0 {
+			reg.Scopes = []string{"openid"}
+		}
+		if reg.RedirectURI == "" {
+			reg.RedirectURI = "{baseUrl}/{action}/oauth2/code/{registrationId}"
+		}
+		if reg.UserNameAttribute == "" {
+			reg.UserNameAttribute = "sub"
+		}
+		if !reg.Discover && (reg.AuthorizationURI == "" || reg.TokenURI == "" || reg.JWKSetURI == "") {
+			return nil, fmt.Errorf("registration %s needs the provider's issuer-uri (or authorization-uri, token-uri and jwk-set-uri)", id)
+		}
+		c.Registrations = append(c.Registrations, &reg)
 	}
 	rolesPath := strings.TrimSpace(props["spring.security.oauth2.client.jwt-roles-path"])
 	if rolesPath == "" {
 		rolesPath = "resource_access::cbioportal::roles"
 	}
 	c.RolesPath = strings.Split(rolesPath, "::")
-	if c.IssuerURI == "" && (c.AuthorizationURI == "" || c.TokenURI == "" || c.JWKSetURI == "") {
-		return nil, errors.New("authenticate=oauth2 needs the provider's issuer-uri (or authorization-uri, token-uri and jwk-set-uri)")
-	}
 	return c, nil
 }
 
@@ -145,64 +295,75 @@ type providerMeta struct {
 	EndSessionEndpoint    string `json:"end_session_endpoint"`
 }
 
+// authSession is a login session as kept in the loginStore.
 type authSession struct {
-	user    User
-	idToken string
-	expires time.Time
-	// replay is a form posted before the login, re-posted when the browser
+	User         string    `json:"user"`
+	Roles        []string  `json:"roles,omitempty"`
+	Registration string    `json:"registration"`
+	IDToken      string    `json:"idToken,omitempty"`
+	Expires      time.Time `json:"expires"`
+	// Replay is a form posted before the login, re-posted when the browser
 	// returns to its URL.
-	replay *savedRequest
+	Replay *savedRequest `json:"replay,omitempty"`
 }
 
 type savedRequest struct {
-	url  string // path and query
-	form url.Values
-	post bool
+	URL  string     `json:"url"` // path and query
+	Form url.Values `json:"form,omitempty"`
+	Post bool       `json:"post,omitempty"`
 }
 
+// loginAttempt is a login in progress, keyed by the browser's login cookie:
+// the page to return to and, once the provider is asked, the state and nonce
+// its answer must carry.
 type loginAttempt struct {
-	state, nonce string
-	target       *savedRequest
-	expires      time.Time
+	Registration string        `json:"registration,omitempty"`
+	State        string        `json:"state,omitempty"`
+	Nonce        string        `json:"nonce,omitempty"`
+	Target       *savedRequest `json:"target,omitempty"`
+}
+
+type providerState struct {
+	meta *providerMeta
+	keys *jwks
 }
 
 type oauth2Login struct {
 	cfg    *oauth2Config
 	client *http.Client
+	store  loginStore
 
-	metaMu sync.Mutex
-	meta   *providerMeta
-	keys   *jwks
-
-	mu       sync.Mutex
-	sessions map[string]*authSession
-	pending  map[string]*loginAttempt // by browser login cookie
+	metaMu    sync.Mutex
+	providers map[string]providerState // by registration id
 
 	// dat authenticates API requests that carry an Authorization header
 	// (dat.method=oauth2); nil leaves them to the session.
 	dat *datProvider
 }
 
-func newOAuth2Login(cfg *oauth2Config) *oauth2Login {
+func newOAuth2Login(cfg *oauth2Config, store loginStore) *oauth2Login {
+	if store == nil {
+		store = newMemoryLoginStore()
+	}
 	return &oauth2Login{
-		cfg:      cfg,
-		client:   &http.Client{Timeout: 15 * time.Second},
-		sessions: map[string]*authSession{},
-		pending:  map[string]*loginAttempt{},
+		cfg:       cfg,
+		client:    &http.Client{Timeout: 15 * time.Second},
+		store:     store,
+		providers: map[string]providerState{},
 	}
 }
 
-// provider returns the provider metadata, discovering it on first use (the
-// provider may start after the portal).
-func (o *oauth2Login) provider() (*providerMeta, *jwks, error) {
+// provider returns the registration's provider metadata, discovering it on
+// first use (the provider may start after the portal).
+func (o *oauth2Login) provider(reg *oauth2Registration) (*providerMeta, *jwks, error) {
 	o.metaMu.Lock()
 	defer o.metaMu.Unlock()
-	if o.meta != nil {
-		return o.meta, o.keys, nil
+	if p, ok := o.providers[reg.ID]; ok {
+		return p.meta, p.keys, nil
 	}
 	m := &providerMeta{}
-	if o.cfg.IssuerURI != "" {
-		resp, err := o.client.Get(o.cfg.IssuerURI + "/.well-known/openid-configuration")
+	if reg.Discover {
+		resp, err := o.client.Get(reg.IssuerURI + "/.well-known/openid-configuration")
 		if err != nil {
 			return nil, nil, fmt.Errorf("OpenID discovery: %w", err)
 		}
@@ -213,26 +374,27 @@ func (o *oauth2Login) provider() (*providerMeta, *jwks, error) {
 		if err := json.NewDecoder(resp.Body).Decode(m); err != nil {
 			return nil, nil, fmt.Errorf("OpenID discovery: %w", err)
 		}
-		if strings.TrimSuffix(m.Issuer, "/") != o.cfg.IssuerURI {
-			return nil, nil, fmt.Errorf("OpenID discovery: issuer %q does not match issuer-uri %q", m.Issuer, o.cfg.IssuerURI)
+		if strings.TrimSuffix(m.Issuer, "/") != reg.IssuerURI {
+			return nil, nil, fmt.Errorf("OpenID discovery: issuer %q does not match issuer-uri %q", m.Issuer, reg.IssuerURI)
 		}
 	}
 	for _, e := range []struct {
 		dst *string
 		v   string
 	}{
-		{&m.AuthorizationEndpoint, o.cfg.AuthorizationURI}, {&m.TokenEndpoint, o.cfg.TokenURI},
-		{&m.UserInfoEndpoint, o.cfg.UserInfoURI}, {&m.JWKSURI, o.cfg.JWKSetURI},
+		{&m.AuthorizationEndpoint, reg.AuthorizationURI}, {&m.TokenEndpoint, reg.TokenURI},
+		{&m.UserInfoEndpoint, reg.UserInfoURI}, {&m.JWKSURI, reg.JWKSetURI},
 	} {
 		if e.v != "" {
 			*e.dst = e.v
 		}
 	}
 	if m.Issuer == "" {
-		m.Issuer = o.cfg.IssuerURI
+		m.Issuer = reg.IssuerURI
 	}
-	o.meta, o.keys = m, newJWKS(m.JWKSURI, o.client)
-	return o.meta, o.keys, nil
+	p := providerState{m, newJWKS(m.JWKSURI, o.client)}
+	o.providers[reg.ID] = p
+	return p.meta, p.keys, nil
 }
 
 // publicPath reports the paths open without a login, as in the Java
@@ -256,37 +418,52 @@ func isAPIPath(p string) bool {
 }
 
 // middleware authenticates every request from its session cookie and routes
-// the login endpoints; unauthenticated requests outside the public paths are
-// refused (API) or sent to the login (pages).
+// the login endpoints. With oauth2, unauthenticated requests outside the
+// public paths are refused (API) or sent to the login (pages); with
+// optional_oauth2 they are served anonymously.
 func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch p := r.URL.Path; {
+		p := r.URL.Path
+		switch {
 		case p == "/login":
 			o.loginPage(w, r)
-			return
-		case p == "/oauth2/authorization/"+o.cfg.RegistrationID:
-			o.authorize(w, r)
-			return
-		case p == "/login/oauth2/code/"+o.cfg.RegistrationID:
-			o.callback(w, r)
 			return
 		case p == "/logout":
 			o.logout(w, r)
 			return
+		case strings.HasPrefix(p, "/oauth2/authorization/"):
+			if reg := o.cfg.registration(strings.TrimPrefix(p, "/oauth2/authorization/")); reg != nil {
+				o.authorize(w, r, reg)
+				return
+			}
+		case strings.HasPrefix(p, "/login/oauth2/code/"):
+			if reg := o.cfg.registration(strings.TrimPrefix(p, "/login/oauth2/code/")); reg != nil {
+				o.callback(w, r, reg)
+				return
+			}
 		}
-		if o.dat != nil && isAPIPath(r.URL.Path) && r.Header.Get("Authorization") != "" {
+		if o.dat != nil && isAPIPath(p) && r.Header.Get("Authorization") != "" {
 			o.dat.tokenAuth(w, r, next)
 			return
 		}
-		if sess := o.session(r); sess != nil {
-			r = o.replay(r, sess)
-			next.ServeHTTP(w, withUser(r, sess.user))
+		sess, id, err := o.session(r)
+		if err != nil {
+			log.Printf("oauth2: login session: %v", err)
+			if !o.cfg.optional() {
+				readBody(r, nil)
+				http.Error(w, "login sessions unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		if sess != nil {
+			r = o.replay(r, sess, id)
+			next.ServeHTTP(w, withUser(r, User{Name: sess.User, Roles: sess.Roles}))
 			return
 		}
 		switch {
-		case publicPath(r.URL.Path):
+		case o.cfg.optional(), publicPath(p):
 			next.ServeHTTP(w, r)
-		case isAPIPath(r.URL.Path):
+		case isAPIPath(p):
 			readBody(r, nil)
 			w.WriteHeader(http.StatusUnauthorized)
 		default:
@@ -296,41 +473,57 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 	})
 }
 
-// session returns the live session of the request's cookie, extending it.
-func (o *oauth2Login) session(r *http.Request) *authSession {
-	c, err := r.Cookie(sessionCookie)
+func sessionKey(id string) string { return "session:" + id }
+func attemptKey(id string) string { return "attempt:" + id }
+
+func (o *oauth2Login) put(ctx context.Context, key string, v any, ttl time.Duration) error {
+	b, err := json.Marshal(v)
 	if err != nil {
-		return nil
+		return err
 	}
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	sess := o.sessions[c.Value]
-	if sess == nil {
-		return nil
+	return o.store.set(ctx, key, b, ttl)
+}
+
+// session returns the live session of the request's cookie and its id,
+// extending it.
+func (o *oauth2Login) session(r *http.Request) (*authSession, string, error) {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil || c.Value == "" {
+		return nil, "", nil
 	}
-	if time.Now().After(sess.expires) {
-		delete(o.sessions, c.Value)
-		return nil
+	b, ok, err := o.store.get(r.Context(), sessionKey(c.Value))
+	if err != nil || !ok {
+		return nil, "", err
 	}
-	sess.expires = time.Now().Add(sessionTimeout)
-	return sess
+	sess := &authSession{}
+	if err := json.Unmarshal(b, sess); err != nil {
+		return nil, "", fmt.Errorf("stored session: %w", err)
+	}
+	now := time.Now()
+	if now.After(sess.Expires) {
+		return nil, "", nil
+	}
+	if sess.Expires.Sub(now) < sessionTimeout-sessionRefresh {
+		sess.Expires = now.Add(sessionTimeout)
+		if err := o.put(r.Context(), sessionKey(c.Value), sess, sessionTimeout); err != nil {
+			log.Printf("oauth2: extending session: %v", err)
+		}
+	}
+	return sess, c.Value, nil
 }
 
 // replay turns the browser's return to a page whose form was posted before
 // the login back into that POST.
-func (o *oauth2Login) replay(r *http.Request, sess *authSession) *http.Request {
-	o.mu.Lock()
-	saved := sess.replay
-	if saved != nil && r.Method == http.MethodGet && r.URL.RequestURI() == saved.url {
-		sess.replay = nil
-	} else {
-		saved = nil
-	}
-	o.mu.Unlock()
-	if saved == nil {
+func (o *oauth2Login) replay(r *http.Request, sess *authSession, id string) *http.Request {
+	saved := sess.Replay
+	if saved == nil || r.Method != http.MethodGet || r.URL.RequestURI() != saved.URL {
 		return r
 	}
-	body := saved.form.Encode()
+	sess.Replay = nil
+	if err := o.put(r.Context(), sessionKey(id), sess, time.Until(sess.Expires)); err != nil {
+		log.Printf("oauth2: saving session: %v", err)
+	}
+	body := saved.Form.Encode()
 	r2 := r.Clone(r.Context())
 	r2.Method = http.MethodPost
 	r2.Body = io.NopCloser(strings.NewReader(body))
@@ -342,70 +535,83 @@ func (o *oauth2Login) replay(r *http.Request, sess *authSession) *http.Request {
 // saveRequest remembers the page an unauthenticated browser asked for (with
 // its form, if posted), to return to it after the login.
 func (o *oauth2Login) saveRequest(w http.ResponseWriter, r *http.Request) {
-	saved := &savedRequest{url: r.URL.RequestURI()}
+	saved := &savedRequest{URL: r.URL.RequestURI()}
 	if r.Method == http.MethodPost {
 		if err := r.ParseForm(); err == nil {
-			saved.form, saved.post = r.PostForm, true
+			saved.Form, saved.Post = r.PostForm, true
 		}
 	} else {
 		readBody(r, nil)
 	}
 	id := randomToken()
-	o.mu.Lock()
-	o.prune()
-	o.pending[id] = &loginAttempt{target: saved, expires: time.Now().Add(loginTimeout)}
-	o.mu.Unlock()
+	if err := o.put(r.Context(), attemptKey(id), loginAttempt{Target: saved}, loginTimeout); err != nil {
+		log.Printf("oauth2: saving request: %v", err)
+		return
+	}
 	o.setCookie(w, r, loginCookie, id, loginTimeout)
 }
 
-// loginPage sends the browser to the provider, or explains a refused login.
+// loginPage sends the browser to the provider when there is only one, as the
+// Java portal's LoginPageController, or lists the registrations to sign in
+// with (and explains a refused login).
 func (o *oauth2Login) loginPage(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	if !q.Has("logout_failure") {
-		http.Redirect(w, r, "/oauth2/authorization/"+o.cfg.RegistrationID, http.StatusFound)
+	failed := r.URL.Query().Has("logout_failure")
+	if len(o.cfg.Registrations) == 1 && !failed && o.cfg.ForceRedirect {
+		http.Redirect(w, r, "/oauth2/authorization/"+o.cfg.Registrations[0].ID, http.StatusFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusUnauthorized)
-	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>cBioPortal login</title></head>`+
-		`<body style="font-family:sans-serif;margin:3em"><h2>cBioPortal</h2>`+
-		`<p>You are not authorized to access this resource.</p>`+
-		`<p><a href="/oauth2/authorization/%s">Sign in with: %s</a></p></body></html>`,
-		html.EscapeString(o.cfg.RegistrationID), html.EscapeString(o.cfg.RegistrationID))
+	status := http.StatusOK
+	if failed {
+		status = http.StatusUnauthorized
+	}
+	w.WriteHeader(status)
+	var b strings.Builder
+	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>cBioPortal login</title></head>` +
+		`<body style="font-family:sans-serif;margin:3em"><h2>cBioPortal</h2>`)
+	if failed {
+		b.WriteString(`<p>You are not authorized to access this resource.</p>`)
+	}
+	for _, reg := range o.cfg.Registrations {
+		id := html.EscapeString(reg.ID)
+		fmt.Fprintf(&b, `<p><a href="/oauth2/authorization/%s">Sign in with: %s</a></p>`, id, id)
+	}
+	b.WriteString(`</body></html>`)
+	io.WriteString(w, b.String())
 }
 
 // authorize starts the authorization-code flow.
-func (o *oauth2Login) authorize(w http.ResponseWriter, r *http.Request) {
-	meta, _, err := o.provider()
+func (o *oauth2Login) authorize(w http.ResponseWriter, r *http.Request, reg *oauth2Registration) {
+	meta, _, err := o.provider(reg)
 	if err != nil {
-		log.Printf("oauth2: %v", err)
+		log.Printf("oauth2: %s: %v", reg.ID, err)
 		http.Error(w, "login provider unavailable", http.StatusBadGateway)
 		return
 	}
-	attempt := &loginAttempt{state: randomToken(), nonce: randomToken(), expires: time.Now().Add(loginTimeout)}
+	attempt := loginAttempt{Registration: reg.ID, State: randomToken(), Nonce: randomToken()}
 	id := ""
-	if c, err := r.Cookie(loginCookie); err == nil {
+	if c, err := r.Cookie(loginCookie); err == nil && c.Value != "" {
 		id = c.Value
+		var prev loginAttempt
+		if b, ok, err := o.store.take(r.Context(), attemptKey(id)); err == nil && ok && json.Unmarshal(b, &prev) == nil {
+			attempt.Target = prev.Target
+		}
 	}
-	o.mu.Lock()
-	o.prune()
-	if prev := o.pending[id]; prev != nil {
-		attempt.target = prev.target
+	id = randomToken()
+	if err := o.put(r.Context(), attemptKey(id), attempt, loginTimeout); err != nil {
+		log.Printf("oauth2: saving login: %v", err)
+		http.Error(w, "login sessions unavailable", http.StatusServiceUnavailable)
+		return
 	}
-	if id == "" || o.pending[id] == nil {
-		id = randomToken()
-	}
-	o.pending[id] = attempt
-	o.mu.Unlock()
 	o.setCookie(w, r, loginCookie, id, loginTimeout)
 
 	q := url.Values{
 		"response_type": {"code"},
-		"client_id":     {o.cfg.ClientID},
-		"scope":         {strings.Join(o.cfg.Scopes, " ")},
-		"state":         {attempt.state},
-		"redirect_uri":  {o.redirectURI(r)},
-		"nonce":         {attempt.nonce},
+		"client_id":     {reg.ClientID},
+		"scope":         {strings.Join(reg.Scopes, " ")},
+		"state":         {attempt.State},
+		"redirect_uri":  {o.redirectURI(r, reg)},
+		"nonce":         {attempt.Nonce},
 	}
 	sep := "?"
 	if strings.Contains(meta.AuthorizationEndpoint, "?") {
@@ -416,28 +622,34 @@ func (o *oauth2Login) authorize(w http.ResponseWriter, r *http.Request) {
 
 // callback completes the login: it exchanges the code, verifies the ID token
 // and starts the session.
-func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request) {
+func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request, reg *oauth2Registration) {
 	fail := func(format string, args ...any) {
 		loginsTotal.Inc("failure")
-		log.Printf("oauth2: login failed: "+format, args...)
+		log.Printf("oauth2: %s: login failed: "+format, append([]any{reg.ID}, args...)...)
 		http.Redirect(w, r, "/login?logout_failure", http.StatusFound)
 	}
 	c, err := r.Cookie(loginCookie)
-	if err != nil {
+	if err != nil || c.Value == "" {
 		fail("no login in progress")
 		return
 	}
-	o.mu.Lock()
-	attempt := o.pending[c.Value]
-	delete(o.pending, c.Value)
-	o.mu.Unlock()
 	o.setCookie(w, r, loginCookie, "", -1)
-	q := r.URL.Query()
-	if attempt == nil || attempt.state == "" || time.Now().After(attempt.expires) {
+	b, ok, err := o.store.take(r.Context(), attemptKey(c.Value))
+	if err != nil {
+		fail("%v", err)
+		return
+	}
+	var attempt loginAttempt
+	if !ok || json.Unmarshal(b, &attempt) != nil || attempt.State == "" {
 		fail("login expired")
 		return
 	}
-	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(attempt.state)) != 1 {
+	q := r.URL.Query()
+	if attempt.Registration != reg.ID {
+		fail("login started with %s", attempt.Registration)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(attempt.State)) != 1 {
 		fail("state mismatch")
 		return
 	}
@@ -445,45 +657,49 @@ func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request) {
 		fail("provider error %s", e)
 		return
 	}
-	user, idToken, err := o.exchange(r, q.Get("code"), attempt.nonce)
+	user, idToken, err := o.exchange(r, reg, q.Get("code"), attempt.Nonce)
 	if err != nil {
 		fail("%v", err)
 		return
 	}
 
-	sess := &authSession{user: user, idToken: idToken, expires: time.Now().Add(sessionTimeout)}
+	sess := &authSession{
+		User: user.Name, Roles: user.Roles, Registration: reg.ID, IDToken: idToken,
+		Expires: time.Now().Add(sessionTimeout),
+	}
 	target := "/"
-	if attempt.target != nil {
-		target = attempt.target.url
-		if attempt.target.post {
-			sess.replay = attempt.target
+	if attempt.Target != nil {
+		target = attempt.Target.URL
+		if attempt.Target.Post {
+			sess.Replay = attempt.Target
 		}
 	}
 	id := randomToken()
-	o.mu.Lock()
-	o.sessions[id] = sess
-	o.mu.Unlock()
+	if err := o.put(r.Context(), sessionKey(id), sess, sessionTimeout); err != nil {
+		fail("saving session: %v", err)
+		return
+	}
 	o.setCookie(w, r, sessionCookie, id, 0)
 	loginsTotal.Inc("success")
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // exchange redeems an authorization code and returns the user it identifies.
-func (o *oauth2Login) exchange(r *http.Request, code, nonce string) (User, string, error) {
-	meta, keys, err := o.provider()
+func (o *oauth2Login) exchange(r *http.Request, reg *oauth2Registration, code, nonce string) (User, string, error) {
+	meta, keys, err := o.provider(reg)
 	if err != nil {
 		return User{}, "", err
 	}
-	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {o.redirectURI(r)}}
-	if o.cfg.ClientAuthPost {
-		form.Set("client_id", o.cfg.ClientID)
-		form.Set("client_secret", o.cfg.ClientSecret)
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {o.redirectURI(r, reg)}}
+	if reg.ClientAuthPost {
+		form.Set("client_id", reg.ClientID)
+		form.Set("client_secret", reg.ClientSecret)
 	}
 	req, _ := http.NewRequestWithContext(r.Context(), http.MethodPost, meta.TokenEndpoint, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	if !o.cfg.ClientAuthPost {
-		req.SetBasicAuth(url.QueryEscape(o.cfg.ClientID), url.QueryEscape(o.cfg.ClientSecret))
+	if !reg.ClientAuthPost {
+		req.SetBasicAuth(url.QueryEscape(reg.ClientID), url.QueryEscape(reg.ClientSecret))
 	}
 	resp, err := o.client.Do(req)
 	if err != nil {
@@ -505,7 +721,8 @@ func (o *oauth2Login) exchange(r *http.Request, code, nonce string) (User, strin
 	if err != nil {
 		return User{}, "", err
 	}
-	if err := checkIDToken(claims, meta.Issuer, o.cfg.ClientID, nonce, time.Now()); err != nil {
+	issuers := append([]string{meta.Issuer}, reg.Issuers...)
+	if err := checkIDToken(claims, issuers, reg.ClientID, nonce, time.Now()); err != nil {
 		return User{}, "", err
 	}
 	var userinfo map[string]any
@@ -518,7 +735,7 @@ func (o *oauth2Login) exchange(r *http.Request, code, nonce string) (User, strin
 			return User{}, "", errors.New("userinfo subject does not match the ID token")
 		}
 	}
-	return o.userFromClaims(claims, userinfo), tok.IDToken, nil
+	return o.userFromClaims(reg, claims, userinfo), tok.IDToken, nil
 }
 
 func (o *oauth2Login) userInfo(ctx context.Context, endpoint, accessToken string) (map[string]any, error) {
@@ -540,10 +757,11 @@ func (o *oauth2Login) userInfo(ctx context.Context, endpoint, accessToken string
 	return claims, nil
 }
 
-// checkIDToken validates the claims of a signature-checked ID token.
-func checkIDToken(claims map[string]any, issuer, clientID, nonce string, now time.Time) error {
-	if iss, _ := claims["iss"].(string); iss != issuer {
-		return fmt.Errorf("ID token issuer %q is not %q", iss, issuer)
+// checkIDToken validates the claims of a signature-checked ID token: issued
+// by one of issuers, for clientID, unexpired, with the login's nonce.
+func checkIDToken(claims map[string]any, issuers []string, clientID, nonce string, now time.Time) error {
+	if iss, _ := claims["iss"].(string); !slices.Contains(issuers, iss) {
+		return fmt.Errorf("ID token issuer %q is not %q", iss, issuers[0])
 	}
 	var aud []string
 	switch v := claims["aud"].(type) {
@@ -572,7 +790,7 @@ func checkIDToken(claims map[string]any, issuer, clientID, nonce string, now tim
 
 // userFromClaims names the user by the user-name-attribute claim and
 // collects the roles at the roles path of the userinfo and ID token claims.
-func (o *oauth2Login) userFromClaims(idClaims, userinfo map[string]any) User {
+func (o *oauth2Login) userFromClaims(reg *oauth2Registration, idClaims, userinfo map[string]any) User {
 	attrs := map[string]any{}
 	for k, v := range idClaims {
 		attrs[k] = v
@@ -580,8 +798,8 @@ func (o *oauth2Login) userFromClaims(idClaims, userinfo map[string]any) User {
 	for k, v := range userinfo {
 		attrs[k] = v
 	}
-	name := fmt.Sprint(attrs[o.cfg.UserNameAttribute])
-	if attrs[o.cfg.UserNameAttribute] == nil {
+	name := fmt.Sprint(attrs[reg.UserNameAttribute])
+	if attrs[reg.UserNameAttribute] == nil {
 		name, _ = attrs["sub"].(string)
 	}
 	var roles []string
@@ -623,39 +841,47 @@ func claimRoles(claims map[string]any, path []string) []string {
 	return roles
 }
 
-// logout ends the session and, when the provider supports it, its session
-// too, returning to the portal.
+// logout ends the session and returns to the portal. With oauth2 it ends the
+// provider's session too when the provider supports it; optional_oauth2
+// returns to / directly, as Java's logoutSuccessUrl("/").
 func (o *oauth2Login) logout(w http.ResponseWriter, r *http.Request) {
-	idToken := ""
-	if c, err := r.Cookie(sessionCookie); err == nil {
-		o.mu.Lock()
-		if sess := o.sessions[c.Value]; sess != nil {
-			idToken = sess.idToken
+	var sess authSession
+	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
+		if b, ok, err := o.store.take(r.Context(), sessionKey(c.Value)); err != nil {
+			log.Printf("oauth2: ending session: %v", err)
+		} else if ok {
+			json.Unmarshal(b, &sess)
 		}
-		delete(o.sessions, c.Value)
-		o.mu.Unlock()
 	}
 	o.setCookie(w, r, sessionCookie, "", -1)
 	target := "/"
-	if meta, _, err := o.provider(); err == nil && meta.EndSessionEndpoint != "" && idToken != "" {
-		q := url.Values{"id_token_hint": {idToken}, "post_logout_redirect_uri": {baseURL(r)}}
-		target = meta.EndSessionEndpoint + "?" + q.Encode()
+	if reg := o.cfg.registration(sess.Registration); reg != nil && !o.cfg.optional() && sess.IDToken != "" {
+		if meta, _, err := o.provider(reg); err == nil && meta.EndSessionEndpoint != "" {
+			q := url.Values{"id_token_hint": {sess.IDToken}, "post_logout_redirect_uri": {baseURL(r)}}
+			target = meta.EndSessionEndpoint + "?" + q.Encode()
+		}
 	}
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-func (o *oauth2Login) redirectURI(r *http.Request) string {
-	return strings.NewReplacer("{baseUrl}", baseURL(r), "{registrationId}", o.cfg.RegistrationID).Replace(o.cfg.RedirectURI)
+func (o *oauth2Login) redirectURI(r *http.Request, reg *oauth2Registration) string {
+	return strings.NewReplacer("{baseUrl}", baseURL(r), "{action}", "login", "{registrationId}", reg.ID).Replace(reg.RedirectURI)
 }
 
-// baseURL is the portal's origin as the browser sees it.
+// baseURL is the portal's origin as the browser sees it: behind a
+// TLS-terminating proxy or ingress, from its X-Forwarded-Proto and
+// X-Forwarded-Host (or the Host it passes on).
 func baseURL(r *http.Request) string {
+	first := func(h string) string {
+		v, _, _ := strings.Cut(r.Header.Get(h), ",")
+		return strings.TrimSpace(v)
+	}
 	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+	if r.TLS != nil || strings.EqualFold(first("X-Forwarded-Proto"), "https") {
 		scheme = "https"
 	}
 	host := r.Host
-	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+	if h := first("X-Forwarded-Host"); h != "" {
 		host = h
 	}
 	return scheme + "://" + host
@@ -673,21 +899,6 @@ func (o *oauth2Login) setCookie(w http.ResponseWriter, r *http.Request, name, va
 		c.MaxAge = int(maxAge.Seconds())
 	}
 	http.SetCookie(w, c)
-}
-
-// prune drops expired sessions and login attempts; the caller holds o.mu.
-func (o *oauth2Login) prune() {
-	now := time.Now()
-	for k, a := range o.pending {
-		if now.After(a.expires) {
-			delete(o.pending, k)
-		}
-	}
-	for k, s := range o.sessions {
-		if now.After(s.expires) {
-			delete(o.sessions, k)
-		}
-	}
 }
 
 func randomToken() string {

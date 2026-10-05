@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// Study-level authorization under authenticate=oauth2, following the Java
+// Study-level authorization under authenticate=oauth2 (and optional_oauth2
+// with security.method_authorization_enabled=true), following the Java
 // portal's CancerStudyPermissionEvaluator:
 //
 //   - A user's authorities are their roles, uppercased; with
@@ -30,6 +31,10 @@ type accessPolicy struct {
 	filterByAppName  bool
 	alwaysShowGroup  string
 	showUnauthorized bool
+	// anonymous applies the policy to requests without a user too, with
+	// always_show_study_group as their only authority (optional_oauth2 with
+	// security.method_authorization_enabled).
+	anonymous bool
 }
 
 func newAccessPolicy(props map[string]string) accessPolicy {
@@ -162,7 +167,7 @@ var filteredLists = map[string]bool{
 func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := GetUser(r.Context())
-		if !ok || !isAPIPath(r.URL.Path) {
+		if (!ok && !policy.anonymous) || !isAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

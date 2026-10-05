@@ -69,6 +69,19 @@ Three tiers, fastest first:
    DAT_KEYCLOAK=1 API=http://localhost:18096 go test -run DATKeycloak ./test/
    ```
 
+   Optional sign-in (`authenticate=optional_oauth2`) has one too, skipped
+   unless `OPTIONAL_KEYCLOAK` is set: anonymous browsing, sign-in as
+   `testuser` through `/login`, the same studies either way, a saved virtual
+   study, logout. With `REDIS` the API keeps its login sessions in Redis
+   (the store's live test is `REDIS_TEST_ADDR=… go test -run
+   RedisLoginStoreLive ./internal/api`):
+
+   ```bash
+   docker run -d --name cbioportal-go-redis -p 127.0.0.1:16379:6379 redis:7-alpine
+   OPTIONAL=true REDIS=localhost:16379 PORT=18096 test/e2e_api.sh
+   OPTIONAL_KEYCLOAK=1 API=http://localhost:18096 go test -run OptionalOAuth2Keycloak ./test/
+   ```
+
 CI (`.github/workflows/ci.yml`) runs gofmt, vet and the unit tests, then the
 contract tests against a ClickHouse service loaded with the fixture studies,
 on every push and pull request. The full frontend e2e suite

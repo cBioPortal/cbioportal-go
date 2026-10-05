@@ -25,6 +25,9 @@ The API container is configured with the settings in
 `CBIOPORTAL_RAW_DB` / `CBIOPORTAL_REF_DB`, and `SESSION_STORE_FILE` on a
 persistent volume — or, for more than one replica, cBioPortal's session
 service (`SESSION_SERVICE_URL`, see [Sessions](configuration.md#sessions)). Health check: `GET /health`.
+With a login (`authenticate=oauth2` or `optional_oauth2`) and more than one
+replica, login sessions go to Redis (`spring.session.store-type=redis`, see
+[Login sessions in Redis](configuration.md#login-sessions-in-redis)).
 
 ## go.cbioportal.org
 
@@ -34,6 +37,35 @@ The preview runs in the cBioPortal production cluster: manifests in
 (`secrets/cbioportal-go/`). It serves ClickHouse Cloud databases in two colors,
 `dev_cbioportal_public_go_{blue,green}` with their `_raw` and `_ref`
 companions; the ConfigMap `cbioportal-go-active` says which color is live.
+
+### Sign-in
+
+As www, the preview offers Google sign-in on an open portal
+(`authenticate=optional_oauth2`). The secrets come from the Secret
+`cbioportal-public-green` as environment variables
+(`GOOGLE_PLUS_CONSUMER_KEY`, `GOOGLE_PLUS_CONSUMER_SECRET`,
+`REDIS_SESSION_HOST`, `REDIS_SESSION_PORT`, `REDIS_SESSION_PASSWORD`); the
+container arguments name them by placeholder, which the server resolves
+(Kubernetes leaves `${…}` alone):
+
+```yaml
+args:
+  - --authenticate=optional_oauth2
+  - --authorization=false
+  - --security.method_authorization_enabled=false
+  - --always_show_study_group=PUBLIC
+  - --spring.security.oauth2.client.registration.google.clientId=${GOOGLE_PLUS_CONSUMER_KEY}
+  - --spring.security.oauth2.client.registration.google.clientSecret=${GOOGLE_PLUS_CONSUMER_SECRET}
+  - --spring.security.oauth2.client.provider.google.user-name-attribute=email
+  - --spring.session.store-type=redis
+  - --spring.data.redis.host=${REDIS_SESSION_HOST}
+  - --spring.data.redis.port=${REDIS_SESSION_PORT}
+  - --spring.data.redis.password=${REDIS_SESSION_PASSWORD}
+```
+
+The Google client must list
+`https://go.cbioportal.org/login/oauth2/code/google` as an authorized
+redirect URI; the ingress sends `X-Forwarded-Proto: https`.
 
 ### Loading studies
 

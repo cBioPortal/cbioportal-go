@@ -7,6 +7,8 @@
 #   test/e2e_api.sh             # foreground, on :18090
 #   KEYCLOAK=false test/e2e_api.sh   # anonymous, AUTH_DEFAULT_USER=testuser
 #   DAT=true test/e2e_api.sh    # also data access tokens (dat.method=oauth2)
+#   OPTIONAL=true test/e2e_api.sh   # authenticate=optional_oauth2: open, sign-in optional
+#   REDIS=localhost:16379 REDIS_PASSWORD=pw test/e2e_api.sh   # login sessions in Redis
 #
 # Anonymous mode is the contract tests' backend: it serves study_hg38, which
 # the e2e portal properties lock (study_availability.enabled), since the
@@ -23,8 +25,11 @@ if [ "${KEYCLOAK:-true}" != false ]; then
   curl -sf -o /dev/null "http://localhost:$KC_PORT/auth/realms/cbio/.well-known/openid-configuration" ||
     KEYCLOAK_PORT=$KC_PORT test/keycloak/start.sh
   reg=spring.security.oauth2.client.registration.keycloak
+  method=oauth2
+  [ "${OPTIONAL:-false}" = true ] && method=optional_oauth2
   auth=(
-    --authenticate=oauth2
+    --authenticate=$method
+    --authorization=false
     --$reg.client-id=cbioportal_oauth2
     --$reg.client-secret=client_secret
     --$reg.client-authentication-method=client_secret_post
@@ -32,6 +37,16 @@ if [ "${KEYCLOAK:-true}" != false ]; then
     --spring.security.oauth2.client.provider.keycloak.issuer-uri=http://localhost:$KC_PORT/auth/realms/cbio
     --spring.security.oauth2.client.provider.keycloak.user-name-attribute=email
   )
+  if [ -n "${REDIS:-}" ]; then
+    # The password stays in the environment, resolved by the placeholder.
+    export REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    auth+=(
+      --spring.session.store-type=redis
+      --spring.data.redis.host=${REDIS%:*}
+      --spring.data.redis.port=${REDIS##*:}
+      '--spring.data.redis.password=${REDIS_PASSWORD}'
+    )
+  fi
   if [ "${DAT:-false}" = true ]; then
     realm=http://localhost:$KC_PORT/auth/realms/cbio
     oidc=$realm/protocol/openid-connect

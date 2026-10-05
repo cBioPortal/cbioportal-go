@@ -66,6 +66,7 @@ var envOnly = [][2]string{
 	{"PUBLISHER_API_KEY", "key required by /api/public_virtual_studies publish/unpublish (or the\n    \tsession.endpoint.publisher-api-key property)"},
 	{"SESSION_SERVICE_URL, SESSION_SERVICE_USER, SESSION_SERVICE_PASSWORD", "cBioPortal session service and its basic authentication, when the\n    \tsession.service.url/user/password properties are unset"},
 	{"CBIOPORTAL_PPROF_ADDR", "serve net/http/pprof on this address, e.g. 127.0.0.1:6060"},
+	{"any, through ${NAME}", "portal property values may name environment variables, e.g.\n    \t--spring.data.redis.password='${REDIS_SESSION_PASSWORD}'"},
 }
 
 func allOptions() []option {

@@ -29,6 +29,54 @@ func TestLoadPortalProperties(t *testing.T) {
 	}
 }
 
+func TestPropertyPlaceholders(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "portal.properties")
+	os.WriteFile(file, []byte("redis.host=from-file\nhost=${redis.host}\n"+
+		"spring.data.redis.port=${REDIS_SESSION_PORT:6379}\n"), 0o644)
+	env := map[string]string{
+		"GOOGLE_PLUS_CONSUMER_KEY":    "id-123",
+		"GOOGLE_PLUS_CONSUMER_SECRET": "s3cret",
+		"SKIN_TITLE":                  "From env (relaxed name)",
+	}
+	lookup := func(k string) (string, bool) { v, ok := env[k]; return v, ok }
+	reg := "spring.security.oauth2.client.registration.google."
+	props, err := loadPortalProperties(file, []string{
+		"--" + reg + "clientId=${GOOGLE_PLUS_CONSUMER_KEY}",
+		"--" + reg + "clientSecret=${GOOGLE_PLUS_CONSUMER_SECRET}",
+		"--title=[${skin.title}]",
+		"--empty=${UNSET_VAR:}",
+	}, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		reg + "clientId":         "id-123",
+		reg + "clientSecret":     "s3cret",
+		"title":                  "[From env (relaxed name)]",
+		"empty":                  "",
+		"host":                   "from-file",
+		"spring.data.redis.port": "6379",
+	}
+	for k, v := range want {
+		if props[k] != v {
+			t.Errorf("%s = %q, want %q", k, props[k], v)
+		}
+	}
+	// Arguments take precedence over the environment and the file.
+	props, _ = loadPortalProperties(file, []string{"--redis.host=from-args", "--REDIS_SESSION_PORT=1"}, lookup)
+	if props["host"] != "from-args" || props["spring.data.redis.port"] != "1" {
+		t.Errorf("host %q port %q, want the arguments' values", props["host"], props["spring.data.redis.port"])
+	}
+
+	_, err = loadPortalProperties("", []string{"--" + reg + "clientSecret=${MISSING_SECRET}"}, lookup)
+	if err == nil || !strings.Contains(err.Error(), "MISSING_SECRET") || !strings.Contains(err.Error(), "clientSecret") {
+		t.Errorf("unset placeholder: %v, want an error naming the property and the placeholder", err)
+	}
+	if _, err := loadPortalProperties("", []string{"--a=${B"}, lookup); err == nil {
+		t.Error("accepted an unterminated placeholder")
+	}
+}
+
 func TestFrontendConfigOverrides(t *testing.T) {
 	cfg := FrontendConfig("/", map[string]string{"skin.title": "Go preview"}, false)
 	if cfg["skin_title"] != "Go preview" {

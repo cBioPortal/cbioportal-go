@@ -43,8 +43,9 @@ type State struct {
 	// a mounted application.properties does for the Java portal.
 	Props                map[string]string
 	PropsReplaceDefaults bool
-	// login is the OAuth2 login (authenticate=oauth2) and access its study
-	// authorization; nil login serves every study anonymously.
+	// login is the OAuth2 login (authenticate=oauth2 or optional_oauth2) and
+	// access its study authorization; nil login serves every study
+	// anonymously.
 	login  *oauth2Login
 	access accessPolicy
 	// dat serves and verifies data access tokens (dat.method=oauth2).
@@ -64,7 +65,7 @@ func (s *State) ConfigureAuth() error {
 		return err
 	}
 	if datCfg != nil {
-		if cfg == nil {
+		if cfg == nil || cfg.optional() {
 			return errors.New("dat.method=oauth2 needs authenticate=oauth2")
 		}
 		if loadAuthConfig().Enabled {
@@ -74,9 +75,24 @@ func (s *State) ConfigureAuth() error {
 	if cfg == nil {
 		return nil
 	}
-	s.login = newOAuth2Login(cfg)
+	store, err := loadLoginStore(props)
+	if err != nil {
+		return err
+	}
+	s.login = newOAuth2Login(cfg, store)
 	s.access = newAccessPolicy(props)
-	log.Printf("authenticate=oauth2: login through %s (client %s)", cfg.IssuerURI, cfg.ClientID)
+	s.access.anonymous = cfg.optional()
+	for _, reg := range cfg.Registrations {
+		issuer := reg.IssuerURI
+		if issuer == "" {
+			issuer = reg.AuthorizationURI
+		}
+		log.Printf("authenticate=%s: login with %s through %s (client %s)", cfg.Method, reg.ID, issuer, reg.ClientID)
+	}
+	if !cfg.MethodAuthorization {
+		log.Printf("authenticate=%s: every study is open to everyone (security.method_authorization_enabled is off)", cfg.Method)
+	}
+	log.Printf("login sessions: %s", store.describe())
 	if datCfg != nil {
 		s.dat = newDATProvider(datCfg)
 		s.login.dat = s.dat
@@ -109,7 +125,10 @@ func NewRouter(s *State) http.Handler {
 	}
 	h := auth(authCfg, s.studyAvailability(s.extraEndpoints(s.javaContract(pageList(metaProjection(bodyErrors(mux)))))))
 	if s.login != nil {
-		h = s.login.middleware(s.studyAccess(s.access, h))
+		if s.login.cfg.MethodAuthorization {
+			h = s.studyAccess(s.access, h)
+		}
+		h = s.login.middleware(h)
 	}
 	return s.observe(cors(gzipResponse(gunzipBody(h))))
 }
