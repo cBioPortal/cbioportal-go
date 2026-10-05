@@ -129,14 +129,12 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 	}
 	alterations := cnaEventAlterations(eventType)
 	detailed := projection == "DETAILED"
+	out := newJSONArray(w)
 	if !homdelOrAmpOnly(alterations) {
-		out, err := s.discreteCopyNumberFromValues(mpid, meta, molecularDataFilter{
-			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, alterations, detailed)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		writeJSON(w, out)
+		out.finish(s.discreteCopyNumberFromValues(mpid, meta, molecularDataFilter{
+			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, alterations, detailed, func(d DiscreteCopyNumberData) error {
+			return out.add(d)
+		}))
 		return
 	}
 	where := fmt.Sprintf("c.study_id = {study:String} AND c.profile_stable_id = {profile:String} AND toInt64OrNull(c.alteration) IN (%s)",
@@ -153,7 +151,7 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 		p["list"] = sampleListID
 	}
 	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
-	rows, err := ch.QueryP[discreteCnaRow](s.CH, fmt.Sprintf(
+	err := ch.QueryEachP(s.CH, fmt.Sprintf(
 		"SELECT c.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"toInt64OrNull(c.entrez_gene_id) AS entrezGeneId, if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, c.hugo_symbol) AS hugoGeneSymbol, "+
 			"rg.type AS geneType, toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns, "+
@@ -162,55 +160,46 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			"FROM cna c LEFT JOIN sample sm "+
 			"ON c.study_id = sm.study_id AND c.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(c.entrez_gene_id) "+
-			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0 ORDER BY entrezGeneId, alteration, c.sample_id", where), p)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]DiscreteCopyNumberData, len(rows))
-	for i, r := range rows {
-		// CnaUtil reads the driver columns with getPartString: empty is "NA".
-		d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, naString)
-		out[i] = DiscreteCopyNumberData{
-			Alteration:                  derefInt(r.Alteration),
-			EntrezGeneID:                derefInt(r.EntrezGeneID),
-			MolecularProfileID:          mpid,
-			PatientID:                   r.PatientID,
-			SampleID:                    r.SampleID,
-			StudyID:                     meta.StudyID,
-			UniquePatientKey:            uniqueKey(meta.StudyID, r.PatientID),
-			UniqueSampleKey:             uniqueKey(meta.StudyID, r.SampleID),
-			NamespaceColumns:            namespaceColumnsJSON(r.NamespaceColumns),
-			DriverFilter:                d.Filter,
-			DriverFilterAnnotation:      d.FilterAnn,
-			DriverTiersFilter:           d.TiersFilter,
-			DriverTiersFilterAnnotation: d.TiersFilterAnn,
-		}
-		if detailed {
-			out[i].Gene = &Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol, Type: r.GeneType}
-		}
-	}
-	writeJSON(w, out)
+			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0 ORDER BY entrezGeneId, alteration, c.sample_id", where), p,
+		func(r *discreteCnaRow) error {
+			// CnaUtil reads the driver columns with getPartString: empty is "NA".
+			d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, naString)
+			rec := DiscreteCopyNumberData{
+				Alteration:                  derefInt(r.Alteration),
+				EntrezGeneID:                derefInt(r.EntrezGeneID),
+				MolecularProfileID:          mpid,
+				PatientID:                   r.PatientID,
+				SampleID:                    r.SampleID,
+				StudyID:                     meta.StudyID,
+				UniquePatientKey:            uniqueKey(meta.StudyID, r.PatientID),
+				UniqueSampleKey:             uniqueKey(meta.StudyID, r.SampleID),
+				NamespaceColumns:            namespaceColumnsJSON(r.NamespaceColumns),
+				DriverFilter:                d.Filter,
+				DriverFilterAnnotation:      d.FilterAnn,
+				DriverTiersFilter:           d.TiersFilter,
+				DriverTiersFilterAnnotation: d.TiersFilterAnn,
+			}
+			if detailed {
+				rec.Gene = &Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol, Type: r.GeneType}
+			}
+			return out.add(rec)
+		})
+	out.finish(err)
 }
 
 // discreteCopyNumberFromValues is the molecular-data path of
-// DiscreteCopyNumberServiceImpl: the profile's per-sample values whose
-// integer value (Integer.parseInt) is one of the requested alterations, in
-// molecular-data order.
-func (s *State) discreteCopyNumberFromValues(mpid string, meta profileMeta, f molecularDataFilter, alterations []int64, detailed bool) ([]DiscreteCopyNumberData, error) {
-	data, err := s.molecularData(mpid, f)
-	if err != nil {
-		return nil, err
-	}
+// DiscreteCopyNumberServiceImpl: it calls fn with the profile's per-sample
+// values whose integer value (Integer.parseInt) is one of the requested
+// alterations, in molecular-data order.
+func (s *State) discreteCopyNumberFromValues(mpid string, meta profileMeta, f molecularDataFilter, alterations []int64, detailed bool, fn func(DiscreteCopyNumberData) error) error {
 	want := map[int64]bool{}
 	for _, a := range alterations {
 		want[a] = true
 	}
-	out := []DiscreteCopyNumberData{}
-	for _, d := range data {
+	return s.molecularDataEach(mpid, f, func(d MolecularData) error {
 		v, err := strconv.ParseInt(d.Value, 10, 32)
 		if err != nil || !want[v] || d.EntrezGeneID == nil {
-			continue
+			return nil
 		}
 		rec := DiscreteCopyNumberData{
 			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey,
@@ -221,9 +210,8 @@ func (s *State) discreteCopyNumberFromValues(mpid string, meta profileMeta, f mo
 			g := d.Gene
 			rec.Gene = &g
 		}
-		out = append(out, rec)
-	}
-	return out, nil
+		return fn(rec)
+	})
 }
 
 // profileSampleCount is MolecularDataService.getNumberOfSamplesInMolecularProfile:
