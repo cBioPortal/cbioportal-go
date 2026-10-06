@@ -31,8 +31,10 @@ const (
 
 type filterProp struct {
 	name string
-	kind filterKind
-	elem *filterSchema // fObjects
+	// field is the Java field a violation names, when it is not name.
+	field string
+	kind  filterKind
+	elem  *filterSchema // fObjects
 	// sizeMin / sizeMax are the @Size bounds; sized is false without one.
 	sizeMin, sizeMax int
 	sized            bool
@@ -89,7 +91,7 @@ var (
 	genePanelDataFilterSchema    = sampleListOrIDs([]string{"sampleIds", "eitherSampleListIdOrSampleIdsPresent"})
 	mutationSpectrumFilterSchema = sampleListOrIDs([]string{"sampleIds", "eitherSampleListIdOrSampleIdsPresent"})
 	genericAssayFilterSchema     = sampleListOrIDs([]string{"sampleIds", "genericAssayStableIds", "eitherSampleListIdOrSampleIdsPresent"},
-		sizedProp("genericAssayStableIds", fStrings, 1, maxPageSize))
+		filterProp{name: "genericAssayStableIds", field: "genericAssayStableId", kind: fStrings, sizeMin: 1, sizeMax: maxPageSize, sized: true})
 
 	mutationMultipleStudyFilterSchema = profilesOrIdentifiers(1,
 		[]string{"sampleMolecularIdentifiers", "entrezGeneIds", "eitherMolecularProfileIdsOrSampleMolecularIdentifiersPresent"},
@@ -237,6 +239,9 @@ func (fs *filterSchema) violation(obj map[string]any) (string, string) {
 			continue
 		}
 		if len(arr) < p.sizeMin || len(arr) > p.sizeMax {
+			if p.field != "" {
+				name = p.field
+			}
 			return name, fmt.Sprintf("size must be between %d and %d", p.sizeMin, p.sizeMax)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -58,6 +59,11 @@ func (s *State) javaContract(next http.Handler) http.Handler {
 				return
 			}
 		}
+		if rt.metaUnsupported && strings.TrimSpace(q.Get("projection")) == "META" {
+			readBody(r, nil)
+			writeError(w, http.StatusNotImplemented, msgNotImplemented)
+			return
+		}
 		for _, kind := range rt.exists {
 			if msg := s.missing(kind, vals); msg != "" {
 				readBody(r, nil)
@@ -90,7 +96,7 @@ func (s *State) javaContract(next http.Handler) http.Handler {
 			if !shaped && nest == "" {
 				return false
 			}
-			rs = s.newReshaper(keep, shaped, nest)
+			rs = s.newReshaper(keep, shaped, nest, rt.nestAfter)
 			maps.Copy(w.Header(), h)
 			w.Header().Del("Content-Length")
 			w.WriteHeader(http.StatusOK)
@@ -122,7 +128,7 @@ func (s *State) javaContract(next http.Handler) http.Handler {
 		}
 		body := rec.raw.Bytes()
 		if rec.status == http.StatusOK && (shaped || nest != "") {
-			if out, ok := s.reshape(body, keep, shaped, nest); ok {
+			if out, ok := s.reshape(body, keep, shaped, nest, rt.nestAfter); ok {
 				body = out
 				w.Header().Del("Content-Length")
 			}
@@ -320,8 +326,9 @@ type contractRoute struct {
 	shape map[string][]string
 	// fixed is the projection of an endpoint without a projection parameter.
 	fixed string
-	// nest names the field the DETAILED projection adds the legacy study under.
-	nest string
+	// nest names the field the DETAILED projection adds the legacy study
+	// under: after the field nestAfter, else last.
+	nest, nestAfter string
 	// notFound turns the handler's 404 into Java's message.
 	notFound func(vals map[string]string) string
 	// filter is the Java filter class of a POST body, declared after the
@@ -336,6 +343,9 @@ type contractRoute struct {
 	// unvalidated leaves the filter's violations to the handler, which
 	// answers them itself (GenericAssayDataController).
 	unvalidated bool
+	// metaUnsupported answers projection=META with 501, as the controllers
+	// that throw UnsupportedOperationException for it do.
+	metaUnsupported bool
 }
 
 // checkFilter checks the parameters and filter body of a POST with a
@@ -370,18 +380,19 @@ func (rt *contractRoute) checkFilter(w http.ResponseWriter, r *http.Request, q m
 }
 
 var (
-	sampleFieldsID      = []string{"sampleId", "patientId", "studyId", "uniqueSampleKey", "uniquePatientKey"}
-	sampleShape         = map[string][]string{"ID": sampleFieldsID, "SUMMARY": append(append([]string{}, sampleFieldsID...), "sampleType")}
-	patientFields       = []string{"patientId", "studyId", "uniquePatientKey"}
-	patientShape        = map[string][]string{"ID": patientFields, "SUMMARY": patientFields, "DETAILED": patientFields}
-	sampleListShape     = map[string][]string{"ID": {"sampleListId"}, "SUMMARY": {"sampleListId", "studyId", "category", "name", "description"}}
-	clinicalAttrShape   = map[string][]string{"ID": {"clinicalAttributeId", "studyId", "patientAttribute", "displayName"}}
-	geneFields          = []string{"entrezGeneId", "hugoGeneSymbol", "type"}
-	geneShape           = map[string][]string{"ID": {"entrezGeneId", "hugoGeneSymbol"}, "SUMMARY": geneFields, "DETAILED": geneFields}
-	genePanelShape      = map[string][]string{"ID": {"genePanelId"}, "SUMMARY": {"genePanelId", "description"}}
-	cancerTypeShape     = map[string][]string{"ID": {"cancerTypeId"}}
-	molecularProfileIDs = []string{"molecularProfileId", "studyId"}
-	molecularProfileSum = []string{"molecularProfileId", "studyId", "molecularAlterationType", "datatype", "name",
+	sampleFieldsID        = []string{"sampleId", "patientId", "studyId", "uniqueSampleKey", "uniquePatientKey"}
+	sampleShape           = map[string][]string{"ID": sampleFieldsID, "SUMMARY": append(append([]string{}, sampleFieldsID...), "sampleType")}
+	patientFields         = []string{"patientId", "studyId", "uniquePatientKey"}
+	patientShape          = map[string][]string{"ID": patientFields, "SUMMARY": patientFields, "DETAILED": patientFields}
+	sampleListShape       = map[string][]string{"ID": {"sampleListId"}, "SUMMARY": {"sampleListId", "studyId", "category", "name", "description"}}
+	clinicalAttrShape     = map[string][]string{"ID": {"clinicalAttributeId", "studyId", "patientAttribute", "displayName"}}
+	geneFields            = []string{"entrezGeneId", "hugoGeneSymbol", "type"}
+	geneShape             = map[string][]string{"ID": {"entrezGeneId", "hugoGeneSymbol"}, "SUMMARY": geneFields, "DETAILED": geneFields}
+	genePanelShape        = map[string][]string{"ID": {"genePanelId"}, "SUMMARY": {"genePanelId", "description"}}
+	cancerTypeShape       = map[string][]string{"ID": {"cancerTypeId"}}
+	genericAssayMetaShape = map[string][]string{"ID": {"stableId"}}
+	molecularProfileIDs   = []string{"molecularProfileId", "studyId"}
+	molecularProfileSum   = []string{"molecularProfileId", "studyId", "molecularAlterationType", "datatype", "name",
 		"description", "showProfileInAnalysisTab", "pivotThreshold", "sortOrder", "genericAssayType", "patientLevel"}
 	molecularProfileShape = map[string][]string{"ID": molecularProfileIDs, "SUMMARY": molecularProfileSum, "DETAILED": molecularProfileSum}
 )
@@ -474,21 +485,23 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
 
 	// Resources, copy-number segments, significance lists.
-	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
-	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
-	{method: "GET", pattern: "/api/studies/{studyId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
-	{method: "GET", pattern: "/api/studies/{studyId}/resource-data-all", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
-	{method: "GET", pattern: "/api/studies/{studyId}/resource-definitions", params: paged(legacyProjection, resourceDefinitionSortParam)},
+	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-data-all", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-definitions", params: paged(legacyProjection, resourceDefinitionSortParam), metaUnsupported: true},
+	{method: "POST", pattern: "/api/resource-definitions/fetch", params: []param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/copy-number-segments",
 		params: append([]param{{name: "chromosome", text: true}}, pagedMax(legacyProjection, copyNumberSegmentSort, 20000)...)},
+	{method: "POST", pattern: "/api/copy-number-segments/fetch", params: []param{{name: "chromosome", text: true}, projectionParamOf(legacyProjection)}},
 	{method: "GET", pattern: "/api/studies/{studyId}/significantly-mutated-genes", params: paged(legacyProjection, smgSort)},
 	{method: "GET", pattern: "/api/studies/{studyId}/significant-copy-number-regions", params: paged(legacyProjection, scnrSort)},
 
 	// Molecular profiles.
-	{method: "GET", pattern: "/api/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), shape: molecularProfileShape, nest: "study"},
-	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}", exists: []string{"profile"}, fixed: "DETAILED", shape: molecularProfileShape, nest: "study"},
-	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study"},
-	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study"},
+	{method: "GET", pattern: "/api/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}", exists: []string{"profile"}, fixed: "DETAILED", shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"},
 		params: append([]param{sampleListIDParam, {name: "entrezGeneId", required: true}},
 			paged(legacyProjection, mutationSort)...)},
@@ -526,11 +539,30 @@ var contractRoutes = []contractRoute{
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutation-spectrums/fetch", exists: []string{"profile"},
 		filter: mutationSpectrumFilterSchema},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/variant-counts/fetch", exists: []string{"profile"}},
-	{method: "GET", pattern: "/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", exists: []string{"profile"}},
+	{method: "GET", pattern: "/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", exists: []string{"profile"},
+		params: []param{projectionParamOf(legacyProjection)}},
 	{method: "POST", pattern: "/api/generic_assay_data/{molecularProfileId}/fetch", exists: []string{"profile"},
 		params: []param{projectionParamOf(legacyProjection)}, filter: genericAssayFilterSchema},
 	{method: "POST", pattern: "/api/generic_assay_data/fetch", params: []param{projectionParamOf(legacyProjection)},
 		filter: genericAssayDataMultipleStudyFilterSchema, intercepted: "interceptedGenericAssayDataMultipleStudyFilter", unvalidated: true},
+
+	// Generic assay meta (ColumnStoreGenericAssayController): ID keeps the stable id.
+	{method: "POST", pattern: "/api/generic-assay-meta/fetch", params: []param{{name: "searchTerm", text: true},
+		{name: "pageSize", min: 1, max: maxPageSize, hasMin: true, hasMax: true}, pageNumberParam, projectionParamOf(legacyProjection)},
+		shape: genericAssayMetaShape},
+	{method: "GET", pattern: "/api/generic-assay-meta/{molecularProfileId}", params: []param{projectionParamOf(legacyProjection)}, shape: genericAssayMetaShape},
+	{method: "GET", pattern: "/api/generic-assay-meta/generic-assay/{genericAssayStableId}", params: []param{projectionParamOf(legacyProjection)},
+		shape: genericAssayMetaShape},
+
+	// Gene sets.
+	{method: "GET", pattern: "/api/genesets", params: []param{projectionParamOf(legacyProjection),
+		{name: "pageSize", min: 1, max: math.MaxInt32, hasMin: true, hasMax: true}, pageNumberParam}},
+
+	// Study view counts with a projection.
+	{method: "POST", pattern: "/api/mutation-data-counts/fetch", params: []param{projectionParamOf(legacyProjection)}},
+	{method: "POST", pattern: "/api/treatments/sample-counts/fetch", params: []param{
+		enumParam("tier", "org.cbioportal.legacy.model.ClinicalEventKeyCode", "Agent", "AgentClass", "AgentTarget"),
+		projectionParamOf(projectionType)}},
 
 	// Genes.
 	{method: "GET", pattern: "/api/genes", params: paged(legacyProjection, geneSort), shape: geneShape},
@@ -711,13 +743,14 @@ func (s *State) legacyStudies() map[string]json.RawMessage {
 
 // reshaper rewrites JSON objects: when shaped, objects keep only the kept
 // fields (in their order of appearance); when nest is set, each object gains
-// the legacy study of its studyId under that name.
+// the legacy study of its studyId under that name, after the field nestAfter
+// or last.
 type reshaper struct {
-	kept    map[string]bool
-	shaped  bool
-	nest    string
-	studies map[string]json.RawMessage
-	fields  []objectField
+	kept            map[string]bool
+	shaped          bool
+	nest, nestAfter string
+	studies         map[string]json.RawMessage
+	fields          []objectField
 }
 
 // byteWriter is a bytes.Buffer or a bufio.Writer.
@@ -726,8 +759,8 @@ type byteWriter interface {
 	io.ByteWriter
 }
 
-func (s *State) newReshaper(keep []string, shaped bool, nest string) *reshaper {
-	rs := &reshaper{kept: make(map[string]bool, len(keep)), shaped: shaped, nest: nest}
+func (s *State) newReshaper(keep []string, shaped bool, nest, nestAfter string) *reshaper {
+	rs := &reshaper{kept: make(map[string]bool, len(keep)), shaped: shaped, nest: nest, nestAfter: nestAfter}
 	for _, k := range keep {
 		rs.kept[k] = true
 	}
@@ -745,13 +778,28 @@ func (rs *reshaper) object(out byteWriter, obj []byte) bool {
 	if !ok {
 		return false
 	}
+	studyID := ""
+	if rs.nest != "" {
+		for _, f := range rs.fields {
+			if string(f.key) == "studyId" {
+				studyID = jsonStringValue(f.val)
+				break
+			}
+		}
+	}
+	st, nested := rs.studies[studyID]
+	nested = nested && rs.nest != ""
+	writeNest := func(n int) {
+		if n > 0 {
+			out.WriteByte(',')
+		}
+		fmt.Fprintf(out, "%q:", rs.nest)
+		out.Write(st)
+		nested = false
+	}
 	out.WriteByte('{')
 	n := 0
-	studyID := ""
 	for _, f := range rs.fields {
-		if rs.nest != "" && string(f.key) == "studyId" {
-			studyID = jsonStringValue(f.val)
-		}
 		if rs.shaped && !rs.kept[string(f.key)] {
 			continue
 		}
@@ -762,13 +810,12 @@ func (rs *reshaper) object(out byteWriter, obj []byte) bool {
 		out.WriteByte(':')
 		out.Write(f.val)
 		n++
-	}
-	if st, ok := rs.studies[studyID]; ok && rs.nest != "" {
-		if n > 0 {
-			out.WriteByte(',')
+		if nested && string(f.key) == rs.nestAfter {
+			writeNest(n)
 		}
-		fmt.Fprintf(out, "%q:", rs.nest)
-		out.Write(st)
+	}
+	if nested {
+		writeNest(n)
 	}
 	out.WriteByte('}')
 	return true
@@ -776,8 +823,8 @@ func (rs *reshaper) object(out byteWriter, obj []byte) bool {
 
 // reshape rewrites a whole JSON object or array of objects as reshaper
 // does. ok is false when the body is not an object or array of objects.
-func (s *State) reshape(body []byte, keep []string, shaped bool, nest string) ([]byte, bool) {
-	rs := s.newReshaper(keep, shaped, nest)
+func (s *State) reshape(body []byte, keep []string, shaped bool, nest, nestAfter string) ([]byte, bool) {
+	rs := s.newReshaper(keep, shaped, nest, nestAfter)
 	var out bytes.Buffer
 	out.Grow(len(body))
 	writeObject := func(obj []byte) bool { return rs.object(&out, obj) }

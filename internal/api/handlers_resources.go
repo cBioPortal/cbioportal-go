@@ -39,13 +39,13 @@ type ResourceDefinition struct {
 // ResourceData is the ResourceData model (UniqueKeyBase keys are set only for
 // the ids present, as UniqueKeyInterceptor does).
 type ResourceData struct {
-	UniqueSampleKey    string              `json:"uniqueSampleKey,omitempty"`
-	UniquePatientKey   string              `json:"uniquePatientKey,omitempty"`
 	SampleID           string              `json:"sampleId,omitempty"`
 	PatientID          string              `json:"patientId,omitempty"`
 	StudyID            string              `json:"studyId"`
 	ResourceID         string              `json:"resourceId"`
 	URL                *string             `json:"url,omitempty"`
+	UniqueSampleKey    string              `json:"uniqueSampleKey,omitempty"`
+	UniquePatientKey   string              `json:"uniquePatientKey,omitempty"`
 	ResourceDefinition *ResourceDefinition `json:"resourceDefinition,omitempty"`
 }
 

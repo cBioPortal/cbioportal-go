@@ -193,7 +193,7 @@ func TestStreamedReshape(t *testing.T) {
 	for _, proj := range []string{"ID", "SUMMARY", "DETAILED"} {
 		got := httptest.NewRecorder()
 		s.javaContract(handler).ServeHTTP(got, httptest.NewRequest("POST", "/api/filtered-samples/fetch?projection="+proj, nil))
-		want, _ := s.reshape([]byte(body), sampleShape["ID"], true, "")
+		want, _ := s.reshape([]byte(body), sampleShape["ID"], true, "", "")
 		if got.Body.String() != string(want) || got.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("%s: got %.200s", proj, got.Body.String())
 		}

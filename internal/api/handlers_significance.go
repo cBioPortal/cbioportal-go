@@ -16,15 +16,17 @@ func (s *State) routeSignificance(mux *http.ServeMux) {
 
 // Gistic is the Gistic model as serialized through GisticMixin (gisticRoiId
 // ignored, cancerStudyId -> studyId). Genes are omitted for the ID projection.
+// Jackson writes the properties renamed by the mixin or @JsonProperty
+// (studyId, qValue) after the others.
 type Gistic struct {
-	StudyID       string         `json:"studyId"`
 	Chromosome    int32          `json:"chromosome"`
 	Cytoband      string         `json:"cytoband"`
 	WidePeakStart int64          `json:"widePeakStart"`
 	WidePeakEnd   int64          `json:"widePeakEnd"`
-	QValue        float64        `json:"qValue"`
 	Amp           bool           `json:"amp"`
 	Genes         []GisticToGene `json:"genes,omitempty"`
+	StudyID       string         `json:"studyId"`
+	QValue        float64        `json:"qValue"`
 }
 
 // GisticToGene is a gene of a GISTIC region (GisticToGeneMixin drops the
@@ -36,11 +38,13 @@ type GisticToGene struct {
 
 // MutSig is the MutSig model as serialized through MutSigMixin (internal ids
 // and numbasescovered ignored, nummutations -> numberOfMutations).
+// The renamed properties (studyId, numberOfMutations, pValue, qValue) come
+// last, as for Gistic.
 type MutSig struct {
-	StudyID           string  `json:"studyId"`
 	EntrezGeneID      int64   `json:"entrezGeneId"`
 	HugoGeneSymbol    string  `json:"hugoGeneSymbol"`
 	Rank              int32   `json:"rank"`
+	StudyID           string  `json:"studyId"`
 	NumberOfMutations int32   `json:"numberOfMutations"`
 	PValue            float64 `json:"pValue"`
 	QValue            float64 `json:"qValue"`
@@ -120,9 +124,11 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 			ID uint64 `json:"gistic_roi_id"`
 			GisticToGene
 		}
+		// getGenesOfRegions has no ORDER BY: a region's genes come in the
+		// order of gistic_to_gene's sort key, by entrez id.
 		rows, err := queryView[geneRow](s.CH,
 			"SELECT gistic_roi_id, entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol FROM gistic_to_gene WHERE "+
-				where+" ORDER BY gistic_roi_id, gene_index", p)
+				where+" ORDER BY gistic_roi_id, entrez_gene_id", p)
 		if err != nil {
 			fail(w, err)
 			return

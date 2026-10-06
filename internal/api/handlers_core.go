@@ -1,8 +1,10 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -56,6 +58,66 @@ type CancerStudy struct {
 	CancerType     *studyCancerType `json:"cancerType,omitempty"`
 	ReadPermission bool             `json:"readPermission"`
 	ResourceCounts *[]ResourceCount `json:"resourceCounts,omitempty"`
+	// legacy orders the fields as the legacy CancerStudy model, rather than
+	// as the column-store CancerStudyMetadataDTO.
+	legacy bool
+}
+
+// MarshalJSON writes the study in its model's field order. The column-store
+// DTO: the summary fields, the counts, referenceGenome, the treatment and
+// structural variant counts, cancerType, readPermission, resourceCounts. The
+// legacy model: the summary fields up to importDate, cancerType,
+// allSampleCount, the counts, referenceGenome, readPermission, the treatment
+// and structural variant counts, resourceCounts.
+func (c CancerStudy) MarshalJSON() ([]byte, error) {
+	var o jsonObject
+	sum, cnt := c.studySummary, c.studyCounts
+	o.add("studyId", c.StudyID)
+	if sum != nil {
+		o.add("cancerTypeId", sum.CancerTypeID)
+		o.add("name", sum.Name)
+		o.add("description", sum.Description)
+		o.add("publicStudy", sum.PublicStudy)
+		o.addIf(sum.Pmid != "", "pmid", sum.Pmid)
+		o.addIf(sum.Citation != "", "citation", sum.Citation)
+		o.add("groups", sum.Groups)
+		o.add("status", sum.Status)
+		o.addIf(sum.ImportDate != "", "importDate", sum.ImportDate)
+	}
+	if c.legacy {
+		o.addIf(c.CancerType != nil, "cancerType", c.CancerType)
+	}
+	if sum != nil {
+		o.add("allSampleCount", sum.AllSampleCount)
+	}
+	if cnt != nil {
+		o.add("sequencedSampleCount", cnt.SequencedSampleCount)
+		o.add("cnaSampleCount", cnt.CnaSampleCount)
+		o.add("mrnaRnaSeqSampleCount", cnt.MrnaRnaSeqSampleCount)
+		o.add("mrnaRnaSeqV2SampleCount", cnt.MrnaRnaSeqV2SampleCount)
+		o.add("mrnaMicroarraySampleCount", cnt.MrnaMicroarraySampleCount)
+		o.add("miRnaSampleCount", cnt.MiRnaSampleCount)
+		o.add("methylationHm27SampleCount", cnt.MethylationHm27SampleCount)
+		o.add("rppaSampleCount", cnt.RppaSampleCount)
+		o.add("massSpectrometrySampleCount", cnt.MassSpectrometrySampleCount)
+		o.add("completeSampleCount", cnt.CompleteSampleCount)
+	}
+	if sum != nil {
+		o.add("referenceGenome", sum.ReferenceGenome)
+	}
+	if c.legacy {
+		o.add("readPermission", c.ReadPermission)
+	}
+	if cnt != nil {
+		o.add("treatmentCount", cnt.TreatmentCount)
+		o.add("structuralVariantCount", cnt.StructuralVariantCount)
+	}
+	if !c.legacy {
+		o.addIf(c.CancerType != nil, "cancerType", c.CancerType)
+		o.add("readPermission", c.ReadPermission)
+	}
+	o.addIf(c.ResourceCounts != nil, "resourceCounts", c.ResourceCounts)
+	return o.bytes()
 }
 
 // studySummary is the SUMMARY block of a study.
@@ -96,6 +158,29 @@ type ResourceCount struct {
 	CustomMetaData        string `json:"customMetaData,omitempty"`
 	SampleCount           int64  `json:"sampleCount"`
 	PatientCount          int64  `json:"patientCount"`
+	// legacy orders the fields as the legacy StudyController writes them:
+	// cancerStudyIdentifier last.
+	legacy bool
+}
+
+func (rc ResourceCount) MarshalJSON() ([]byte, error) {
+	type plain ResourceCount
+	if !rc.legacy {
+		return json.Marshal(plain(rc))
+	}
+	return json.Marshal(struct {
+		ResourceID            string `json:"resourceId"`
+		DisplayName           string `json:"displayName"`
+		Description           string `json:"description"`
+		ResourceType          string `json:"resourceType"`
+		Priority              string `json:"priority"`
+		OpenByDefault         bool   `json:"openByDefault"`
+		CustomMetaData        string `json:"customMetaData,omitempty"`
+		SampleCount           int64  `json:"sampleCount"`
+		PatientCount          int64  `json:"patientCount"`
+		CancerStudyIdentifier string `json:"cancerStudyIdentifier"`
+	}{rc.ResourceID, rc.DisplayName, rc.Description, rc.ResourceType, rc.Priority, rc.OpenByDefault,
+		rc.CustomMetaData, rc.SampleCount, rc.PatientCount, rc.CancerStudyIdentifier})
 }
 
 // studyCountCols / studyCountJoins add the counts of the column-store
@@ -165,7 +250,7 @@ type studyShape struct {
 }
 
 func toCancerStudy(r studyRow, shape studyShape, importDates map[string]string) CancerStudy {
-	out := CancerStudy{StudyID: r.StudyID, ReadPermission: true}
+	out := CancerStudy{StudyID: r.StudyID, ReadPermission: true, legacy: !shape.columnStore}
 	if !shape.summary {
 		return out
 	}
@@ -250,7 +335,8 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	}
 	if projection == "META" {
 		w.Header().Set("total-count", fmt.Sprint(len(rows)))
-		writeJSON(w, []CancerStudy{})
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
 		return
 	}
 	shape := studyShape{summary: true, detailed: projection == "DETAILED", columnStore: true}
@@ -577,6 +663,11 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 		rc := byStudy[studies[i].StudyID]
 		if rc == nil {
 			rc = []ResourceCount{}
+		} else if studies[i].legacy {
+			rc = slices.Clone(rc)
+			for j := range rc {
+				rc[j].legacy = true
+			}
 		}
 		studies[i].ResourceCounts = &rc
 	}

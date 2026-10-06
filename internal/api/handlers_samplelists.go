@@ -11,10 +11,10 @@ import (
 
 type sampleListRow struct {
 	SampleListID string   `json:"sampleListId"`
+	StudyID      string   `json:"studyId"`
 	Category     string   `json:"category"`
 	Name         string   `json:"name"`
 	Description  string   `json:"description"`
-	StudyID      string   `json:"studyId"`
 	SampleIDs    []string `json:"sampleIds"`
 }
 
@@ -22,10 +22,10 @@ type sampleListRow struct {
 // to the DETAILED projection (the others are cut by javaContract).
 type SampleList struct {
 	SampleListID string   `json:"sampleListId"`
+	StudyID      string   `json:"studyId"`
 	Category     string   `json:"category"`
 	Name         string   `json:"name"`
 	Description  string   `json:"description"`
-	StudyID      string   `json:"studyId"`
 	SampleCount  int      `json:"sampleCount"`
 	SampleIDs    []string `json:"sampleIds"`
 }

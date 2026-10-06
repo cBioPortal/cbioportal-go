@@ -228,12 +228,12 @@ type clinAttrRow struct {
 }
 
 type ClinicalAttribute struct {
-	ClinicalAttributeID string `json:"clinicalAttributeId"`
 	DisplayName         string `json:"displayName"`
 	Description         string `json:"description"`
 	Datatype            string `json:"datatype"`
 	PatientAttribute    bool   `json:"patientAttribute"`
 	Priority            string `json:"priority"`
+	ClinicalAttributeID string `json:"clinicalAttributeId"`
 	StudyID             string `json:"studyId"`
 }
 

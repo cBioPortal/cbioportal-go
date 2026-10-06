@@ -250,8 +250,8 @@ func toAlterationCounts(rows []geneCountRow, profiled uint64, keepAlteration boo
 // ---------- Data types + structural variants ----------
 
 type GenomicDataCount struct {
-	Value       string   `json:"value"`
 	Label       string   `json:"label"`
+	Value       string   `json:"value"`
 	Count       uint64   `json:"count"`
 	UniqueCount *uint64  `json:"uniqueCount,omitempty"`
 	SampleIDs   []string `json:"sampleIds,omitempty"`

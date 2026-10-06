@@ -194,3 +194,17 @@ answer 500 (a MyBatis expression calls a missing
 `SqlUtils.combineStudyAndPatientIds`), categorical enrichments of a
 patient-level profile answer 500, and `/clinical-data-table/fetch` answers
 500 for a `sortBy` that is not an attribute.
+
+paritydiff ignores key order; the field order of each projection (Jackson's:
+a model's fields in declaration order, superclass first, properties renamed
+by a mixin or `@JsonProperty` last) is pinned by the `TestOracleProjection*`
+contract tests. Java oddities left as they are: generic assay data answers
+500 for `projection=ID`; `/sample-lists/fetch`, `/gene-panels/fetch`,
+`/resource-definitions/fetch`, the generic assay meta endpoints,
+`/mutation-data-counts/fetch` and `/treatments/sample-counts/fetch` ignore
+META (they answer a body, no total-count); `/genes` answers 500 for
+`sortBy=cytoband` or `length` (GeneSortBy lists them, the gene table has no
+such column) and re-sorts every page by symbol, so `sortBy` only picks the
+page's genes; and mutations share the importer's `mutation_event` across
+studies, so a record reports the NCBI build of the study that first imported
+its event.

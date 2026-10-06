@@ -27,7 +27,7 @@ func BenchmarkReshapeSamples(b *testing.B) {
 	body := samplesBody(10945)
 	b.SetBytes(int64(len(body)))
 	for b.Loop() {
-		if _, ok := s.reshape(body, sampleShape["SUMMARY"], true, ""); !ok {
+		if _, ok := s.reshape(body, sampleShape["SUMMARY"], true, "", ""); !ok {
 			b.Fatal("not reshaped")
 		}
 	}

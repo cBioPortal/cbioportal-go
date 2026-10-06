@@ -184,6 +184,16 @@ func DecimalFromFloat64(f float64) Decimal {
 // (shortest round-tripping digits, plain notation for 1e-3 <= |f| < 1e7 and
 // computerized scientific notation otherwise, always with a fraction digit).
 func javaDoubleToString(f float64) string {
+	return javaNumberString(f, 64)
+}
+
+// JavaFloatToString renders f the way java.lang.Float.toString does (as
+// javaDoubleToString, with the shortest digits that round-trip a float).
+func JavaFloatToString(f float32) string {
+	return javaNumberString(float64(f), 32)
+}
+
+func javaNumberString(f float64, bitSize int) string {
 	if f == 0 {
 		if math.Signbit(f) {
 			return "-0.0"
@@ -195,12 +205,13 @@ func javaDoubleToString(f float64) string {
 		sign = "-"
 		f = -f
 	}
-	e := strconv.FormatFloat(f, 'e', -1, 64)
+	e := strconv.FormatFloat(f, 'e', -1, bitSize)
 	if !strings.Contains(e, ".") {
 		// When the shortest form has one digit, Java chooses the closest
 		// decimal of one or two digits (this only differs for subnormals,
 		// e.g. 4.9E-324 rather than 5.0E-324).
-		if two := strconv.FormatFloat(f, 'e', 1, 64); mustParseFloat(two) == f && two[2] != '0' {
+		two := strconv.FormatFloat(f, 'e', 1, bitSize)
+		if back, err := strconv.ParseFloat(two, bitSize); err == nil && back == f && two[2] != '0' {
 			e = two
 		}
 	}
@@ -226,14 +237,6 @@ func javaDoubleToString(f float64) string {
 		frac = "0"
 	}
 	return sign + digits[:1] + "." + frac + "E" + strconv.Itoa(exp)
-}
-
-func mustParseFloat(s string) float64 {
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		panic(err)
-	}
-	return f
 }
 
 // String renders d exactly like BigDecimal.toString.

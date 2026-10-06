@@ -30,14 +30,14 @@ type MolecularProfile struct {
 	MolecularProfileID       string   `json:"molecularProfileId"`
 	StudyID                  string   `json:"studyId"`
 	MolecularAlterationType  string   `json:"molecularAlterationType"`
+	GenericAssayType         string   `json:"genericAssayType,omitempty"`
 	Datatype                 string   `json:"datatype"`
 	Name                     string   `json:"name"`
 	Description              string   `json:"description"`
 	ShowProfileInAnalysisTab bool     `json:"showProfileInAnalysisTab"`
-	PatientLevel             bool     `json:"patientLevel"`
-	GenericAssayType         string   `json:"genericAssayType,omitempty"`
 	PivotThreshold           *float64 `json:"pivotThreshold,omitempty"`
 	SortOrder                *string  `json:"sortOrder,omitempty"`
+	PatientLevel             bool     `json:"patientLevel"`
 }
 
 const mpSelectTmpl = "SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, " +
@@ -245,65 +245,63 @@ type Gene struct {
 // fields are absent. The nested gene and allele-specific copy number belong
 // to the DETAILED projection only.
 type Mutation struct {
-	MolecularProfileID string `json:"molecularProfileId"`
-	SampleID           string `json:"sampleId"`
-	StudyID            string `json:"studyId"`
-	EntrezGeneID       *int64 `json:"entrezGeneId,omitempty"`
-	Gene               *Gene  `json:"gene,omitempty"`
-	Chr                string `json:"chr"`
-	StartPosition      *int64 `json:"startPosition,omitempty"`
-	EndPosition        *int64 `json:"endPosition,omitempty"`
-	ReferenceAllele    string `json:"referenceAllele"`
-	VariantAllele      string `json:"variantAllele"`
-	ProteinChange      string `json:"proteinChange"`
-	MutationType       string `json:"mutationType"`
-	TumorAltCount      *int64 `json:"tumorAltCount,omitempty"`
-	TumorRefCount      *int64 `json:"tumorRefCount,omitempty"`
-	UniqueSampleKey    string `json:"uniqueSampleKey"`
-	Keyword            string `json:"keyword,omitempty"`
-
-	DriverFilter                *string         `json:"driverFilter,omitempty"`
-	DriverFilterAnnotation      *string         `json:"driverFilterAnnotation,omitempty"`
-	DriverTiersFilter           *string         `json:"driverTiersFilter,omitempty"`
-	DriverTiersFilterAnnotation *string         `json:"driverTiersFilterAnnotation,omitempty"`
-	NamespaceColumns            json.RawMessage `json:"namespaceColumns,omitempty"`
-
-	PatientID                string                    `json:"patientId"`
-	UniquePatientKey         string                    `json:"uniquePatientKey"`
-	Center                   string                    `json:"center"`
-	MutationStatus           string                    `json:"mutationStatus"`
-	ValidationStatus         string                    `json:"validationStatus"`
-	NormalAltCount           *int64                    `json:"normalAltCount,omitempty"`
-	NormalRefCount           *int64                    `json:"normalRefCount,omitempty"`
-	NcbiBuild                string                    `json:"ncbiBuild"`
-	VariantType              string                    `json:"variantType"`
-	RefseqMrnaID             string                    `json:"refseqMrnaId"`
-	ProteinPosStart          int64                     `json:"proteinPosStart"`
-	ProteinPosEnd            int64                     `json:"proteinPosEnd"`
-	AlleleSpecificCopyNumber *alleleSpecificCopyNumber `json:"alleleSpecificCopyNumber,omitempty"`
+	UniqueSampleKey             string                    `json:"uniqueSampleKey"`
+	UniquePatientKey            string                    `json:"uniquePatientKey"`
+	MolecularProfileID          string                    `json:"molecularProfileId"`
+	SampleID                    string                    `json:"sampleId"`
+	PatientID                   string                    `json:"patientId"`
+	EntrezGeneID                *int64                    `json:"entrezGeneId,omitempty"`
+	Gene                        *Gene                     `json:"gene,omitempty"`
+	StudyID                     string                    `json:"studyId"`
+	DriverFilter                *string                   `json:"driverFilter,omitempty"`
+	DriverFilterAnnotation      *string                   `json:"driverFilterAnnotation,omitempty"`
+	DriverTiersFilter           *string                   `json:"driverTiersFilter,omitempty"`
+	DriverTiersFilterAnnotation *string                   `json:"driverTiersFilterAnnotation,omitempty"`
+	Center                      string                    `json:"center"`
+	MutationStatus              string                    `json:"mutationStatus"`
+	ValidationStatus            string                    `json:"validationStatus"`
+	TumorAltCount               *int64                    `json:"tumorAltCount,omitempty"`
+	TumorRefCount               *int64                    `json:"tumorRefCount,omitempty"`
+	NormalAltCount              *int64                    `json:"normalAltCount,omitempty"`
+	NormalRefCount              *int64                    `json:"normalRefCount,omitempty"`
+	Chr                         string                    `json:"chr"`
+	StartPosition               *int64                    `json:"startPosition,omitempty"`
+	EndPosition                 *int64                    `json:"endPosition,omitempty"`
+	ReferenceAllele             string                    `json:"referenceAllele"`
+	VariantAllele               string                    `json:"variantAllele"`
+	ProteinChange               string                    `json:"proteinChange"`
+	MutationType                string                    `json:"mutationType"`
+	NcbiBuild                   string                    `json:"ncbiBuild"`
+	VariantType                 string                    `json:"variantType"`
+	RefseqMrnaID                string                    `json:"refseqMrnaId"`
+	ProteinPosStart             int64                     `json:"proteinPosStart"`
+	ProteinPosEnd               int64                     `json:"proteinPosEnd"`
+	Keyword                     string                    `json:"keyword,omitempty"`
+	AlleleSpecificCopyNumber    *alleleSpecificCopyNumber `json:"alleleSpecificCopyNumber,omitempty"`
+	NamespaceColumns            json.RawMessage           `json:"namespaceColumns,omitempty"`
 }
 
 // MutationID is a mutation in the ID projection.
 type MutationID struct {
+	UniqueSampleKey    string `json:"uniqueSampleKey"`
+	UniquePatientKey   string `json:"uniquePatientKey"`
 	MolecularProfileID string `json:"molecularProfileId"`
 	SampleID           string `json:"sampleId"`
 	PatientID          string `json:"patientId"`
 	EntrezGeneID       *int64 `json:"entrezGeneId,omitempty"`
 	StudyID            string `json:"studyId"`
-	UniqueSampleKey    string `json:"uniqueSampleKey"`
-	UniquePatientKey   string `json:"uniquePatientKey"`
 }
 
 // alleleSpecificCopyNumber is the ASCN namespace of a MAF record.
 type alleleSpecificCopyNumber struct {
-	AscnIntegerCopyNumber  *int64   `json:"ascnIntegerCopyNumber,omitempty"`
-	AscnMethod             string   `json:"ascnMethod,omitempty"`
-	CcfExpectedCopiesUpper *float64 `json:"ccfExpectedCopiesUpper,omitempty"`
-	CcfExpectedCopies      *float64 `json:"ccfExpectedCopies,omitempty"`
-	Clonal                 string   `json:"clonal,omitempty"`
-	MinorCopyNumber        *int64   `json:"minorCopyNumber,omitempty"`
-	ExpectedAltCopies      *int64   `json:"expectedAltCopies,omitempty"`
-	TotalCopyNumber        *int64   `json:"totalCopyNumber,omitempty"`
+	AscnIntegerCopyNumber  *int64     `json:"ascnIntegerCopyNumber,omitempty"`
+	AscnMethod             string     `json:"ascnMethod,omitempty"`
+	CcfExpectedCopiesUpper *javaFloat `json:"ccfExpectedCopiesUpper,omitempty"`
+	CcfExpectedCopies      *javaFloat `json:"ccfExpectedCopies,omitempty"`
+	Clonal                 string     `json:"clonal,omitempty"`
+	MinorCopyNumber        *int64     `json:"minorCopyNumber,omitempty"`
+	ExpectedAltCopies      *int64     `json:"expectedAltCopies,omitempty"`
+	TotalCopyNumber        *int64     `json:"totalCopyNumber,omitempty"`
 }
 
 func (a alleleSpecificCopyNumber) present() bool {

@@ -251,12 +251,20 @@ type ClinicalEventData struct {
 type ClinicalEvent struct {
 	StudyID                         string              `json:"studyId"`
 	PatientID                       string              `json:"patientId"`
+	UniquePatientKey                string              `json:"uniquePatientKey"`
 	EventType                       string              `json:"eventType"`
 	StartNumberOfDaysSinceDiagnosis *int64              `json:"startNumberOfDaysSinceDiagnosis,omitempty"`
 	EndNumberOfDaysSinceDiagnosis   *int64              `json:"endNumberOfDaysSinceDiagnosis,omitempty"`
 	Attributes                      []ClinicalEventData `json:"attributes"`
-	UniquePatientKey                string              `json:"uniquePatientKey"`
-	UniqueSampleKey                 string              `json:"uniqueSampleKey,omitempty"`
+}
+
+// clinicalEventID is a ClinicalEvent in the ID projection: ClinicalEventMapper
+// selects no dates and the service reads no attributes.
+type clinicalEventID struct {
+	StudyID          string `json:"studyId"`
+	PatientID        string `json:"patientId"`
+	UniquePatientKey string `json:"uniquePatientKey"`
+	EventType        string `json:"eventType"`
 }
 
 // timelineRow is one event of cbioportal_raw.timeline with its non-empty
@@ -415,8 +423,13 @@ func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, wher
 	// so they are stored (and read back) in its iteration order; events of a
 	// production clone carry their stored order.
 	staged := !slices.Contains(s.rawColumns("timeline"), "event_attributes")
+	idOnly := projectionOf(r) == "ID"
 	out := newJSONArray(w)
 	err := ch.QueryEachP(s.CH, query, p, func(row *timelineRow) error {
+		if idOnly {
+			return out.add(clinicalEventID{StudyID: row.StudyID, PatientID: row.PatientID,
+				UniquePatientKey: uniqueKey(row.StudyID, row.PatientID), EventType: row.EventType})
+		}
 		if staged {
 			row.Attrs = javaHashMapAttrs(row.Attrs)
 		}

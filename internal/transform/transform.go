@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/javaorder"
 )
 
 type ViewCount struct {
@@ -271,7 +272,9 @@ func snapshotView(c *client, db, name, orderBy, idFrom string) error {
 // empty column onto another study's rows. tablePrefix is the table alias (e.g.
 // "m."). Returns "'{}'" when no namespace columns are present.
 func namespaceColumnsExpr(c *client, rawDB string, has map[string]bool, tablePrefix string) string {
-	names := distinctNamespaces(c, rawDB)
+	// The importer's namespace parser collects the namespaces, and each
+	// namespace's columns, in HashMaps: the stored JSON has their order.
+	names := javaorder.HashMapOrder(distinctNamespaces(c, rawDB))
 	var frags []string
 	for _, name := range names {
 		// ASCN columns populate Mutation.alleleSpecificCopyNumber instead.
@@ -279,17 +282,20 @@ func namespaceColumnsExpr(c *client, rawDB string, has map[string]bool, tablePre
 			continue
 		}
 		prefix := strings.ToLower(name) + "_"
-		var subCols []string
+		var subs []string
 		for _, col := range sortedColumnNames(has) {
 			if strings.HasPrefix(col, prefix) && len(col) > len(prefix) {
-				sub := col[len(prefix):]
-				// Numeric values are emitted as JSON numbers, as the importer's
-				// namespace parser stores them; empty values are stored as
-				// null, which the API leaves out.
-				v := tablePrefix + col
-				subCols = append(subCols, fmt.Sprintf(
-					`if(%[2]s = '', '', concat('"%[1]s":', if(match(%[2]s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %[2]s, toJSONString(%[2]s))))`, sub, v))
+				subs = append(subs, col[len(prefix):])
 			}
+		}
+		var subCols []string
+		for _, sub := range javaorder.HashMapOrder(subs) {
+			// Numeric values are emitted as JSON numbers, as the importer's
+			// namespace parser stores them; empty values are stored as
+			// null, which the API leaves out.
+			v := tablePrefix + prefix + sub
+			subCols = append(subCols, fmt.Sprintf(
+				`if(%[2]s = '', '', concat('"%[1]s":', if(match(%[2]s, '^-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?$'), %[2]s, toJSONString(%[2]s))))`, sub, v))
 		}
 		if len(subCols) == 0 {
 			continue

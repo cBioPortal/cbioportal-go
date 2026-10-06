@@ -79,19 +79,19 @@ func TestBodyValidators(t *testing.T) {
 func TestReshape(t *testing.T) {
 	s := &State{}
 	body := []byte(`[{"sampleId":"a\"b","sampleType":"x","sequenced":true,"nested":{"k":[1,{"z":"}"}]},"studyId":"s"},{"sampleId":"c","studyId":"s"}]` + "\n")
-	out, ok := s.reshape(body, []string{"sampleId", "studyId", "nested"}, true, "")
+	out, ok := s.reshape(body, []string{"sampleId", "studyId", "nested"}, true, "", "")
 	want := `[{"sampleId":"a\"b","nested":{"k":[1,{"z":"}"}]},"studyId":"s"},{"sampleId":"c","studyId":"s"}]` + "\n"
 	if !ok || string(out) != want {
 		t.Fatalf("reshape array:\n got %s\nwant %s", out, want)
 	}
-	out, ok = s.reshape([]byte(`{"a":1, "b" : null ,"c":"x"}`), []string{"c", "b"}, true, "")
+	out, ok = s.reshape([]byte(`{"a":1, "b" : null ,"c":"x"}`), []string{"c", "b"}, true, "", "")
 	if !ok || string(out) != `{"b":null,"c":"x"}`+"\n" {
 		t.Fatalf("reshape object: %s", out)
 	}
-	if _, ok := s.reshape([]byte(`["x"]`), nil, true, ""); ok {
+	if _, ok := s.reshape([]byte(`["x"]`), nil, true, "", ""); ok {
 		t.Fatal("array of strings reshaped")
 	}
-	if out, ok := s.reshape([]byte(`[]`), nil, true, ""); !ok || string(out) != "[]\n" {
+	if out, ok := s.reshape([]byte(`[]`), nil, true, "", ""); !ok || string(out) != "[]\n" {
 		t.Fatalf("empty array: %s", out)
 	}
 }

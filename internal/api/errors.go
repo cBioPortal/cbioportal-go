@@ -15,6 +15,9 @@ import (
 
 const msgBadJSON = "There is an error in the JSON format of the request payload"
 
+// msgNotImplemented answers UnsupportedOperationException (HTTP 501).
+const msgNotImplemented = "Requested API is not implemented yet"
+
 func msgStudyNotFound(studyID string) string { return "Study not found: " + studyID }
 
 func msgPatientNotFound(studyID, patientID string) string {

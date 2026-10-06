@@ -109,7 +109,7 @@ func TestContractStudyProjections(t *testing.T) {
 	wantEq(t, keys(ct), []string{"cancerTypeId", "dedicatedColor", "name", "parent", "shortName"})
 
 	resp, body := rawDo(t, "GET", "/api/studies?projection=META", "")
-	wantEq(t, string(body), "[]\n")
+	wantEq(t, string(body), "[]")
 	if resp.Header.Get("total-count") == "" || resp.Header.Get("sample-count") != "" {
 		t.Errorf("studies META headers: %v", resp.Header)
 	}

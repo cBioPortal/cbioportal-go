@@ -13,16 +13,16 @@ import (
 // ---------- Generic assay data ----------
 
 type GenericAssayData struct {
-	GenericAssayStableID string `json:"genericAssayStableId"`
-	MolecularProfileID   string `json:"molecularProfileId"`
-	PatientID            string `json:"patientId"`
-	PatientLevel         bool   `json:"patientLevel"`
-	SampleID             string `json:"sampleId"`
-	StableID             string `json:"stableId"`
-	StudyID              string `json:"studyId"`
-	UniquePatientKey     string `json:"uniquePatientKey"`
 	UniqueSampleKey      string `json:"uniqueSampleKey"`
+	UniquePatientKey     string `json:"uniquePatientKey"`
+	MolecularProfileID   string `json:"molecularProfileId"`
+	SampleID             string `json:"sampleId"`
+	PatientID            string `json:"patientId"`
+	StudyID              string `json:"studyId"`
 	Value                string `json:"value"`
+	GenericAssayStableID string `json:"genericAssayStableId"`
+	PatientLevel         bool   `json:"patientLevel"`
+	StableID             string `json:"stableId"`
 }
 
 type genericAssayFilter struct {
@@ -207,9 +207,9 @@ func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Req
 // ---------- Generic assay meta ----------
 
 type GenericAssayMeta struct {
-	EntityType                  string            `json:"entityType"`
-	GenericEntityMetaProperties map[string]string `json:"genericEntityMetaProperties"`
-	StableID                    string            `json:"stableId"`
+	StableID                    string        `json:"stableId"`
+	EntityType                  string        `json:"entityType"`
+	GenericEntityMetaProperties javaStringMap `json:"genericEntityMetaProperties"`
 }
 
 type genericAssayMetaFilter struct {
@@ -267,7 +267,7 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 
 // genericAssayMetaList orders entity metadata as GenericAssayMapper does:
 // by the number an id starts with (0 without one), then by id.
-func genericAssayMetaList(props map[string]map[string]string) []GenericAssayMeta {
+func genericAssayMetaList(props map[string]javaStringMap) []GenericAssayMeta {
 	ids := sortedKeys(props)
 	sort.SliceStable(ids, func(i, j int) bool { return entityLess(ids[i], ids[j]) })
 	out := make([]GenericAssayMeta, 0, len(ids))
@@ -282,25 +282,29 @@ func genericAssayMetaList(props map[string]map[string]string) []GenericAssayMeta
 // entity_stable_id, with placeholders bound in args), keyed by entity stable
 // id: every stored property where the raw database has the entity tables of a
 // production clone, else the NAME / DESCRIPTION / URL columns of the staged
-// matrix.
-func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[string]map[string]string, error) {
+// matrix. Properties keep their stored order (the importer's, by property
+// id), in which Java puts them into its HashMap.
+func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[string]javaStringMap, error) {
 	if len(s.rawColumns("generic_assay_entity_meta")) > 0 {
 		type propRow struct {
-			StableID string            `json:"stableId"`
-			Props    map[string]string `json:"props"`
+			StableID string   `json:"stableId"`
+			Keys     []string `json:"keys"`
+			Values   []string `json:"vals"`
 		}
 		rows, err := queryA[propRow](s.CH, fmt.Sprintf(
-			"SELECT entity_stable_id AS stableId, properties AS props FROM cbioportal_raw.generic_assay_entity_meta "+
+			"SELECT entity_stable_id AS stableId, mapKeys(properties) AS keys, mapValues(properties) AS vals "+
+				"FROM cbioportal_raw.generic_assay_entity_meta "+
 				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where), args)
 		if err != nil {
 			return nil, err
 		}
-		out := make(map[string]map[string]string, len(rows))
+		out := make(map[string]javaStringMap, len(rows))
 		for _, r := range rows {
-			if r.Props == nil {
-				r.Props = map[string]string{}
+			var m javaStringMap
+			for i, k := range r.Keys {
+				m.set(k, r.Values[i])
 			}
-			out[r.StableID] = r.Props
+			out[r.StableID] = m
 		}
 		return out, nil
 	}
@@ -310,9 +314,13 @@ func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[str
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]map[string]string, len(rows))
+	out := make(map[string]javaStringMap, len(rows))
 	for _, r := range rows {
-		out[r.StableID] = map[string]string{"NAME": r.Name, "DESCRIPTION": r.Description, "URL": r.URL}
+		var m javaStringMap
+		m.set("NAME", r.Name)
+		m.set("DESCRIPTION", r.Description)
+		m.set("URL", r.URL)
+		out[r.StableID] = m
 	}
 	return out, nil
 }

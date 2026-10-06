@@ -36,7 +36,7 @@ type GenomicEnrichment struct {
 // GenericAssayEnrichment is the generic-assay-enrichments response element
 // (Java sets neither name nor qValue on numeric enrichments).
 type GenericAssayEnrichment struct {
-	GenericEntityMetaProperties map[string]string `json:"genericEntityMetaProperties"`
+	GenericEntityMetaProperties javaStringMap     `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []GroupStatistics `json:"groupsStatistics"`
 	PValue                      float64           `json:"pValue"`
 	StableID                    string            `json:"stableId"`
@@ -53,7 +53,7 @@ type GenericAssayCountSummary struct {
 // (Java leaves name unset, so it is not serialized).
 type GenericAssayBinaryEnrichment struct {
 	Counts                      []GenericAssayCountSummary `json:"counts"`
-	GenericEntityMetaProperties map[string]string          `json:"genericEntityMetaProperties"`
+	GenericEntityMetaProperties javaStringMap              `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []GroupStatistics          `json:"groupsStatistics"`
 	PValue                      float64                    `json:"pValue"`
 	QValue                      float64                    `json:"qValue"`
@@ -63,7 +63,7 @@ type GenericAssayBinaryEnrichment struct {
 // GenericAssayCategoricalEnrichment is the generic-assay-categorical-enrichments
 // element (Java leaves name unset, so it is not serialized).
 type GenericAssayCategoricalEnrichment struct {
-	GenericEntityMetaProperties map[string]string            `json:"genericEntityMetaProperties"`
+	GenericEntityMetaProperties javaStringMap                `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []CategoricalGroupStatistics `json:"groupsStatistics"`
 	PValue                      float64                      `json:"pValue"`
 	QValue                      float64                      `json:"qValue"`
@@ -297,19 +297,15 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		fail(w, err)
 		return
 	}
-	props := map[string]map[string]string{}
+	props := map[string]javaStringMap{}
 	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
 		args := newArgs()
 		props, _ = s.genericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.pairs(pairs), args)
 	}
 	out := make([]GenericAssayEnrichment, len(results))
 	for i, res := range results {
-		meta := props[res.stable]
-		if meta == nil {
-			meta = map[string]string{}
-		}
 		out[i] = GenericAssayEnrichment{
-			GenericEntityMetaProperties: meta,
+			GenericEntityMetaProperties: props[res.stable],
 			GroupsStatistics:            res.groupsStatistics,
 			PValue:                      res.pValue,
 			StableID:                    res.stable,

@@ -39,7 +39,9 @@ type genomicDataCountFilter struct {
 func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f genomicDataCountFilter
 	readBody(r, &f)
-	summary := !strings.EqualFold(r.URL.Query().Get("projection"), "DETAILED")
+	// Only SUMMARY counts mutated / not mutated / not profiled samples; the
+	// other projections count by mutation type.
+	summary := projectionOf(r) == "SUMMARY"
 	includeSampleIDs := r.URL.Query().Get("includeSampleIds") == "true"
 	svf := f.StudyViewFilter
 	if len(f.GenomicDataFilters) == 1 && summary {
