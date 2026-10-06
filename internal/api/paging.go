@@ -156,7 +156,8 @@ func pageList(next http.Handler) http.Handler {
 		}
 		sizeParam, numberParam := q.Get("pageSize"), q.Get("pageNumber")
 		if (sizeParam == "" && numberParam == "" && sortBy == "") || selfPagedPaths[r.URL.Path] ||
-			endpoint == "" || strings.EqualFold(q.Get("projection"), "META") {
+			endpoint == "" || strings.EqualFold(q.Get("projection"), "META") ||
+			(endpoint == "GET /api/genes" && q.Has("keyword")) {
 			next.ServeHTTP(w, r)
 			return
 		}
