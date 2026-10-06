@@ -142,16 +142,35 @@ func (s *State) modelHasColumn(table, column string) bool {
 	return err == nil && len(rows) == 1 && rows[0].N > 0
 }
 
+// rawFileOrder is the expression ordering a raw staging table's rows of one
+// study as its files list them (transform.StagingOrderSQL); prefix qualifies
+// the columns (e.g. "t."). A MergeTree table has the storage position as
+// virtual columns; a view has it only when it selects _part.
+func (s *State) rawFileOrder(table, prefix string) string {
+	cols := s.rawColumns(table)
+	storage := slices.Contains(cols, "_part") || strings.HasSuffix(s.rawEngine(table), "MergeTree")
+	return transform.StagingOrderSQL(prefix, slices.Contains(cols, "row_num"), storage)
+}
+
+// rawEngine is a raw staging table's engine (e.g. "MergeTree", "View"), or ""
+// when no study staged that table.
+func (s *State) rawEngine(table string) string {
+	type row struct {
+		Engine string `json:"engine"`
+	}
+	rows, err := cachedQueryP[row](s,
+		"SELECT engine FROM system.tables WHERE database = 'cbioportal_raw' AND name = {table:String}",
+		ch.Params{"table": table})
+	if err != nil || len(rows) != 1 {
+		return ""
+	}
+	return rows[0].Engine
+}
+
 // rawSource returns a FROM-clause source for a raw staging table that has at
 // least the given columns: the table itself when it has them all, the table
 // with each missing column added as an empty string, or an empty relation of
 // those columns when the table is absent.
-// rawFileOrder is the expression ordering a raw staging table's rows of one
-// study as its files list them (transform.StagingOrderSQL); prefix qualifies
-// the columns (e.g. "t.").
-func (s *State) rawFileOrder(table, prefix string) string {
-	return transform.StagingOrderSQL(prefix, slices.Contains(s.rawColumns(table), "row_num"))
-}
 
 func (s *State) rawSource(table string, cols ...string) string {
 	have := s.rawColumns(table)

@@ -17,9 +17,15 @@ var OrderColumns = map[string]bool{"file_num": true, "row_num": true}
 // position (insert block of its part, offset in the part). The storage
 // position is the fallback for rows staged before file_num and row_num were
 // written, which read 0 for both (or, when the table lacks the columns,
-// hasOrderColumns is false). prefix qualifies the columns (e.g. "m.").
-func StagingOrderSQL(prefix string, hasOrderColumns bool) string {
-	storage := fmt.Sprintf("toUInt64OrZero(splitByChar('_', %[1]s_part)[2]), %[1]s_part_offset", prefix)
+// hasOrderColumns is false). hasStorage is false for a source without the
+// storage position (_part, _part_offset), such as a view that does not
+// supply them; its rows then tie on it. prefix qualifies the columns (e.g.
+// "m.").
+func StagingOrderSQL(prefix string, hasOrderColumns, hasStorage bool) string {
+	storage := "toUInt64(0), toUInt64(0)"
+	if hasStorage {
+		storage = fmt.Sprintf("toUInt64OrZero(splitByChar('_', %[1]s_part)[2]), %[1]s_part_offset", prefix)
+	}
 	if !hasOrderColumns {
 		return "(toUInt32(0), toUInt64(0), " + storage + ")"
 	}
@@ -28,7 +34,7 @@ func StagingOrderSQL(prefix string, hasOrderColumns bool) string {
 
 // fileOrderSQL is StagingOrderSQL for the positionedSources, whose stand-ins
 // supply the order columns where the table lacks them.
-var fileOrderSQL = StagingOrderSQL("", true)
+var fileOrderSQL = StagingOrderSQL("", true, true)
 
 // studyRankSQL numbers the staged studies in import order (study_id,
 // study_rank): by the time the study was ingested (a re-ingested study comes

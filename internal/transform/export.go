@@ -38,7 +38,7 @@ func MafRecordsSQL(table, source, targetDB string, has map[string]bool) string {
 		"SELECT %s, gk.resolved_hugo_gene_symbol AS hugo, gk.resolved_entrez_gene_id AS entrez, %s AS protein_change, "+
 			"%s AS ord "+
 			"FROM %s m%s WHERE m.study_id = {study:String} AND m.profile_stable_id = {profile:String} AND %s",
-		strings.Join(cols, ", "), proteinChangeSQL(has), StagingOrderSQL("m.", has["row_num"]), table,
+		strings.Join(cols, ", "), proteinChangeSQL(has), StagingOrderSQL("m.", has["row_num"], true), table,
 		geneKeyJoin(targetDB, source, "m", "hugo_symbol", "entrez_gene_id"),
 		mutationFilterSQL("m", "gk.resolved_entrez_gene_id"))
 }
