@@ -2,15 +2,21 @@
 # Rebuilds the inactive blue/green color of go.cbioportal.org from the live
 # production database, the way the LibreChat clone job does:
 #
-#   1. read the live production color from ${MGMT_DB}.update_status;
+#   1. read the live production color and its last import from
+#      ${MGMT_DB}.update_status; stop without changes while an import is
+#      running, or when the served color was already built from that import
+#      (so the job can run hourly and follow each production switch);
 #   2. pick the Go color that is not being served (ACTIVE_DB is the database
 #      served now; anything else bootstraps into blue);
 #   3. empty that color's databases and zero-copy CLONE every production table
 #      (minus auth/credential tables) into ${PREFIX}_<color>_ref;
 #   4. build the portal database ${PREFIX}_<color> from the clone with
 #      `cbioportal-import transform --from-prod`;
-#   5. write $WORKDIR/state.env (CBIOPORTAL_DB, CBIOPORTAL_RAW_DB,
-#      CBIOPORTAL_REF_DB) for the step that switches the API over.
+#   5. record the production snapshot it was built from in
+#      ${PREFIX}_<color>_ref._go_mirror_source, and write $WORKDIR/state.env
+#      (CBIOPORTAL_DB, CBIOPORTAL_RAW_DB, CBIOPORTAL_REF_DB) for the step that
+#      switches the API over. When nothing is rebuilt, state.env names the
+#      served databases, so that step changes nothing.
 #
 # Env: CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD (never printed);
 # PREFIX (default dev_cbioportal_public_go), ACTIVE_DB, WORKDIR (default
@@ -46,11 +52,32 @@ ch() {
     "${auth[@]}" "$CLICKHOUSE_URL/" --data-binary "$1"
 }
 
-# 1) Production color.
-PROD_COLOR=$(ch "SELECT current_database_in_production FROM ${MGMT_DB}.update_status WHERE portal_database = '${PORTAL_DATABASE}' FORMAT TSV" | tr -d '[:space:]')
+# 1) Production color and the import it serves.
+IFS=$'\t' read -r PROD_COLOR PROD_STATUS PROD_COMPLETED < <(ch "SELECT current_database_in_production, update_process_status, toString(time_of_last_update_process_completion) FROM ${MGMT_DB}.update_status WHERE portal_database = '${PORTAL_DATABASE}' FORMAT TSV")
 case "$PROD_COLOR" in blue | green) ;; *) log "FAIL: unexpected production color '$PROD_COLOR'"; exit 1 ;; esac
 SRC_DB=${SRC_PREFIX}${PROD_COLOR}
-log "production color=$PROD_COLOR, source=$SRC_DB"
+SNAPSHOT="$PROD_COLOR $PROD_COMPLETED"
+log "production color=$PROD_COLOR, status=$PROD_STATUS, last import completed $PROD_COMPLETED"
+
+# Keeps the served databases: state.env names them, so the switch step is a
+# no-op and the pods are not restarted.
+keep_active() {
+  log "$1; keeping ${ACTIVE_DB}"
+  mkdir -p "$WORKDIR"
+  printf 'CBIOPORTAL_DB=%s\nCBIOPORTAL_RAW_DB=%s\nCBIOPORTAL_REF_DB=%s\n' "$ACTIVE_DB" "${ACTIVE_DB}_raw" "${ACTIVE_DB}_ref" >"$WORKDIR/state.env"
+  exit 0
+}
+case "${ACTIVE_DB:-}" in
+  "${PREFIX}_blue" | "${PREFIX}_green")
+    [ "$PROD_STATUS" = complete ] || keep_active "production import in progress (status=$PROD_STATUS)"
+    built_from=""
+    if [ "$(ch "SELECT count() FROM system.tables WHERE database = '${ACTIVE_DB}_ref' AND name = '_go_mirror_source' FORMAT TSV")" = 1 ]; then
+      built_from=$(ch "SELECT any(snapshot) FROM \`${ACTIVE_DB}_ref\`._go_mirror_source FORMAT TSV")
+    fi
+    [ "$built_from" != "$SNAPSHOT" ] || keep_active "already built from $SNAPSHOT"
+    log "served databases built from '${built_from:-unknown}'; rebuilding from $SNAPSHOT"
+    ;;
+esac
 
 # 2) Target color: the one not being served.
 case "${ACTIVE_DB:-}" in
@@ -98,7 +125,10 @@ samples=$(ch "SELECT count() FROM \`$DB\`.sample_derived FORMAT TSV")
 [ "$samples" -gt 0 ] || { log "FAIL: $DB has no samples"; exit 1; }
 log "sanity check: $samples samples in $DB"
 
-# 5) Hand over to the step that switches the API to the new color.
+# 5) Record the snapshot, then hand over to the step that switches the API to
+#    the new color.
+ch "CREATE TABLE \`$REF_DB\`._go_mirror_source (snapshot String, built_at DateTime DEFAULT now()) ENGINE = MergeTree ORDER BY tuple()" >/dev/null
+ch "INSERT INTO \`$REF_DB\`._go_mirror_source (snapshot) VALUES ('$SNAPSHOT')" >/dev/null
 mkdir -p "$WORKDIR"
 printf 'CBIOPORTAL_DB=%s\nCBIOPORTAL_RAW_DB=%s\nCBIOPORTAL_REF_DB=%s\n' "$DB" "$RAW_DB" "$REF_DB" >"$WORKDIR/state.env"
 log "done: CBIOPORTAL_DB=$DB"
