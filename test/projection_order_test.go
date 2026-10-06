@@ -142,8 +142,10 @@ func TestOracleProjectionFieldOrder(t *testing.T) {
 		// Clinical events: ID has neither dates nor attributes.
 		{"GET", "/api/studies/lgg_ucsf_2014_test_generic_assay/patients/P04/clinical-events?projection=ID&pageSize=1", "", nil,
 			"studyId,patientId,uniquePatientKey,eventType"},
-		{"GET", "/api/studies/lgg_ucsf_2014_test_generic_assay/patients/P04/clinical-events?projection=SUMMARY&pageSize=1", "", nil,
-			"studyId,patientId,uniquePatientKey,eventType,startNumberOfDaysSinceDiagnosis,attributes"},
+		// Sorted so the page holds the same event (one with an end date) on
+		// every database build.
+		{"GET", "/api/studies/lgg_ucsf_2014_test_generic_assay/patients/P04/clinical-events?projection=SUMMARY&pageSize=1&sortBy=endNumberOfDaysSinceDiagnosis&direction=DESC", "", nil,
+			"studyId,patientId,uniquePatientKey,eventType,startNumberOfDaysSinceDiagnosis,endNumberOfDaysSinceDiagnosis,attributes"},
 		// Molecular profiles: the DETAILED study follows showProfileInAnalysisTab.
 		{"POST", "/api/molecular-profiles/fetch?projection=SUMMARY", `{"molecularProfileIds":["lgg_ucsf_2014_test_generic_assay_hla"]}`, nil,
 			"molecularProfileId,studyId,molecularAlterationType,genericAssayType,datatype,name,description,showProfileInAnalysisTab,patientLevel"},
