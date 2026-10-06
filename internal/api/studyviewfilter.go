@@ -814,10 +814,16 @@ func filterEncloses(fv dataFilterValue, lo, hi float64, loInc, hiInc bool) bool 
 
 // mergeDataFilters joins consecutive numeric ranges of each filter
 // ((0,10] + (10,20] → (0,20]), keeping categorical values as-is
-// (DataFilterUtil.mergeDataFilters).
+// (DataFilterUtil.mergeDataFilters). Filters are merged only when all of them
+// are valid bin sequences (areValidFilters); otherwise none is.
 func mergeDataFilters[T any](filters []T, values func(*T) *[]dataFilterValue) []T {
 	out := make([]T, len(filters))
 	copy(out, filters)
+	for i := range out {
+		if !validBinSequence(*values(&out[i])) {
+			return out
+		}
+	}
 	for i := range out {
 		vals := values(&out[i])
 		for _, v := range *vals {
@@ -851,6 +857,47 @@ func mergeDataFilters[T any](filters []T, values func(*T) *[]dataFilterValue) []
 		*vals = append(merged, special...)
 	}
 	return out
+}
+
+// validBinSequence is DataFilterUtil.isValidFilter: a non-empty list whose
+// categorical values carry no range and whose ranges have start < end, starts
+// strictly increasing and not before the previous end, and ends strictly
+// increasing.
+func validBinSequence(vals []dataFilterValue) bool {
+	if len(vals) == 0 {
+		return false
+	}
+	num := func(n *json.Number) float64 {
+		f, _ := strconv.ParseFloat(string(*n), 64)
+		return f
+	}
+	var lastStart, lastEnd *float64
+	for _, v := range vals {
+		if v.Value != nil {
+			if v.Start != nil || v.End != nil {
+				return false
+			}
+		} else {
+			if v.Start != nil && v.End != nil && num(v.Start) >= num(v.End) {
+				return false
+			}
+			if v.Start != nil && ((lastStart != nil && *lastStart >= num(v.Start)) || (lastEnd != nil && num(v.Start) < *lastEnd)) {
+				return false
+			}
+			if v.End != nil && lastEnd != nil && *lastEnd >= num(v.End) {
+				return false
+			}
+		}
+		if v.Start != nil {
+			s := num(v.Start)
+			lastStart = &s
+		}
+		if v.End != nil {
+			e := num(v.End)
+			lastEnd = &e
+		}
+	}
+	return true
 }
 
 // withoutClinical returns a copy of the filter without the clinical filter on
