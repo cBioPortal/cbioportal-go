@@ -291,7 +291,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 				"toFloat64(count() OVER (PARTITION BY attr_id, v)) AS t, uniqExact(v) OVER (PARTITION BY attr_id) AS nd FROM (%s)"+
 				") GROUP BY attr_id, grp ORDER BY attr_id, grp",
 			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
-				func(col string) string { return "toFloat64OrNull(" + col + ") IS NOT NULL" }, idsByLevel(numeric))), args)
+				func(col string) string { return "match(" + col + ", " + args.str(decimalCreatable) + ")" }, idsByLevel(numeric))), args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -326,6 +326,13 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 
 	writeJSON(w, out)
 }
+
+// decimalCreatable matches the decimal numbers NumberUtils.isCreatable
+// accepts, the values ClinicalDataEnrichmentUtil tests ("nan", "inf" and
+// blank-padded values are not): decimal and scientific notation, and integers
+// with a leading zero only as octal literals. Hexadecimal literals and Java
+// type suffixes, which it also accepts, are left out.
+const decimalCreatable = `^[+-]?(0[0-7]+|(0|[1-9][0-9]*)([eE][+-]?[0-9]+)?|([0-9]+\.[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?)$`
 
 // compactSampleScope is a predicate over the sample view selecting the given
 // samples, written per study as sample_id IN <ids> so a study's sample ids
