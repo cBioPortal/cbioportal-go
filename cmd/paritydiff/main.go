@@ -195,6 +195,14 @@ func setOf(keys []string) map[string]bool {
 	return m
 }
 
+// cut returns s cut to max bytes (0: whole).
+func cut(s string, max int) string {
+	if max > 0 && len(s) > max {
+		return s[:max]
+	}
+	return s
+}
+
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 func main() {
@@ -209,6 +217,8 @@ func main() {
 	quiet := flag.Bool("q", false, "list only requests that are not identical")
 	report := flag.String("json", "", "also write the results as JSON to this file")
 	dump := flag.String("dump", "", "write both bodies of every non-identical response to this directory (<name>.a.json, <name>.b.json)")
+	dumpMax := flag.Int("dump-max", 0, "cut dumped bodies to this many bytes (0: whole)")
+	dumpUnexplained := flag.Bool("dump-unexplained", false, "dump only responses that differ without a known reason")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
 	retry := flag.Duration("retry", -1, "send requests that failed in transport or with 502/503/504 once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
@@ -257,12 +267,19 @@ func main() {
 			res.Body = res.Body[:200] + "…"
 		}
 		res.MillisA = msA
-		if *dump != "" && res.Outcome != identical && res.Outcome != failed {
-			if err := os.MkdirAll(*dump, 0o755); err != nil {
-				fatal(err)
+		if *dump != "" {
+			pathA, pathB := filepath.Join(*dump, rq.Name+".a.json"), filepath.Join(*dump, rq.Name+".b.json")
+			if res.Outcome == identical || res.Outcome == failed || (*dumpUnexplained && res.Outcome == known) {
+				// A retry that settles the request leaves no dump behind.
+				_ = os.Remove(pathA)
+				_ = os.Remove(pathB)
+			} else {
+				if err := os.MkdirAll(*dump, 0o755); err != nil {
+					fatal(err)
+				}
+				_ = os.WriteFile(pathA, []byte(cut(ra.Body, *dumpMax)), 0o644)
+				_ = os.WriteFile(pathB, []byte(cut(rb.Body, *dumpMax)), 0o644)
 			}
-			_ = os.WriteFile(filepath.Join(*dump, rq.Name+".a.json"), []byte(ra.Body), 0o644)
-			_ = os.WriteFile(filepath.Join(*dump, rq.Name+".b.json"), []byte(rb.Body), 0o644)
 		}
 		return res
 	}

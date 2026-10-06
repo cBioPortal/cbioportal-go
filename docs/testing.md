@@ -157,13 +157,16 @@ requests (`test/parity/logged_corpus.sh`: read-only endpoints only, each
 endpoint's share growing with the square root of its volume, at least 3,
 known differences marked; seeded by ISO week; written to the gitignored
 `.parity/nightly/corpus.txt`, mode 600, as it is real user traffic) at
-4 requests/s with a fresh paritydiff cache, and sends requests that failed
+most 4 requests/s without a response cache (a night's responses take
+several GB), and sends requests that failed
 in transport or with 502/503/504 once more after 2 minutes, so a pod
 rollout is not reported as a regression. `runs/<date>/report.md` records
 both deployments' `/api/info` versions and the outcome counts (identical,
 known, unexplained difference, status mismatch, error) and details the
 unexplained requests (request, body cut to 200 bytes, first diff lines),
-marking those new since the previous run; runs are kept 7 days. The exit
+marking those new since the previous run; `runs/<date>/dump` keeps both
+bodies of each unexplained request, cut to 1 MB (paritydiff `-dump
+-dump-unexplained -dump-max`). Runs are kept 14 days. The exit
 status is 1 when anything is unexplained.
 
 While anything is unexplained it keeps one issue open in this repository,

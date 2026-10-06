@@ -10,13 +10,15 @@
 #   --regen    regenerate the corpus first (also done when there is none)
 #   --dry-run  print the GitHub issue actions and body instead of running gh
 #
-# Read-only: the corpus holds no writing endpoints, B is sent at most RATE
-# requests per second, and the paritydiff cache of B's responses is fresh
-# each night (runs/<date>/cache), so every request reaches production.
+# Read-only: the corpus holds no writing endpoints and B is sent at most
+# RATE requests per second. Responses are not cached (a night's would take
+# several GB); only the bodies of the unexplained requests are kept, cut to
+# 1 MB each (runs/<date>/dump).
 #
 # Environment:
-#   PARITY_DIR  corpus.txt, runs/<date>/ (cache, results.json, output.txt,
-#               report.md, issue.md; runs older than 7 days are pruned) and
+#   PARITY_DIR  corpus.txt, runs/<date>/ (results.json, output.txt,
+#               report.md, issue.md, dump/; runs older than 14 days are
+#               pruned) and
 #               last-unexplained.txt; default .parity/nightly
 #   A, B        origins (default https://go.cbioportal.org, https://api.cbioportal.org)
 #   RATE        requests per second to B (default 4)
@@ -58,7 +60,9 @@ mkdir -p "$DIR/runs" || die "cannot create $DIR"
 if [ -n "$regen" ] || [ ! -s "$CORPUS" ]; then
   "$ROOT/test/parity/logged_corpus.sh" "$CORPUS" || die "corpus generation failed"
 fi
-find "$DIR/runs" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +
+find "$DIR/runs" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
+# No response cache is kept: remove any left in a run directory.
+find "$DIR/runs" -mindepth 2 -maxdepth 2 -type d -name cache -exec rm -rf {} +
 rm -rf "$RUN"
 mkdir -p "$RUN"
 (cd "$ROOT" && go build -o "$DIR/bin/paritydiff" ./cmd/paritydiff) || die "building paritydiff failed"
@@ -77,7 +81,8 @@ VB="$(version "$B")"
 
 start=$(date +%s)
 "$DIR/bin/paritydiff" -corpus "$CORPUS" -a "$A" -b "$B" -ua "$UA" -rate "$RATE" \
-  -cache "$RUN/cache" -retry 2m -q -json "$RUN/results.json" >"$RUN/output.txt" 2>&1
+  -cache '' -retry 2m -q -json "$RUN/results.json" \
+  -dump "$RUN/dump" -dump-unexplained -dump-max 1000000 >"$RUN/output.txt" 2>&1
 rc=$?
 minutes=$(( ($(date +%s) - start + 59) / 60 ))
 [ -s "$RUN/results.json" ] || die "paritydiff wrote no results (exit $rc), see $RUN/output.txt"
