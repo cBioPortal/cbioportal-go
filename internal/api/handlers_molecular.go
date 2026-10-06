@@ -150,6 +150,43 @@ const mutationSelect = "SELECT study_id AS studyId, sample_id AS sampleId, hugo_
 // mutationOrder is MutationMapper's default ORDER BY.
 const mutationOrder = "molecular_profile_id, sample_id, toInt64OrNull(entrez_gene_id), protein_change"
 
+// mutationSortable are the MutationSortBy columns as SQL over
+// mutationSelect's columns computing the record's field (toMutation): MAF
+// strings read empty as NA, counts as javaCount. aminoAcidChange, which
+// Java's records leave null, orders nothing. keyword and the protein
+// positions are derived in Go, so their pages are sorted by pageList.
+var mutationSortable = map[string]string{
+	"entrezGeneId":     "entrezGeneId",
+	"center":           naSQL("center"),
+	"mutationStatus":   naSQL("mutationStatus"),
+	"validationStatus": naSQL("validationStatus"),
+	"tumorAltCount":    javaCountSQL("tumorAltCount"),
+	"tumorRefCount":    javaCountSQL("tumorRefCount"),
+	"normalAltCount":   javaCountSQL("normalAltCount"),
+	"normalRefCount":   javaCountSQL("normalRefCount"),
+	"aminoAcidChange":  "",
+	"startPosition":    "startPosition",
+	"endPosition":      "endPosition",
+	"referenceAllele":  naSQL("referenceAllele"),
+	"variantAllele":    "variantAllele",
+	"proteinChange":    "proteinChange",
+	"mutationType":     naSQL("mutationType"),
+	"ncbiBuild":        naSQL("ncbiBuild"),
+	"variantType":      naSQL("variantType"),
+	"refseqMrnaId":     naSQL("refseqMrnaId"),
+}
+
+// naSQL is naString in SQL.
+func naSQL(col string) string { return fmt.Sprintf("if(%s = '', 'NA', %s)", col, col) }
+
+// javaCountSQL is javaCount in SQL: the cell as a number, NaN as 0, clamped
+// to the Java int range and truncated; null when it is no number or -1.
+func javaCountSQL(col string) string {
+	f := fmt.Sprintf("toFloat64OrNull(trimBoth(%s))", col)
+	return fmt.Sprintf("nullIf(multiIf(isNull(%[1]s), -1, isNaN(%[1]s), 0, %[1]s >= 2147483647, 2147483647, "+
+		"%[1]s <= -2147483648, -2147483648, toInt64(%[1]s)), -1)", f)
+}
+
 type mutationRow struct {
 	StudyID           string `json:"studyId"`
 	SampleID          string `json:"sampleId"`
@@ -328,9 +365,29 @@ func projectionOf(r *http.Request) string {
 // mutationsWhere streams the mutations matching where, whose placeholders
 // are bound in args.
 func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs, limit int) {
+	if projectionOf(r) == "META" && limit == 0 {
+		// MutationMeta: the records and their distinct samples.
+		sql := fmt.Sprintf("SELECT count() AS n, uniqExact(studyId, sampleId) AS samples FROM (%s WHERE %s)", mutationSelect, where)
+		rows, err := ch.QueryP[struct {
+			N       uint64 `json:"n"`
+			Samples uint64 `json:"samples"`
+		}](s.CH, sql, args.params(sql))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		w.Header().Set("total-count", fmt.Sprint(rows[0].N))
+		w.Header().Set("sample-count", fmt.Sprint(rows[0].Samples))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", mutationSelect, where, mutationOrder)
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
+	} else {
+		// mutationOrder leaves ties (records of one gene and protein change in
+		// a sample).
+		sql = sqlStablePageQuery(r, mutationSortable, mutationSelect+" WHERE "+where, mutationOrder)
 	}
 	projection := projectionOf(r)
 	out := newJSONArray(w)

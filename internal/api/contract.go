@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -70,15 +71,46 @@ func (s *State) javaContract(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
+		// A successful array is reshaped element by element as it is written;
+		// anything else is kept whole.
+		var bw *bufio.Writer
+		var rs *reshaper
+		n := 0
+		rec := newElementWriter(func(h http.Header) bool {
+			if !shaped && nest == "" {
+				return false
+			}
+			rs = s.newReshaper(keep, shaped, nest)
+			maps.Copy(w.Header(), h)
+			w.Header().Del("Content-Length")
+			w.WriteHeader(http.StatusOK)
+			bw = bufio.NewWriterSize(w, 64<<10)
+			bw.WriteByte('[')
+			return true
+		}, func(el []byte) error {
+			if n > 0 {
+				bw.WriteByte(',')
+			}
+			n++
+			if !rs.object(bw, el) {
+				bw.Write(el)
+			}
+			_, err := bw.Write(nil) // the error of an earlier write, if any
+			return err
+		})
 		next.ServeHTTP(rec, r)
+		if rec.finish() {
+			bw.WriteString("]\n")
+			bw.Flush()
+			return
+		}
 		maps.Copy(w.Header(), rec.header)
 		if rec.status == http.StatusNotFound && rt.notFound != nil {
 			w.Header().Del("X-Content-Type-Options")
 			writeError(w, http.StatusNotFound, rt.notFound(vals))
 			return
 		}
-		body := rec.body.Bytes()
+		body := rec.raw.Bytes()
 		if rec.status == http.StatusOK && (shaped || nest != "") {
 			if out, ok := s.reshape(body, keep, shaped, nest); ok {
 				body = out
@@ -132,7 +164,14 @@ var (
 // paged is the projection / pageSize / pageNumber / sortBy / direction
 // parameter list of a Java list endpoint.
 func paged(projClass string, sort param) []param {
-	return []param{projectionParamOf(projClass), pageSizeParam, pageNumberParam, sort, directionParam}
+	return pagedMax(projClass, sort, maxPageSize)
+}
+
+// pagedMax is paged with an endpoint's own @Max page size.
+func pagedMax(projClass string, sort param, maxSize int) []param {
+	size := pageSizeParam
+	size.max = maxSize
+	return []param{projectionParamOf(projClass), size, pageNumberParam, sort, directionParam}
 }
 
 // checkParams converts the parameters in declaration order (the first
@@ -283,8 +322,20 @@ var (
 	molecularProfileSort = sortBy("MolecularProfileSortBy", "molecularProfileId", "molecularAlterationType", "datatype", "name", "description", "showProfileInAnalysisTab")
 	geneSort             = sortBy("GeneSortBy", "entrezGeneId", "hugoGeneSymbol", "type", "cytoband", "length")
 	genePanelSort        = sortBy("GenePanelSortBy", "genePanelId", "description")
-	clinicalDataType     = enumParam("clinicalDataType", "org.cbioportal.legacy.web.parameter.ClinicalDataType", "SAMPLE", "PATIENT")
-	geneIDType           = enumParam("geneIdType", "org.cbioportal.legacy.web.parameter.GeneIdType", "ENTREZ_GENE_ID", "HUGO_GENE_SYMBOL")
+	clinicalEventSort    = sortBy("ClinicalEventSortBy", "eventType", "startNumberOfDaysSinceDiagnosis", "endNumberOfDaysSinceDiagnosis")
+	mutationSort         = sortBy("MutationSortBy", "entrezGeneId", "center", "mutationStatus", "validationStatus",
+		"tumorAltCount", "tumorRefCount", "normalAltCount", "normalRefCount", "aminoAcidChange", "startPosition",
+		"endPosition", "referenceAllele", "variantAllele", "proteinChange", "mutationType", "ncbiBuild", "variantType",
+		"refseqMrnaId", "proteinPosStart", "proteinPosEnd", "keyword")
+	resourceDataSortParam       = sortBy("ResourceDataSortBy", "ResourceId", "url")
+	resourceDefinitionSortParam = sortBy("ResourceDefinitionSortBy", "resourceId", "displayName", "description", "resourceType",
+		"priority", "openByDefault", "studyId", "customMetaData")
+	copyNumberSegmentSort = sortBy("CopyNumberSegmentSortBy", "chromosome", "start", "end", "numberOfProbes", "segmentMean")
+	smgSort               = sortBy("SignificantlyMutatedGeneSortBy", "entrezGeneId", "hugoGeneSymbol", "rank", "numberOfMutations", "pValue", "qValue")
+	scnrSort              = sortBy("SignificantCopyNumberRegionSortBy", "chromosome", "cytoband", "widePeakStart", "widePeakEnd", "qValue", "amp")
+	resourceIDParam       = param{name: "resourceId", text: true}
+	clinicalDataType      = enumParam("clinicalDataType", "org.cbioportal.legacy.web.parameter.ClinicalDataType", "SAMPLE", "PATIENT")
+	geneIDType            = enumParam("geneIdType", "org.cbioportal.legacy.web.parameter.GeneIdType", "ENTREZ_GENE_ID", "HUGO_GENE_SYMBOL")
 )
 
 func pathValue(key string, msg func(string) string) func(map[string]string) string {
@@ -340,14 +391,32 @@ var contractRoutes = []contractRoute{
 	{method: "POST", pattern: "/api/studies/{studyId}/clinical-data/fetch", params: []param{clinicalDataType, projectionParamOf(legacyProjection)}, exists: []string{"study"}},
 	{method: "POST", pattern: "/api/clinical-data/fetch", params: []param{clinicalDataType, projectionParamOf(legacyProjection)}},
 
+	// Clinical events (the study's list has its own page size bound).
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", params: paged(legacyProjection, clinicalEventSort)},
+	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
+
+	// Resources, copy-number segments, significance lists.
+	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-data", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-data-all", params: append([]param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...)},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-definitions", params: paged(legacyProjection, resourceDefinitionSortParam)},
+	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/copy-number-segments",
+		params: append([]param{{name: "chromosome", text: true}}, pagedMax(legacyProjection, copyNumberSegmentSort, 20000)...)},
+	{method: "GET", pattern: "/api/studies/{studyId}/significantly-mutated-genes", params: paged(legacyProjection, smgSort)},
+	{method: "GET", pattern: "/api/studies/{studyId}/significant-copy-number-regions", params: paged(legacyProjection, scnrSort)},
+
 	// Molecular profiles.
 	{method: "GET", pattern: "/api/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), shape: molecularProfileShape, nest: "study"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}", exists: []string{"profile"}, fixed: "DETAILED", shape: molecularProfileShape, nest: "study"},
 	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study"},
 	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"},
-		params: []param{{name: "sampleListId", required: true, text: true}, {name: "entrezGeneId", required: true}}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations/fetch", exists: []string{"profile"}},
+		params: append([]param{{name: "sampleListId", required: true, text: true}, {name: "entrezGeneId", required: true}},
+			paged(legacyProjection, mutationSort)...)},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations/fetch", exists: []string{"profile"},
+		params: paged(legacyProjection, mutationSort)},
+	{method: "POST", pattern: "/api/mutations/fetch", params: paged(legacyProjection, mutationSort)},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"}},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number", exists: []string{"profile"}},
@@ -515,56 +584,78 @@ func (s *State) legacyStudies() map[string]json.RawMessage {
 	return out
 }
 
-// reshape rewrites a JSON object or array of objects: when shaped, objects
-// keep only the keep fields (in their order of appearance); when nest is
-// set, each object gains the legacy study of its studyId under that name.
-// ok is false when the body is not an object or array of objects.
-func (s *State) reshape(body []byte, keep []string, shaped bool, nest string) ([]byte, bool) {
-	kept := make(map[string]bool, len(keep))
+// reshaper rewrites JSON objects: when shaped, objects keep only the kept
+// fields (in their order of appearance); when nest is set, each object gains
+// the legacy study of its studyId under that name.
+type reshaper struct {
+	kept    map[string]bool
+	shaped  bool
+	nest    string
+	studies map[string]json.RawMessage
+	fields  []objectField
+}
+
+// byteWriter is a bytes.Buffer or a bufio.Writer.
+type byteWriter interface {
+	io.Writer
+	io.ByteWriter
+}
+
+func (s *State) newReshaper(keep []string, shaped bool, nest string) *reshaper {
+	rs := &reshaper{kept: make(map[string]bool, len(keep)), shaped: shaped, nest: nest}
 	for _, k := range keep {
-		kept[k] = true
+		rs.kept[k] = true
 	}
-	var studies map[string]json.RawMessage
 	if nest != "" {
-		studies = s.legacyStudies()
+		rs.studies = s.legacyStudies()
 	}
+	return rs
+}
+
+// object writes obj reshaped to out. It writes nothing and returns false
+// when obj is not a JSON object.
+func (rs *reshaper) object(out byteWriter, obj []byte) bool {
+	var ok bool
+	rs.fields, ok = objectFields(obj, rs.fields[:0])
+	if !ok {
+		return false
+	}
+	out.WriteByte('{')
+	n := 0
+	studyID := ""
+	for _, f := range rs.fields {
+		if rs.nest != "" && string(f.key) == "studyId" {
+			studyID = jsonStringValue(f.val)
+		}
+		if rs.shaped && !rs.kept[string(f.key)] {
+			continue
+		}
+		if n > 0 {
+			out.WriteByte(',')
+		}
+		out.Write(f.raw)
+		out.WriteByte(':')
+		out.Write(f.val)
+		n++
+	}
+	if st, ok := rs.studies[studyID]; ok && rs.nest != "" {
+		if n > 0 {
+			out.WriteByte(',')
+		}
+		fmt.Fprintf(out, "%q:", rs.nest)
+		out.Write(st)
+	}
+	out.WriteByte('}')
+	return true
+}
+
+// reshape rewrites a whole JSON object or array of objects as reshaper
+// does. ok is false when the body is not an object or array of objects.
+func (s *State) reshape(body []byte, keep []string, shaped bool, nest string) ([]byte, bool) {
+	rs := s.newReshaper(keep, shaped, nest)
 	var out bytes.Buffer
 	out.Grow(len(body))
-	var fields []objectField
-	writeObject := func(obj []byte) bool {
-		var ok bool
-		fields, ok = objectFields(obj, fields[:0])
-		if !ok {
-			return false
-		}
-		out.WriteByte('{')
-		n := 0
-		studyID := ""
-		for _, f := range fields {
-			if nest != "" && string(f.key) == "studyId" {
-				studyID = jsonStringValue(f.val)
-			}
-			if shaped && !kept[string(f.key)] {
-				continue
-			}
-			if n > 0 {
-				out.WriteByte(',')
-			}
-			out.Write(f.raw)
-			out.WriteByte(':')
-			out.Write(f.val)
-			n++
-		}
-		if st, ok := studies[studyID]; ok && nest != "" {
-			if n > 0 {
-				out.WriteByte(',')
-			}
-			fmt.Fprintf(&out, "%q:", nest)
-			out.Write(st)
-		}
-		out.WriteByte('}')
-		return true
-	}
+	writeObject := func(obj []byte) bool { return rs.object(&out, obj) }
 	b := bytes.TrimSpace(body)
 	switch {
 	case len(b) > 0 && b[0] == '{':

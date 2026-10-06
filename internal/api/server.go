@@ -285,6 +285,25 @@ func metaProjection(next http.Handler) http.Handler {
 	})
 }
 
+// writeMetaCount answers projection=META with the record count sql reads (a
+// row with n) as the total-count header, as metaProjection would count the
+// records. p holds sql's placeholder values.
+func writeMetaCount(w http.ResponseWriter, c *ch.Client, sql string, p ch.Params) {
+	rows, err := ch.QueryP[struct {
+		N uint64 `json:"n"`
+	}](c, sql, p)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var n uint64
+	if len(rows) > 0 {
+		n = rows[0].N
+	}
+	w.Header().Set("total-count", fmt.Sprint(n))
+	w.WriteHeader(http.StatusOK)
+}
+
 // metaCounter receives a handler's response for metaProjection. A successful
 // JSON array of objects without a total-count header is counted as it is
 // written (its elements and their distinct uniqueSampleKeys) and not kept, so

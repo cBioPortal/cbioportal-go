@@ -52,12 +52,14 @@ func toClinicalData(r *clinicalRow, patient bool) ClinicalData {
 // and attr_id. Sample rows carry their patient id. Rows are in
 // ClinicalDataMapper's order where the database carries internal ids: by the
 // internal id of their sample or patient, then attribute (the storage order
-// of clinical_sample / clinical_patient).
-func clinicalSQL(patient, importOrder bool, where string) string {
-	order := " ORDER BY studyId, id, clinicalAttributeId"
+// of clinical_sample / clinical_patient); a sorted page (ClinicalDataSortBy)
+// is read as sqlPageOrder orders it.
+func clinicalSQL(r *http.Request, patient, importOrder bool, where string) string {
+	def := "studyId, id, clinicalAttributeId"
 	if importOrder {
-		order = " ORDER BY c.internal_id, studyId, id, clinicalAttributeId"
+		def = "c.internal_id, studyId, id, clinicalAttributeId"
 	}
+	order := sqlPageOrder(r, clinicalDataSortable, def)
 	if patient {
 		return "SELECT c.study_id AS studyId, c.patient_id AS id, c.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 			"c.attr_value AS value FROM clinical_patient c WHERE " + where + order
@@ -66,6 +68,10 @@ func clinicalSQL(patient, importOrder bool, where string) string {
 		"c.attr_value AS value FROM (SELECT * FROM clinical_sample WHERE " + where + ") c " +
 		"LEFT JOIN sample s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
 }
+
+// clinicalDataSortable are the ClinicalDataSortBy columns (attrId,
+// attrValue) as clinicalSQL names them.
+var clinicalDataSortable = map[string]string{"clinicalAttributeId": "clinicalAttributeId", "value": "value"}
 
 // clinicalDataOut is a legacy ClinicalData record as Jackson writes it
 // (NON_NULL, see ClinicalDataMapper.selectSample / selectPatient): ID carries
@@ -111,7 +117,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		attrs = s.clinicalAttributes(studies)
 	}
 	out := newJSONArray(w)
-	sql := clinicalSQL(patient, s.importOrdered(), where)
+	sql := clinicalSQL(r, patient, s.importOrdered(), where)
 	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *clinicalRow) error {
 		d := toClinicalData(row, patient)
 		o := clinicalDataOut{

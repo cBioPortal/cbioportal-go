@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -191,19 +193,39 @@ func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &bufferedResponse{header: http.Header{}}
-		next.ServeHTTP(rec, r)
-		status := rec.status
-		if status == 0 {
-			status = http.StatusOK
-		}
 		keepAll := r.URL.Path == "/api/studies" && policy.showUnauthorized
-		body := rec.body.Bytes()
+		f := studyFilter{readable: func(study string) bool {
+			groups, ok := idx.groups[study]
+			return !ok || canRead(auth, study, groups)
+		}, keepAll: keepAll, studies: r.URL.Path == "/api/studies"}
+		// A successful array is filtered element by element as it is
+		// written, unless its total-count header must count the kept records.
+		var bw *bufio.Writer
+		rec := newElementWriter(func(h http.Header) bool {
+			if h.Get("total-count") != "" {
+				return false
+			}
+			maps.Copy(w.Header(), h)
+			w.Header().Del("Content-Length")
+			w.WriteHeader(http.StatusOK)
+			bw = bufio.NewWriterSize(w, 64<<10)
+			bw.WriteByte('[')
+			return true
+		}, func(el []byte) error {
+			f.record(bw, el)
+			_, err := bw.Write(nil) // the error of an earlier write, if any
+			return err
+		})
+		next.ServeHTTP(rec, r)
+		if rec.finish() {
+			bw.WriteByte(']')
+			bw.Flush()
+			return
+		}
+		status := rec.status
+		body := rec.raw.Bytes()
 		if status == http.StatusOK {
-			body = filterByStudy(body, func(study string) bool {
-				groups, ok := idx.groups[study]
-				return !ok || canRead(auth, study, groups)
-			}, keepAll, r.URL.Path == "/api/studies", rec.header)
+			body = filterByStudy(body, f.readable, keepAll, f.studies, rec.header)
 		}
 		for k, v := range rec.header {
 			w.Header()[k] = v
@@ -309,30 +331,45 @@ func filterByStudy(body []byte, readable func(string) bool, keepAll, studies boo
 	if json.Unmarshal(body, &records) != nil {
 		return body
 	}
+	f := studyFilter{readable: readable, keepAll: keepAll, studies: studies}
 	var out bytes.Buffer
 	out.WriteByte('[')
-	n := 0
 	for _, rec := range records {
-		var id struct {
-			StudyID string `json:"studyId"`
-		}
-		json.Unmarshal(rec, &id)
-		ok := id.StudyID == "" || readable(id.StudyID)
-		if !ok && !keepAll {
-			continue
-		}
-		if studies && !ok {
-			rec = bytes.Replace(rec, []byte(`"readPermission":true`), []byte(`"readPermission":false`), 1)
-		}
-		if n > 0 {
-			out.WriteByte(',')
-		}
-		out.Write(rec)
-		n++
+		f.record(&out, rec)
 	}
 	out.WriteByte(']')
 	if header.Get("total-count") != "" {
-		header.Set("total-count", strconv.Itoa(n))
+		header.Set("total-count", strconv.Itoa(f.n))
 	}
 	return out.Bytes()
+}
+
+// studyFilter writes the records of a list that the user may read.
+type studyFilter struct {
+	readable func(string) bool
+	// keepAll keeps unreadable records too; in study lists (studies) they
+	// are marked readPermission false.
+	keepAll, studies bool
+	n                int // records written
+}
+
+// record writes rec to out, after a comma unless it is the first, when it
+// is kept.
+func (f *studyFilter) record(out byteWriter, rec []byte) {
+	var id struct {
+		StudyID string `json:"studyId"`
+	}
+	json.Unmarshal(rec, &id)
+	ok := id.StudyID == "" || f.readable(id.StudyID)
+	if !ok && !f.keepAll {
+		return
+	}
+	if f.studies && !ok {
+		rec = bytes.Replace(rec, []byte(`"readPermission":true`), []byte(`"readPermission":false`), 1)
+	}
+	if f.n > 0 {
+		out.WriteByte(',')
+	}
+	out.Write(rec)
+	f.n++
 }

@@ -585,6 +585,11 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 			parts = append(parts, sel)
 		}
 	}
+	if projectionOf(r) == "META" && len(parts) > 0 {
+		sql := "SELECT count() AS n FROM (" + strings.Join(parts, " UNION ALL ") + ") WHERE " + javaNumericSQL("value")
+		writeMetaCount(w, s.CH, sql, args.params(sql))
+		return
+	}
 	out := newJSONArray(w)
 	if len(parts) == 0 {
 		out.finish(nil)

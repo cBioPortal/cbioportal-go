@@ -154,6 +154,16 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 // a whole profile can be millions of records.
 func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid string, f molecularDataFilter) {
 	projection := projectionOf(r)
+	if projection == "META" {
+		args := newArgs()
+		sel, _, ok := s.molecularDataSelect(args, mpid, f, "")
+		if !ok {
+			sel = "SELECT '' AS value WHERE 0"
+		}
+		sql := "SELECT count() AS n FROM (" + sel + ") WHERE " + javaNumericSQL("value")
+		writeMetaCount(w, s.CH, sql, args.params(sql))
+		return
+	}
 	out := newJSONArray(w)
 	err := s.molecularDataEach(mpid, f, func(d MolecularData) error {
 		if rec, ok := numericRecord(d, projection); ok {

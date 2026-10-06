@@ -50,7 +50,9 @@ func toSampleList(r sampleListRow) SampleList {
 // take their values from p, by stable id or, with byInternalID, in the order
 // of their internal ids (SampleListMapper.getSampleLists has no ORDER BY)
 // where the database carries them.
-func (s *State) sampleListsQuery(w http.ResponseWriter, where string, p ch.Params, byInternalID bool) {
+// The lists stream as they are read; a sorted page is read as sqlPageOrder
+// orders it.
+func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, where string, p ch.Params, byInternalID bool) {
 	sql := s.sampleListSelect()
 	if where != "" {
 		sql += " WHERE " + where
@@ -59,21 +61,23 @@ func (s *State) sampleListsQuery(w http.ResponseWriter, where string, p ch.Param
 	if byInternalID && s.modelHasColumn("sample_list", "list_internal_id") {
 		order = "any(list_internal_id), list_id"
 	}
-	sql += " GROUP BY study_id, list_id ORDER BY " + order
-	rows, err := ch.QueryP[sampleListRow](s.CH, sql, p)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]SampleList, len(rows))
-	for i, r := range rows {
-		out[i] = toSampleList(r)
-	}
-	writeJSON(w, out)
+	// Small blocks: a list carries up to every sample of its study.
+	sql += " GROUP BY study_id, list_id" + sqlPageOrder(r, sampleListSortable, order) + " SETTINGS max_block_size = 64"
+	out := newJSONArray(w)
+	err := ch.QueryEachP(s.CH, sql, p, func(row *sampleListRow) error {
+		return out.add(toSampleList(*row))
+	})
+	out.finish(err)
+}
+
+// sampleListSortable are the SampleListSortBy columns (stableId, category,
+// cancerStudyIdentifier, name, description) as sampleListSelect names them.
+var sampleListSortable = map[string]string{
+	"sampleListId": "list_id", "category": "category", "studyId": "study_id", "name": "name", "description": "description",
 }
 
 func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")}, false)
+	s.sampleListsQuery(w, r, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")}, false)
 }
 
 // sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
@@ -99,5 +103,5 @@ func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []SampleList{})
 		return
 	}
-	s.sampleListsQuery(w, "list_id IN {ids:Array(String)}", ch.Params{"ids": ids}, true)
+	s.sampleListsQuery(w, r, "list_id IN {ids:Array(String)}", ch.Params{"ids": ids}, true)
 }

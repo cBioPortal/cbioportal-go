@@ -381,29 +381,42 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 // all timeline events for the study as ClinicalEvent rows. Empty (typed) when the
 // study has no timeline data.
 func (s *State) studyClinicalEvents(w http.ResponseWriter, r *http.Request) {
-	s.writeClinicalEvents(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
+	s.writeClinicalEvents(w, r, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
 // patientClinicalEvents serves the patient-view timeline:
 // GET /api/studies/{studyId}/patients/{patientId}/clinical-events.
 func (s *State) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
-	s.writeClinicalEvents(w, "study_id = {study:String} AND patient_id = {patient:String}",
+	s.writeClinicalEvents(w, r, "study_id = {study:String} AND patient_id = {patient:String}",
 		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
 }
 
+// clinicalEventSortable are the ClinicalEventSortBy columns (eventType,
+// startDate, stopDate) as timelineSelect names them.
+var clinicalEventSortable = map[string]string{
+	"eventType": "eventType", "startNumberOfDaysSinceDiagnosis": "startDate", "endNumberOfDaysSinceDiagnosis": "stopDate",
+}
+
 // writeClinicalEvents streams the timeline events matching where, whose
-// placeholders take their values from p.
-func (s *State) writeClinicalEvents(w http.ResponseWriter, where string, p ch.Params) {
-	sel, order := s.timelineSelect()
-	if order == "" {
-		order = "patientId, startDate, eventType"
+// placeholders take their values from p; a sorted page is read as
+// sqlPageOrder orders it.
+func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, where string, p ch.Params) {
+	sel, def := s.timelineSelect()
+	if def == "" {
+		def = "patientId, startDate, eventType"
 	}
+	if projectionOf(r) == "META" {
+		writeMetaCount(w, s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s WHERE %s)", sel, where), p)
+		return
+	}
+	// Without clinical_event_id the order leaves ties.
+	query := sqlStablePageQuery(r, clinicalEventSortable, fmt.Sprintf("%s WHERE %s", sel, where), def)
 	// ImportTimelineData collects a staged event's attributes in a HashMap,
 	// so they are stored (and read back) in its iteration order; events of a
 	// production clone carry their stored order.
 	staged := !slices.Contains(s.rawColumns("timeline"), "event_attributes")
 	out := newJSONArray(w)
-	err := ch.QueryEachP(s.CH, fmt.Sprintf("%s WHERE %s ORDER BY %s", sel, where, order), p, func(row *timelineRow) error {
+	err := ch.QueryEachP(s.CH, query, p, func(row *timelineRow) error {
 		if staged {
 			row.Attrs = javaHashMapAttrs(row.Attrs)
 		}

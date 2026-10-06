@@ -129,8 +129,22 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 	}
 	alterations := cnaEventAlterations(eventType)
 	detailed := projection == "DETAILED"
-	out := newJSONArray(w)
+	if projection == "META" && !homdelOrAmpOnly(alterations) {
+		// The values discreteCopyNumberFromValues keeps: integers among the
+		// alterations.
+		args := newArgs()
+		sel, _, ok := s.molecularDataSelect(args, mpid, molecularDataFilter{
+			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, "")
+		if !ok {
+			sel = "SELECT '' AS value WHERE 0"
+		}
+		sql := fmt.Sprintf("SELECT count() AS n FROM (%s) WHERE match(value, '^[+-]?0*[0-9]{1,10}$') AND "+
+			"toInt64OrNull(replaceRegexpOne(value, '^[+]', '')) IN (%s)", sel, intListSQL(alterations))
+		writeMetaCount(w, s.CH, sql, args.params(sql))
+		return
+	}
 	if !homdelOrAmpOnly(alterations) {
+		out := newJSONArray(w)
 		out.finish(s.discreteCopyNumberFromValues(mpid, meta, molecularDataFilter{
 			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, alterations, detailed, func(d DiscreteCopyNumberData) error {
 			return out.add(d)
@@ -150,8 +164,7 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 		where += " AND c.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
 		p["list"] = sampleListID
 	}
-	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
-	err := ch.QueryEachP(s.CH, fmt.Sprintf(
+	sel := fmt.Sprintf(
 		"SELECT c.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"toInt64OrNull(c.entrez_gene_id) AS entrezGeneId, if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, c.hugo_symbol) AS hugoGeneSymbol, "+
 			"rg.type AS geneType, toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns, "+
@@ -160,7 +173,14 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			"FROM cna c LEFT JOIN sample sm "+
 			"ON c.study_id = sm.study_id AND c.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(c.entrez_gene_id) "+
-			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0 ORDER BY entrezGeneId, alteration, c.sample_id", where), p,
+			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0", where)
+	if projection == "META" {
+		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sel+")", p)
+		return
+	}
+	out := newJSONArray(w)
+	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
+	err := ch.QueryEachP(s.CH, sel+" ORDER BY entrezGeneId, alteration, c.sample_id", p,
 		func(r *discreteCnaRow) error {
 			// CnaUtil reads the driver columns with getPartString: empty is "NA".
 			d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, naString)

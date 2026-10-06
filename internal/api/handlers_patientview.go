@@ -10,7 +10,7 @@ import (
 // samplesOfPatient — GET /api/studies/{studyId}/patients/{patientId}/samples
 func (s *State) samplesOfPatient(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
-	s.writeSamples(w, "s.study_id = "+args.str(r.PathValue("studyId"))+" AND s.patient_id = "+args.str(r.PathValue("patientId")), args)
+	s.writeSamples(w, r, "s.study_id = "+args.str(r.PathValue("studyId"))+" AND s.patient_id = "+args.str(r.PathValue("patientId")), args)
 }
 
 // patientClinicalData — GET /api/studies/{studyId}/patients/{patientId}/clinical-data

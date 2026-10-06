@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
@@ -101,6 +102,15 @@ func javaTruncatedValueSQL(x string) string {
 }
 
 var javaDecimalRE = regexp.MustCompile(`^([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]+))?$`)
+
+// javaNumericSQL is the SQL condition javaDecimal accepts x on: a decimal
+// with at least one mantissa digit and an exponent in the int range.
+func javaNumericSQL(x string) string {
+	digits := fmt.Sprintf("extract(%s, '[eE][+-]?0*([0-9]+)$')", x)
+	return fmt.Sprintf("(match(%[1]s, '^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$') AND "+
+		"(NOT match(%[1]s, '[eE]') OR (length(%[2]s) <= 10 AND toInt64OrZero(%[2]s) <= "+
+		"if(extract(%[1]s, '[eE]([+-]?)') = '-', 2147483648, 2147483647))))", x, digits)
+}
 
 // javaDecimal parses s as MolecularDataController.filterNonNumberMolecularData
 // does (NumberUtils.isNumber, then new BigDecimal) and renders it the way

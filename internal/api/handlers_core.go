@@ -367,7 +367,7 @@ type Sample struct {
 
 func (s *State) samples(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
-	s.writeSamples(w, "s.study_id = "+args.str(r.PathValue("studyId")), args)
+	s.writeSamples(w, r, "s.study_id = "+args.str(r.PathValue("studyId")), args)
 }
 
 type identifier struct {
@@ -426,7 +426,7 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []Sample{})
 		return
 	}
-	s.writeSamples(w, where, args)
+	s.writeSamples(w, r, where, args)
 }
 
 // ---------- Patients ----------
@@ -449,15 +449,26 @@ func (s *State) patientOrder(r *http.Request) string {
 	return "patient_id, study_id"
 }
 
+// patientSortable is PatientSortBy's column (stableId).
+var patientSortable = map[string]string{"patientId": "patient_id"}
+
 func (s *State) patients(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY "+s.patientOrder(r),
-		ch.Params{"study": r.PathValue("studyId")})
-	if err != nil {
-		fail(w, err)
+	s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String}"+
+		sqlPageOrder(r, patientSortable, s.patientOrder(r)), ch.Params{"study": r.PathValue("studyId")})
+}
+
+// writePatientRows streams the patients sql selects, or counts them for
+// projection=META.
+func (s *State) writePatientRows(w http.ResponseWriter, r *http.Request, sql string, p ch.Params) {
+	if projectionOf(r) == "META" {
+		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sql+")", p)
 		return
 	}
-	writeJSON(w, toPatients(rows))
+	out := newJSONArray(w)
+	err := ch.QueryEachP(s.CH, sql, p, func(r *idRow) error {
+		return out.add(Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID)})
+	})
+	out.finish(err)
 }
 
 func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {

@@ -65,15 +65,36 @@ func toFullSample(r sampleFullRow) Sample {
 // sampleFullSelect builds the sample rows plus sampleType / sequenced / seg
 // flags for the given WHERE predicate over alias `s`.
 func sampleFullSelect(where string) string {
-	return sampleFullSelectOrdered(where, "s.study_id, s.sample_id")
+	return sampleFullSelectFrom(where) + " ORDER BY " + sampleDefaultOrder
 }
 
-func sampleFullSelectOrdered(where, order string) string {
+const sampleDefaultOrder = "s.study_id, s.sample_id"
+
+// sampleFullSelectFrom is sampleFullSelect without its ORDER BY.
+func sampleFullSelectFrom(where string) string {
 	return "SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId, " +
 		"ifNull(sd.sample_type, '') AS sampleType, toUInt8(ifNull(sd.sequenced, 0)) AS sequencedFlag, " +
 		"toUInt8(ifNull(sd.copy_number_segment_present, 0)) AS segFlag " +
 		"FROM sample s LEFT JOIN sample_derived sd ON sd.cancer_study_identifier = s.study_id AND sd.sample_stable_id = s.sample_id " +
-		"WHERE " + where + " ORDER BY " + order
+		"WHERE " + where
+}
+
+// sampleSortable are the SampleSortBy columns (stableId, sampleType) as
+// sampleFullSelect names them.
+var sampleSortable = map[string]string{"sampleId": "sampleId", "sampleType": "sampleType"}
+
+// writeSampleRows streams the samples sql selects, or counts them for
+// projection=META.
+func (s *State) writeSampleRows(w http.ResponseWriter, r *http.Request, sql string, args *sqlArgs) {
+	if projectionOf(r) == "META" {
+		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sql+")", args.params(sql))
+		return
+	}
+	out := newJSONArray(w)
+	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *sampleFullRow) error {
+		return out.add(toFullSample(*row))
+	})
+	out.finish(err)
 }
 
 // allSamples serves GET /api/samples (ClickhouseSampleMapper with a keyword):
@@ -83,24 +104,17 @@ func sampleFullSelectOrdered(where, order string) string {
 func (s *State) allSamples(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
 	conds := []string{"1"}
-	order := "s.study_id, s.sample_id"
+	order := sampleDefaultOrder
 	if q := r.URL.Query(); q.Has("keyword") {
 		kw := q.Get("keyword")
 		for term := range strings.SplitSeq(strings.TrimSpace(kw), " ") {
 			conds = append(conds, fmt.Sprintf("s.sample_id ILIKE concat('%%', %s, '%%')", args.str(term)))
 		}
-		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id", args.str(kw))
+		// A sample id in several studies: by study, which Java leaves
+		// unordered.
+		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id, s.study_id", args.str(kw))
 	}
-	rows, err := queryA[sampleFullRow](s.CH, sampleFullSelectOrdered(strings.Join(conds, " AND "), order), args)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]Sample, len(rows))
-	for i, r := range rows {
-		out[i] = toFullSample(r)
-	}
-	writeJSON(w, out)
+	s.writeSampleRows(w, r, sampleFullSelectFrom(strings.Join(conds, " AND "))+sqlPageOrder(r, sampleSortable, order), args)
 }
 
 // sampleInStudy — GET /api/studies/{studyId}/samples/{sampleId}. Single Sample.
@@ -128,25 +142,22 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	args := newArgs()
-	sql := "SELECT study_id AS studyId, patient_id AS patientId FROM patient ORDER BY " + s.patientOrder(r)
-	if q.Has("keyword") {
-		kw := q.Get("keyword")
-		var conds []string
-		for term := range strings.SplitSeq(kw, " ") {
-			t := args.str(term)
-			conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', %s, '%%') OR sm.sample_id LIKE concat('%%', %s, '%%'))", t, t))
-		}
-		sql = fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
-			"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
-			"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
-			strings.Join(conds, " AND "), args.str(kw))
-	}
-	rows, err := queryA[idRow](s.CH, sql, args)
-	if err != nil {
-		fail(w, err)
+	if !q.Has("keyword") {
+		s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM patient"+
+			sqlPageOrder(r, patientSortable, s.patientOrder(r)), nil)
 		return
 	}
-	writeJSON(w, toPatients(rows))
+	kw := q.Get("keyword")
+	var conds []string
+	for term := range strings.SplitSeq(kw, " ") {
+		t := args.str(term)
+		conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', %s, '%%') OR sm.sample_id LIKE concat('%%', %s, '%%'))", t, t))
+	}
+	sql := fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
+		"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
+		"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
+		strings.Join(conds, " AND "), args.str(kw))
+	s.writePatientRows(w, r, sql, args.params(sql))
 }
 
 // ---------- Bulk genes ----------
@@ -188,7 +199,7 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 
 // allSampleLists — GET /api/sample-lists. Returns []SampleList across studies.
 func (s *State) allSampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, "", nil, false)
+	s.sampleListsQuery(w, r, "", nil, false)
 }
 
 // sampleListSampleIDs — GET /api/sample-lists/{sampleListId}/sample-ids.
@@ -271,16 +282,7 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 
 // writeSamples writes the samples matching a predicate over the `sample` view
 // (aliased s), with type, sequenced and segment flags. where may hold
-// placeholders bound in args.
-func (s *State) writeSamples(w http.ResponseWriter, where string, args *sqlArgs) {
-	rows, err := queryA[sampleFullRow](s.CH, sampleFullSelect(where), args)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	out := make([]Sample, len(rows))
-	for i, r := range rows {
-		out[i] = toFullSample(r)
-	}
-	writeJSON(w, out)
+// placeholders bound in args. A sorted page is read as sqlPageOrder orders it.
+func (s *State) writeSamples(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs) {
+	s.writeSampleRows(w, r, sampleFullSelectFrom(where)+sqlPageOrder(r, sampleSortable, sampleDefaultOrder), args)
 }
