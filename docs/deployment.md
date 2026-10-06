@@ -158,6 +158,11 @@ production's internal ids (`internal_id`, `seg_id`, `list_internal_id`,
 `clinical_event_id`). Where Java attaches a single NA count (or bin) to an
 arbitrary gene or entity of a multi-filter study-view request, or appends
 panels to a shared list in `ProfiledCasesCounter`, results depend on Java's
-iteration order. Expression
+iteration order. Where Java's order is ClickHouse's alone, a page differs at
+its boundaries: the clinical tab's samples without a sort column (no ORDER BY;
+production itself answers different pages), a study's clinical data paged by
+internal id (the attributes of the boundary sample or patient), and the label
+of a case list or profile type merged across studies (the first in GROUP BY
+order). Expression
 enrichments of a TCGA PanCancer study take a few seconds, since
 genetic_alteration_derived is sorted by gene before profile.
