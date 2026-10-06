@@ -117,6 +117,9 @@ weekly.
   contract-test coverage.
 - [Benchmark](docs/benchmark.md) — go.cbioportal.org vs www.cbioportal.org:
   page speed, resource use, cost estimate.
+- [Rewrite method](docs/rewrite-method.md) — how the rewrite was built and
+  checked against the Java backend: Java as the spec, test layers, production
+  traffic replay, mirrored live traffic.
 - [Deployment](docs/deployment.md) — the container image and the daily
   datahub import behind go.cbioportal.org.
 

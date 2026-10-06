@@ -1,5 +1,7 @@
 # Benchmark: cbioportal-go vs the Java backend
 
+How the comparison and the rewrite were done: [Rewrite method](rewrite-method.md).
+
 ## Summary
 
 On the same live API requests (2026-10-06 05:00–15:20 UTC, www's non-browser
