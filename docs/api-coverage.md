@@ -2,7 +2,23 @@
 
 Endpoints of the Java backend ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) `master`, controllers under `org.cbioportal.legacy.web` and `org.cbioportal.application`) and their status here. Generated from the controllers' request mappings; `params` lists the projection, paging and other request parameters Java accepts.
 
-**188 endpoints** (method + path, aliases below not counted): 174 implemented, 0 stubs, 14 missing; 158 covered by tests (`Tested`).
+**190 endpoints** (method + path, aliases below not counted): 176 implemented, 0 stubs, 14 missing; 160 covered by tests (`Tested`).
+
+| Area | Endpoints | Implemented | Missing | Tested | Take `projection` | Take paging / sort |
+|---|---|---|---|---|---|---|
+| [Studies, cancer types, server info](#studies-cancer-types-server-info) | 9 | 9 | — | 9 | 3 | 3 |
+| [Patients, samples, sample lists](#patients-samples-sample-lists) | 14 | 14 | — | 12 | 10 | 7 |
+| [Clinical data, attributes, events](#clinical-data-attributes-events) | 13 | 13 | — | 11 | 10 | 7 |
+| [Molecular profiles and data](#molecular-profiles-and-data) | 27 | 27 | — | 26 | 16 | 8 |
+| [Generic assays](#generic-assays) | 6 | 6 | — | 6 | 6 | 1 |
+| [Genes, gene sets, reference genome](#genes-gene-sets-reference-genome) | 15 | 15 | — | 13 | 3 | 2 |
+| [Study view](#study-view) | 31 | 31 | — | 31 | 2 | 1 |
+| [Group comparison](#group-comparison) | 7 | 7 | — | 7 | — | — |
+| [Resources, MutSig / GISTIC](#resources-mutsig--gistic) | 9 | 9 | — | 9 | 8 | 7 |
+| [Sessions, virtual studies](#sessions-virtual-studies) | 14 | 14 | — | 14 | — | — |
+| [Authentication, data-access tokens](#authentication-data-access-tokens) | 10 | 9 | 1 | 7 | — | — |
+| [Portal, proxies, operations](#portal-proxies-operations) | 35 | 22 | 13 | 15 | — | — |
+| **Total** | **190** | **176** | **14** | **160** | **58** | **36** |
 
 The 33 `/api/legacy/…` and `/api/not-ready-yet/…` aliases (legacy MyBatis and unfinished column-store controllers) are served by the `/api/…` handler of the same name.
 

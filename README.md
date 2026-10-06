@@ -90,7 +90,7 @@ weekly.
   timestamps (and adds the filter's `uniqueStudyIds`).
 - **Importer coverage.** Tested on a handful of studies; needs validation
   against all of datahub and cbioportal-core's validator rules.
-- **API parity.** 174 of the Java backend's 188 endpoints are served (see
+- **API parity.** 176 of the Java backend's 190 endpoints are served (see
   [API coverage](docs/api-coverage.md)). Not served: the SAML login page,
   MatchMiner, the URL shortener and legacy proxies (unused by the frontend),
   MSK-internal entity translation, and `getexternalpage.json` (an open URL
