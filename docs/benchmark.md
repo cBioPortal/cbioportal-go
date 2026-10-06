@@ -17,8 +17,8 @@ traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-p
   their 2 GiB. Java's pool restarted 7 times on failed liveness probes.
 - **Pods:** go uses 48 vs 1,838 MiB per pod on average and a third of Java's
   CPU per request (0.11 vs 0.34 s).
-- **Cost:** all 21 Java backend pods across both AWS accounts take ≈ $1,270/month
-  of nodes; go would need ≈ $160 ([estimate](#cost-estimate)). www and api,
+- **Cost:** the 20 Java backend pods across both AWS accounts take ≈ $1,280/month
+  of nodes (≈ $1,500 with their Redis caches); go would need ≈ $160 ([estimate](#cost-estimate)). www and api,
   which go can replace today, are ≈ $500 of that.
 - **Parity:** 613 of 618 logged requests identical, 0 unexplained; the
   nightly job's first run had 65 unexplained of 5,009, being fixed.
@@ -181,20 +181,21 @@ environmental: www's saved sessions and a different frontend build.
 ## Cost estimate
 
 Java cBioPortal backends running on 2026-10-06 (blue/green: the serving color
-only) and the nodes they use, at on-demand us-east-1 list prices. Account
-203403084713 from the cluster; 666628074417 from its manifests (replicas and
-memory requests), priced at the same cost per requested GiB as 203403084713.
+only) and the nodes they run on, from both clusters, at on-demand us-east-1
+list prices.
 
 | Account | Portals (pods) | Memory request / limit | Node pools | ≈ $/month |
 |---|---|---|---|---|
 | 203403084713 | www (2), api (2), GENIE public (3) and private (3), containerized, master, public beta (1 each) | 78 / 142 GiB | 3 × r7g.xlarge, 3 × r7g.large, 2 × t4g.xlarge | 900 |
-| 666628074417 | MSK (2), MSK beta, private, SCLC, triage, staging (1 each) | 32 / 48 GiB | not visible here; at 203403084713's $/GiB | ≈ 370 |
-| **Total** | 21 pods | 110 / 190 GiB | | **≈ 1,270** |
+| 666628074417 | MSK (2), MSK beta, private, SCLC, triage, staging (1 each) | 32 / 48 GiB | 3 × r7g.large; 3 × t4g.large (SCLC, triage, dev) | 380 |
+| **Total** | 20 pods | 110 / 190 GiB | | **≈ 1,280** |
+
+Redis response caches add 2 × r7g.large (≈ $155) and 2 × t3.medium (≈ $60).
 
 go serves the same traffic at 48 MiB per pod on average (131 MiB peak, 2 GiB
 limit), so two replicas per portal for all of them fit on two r7g.large,
 ≈ $160/month: **≈ $1,100/month (≈ $13,000/year) less** on the application
-tier, plus the Redis response caches. Not included: ClickHouse Cloud, where go
+tier, ≈ $1,300/month (≈ $15,000/year) with the Redis caches. Not included: ClickHouse Cloud, where go
 costs 0.75–1.0× Java's CPU per request, and a load test at www's request rate.
 
 Most of these portals need features go does not have yet: SAML login (GENIE
