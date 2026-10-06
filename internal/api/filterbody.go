@@ -112,6 +112,11 @@ var (
 		return &filterSchema{props: []filterProp{ids, sizedProp("attributeIds", fStrings, 1, maxPageSize)},
 			order: []string{"identifiers", "attributeIds"}}
 	}()
+	// ClinicalDataSingleStudyFilter (ids sized by
+	// ClinicalDataController.CLINICAL_DATA_MAX_PAGE_SIZE).
+	clinicalDataSingleStudyFilterSchema = &filterSchema{
+		props: []filterProp{sizedProp("ids", fStrings, 1, maxPageSize), sizedProp("attributeIds", fStrings, 1, maxPageSize)},
+		order: []string{"ids", "attributeIds"}}
 	structuralVariantFilterSchema = func() *filterSchema {
 		s := profilesOrIdentifiers(0, []string{"eitherMolecularProfileIdsOrSampleMolecularIdentifiersPresent"},
 			sizedProp("entrezGeneIds", fInts, 0, maxPageSize), filterProp{name: "structuralVariantQueries", kind: fAnyArray})

@@ -1,11 +1,9 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 // apiAliasPrefixes are the path prefixes under which the Java backend serves
@@ -140,17 +138,4 @@ func isCacheStatsPath(path string) bool {
 // with persistence.cache_type=no-cache does not register CacheStatsController.
 func springNotFound(w http.ResponseWriter, r *http.Request) {
 	springError(w, r, http.StatusNotFound)
-}
-
-// springError writes Spring Boot's default error body for status.
-func springError(w http.ResponseWriter, r *http.Request, status int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	// Field order and the epoch-millisecond timestamp as Spring Boot writes them.
-	json.NewEncoder(w).Encode(struct {
-		Timestamp int64  `json:"timestamp"`
-		Status    int    `json:"status"`
-		Error     string `json:"error"`
-		Path      string `json:"path"`
-	}{time.Now().UnixMilli(), status, http.StatusText(status), r.URL.Path})
 }

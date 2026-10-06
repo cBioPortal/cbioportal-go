@@ -116,7 +116,8 @@ func NewState(c *ch.Client) *State {
 
 // NewRouter builds the API handler with CORS, the OAuth2 login, data access
 // tokens and study authorization (authenticate=oauth2), optional HS256
-// bearer-token auth (disabled by default), and a body-draining catch-all.
+// bearer-token auth (disabled by default), and a body-draining catch-all,
+// behind the request-target checks of Tomcat and Spring's firewall.
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -131,7 +132,7 @@ func NewRouter(s *State) http.Handler {
 		}
 		h = s.login.middleware(h)
 	}
-	return s.observe(cors(gzipResponse(gunzipBody(h))))
+	return s.observe(javaFirewall(cors(gzipResponse(gunzipBody(h)))))
 }
 
 // gunzipBody transparently decompresses gzip-encoded request bodies. The
