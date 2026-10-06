@@ -609,16 +609,25 @@ func (s *State) missing(kind string, v map[string]string) string {
 			return msgSampleNotFound(study, v["sampleId"])
 		}
 	case "sampleList":
-		if !s.rowExists("SELECT 1 FROM sample_list WHERE list_id = {list:String} LIMIT 1", ch.Params{"list": v["sampleListId"]}) {
+		if studies, ok := s.sampleListStudies(v["sampleListId"]); ok && len(studies) == 0 {
 			return msgSampleListNotFound(v["sampleListId"])
 		}
 	case "profile":
-		if !s.rowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1",
+		if !s.cachedRowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1",
 			ch.Params{"profile": v["molecularProfileId"]}) {
 			return msgMolecularProfileNotFound(v["molecularProfileId"])
 		}
 	}
 	return ""
+}
+
+// cachedRowExists is rowExists through the metadata cache.
+func (s *State) cachedRowExists(sql string, p ch.Params) bool {
+	type row struct {
+		One int `json:"one"`
+	}
+	rows, err := cachedQueryP[row](s, strings.Replace(sql, "SELECT 1 ", "SELECT 1 AS one ", 1), p)
+	return err != nil || len(rows) > 0
 }
 
 func (s *State) studyKnown(id string) bool {

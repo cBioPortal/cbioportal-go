@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -245,17 +246,60 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 	if len(f.SampleIDs) > 0 {
 		where += " AND sample_id IN " + args.strs(f.SampleIDs)
 	} else if f.SampleListID != "" {
-		where += " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
+		where += " AND sample_id IN " + s.sampleListMembersSQL(args, f.SampleListID)
+	}
+	// Every value row is of the profile's study, so only that study's
+	// samples (a key range) are joined; rows resolved through gene_key_map
+	// carry one of the requested genes, so only those are joined.
+	genes := "cbioportal_ref.gene"
+	if geneKeyMapSources[table] && len(f.EntrezGeneIDs) > 0 {
+		genes = "(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (" + intListSQL(f.EntrezGeneIDs) + "))"
 	}
 	return fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
 			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
 			"%s AS value%s FROM (%s) m "+
-			"LEFT JOIN sample s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
-			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = m.entrez "+
+			"LEFT JOIN (SELECT * FROM sample WHERE study_id = %s) s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
+			"LEFT JOIN %s rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL",
 		javaTruncatedValueSQL("m.value"), extra,
-		resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs)), meta, true
+		resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
+		args.str(meta.StudyID), genes), meta, true
+}
+
+// sampleListMembersSQL is a subquery of the sample ids in a sample list. It
+// names the list's studies so that the read is a range of sample_list's
+// (study_id, list_id, sample_id) key rather than a scan of every list.
+func (s *State) sampleListMembersSQL(args *sqlArgs, listID string) string {
+	studies, ok := s.sampleListStudies(listID)
+	if !ok {
+		return "(SELECT sample_id FROM sample_list WHERE list_id = " + args.str(listID) + ")"
+	}
+	if len(studies) == 0 {
+		return "(SELECT '' AS sample_id WHERE 0)"
+	}
+	return fmt.Sprintf("(SELECT sample_id FROM sample_list WHERE study_id IN %s AND list_id = %s)",
+		args.strs(studies), args.str(listID))
+}
+
+// sampleListStudies returns the studies whose sample_list rows carry a list
+// id (normally one), from a cached index of all lists; ok is false when the
+// index could not be read.
+func (s *State) sampleListStudies(listID string) (studies []string, ok bool) {
+	type listStudy struct {
+		ListID  string `json:"listId"`
+		StudyID string `json:"studyId"`
+	}
+	rows, err := cachedQuery[listStudy](s,
+		"SELECT DISTINCT list_id AS listId, study_id AS studyId FROM sample_list ORDER BY listId, studyId")
+	if err != nil {
+		return nil, false
+	}
+	i, _ := slices.BinarySearchFunc(rows, listID, func(r listStudy, id string) int { return strings.Compare(r.ListID, id) })
+	for ; i < len(rows) && rows[i].ListID == listID; i++ {
+		studies = append(studies, rows[i].StudyID)
+	}
+	return studies, true
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the
@@ -282,10 +326,9 @@ func resolvedEntrezSQL(args *sqlArgs, table, src string, meta profileMeta, where
 			table, args.str(meta.StudyID), args.str(meta.StableID))
 		if len(entrez) > 0 {
 			keyFilter += fmt.Sprintf(" AND resolved_entrez_gene_id IN (%s)", idList)
-			// The symbol condition alone is implied by the pair; it lets a
+			// Implied by the join on (hugo_symbol, entrez_gene_id); it lets a
 			// matrix sorted by symbol skip the other genes.
-			where += fmt.Sprintf(" AND hugo_symbol IN (SELECT hugo_symbol FROM gene_key_map WHERE %[1]s) "+
-				"AND (hugo_symbol, entrez_gene_id) IN (SELECT hugo_symbol, entrez_gene_id FROM gene_key_map WHERE %[1]s)", keyFilter)
+			where += fmt.Sprintf(" AND hugo_symbol IN (SELECT hugo_symbol FROM gene_key_map WHERE %s)", keyFilter)
 		}
 		return fmt.Sprintf("SELECT t.*, gk.resolved_entrez_gene_id AS entrez FROM (SELECT * FROM %s WHERE %s) t "+
 			"INNER JOIN (SELECT * FROM gene_key_map WHERE %s) gk "+
