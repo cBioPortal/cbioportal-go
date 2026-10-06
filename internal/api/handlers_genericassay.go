@@ -94,11 +94,11 @@ func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[str
 		parts = append(parts, fmt.Sprintf(
 			"SELECT s.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, %s AS value, "+
 				"%s AS molecularProfileId, %s AS studyId, %s AS sampleRank, en.o AS entityRank "+
-				"FROM (SELECT * FROM %s WHERE %s) m JOIN sample s ON s.study_id = m.study_id AND %s%s "+
+				"FROM (SELECT * FROM %s WHERE %s) m JOIN (SELECT * FROM sample WHERE study_id = %s) s ON s.study_id = m.study_id AND %s%s "+
 				"JOIN (SELECT entity_stable_id AS e, min(%s) AS o FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
 				"GROUP BY entity_stable_id) en ON en.e = m.entity_stable_id",
 			javaTruncatedValueSQL("m.value"), args.str(mpid), args.str(meta.StudyID), sampleRank,
-			genericAssaySource(s), where, join, sampleCond, s.rawFileOrder("generic_assay_matrix", ""), where))
+			genericAssaySource(s), where, args.str(meta.StudyID), join, sampleCond, s.rawFileOrder("generic_assay_matrix", ""), where))
 	}
 	if len(parts) == 0 {
 		return nil
@@ -145,8 +145,8 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 		type idRow struct {
 			SampleID string `json:"sampleId"`
 		}
-		rows, err := ch.QueryP[idRow](s.CH,
-			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String}", ch.Params{"list": f.SampleListID})
+		p := ch.Params{}
+		rows, err := ch.QueryP[idRow](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, f.SampleListID), p)
 		if err != nil {
 			fail(w, err)
 			return

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -265,41 +264,6 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 		javaTruncatedValueSQL("m.value"), extra,
 		resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
 		args.str(meta.StudyID), genes), meta, true
-}
-
-// sampleListMembersSQL is a subquery of the sample ids in a sample list. It
-// names the list's studies so that the read is a range of sample_list's
-// (study_id, list_id, sample_id) key rather than a scan of every list.
-func (s *State) sampleListMembersSQL(args *sqlArgs, listID string) string {
-	studies, ok := s.sampleListStudies(listID)
-	if !ok {
-		return "(SELECT sample_id FROM sample_list WHERE list_id = " + args.str(listID) + ")"
-	}
-	if len(studies) == 0 {
-		return "(SELECT '' AS sample_id WHERE 0)"
-	}
-	return fmt.Sprintf("(SELECT sample_id FROM sample_list WHERE study_id IN %s AND list_id = %s)",
-		args.strs(studies), args.str(listID))
-}
-
-// sampleListStudies returns the studies whose sample_list rows carry a list
-// id (normally one), from a cached index of all lists; ok is false when the
-// index could not be read.
-func (s *State) sampleListStudies(listID string) (studies []string, ok bool) {
-	type listStudy struct {
-		ListID  string `json:"listId"`
-		StudyID string `json:"studyId"`
-	}
-	rows, err := cachedQuery[listStudy](s,
-		"SELECT DISTINCT list_id AS listId, study_id AS studyId FROM sample_list ORDER BY listId, studyId")
-	if err != nil {
-		return nil, false
-	}
-	i, _ := slices.BinarySearchFunc(rows, listID, func(r listStudy, id string) int { return strings.Compare(r.ListID, id) })
-	for ; i < len(rows) && rows[i].ListID == listID; i++ {
-		studies = append(studies, rows[i].StudyID)
-	}
-	return studies, true
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the

@@ -144,8 +144,18 @@ const mutationSelect = "SELECT study_id AS studyId, sample_id AS sampleId, hugo_
 	"toFloat64OrNull(ascn_ccf_expected_copies_upper) AS ccfExpectedCopiesUpper, toFloat64OrNull(ascn_ccf_expected_copies) AS ccfExpectedCopies, " +
 	"ascn_clonal AS clonal, toInt64OrNull(ascn_minor_copy_number) AS minorCopyNumber, toInt64OrNull(ascn_expected_alt_copies) AS expectedAltCopies, " +
 	"toInt64OrNull(ascn_total_copy_number) AS totalCopyNumber FROM mutation " +
-	"LEFT JOIN (SELECT entrez_gene_id AS rg_entrez, hugo_gene_symbol AS rg_hugo, type AS rg_type FROM cbioportal_ref.gene) rg " +
+	"LEFT JOIN (SELECT entrez_gene_id AS rg_entrez, hugo_gene_symbol AS rg_hugo, type AS rg_type FROM cbioportal_ref.gene{genes}) rg " +
 	"ON rg.rg_entrez = toInt64OrNull(mutation.entrez_gene_id)"
+
+// mutationSelectFor is mutationSelect for records of the given genes (all
+// genes when none): only those genes' reference rows are joined.
+func mutationSelectFor(entrez []int64) string {
+	genes := ""
+	if len(entrez) > 0 {
+		genes = " WHERE entrez_gene_id IN (" + intListSQL(entrez) + ")"
+	}
+	return strings.Replace(mutationSelect, "{genes}", genes, 1)
+}
 
 // mutationOrder is MutationMapper's default ORDER BY.
 const mutationOrder = "molecular_profile_id, sample_id, toInt64OrNull(entrez_gene_id), protein_change"
@@ -363,11 +373,13 @@ func projectionOf(r *http.Request) string {
 }
 
 // mutationsWhere streams the mutations matching where, whose placeholders
-// are bound in args.
-func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs, limit int) {
+// are bound in args, and which holds the records to the entrez genes (all
+// genes when none).
+func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs, entrez []int64, limit int) {
+	sel := mutationSelectFor(entrez)
 	if projectionOf(r) == "META" && limit == 0 {
 		// MutationMeta: the records and their distinct samples.
-		sql := fmt.Sprintf("SELECT count() AS n, uniqExact(studyId, sampleId) AS samples FROM (%s WHERE %s)", mutationSelect, where)
+		sql := fmt.Sprintf("SELECT count() AS n, uniqExact(studyId, sampleId) AS samples FROM (%s WHERE %s)", sel, where)
 		rows, err := ch.QueryP[struct {
 			N       uint64 `json:"n"`
 			Samples uint64 `json:"samples"`
@@ -381,13 +393,13 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", mutationSelect, where, mutationOrder)
+	sql := fmt.Sprintf("%s WHERE %s ORDER BY %s", sel, where, mutationOrder)
 	if limit > 0 {
 		sql += fmt.Sprintf(" LIMIT %d", limit)
 	} else {
 		// mutationOrder leaves ties (records of one gene and protein change in
 		// a sample).
-		sql = sqlStablePageQuery(r, mutationSortable, mutationSelect+" WHERE "+where, mutationOrder)
+		sql = sqlStablePageQuery(r, mutationSortable, sel+" WHERE "+where, mutationOrder)
 	}
 	projection := projectionOf(r)
 	out := newJSONArray(w)
@@ -412,7 +424,7 @@ func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	}
 	args := newArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
-	where += sampleListClause(args, "sample_id", q.Get("sampleListId"))
+	where += s.sampleListClause(args, "sample_id", q.Get("sampleListId"))
 	var entrez []int64
 	for _, e := range q["entrezGeneId"] {
 		if id, err := strconv.ParseInt(e, 10, 64); err == nil {
@@ -424,7 +436,7 @@ func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	if q.Get("sampleListId") == "" && len(entrez) == 0 {
 		limit = 100000
 	}
-	s.mutationsWhere(w, r, where, args, limit)
+	s.mutationsWhere(w, r, where, args, entrez, limit)
 }
 
 // profileMutationsClause selects a mutation profile's rows (a study can hold
@@ -435,11 +447,11 @@ func profileMutationsClause(a *sqlArgs, profileID string) string {
 
 // sampleListClause restricts col to the members of a sample list (no-op for
 // an empty list id).
-func sampleListClause(a *sqlArgs, col, listID string) string {
+func (s *State) sampleListClause(a *sqlArgs, col, listID string) string {
 	if listID == "" {
 		return ""
 	}
-	return fmt.Sprintf(" AND %s IN (SELECT sample_id FROM sample_list WHERE list_id = %s)", col, a.str(listID))
+	return fmt.Sprintf(" AND %s IN %s", col, s.sampleListMembersSQL(a, listID))
 }
 
 type mutationFilter struct {
@@ -477,10 +489,10 @@ func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	if len(f.SampleIDs) > 0 {
 		where += " AND sample_id IN " + args.strs(f.SampleIDs)
 	} else {
-		where += sampleListClause(args, "sample_id", f.SampleListID)
+		where += s.sampleListClause(args, "sample_id", f.SampleListID)
 	}
 	where += geneFilter(f.EntrezGeneIDs)
-	s.mutationsWhere(w, r, where, args, 0)
+	s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 }
 
 func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
@@ -496,7 +508,7 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 			triples[i] = [3]string{profileStudy(id.MolecularProfileID), id.MolecularProfileID, id.SampleID}
 		}
 		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN %s%s", args.triples(triples), geneFilter(f.EntrezGeneIDs))
-		s.mutationsWhere(w, r, where, args, 0)
+		s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 		return
 	}
 	if len(f.MolecularProfileIDs) > 0 {
@@ -506,7 +518,7 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		where := fmt.Sprintf("study_id IN %s AND molecular_profile_id IN %s%s",
 			args.strs(studies), args.strs(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))
-		s.mutationsWhere(w, r, where, args, 0)
+		s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 		return
 	}
 	writeJSON(w, []Mutation{})

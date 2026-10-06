@@ -1,7 +1,10 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
@@ -83,8 +86,9 @@ func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
 // sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
 func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect()+" WHERE list_id = {list:String} GROUP BY study_id, list_id",
-		ch.Params{"list": id})
+	p := ch.Params{}
+	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect()+" WHERE "+s.sampleListCondP(p, id)+
+		" GROUP BY study_id, list_id", p)
 	if err != nil {
 		fail(w, err)
 		return
@@ -103,5 +107,85 @@ func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []SampleList{})
 		return
 	}
-	s.sampleListsQuery(w, r, "list_id IN {ids:Array(String)}", ch.Params{"ids": ids}, true)
+	p := ch.Params{"ids": ids}
+	s.sampleListsQuery(w, r, s.listStudyCondP(p, "study_id", ids...)+"list_id IN {ids:Array(String)}", p, true)
+}
+
+// sampleListMembersSQL is a subquery of the sample ids in a sample list,
+// read through sample_list's (study_id, list_id, sample_id) key.
+func (s *State) sampleListMembersSQL(args *sqlArgs, listID string) string {
+	return fmt.Sprintf("(SELECT sample_id FROM sample_list WHERE %slist_id = %s)",
+		s.listStudyCondA(args, "study_id", listID), args.str(listID))
+}
+
+// sampleListMembersP is sampleListMembersSQL with the list bound in p as
+// {list:String}.
+func (s *State) sampleListMembersP(p ch.Params, listID string) string {
+	return "(SELECT sample_id FROM sample_list WHERE " + s.sampleListCondP(p, listID) + ")"
+}
+
+// sampleListCondP selects a list's sample_list rows by key, the list bound in
+// p as {list:String}.
+func (s *State) sampleListCondP(p ch.Params, listID string) string {
+	p["list"] = listID
+	return s.listStudyCondP(p, "study_id", listID) + "list_id = {list:String}"
+}
+
+// listStudyCondA is "<col> IN <the lists' studies> AND ", the key prefix of
+// a sample_list read of these lists, with the studies bound in args; empty
+// when the list index cannot be read.
+func (s *State) listStudyCondA(args *sqlArgs, col string, listIDs ...string) string {
+	studies, ok := s.sampleListsStudies(listIDs)
+	if !ok {
+		return ""
+	}
+	return col + " IN " + args.strs(studies) + " AND "
+}
+
+// listStudyCondP is listStudyCondA with the studies bound in p as
+// {listStudies:Array(String)}.
+func (s *State) listStudyCondP(p ch.Params, col string, listIDs ...string) string {
+	studies, ok := s.sampleListsStudies(listIDs)
+	if !ok {
+		return ""
+	}
+	if studies == nil {
+		studies = []string{}
+	}
+	p["listStudies"] = studies
+	return col + " IN {listStudies:Array(String)} AND "
+}
+
+// sampleListsStudies returns the sorted studies whose sample_list rows carry
+// any of the list ids; ok is false when the list index cannot be read.
+func (s *State) sampleListsStudies(listIDs []string) (studies []string, ok bool) {
+	for _, id := range listIDs {
+		st, ok := s.sampleListStudies(id)
+		if !ok {
+			return nil, false
+		}
+		studies = append(studies, st...)
+	}
+	slices.Sort(studies)
+	return slices.Compact(studies), true
+}
+
+// sampleListStudies returns the studies whose sample_list rows carry a list
+// id (normally one), from a cached index of all lists; ok is false when the
+// index could not be read.
+func (s *State) sampleListStudies(listID string) (studies []string, ok bool) {
+	type listStudy struct {
+		ListID  string `json:"listId"`
+		StudyID string `json:"studyId"`
+	}
+	rows, err := cachedQuery[listStudy](s,
+		"SELECT DISTINCT list_id AS listId, study_id AS studyId FROM sample_list ORDER BY listId, studyId")
+	if err != nil {
+		return nil, false
+	}
+	i, _ := slices.BinarySearchFunc(rows, listID, func(r listStudy, id string) int { return strings.Compare(r.ListID, id) })
+	for ; i < len(rows) && rows[i].ListID == listID; i++ {
+		studies = append(studies, rows[i].StudyID)
+	}
+	return studies, true
 }

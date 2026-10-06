@@ -420,8 +420,9 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		where = "(s.study_id, s.sample_id) IN " + args.pairs(pairs)
 	case len(f.SampleListIDs) > 0:
-		where = "(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id IN " +
-			args.strs(f.SampleListIDs) + ")"
+		where = s.listStudyCondA(args, "s.study_id", f.SampleListIDs...) +
+			"(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE " +
+			s.listStudyCondA(args, "study_id", f.SampleListIDs...) + "list_id IN " + args.strs(f.SampleListIDs) + ")"
 	default:
 		writeJSON(w, []Sample{})
 		return

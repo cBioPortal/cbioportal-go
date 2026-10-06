@@ -104,8 +104,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		sampleFilter = " AND sample_id IN {samples:Array(String)}"
 		p["samples"] = sampleIDs
 	} else if sampleListID != "" {
-		sampleFilter = " AND sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
-		p["list"] = sampleListID
+		sampleFilter = " AND sample_id IN " + s.sampleListMembersP(p, sampleListID)
 	}
 
 	querySub := fmt.Sprintf(

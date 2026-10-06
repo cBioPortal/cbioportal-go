@@ -162,15 +162,16 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 	where := fmt.Sprintf("c.study_id = {study:String} AND c.profile_stable_id = {profile:String} AND toInt64OrNull(c.alteration) IN (%s)",
 		intListSQL(alterations))
 	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID}
+	genes := "cbioportal_ref.gene"
 	if len(entrez) > 0 {
 		where += fmt.Sprintf(" AND toInt64OrNull(c.entrez_gene_id) IN (%s)", intListSQL(entrez))
+		genes = fmt.Sprintf("(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (%s))", intListSQL(entrez))
 	}
 	if len(sampleIDs) > 0 {
 		where += " AND c.sample_id IN {samples:Array(String)}"
 		p["samples"] = sampleIDs
 	} else if sampleListID != "" {
-		where += " AND c.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
-		p["list"] = sampleListID
+		where += " AND c.sample_id IN " + s.sampleListMembersP(p, sampleListID)
 	}
 	sel := fmt.Sprintf(
 		"SELECT c.sample_id AS sampleId, sm.patient_id AS patientId, "+
@@ -178,10 +179,10 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			"rg.type AS geneType, toInt64OrNull(c.alteration) AS alteration, c.namespace_columns AS namespaceColumns, "+
 			"c.cbp_driver AS driverFilter, c.cbp_driver_annotation AS driverFilterAnnotation, "+
 			"c.cbp_driver_tiers AS driverTiersFilter, c.cbp_driver_tiers_annotation AS driverTiersFilterAnnotation "+
-			"FROM cna c LEFT JOIN sample sm "+
+			"FROM cna c LEFT JOIN (SELECT * FROM sample WHERE study_id = {study:String}) sm "+
 			"ON c.study_id = sm.study_id AND c.sample_id = sm.sample_id "+
-			"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(c.entrez_gene_id) "+
-			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0", where)
+			"LEFT JOIN %s rg ON rg.entrez_gene_id = toInt64OrNull(c.entrez_gene_id) "+
+			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0", genes, where)
 	if projection == "META" {
 		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sel+")", p)
 		return
@@ -260,18 +261,19 @@ func (s *State) profileSampleCount(meta profileMeta, mpid string) int64 {
 		return s.countQuery("SELECT uniqExact(sample_id) AS n FROM cbioportal_raw.cna_discrete_long "+
 			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String}"+inStudy, p)
 	}
-	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM sample_profile WHERE molecular_profile_id = {mp:String}", p)
+	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM sample_profile "+
+		"WHERE study_id = {study:String} AND molecular_profile_id = {mp:String}", p)
 }
 
 // variantSampleCount is VariantCountServiceImpl.getNumberOfSamplesInMolecularProfile:
 // the size of the study's sequenced sample list, else the number of samples
 // with a mutation in the profile.
 func (s *State) variantSampleCount(meta profileMeta, mpid string) int64 {
-	p := ch.Params{"list": meta.StudyID + "_sequenced", "mp": mpid}
-	if n := s.countQuery("SELECT count() AS n FROM sample_list WHERE list_id = {list:String}", p); n > 0 {
+	p := ch.Params{"study": meta.StudyID, "mp": mpid}
+	if n := s.countQuery("SELECT count() AS n FROM sample_list WHERE "+s.sampleListCondP(p, meta.StudyID+"_sequenced"), p); n > 0 {
 		return n
 	}
-	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM mutation WHERE molecular_profile_id = {mp:String}", p)
+	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM mutation WHERE study_id = {study:String} AND molecular_profile_id = {mp:String}", p)
 }
 
 // countQuery runs a query returning one count column n; 0 on error.
@@ -416,8 +418,7 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		where += " AND m.sample_id IN {samples:Array(String)}"
 		p["samples"] = f.SampleIDs
 	} else if f.SampleListID != "" {
-		where += " AND m.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = {list:String})"
-		p["list"] = f.SampleListID
+		where += " AND m.sample_id IN " + s.sampleListMembersP(p, f.SampleListID)
 	}
 	// Substitution classes normalised to the pyrimidine strand (C/T reference).
 	classes := map[string]string{
@@ -432,7 +433,7 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		"SELECT m.sample_id AS sampleId, sm.patient_id AS patientId, "+
 			"countIf(%s) AS CtoT, countIf(%s) AS CtoG, countIf(%s) AS CtoA, "+
 			"countIf(%s) AS TtoC, countIf(%s) AS TtoG, countIf(%s) AS TtoA "+
-			"FROM mutation m LEFT JOIN sample sm "+
+			"FROM mutation m LEFT JOIN (SELECT * FROM sample WHERE study_id = {study:String}) sm "+
 			"ON m.study_id = sm.study_id AND m.sample_id = sm.sample_id "+
 			"WHERE %s GROUP BY m.sample_id, sm.patient_id ORDER BY m.sample_id",
 		classes["CtoT"], classes["CtoG"], classes["CtoA"], classes["TtoC"], classes["TtoG"], classes["TtoA"], where), p)

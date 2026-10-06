@@ -201,7 +201,7 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 		rows, err := ch.QueryP[idRow](s.CH, fmt.Sprintf(
 			"SELECT sample_id AS sampleId, patient_id AS patientId FROM sample "+
 				"WHERE study_id = {study:String} AND %s IN {ids:Array(String)} "+
-				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE molecular_profile_id = {profile:String}) "+
+				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE study_id = {study:String} AND molecular_profile_id = {profile:String}) "+
 				"ORDER BY sample_id", idCol),
 			ch.Params{"study": studyID, "ids": all, "profile": profileID})
 		if err != nil {

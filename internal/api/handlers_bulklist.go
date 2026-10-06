@@ -212,9 +212,9 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 	if s.importOrdered() {
 		order = "internal_id, sample_id"
 	}
+	p := ch.Params{}
 	rows, err := ch.QueryP[row](s.CH,
-		"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String} ORDER BY "+order,
-		ch.Params{"list": r.PathValue("sampleListId")})
+		"SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, r.PathValue("sampleListId"))+" ORDER BY "+order, p)
 	if err != nil {
 		fail(w, err)
 		return

@@ -279,10 +279,11 @@ func (s *State) sampleListIDs(listID string) ([]string, bool) {
 	type row struct {
 		SampleID string `json:"sampleId"`
 	}
-	p := ch.Params{"list": listID}
-	rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String} ORDER BY sample_id", p)
+	p := ch.Params{}
+	cond := s.sampleListCondP(p, listID)
+	rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+cond+" ORDER BY sample_id", p)
 	if err != nil || len(rows) == 0 {
-		if err == nil && !s.rowExists("SELECT 1 FROM sample_list WHERE list_id = {list:String} LIMIT 1", p) {
+		if err == nil && !s.rowExists("SELECT 1 FROM sample_list WHERE "+cond+" LIMIT 1", p) {
 			return nil, false
 		}
 	}

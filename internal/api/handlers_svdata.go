@@ -160,7 +160,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		scope = "sv.study_id IN " + args.strs(studies)
 		if f.SampleListID != "" {
-			scope += " AND sv.sample_id IN (SELECT sample_id FROM sample_list WHERE list_id = " + args.str(f.SampleListID) + ")"
+			scope += " AND sv.sample_id IN " + s.sampleListMembersSQL(args, f.SampleListID)
 		}
 	default:
 		writeJSON(w, []StructuralVariant{})
@@ -392,8 +392,8 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 		type sr struct {
 			SampleID string `json:"sampleId"`
 		}
-		rows, _ := ch.QueryP[sr](s.CH,
-			"SELECT sample_id AS sampleId FROM sample_list WHERE list_id = {list:String}", ch.Params{"list": f.SampleListID})
+		p := ch.Params{}
+		rows, _ := ch.QueryP[sr](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, f.SampleListID), p)
 		for _, x := range rows {
 			samples = append(samples, x.SampleID)
 		}
@@ -472,7 +472,8 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 	}
 	members, _ := ch.QueryP[memberRow](s.CH,
 		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
-			"WHERE molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": profIDs})
+			"WHERE study_id IN {studies:Array(String)} AND molecular_profile_id IN {ids:Array(String)}",
+		ch.Params{"studies": studies, "ids": profIDs})
 	type membership struct{ panel string }
 	member := map[string]membership{}
 	for _, m := range members {
@@ -487,9 +488,10 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 	for i, st := range studies {
 		sequencedLists[i] = st + "_sequenced"
 	}
+	seqP := ch.Params{"ids": sequencedLists}
 	seqRows, _ := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId FROM sample_list WHERE list_id IN {ids:Array(String)}",
-		ch.Params{"ids": sequencedLists})
+		"SELECT study_id AS studyId, sample_id AS sampleId FROM sample_list WHERE "+
+			s.listStudyCondP(seqP, "study_id", sequencedLists...)+"list_id IN {ids:Array(String)}", seqP)
 	for _, r := range seqRows {
 		sequenced[jkey(r.StudyID, r.SampleID)] = true
 	}
