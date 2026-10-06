@@ -70,7 +70,66 @@ func (s *State) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	for i, a := range f.Attributes {
 		ids[i] = a.AttributeID
 	}
-	writeJSON(w, s.clinicalDataCounts(svf, ids))
+	writeJSON(w, s.clinicalDataCountsWithMissing(svf, ids))
+}
+
+// clinicalDataCountsWithMissing is GetClinicalDataCountsUseCase: the counts of
+// the attributes that have a value among the filtered cases and, when those
+// are fewer than the requested attribute ids (duplicates included), an NA
+// count for every involved study's definition of each attribute without one
+// (StudyViewColumnarServiceUtil.addClinicalDataCountsForMissingAttributes):
+// all filtered patients for a patient attribute, all filtered samples
+// otherwise, once per study defining it.
+func (s *State) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+	all := s.clinicalDataCounts(f, attrIDs)
+	out := []ClinicalDataCountItem{}
+	withData := map[string]bool{}
+	for _, item := range all {
+		for _, c := range item.Counts {
+			if c.Value != "NA" {
+				withData[item.AttributeID] = true
+				out = append(out, item)
+				break
+			}
+		}
+	}
+	studies := f.studyIDs()
+	if len(out) == len(attrIDs) || len(studies) == 0 {
+		return out
+	}
+	type defRow struct {
+		AttrID  string `json:"attrId"`
+		Patient uint8  `json:"patient"`
+	}
+	args := newArgs()
+	defs, err := queryA[defRow](s.CH, fmt.Sprintf(
+		"SELECT clinical_attribute_id AS attrId, toUInt8(patient_attribute = 1) AS patient FROM clinical_attribute_meta "+
+			"WHERE study_id IN %s AND clinical_attribute_id IN %s ORDER BY clinical_attribute_id, study_id",
+		args.strs(studies), args.strs(attrIDs)), args)
+	if err != nil {
+		return out
+	}
+	type c struct {
+		Samples  uint64 `json:"samples"`
+		Patients uint64 `json:"patients"`
+	}
+	n, _ := queryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM sample_derived WHERE "+
+		s.filterWhere(args, f), args)
+	var total c
+	if len(n) > 0 {
+		total = n[0]
+	}
+	for _, d := range defs {
+		if withData[d.AttrID] {
+			continue
+		}
+		count := total.Samples
+		if d.Patient == 1 {
+			count = total.Patients
+		}
+		out = append(out, ClinicalDataCountItem{AttributeID: d.AttrID, Counts: []ClinicalDataCount{{Value: "NA", Count: count}}})
+	}
+	return out
 }
 
 // clinicalDataCounts counts the values of each attribute over the filtered
