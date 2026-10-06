@@ -16,11 +16,14 @@ func TestExpect(t *testing.T) {
 		{"GET", "/api/info", "", "ignore=gitBranch"},
 		{"GET", "/api/v3/api-docs/public", "", "ignore=host,servers"},
 		{"GET", "/api/studies/", "", "known="},
-		{"GET", "/api/studies/acc_tcga", "", ""},
-		{"GET", "/api/studies/s/clinical-data?pageNumber=6&pageSize=200", "", ""},
+		{"GET", "/api/studies/acc_tcga", "", "ignore=resourceCounts"},
+		{"GET", "/api/studies/acc_tcga/samples", "", ""},
+		{"GET", "/api/studies/s/clinical-data?pageNumber=6&pageSize=200", "", "known="},
+		{"GET", "/api/studies/s/clinical-data?attributeId=AGE", "", ""},
 		{"GET", "/api/samples?keyword=ar&pageSize=3", "", "known="},
 		{"POST", "/api/clinical-data-table/fetch?pageSize=500&sortBy=X", "{}", "known="},
-		{"POST", "/api/clinical-data-table/fetch?pageSize=500", "{}", ""},
+		{"POST", "/api/clinical-data-table/fetch?pageSize=500", "{}", "known="},
+		{"POST", "/api/clinical-data-table/fetch", "{}", ""},
 		{"POST", "/api/molecular-profile-sample-counts/fetch", "{}", "ignore=label"},
 	} {
 		got, _ := expect(c.method, c.target, c.body)

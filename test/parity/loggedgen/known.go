@@ -30,6 +30,8 @@ var (
 	isInfo           = pathIs(`^/api/info$`)
 	isAPIDocs        = pathIs(`^/api/(v2|v3)/api-docs(/|$)`)
 	isStudyList      = pathIs(`^/api/studies/?$`)
+	isStudy          = pathIs(`^/api/studies/[^/]+/?$`)
+	isStudyClinical  = pathIs(`^/api/studies/[^/]+/clinical-data/?$`)
 	isStudiesFetch   = pathIs(`^/api/studies/fetch$`)
 	isSampleList     = pathIs(`^/api/samples/?$`)
 	isClinicalTable  = pathIs(`^/api/clinical-data-table/fetch$`)
@@ -67,6 +69,11 @@ var expectations = []expectation{
 		options: `known="www lists resource definitions of other studies sharing a resource id (CancerStudyMapper joins resource_definition on resource_id only)"`,
 	},
 	{
+		match:   func(m, p string, q url.Values, b string) bool { return m == "GET" && isStudy(p) },
+		options: "ignore=resourceCounts",
+		comment: "www counts resource definitions of other studies sharing a resource id (CancerStudyMapper joins resource_definition on resource_id only)",
+	},
+	{
 		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isStudiesFetch(p) },
 		options: `known="www legacy studies/fetch reports allSampleCount 1"`,
 	},
@@ -81,6 +88,18 @@ var expectations = []expectation{
 			return isClinicalTable(p) && q.Get("sortBy") != "" && q.Has("pageSize")
 		},
 		options: `known="Java orders by the sort value only; which of the tied samples fill the page is unspecified"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return isClinicalTable(p) && q.Get("sortBy") == "" && q.Has("pageSize")
+		},
+		options: `known="without sortBy Java's getVisibleSampleInternalIdsForClinicalTable has no ORDER BY, so which samples fill a page is unspecified (production answers a different page on repeated calls)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "GET" && isStudyClinical(p) && q.Has("pageSize")
+		},
+		options: `known="Java orders by the sample's or patient's internal id only; which of the attributes of the entity at a page boundary fall on the page follows ClickHouse's unstable sort"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return isProfileSamples(p) },

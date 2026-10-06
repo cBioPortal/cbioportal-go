@@ -156,7 +156,9 @@ on production traffic every day. It replays a corpus of ~5,000 logged
 requests (`test/parity/logged_corpus.sh`: read-only endpoints only, each
 endpoint's share growing with the square root of its volume, at least 3,
 known differences marked; seeded by ISO week; written to the gitignored
-`.parity/nightly/corpus.txt`, mode 600, as it is real user traffic) at
+`.parity/nightly/corpus.txt`, mode 600, as it is real user traffic; each
+run marks it again with `loggedgen -annotate`, so expectations added to
+`known.go` apply before the weekly regeneration) at
 most 4 requests/s without a response cache (a night's responses take
 several GB), and sends requests that failed
 in transport or with 502/503/504 once more after 2 minutes, so a pod

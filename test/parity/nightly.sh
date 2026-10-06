@@ -60,6 +60,15 @@ mkdir -p "$DIR/runs" || die "cannot create $DIR"
 if [ -n "$regen" ] || [ ! -s "$CORPUS" ]; then
   "$ROOT/test/parity/logged_corpus.sh" "$CORPUS" || die "corpus generation failed"
 fi
+# Expectations added since the corpus was written apply to it as well.
+annotated="$(mktemp "$CORPUS.XXXXXX")" || die "cannot write next to $CORPUS"
+chmod 600 "$annotated"
+if (cd "$ROOT" && go run ./test/parity/loggedgen -annotate) <"$CORPUS" >"$annotated"; then
+  mv "$annotated" "$CORPUS"
+else
+  rm -f "$annotated"
+  die "annotating the corpus failed"
+fi
 find "$DIR/runs" -mindepth 1 -maxdepth 1 -type d -mtime +14 -exec rm -rf {} +
 # No response cache is kept: remove any left in a run directory.
 find "$DIR/runs" -mindepth 2 -maxdepth 2 -type d -name cache -exec rm -rf {} +
