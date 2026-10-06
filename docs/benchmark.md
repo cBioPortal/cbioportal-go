@@ -3,25 +3,18 @@
 ## Summary
 
 On the same live API requests (2026-10-06 05:00–15:20 UTC, www's non-browser
-traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-production-traffic)),
-compared with 2026-10-05 before the fixes (streaming, Java's 400s, keyed
-reads, the molecular-data GET):
+traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-production-traffic)):
 
-- **Latency:** go now matches Java at the median (all `/api/`: 31 vs 34 ms;
-  91 vs 34 ms before) and keeps the lower tail (p95 296 vs 746 ms, p99 1.4
-  vs 6.0 s).
-- **Molecular data GET:** no longer a weak spot: p50 70 vs 61 ms, p99 408
-  vs 987 ms (before: 191 vs 40 ms); go reads 3.7 MB per single-gene query,
-  against 51 MB per request before and 21 MB for Java today.
-- **ClickHouse:** per request go now uses 0.75× Java's ClickHouse CPU and
-  0.71× the bytes read (≈ 1.0× for both up to 11:40), against 2.3× / 2.5×
-  before.
-- **Errors:** go returns Java's 400s: per-route 400 rates match within a
-  point, and go had no 5xx (Java 60). Left: Java's 400 for paths with `;`
-  (go: 404) and for some `POST /api/studies/{id}/clinical-data/fetch`.
-- **Stability:** no go OOMKills or restarts since the streaming rollout
-  (2026-10-05 21:30 UTC); go pods peaked at 131 MiB of their 2 GiB. Java's
-  pool restarted 7 times in the window on failed liveness probes.
+- **Latency:** go matches Java at the median (all `/api/`: 31 vs 34 ms) and
+  has the lower tail (p95 296 vs 746 ms, p99 1.4 vs 6.0 s); its p99 is lower
+  on every busy route.
+- **ClickHouse:** per request go uses 0.75× Java's ClickHouse CPU and 0.71×
+  the bytes read, without a response cache.
+- **Errors:** per-route 400 rates match Java's; go had no 5xx (Java 60).
+  Open: Java's 400 for paths ending in `;` (go: 404) and for some
+  `POST /api/studies/{id}/clinical-data/fetch` bodies.
+- **Stability:** no go restarts or OOMKills; go pods peaked at 131 MiB of
+  their 2 GiB. Java's pool restarted 7 times on failed liveness probes.
 - **Pods:** go uses 48 vs 1,838 MiB per pod on average and a third of Java's
   CPU per request (0.11 vs 0.34 s).
 - **Parity:** 613 of 618 logged requests identical, 0 unexplained; the
@@ -56,7 +49,6 @@ requests/s on Java this compares cost per request, not behaviour under load.
 
 | Window (UTC) | go image | Java requests | go requests |
 |---|---|---|---|
-| 2026-10-05 A 16:50–21:30 | `b5539a9`…`13d2f6b`: responses built in memory | 69,314 | 7,254 (10.5%) |
 | **2026-10-06 05:00–15:20** | `c41452c`…`b17328c`: all fixes live | 114,938 | 11,924 (10.6%) |
 
 The window ends at the weekly blue/green swap (15:20), which moved the
@@ -83,8 +75,7 @@ percentiles, all statuses; ms.
 | GET /api/studies/{id}/patients/{id}/clinical-data | 3,532 / 350 | 72 / 19 | 253 / 81 | 808 / 99 |
 | GET /api/studies | 3,013 / 367 | 24 / 27 | 234 / 327 | 3,925 / 789 |
 | POST …/discrete-copy-number/fetch | 2,290 / 237 | 88 / 87 | 2,154 / 659 | 7,011 / 2,187 |
-| All /api/, 2026-10-05 A | 65,099 / 6,832 | 34 / 91 | 310 / 508 | 2,429 / 1,224 |
-| **All /api/, 2026-10-06** | 105,695 / 11,209 | **34 / 31** | **746 / 296** | **5,974 / 1,437** |
+| **All /api/** | 105,695 / 11,209 | **34 / 31** | **746 / 296** | **5,974 / 1,437** |
 
 Java keeps the lower median on small repeated requests that Redis answers
 (mutations and molecular-data GETs, profile lists); go has the lower median
@@ -95,10 +86,9 @@ busy route.
 
 | Window | 2xx Java / go | 400 Java / go | 404 Java / go | 5xx Java / go |
 |---|---|---|---|---|
-| 2026-10-05 A | 94.9 / 95.6% | 2.4 / 2.3% | 2.4 / 2.1% | 35 / 0 |
 | 2026-10-06 | 90.7 / 91.1% | 3.5 / 2.9% | 4.8 / 5.4% | 60 (502, 500) / 0 |
 
-Per route the 400 rates now match (molecular-data GET 1.3 / 1.6%, mutations
+Per route the 400 rates match (molecular-data GET 1.3 / 1.6%, mutations
 GET 19.3 / 20.0%, mutations fetch 4.8 / 4.6%). The overall gap is paths
 ending in `;` (`/api/genes/lookup/ACSL1;`, 722 requests), which Java's
 firewall rejects with 400 and go answers 404, and `POST
@@ -113,12 +103,10 @@ requests exclude probes.
 
 | Window | CPU-s per request Java / go | Memory per pod, avg Java / go | Max pod Java / go | Restarts Java / go |
 |---|---|---|---|---|
-| 2026-10-05 A | 0.25 / 0.07 | 1,529 / 179 MiB | 6,690 / 1,900 MiB | 6 / 12 (OOMKilled) |
 | 2026-10-06 | 0.34 / 0.11 | 1,838 / 48 MiB | 6,810 / 131 MiB | 7 / 0 |
 
-Java's restarts were kills after failed liveness probes, not OOM; go has had
-no restart in any pod since 2026-10-05 21:30. go's CPU includes four
-rollouts in the window.
+Java's restarts were kills after failed liveness probes, not OOM. go's CPU
+includes four rollouts in the window.
 
 ## ClickHouse load per request
 
@@ -128,7 +116,6 @@ connection checks excluded.
 
 | Window | Queries Java / go | Bytes read Java / go | Query time Java / go | ClickHouse CPU Java / go |
 |---|---|---|---|---|
-| 2026-10-05 A | 0.68 / 1.91 | 22.1 / 56.1 MB | 67 / 131 ms | 74 / 172 ms (2.3×) |
 | 2026-10-06 | 0.65 / 1.66 | 54.7 / 39.1 MB | 83 / 93 ms | 131 / 99 ms (0.75×) |
 
 Up to 11:40 the two cost the same (CPU 0.96×, bytes 1.0×); Java's
