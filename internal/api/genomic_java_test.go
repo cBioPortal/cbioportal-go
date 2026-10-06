@@ -90,6 +90,15 @@ func TestJavaPartIntAndNamespaces(t *testing.T) {
 			t.Errorf("namespaceColumnsJSON(%q) should be absent", in)
 		}
 	}
+	for in, want := range map[string]string{
+		`{"N": {"Peptide": null, "HLA": null}}`:                   `{"N":{}}`,
+		`{"N": {"Peptide": "A<B", "HLA": null, "S": 1.50}}`:       `{"N":{"Peptide":"A<B","S":1.50}}`,
+		`{"N": {"x": [null, {"y": null, "z": true}]}, "M": null}`: `{"N":{"x":[null,{"z":true}]}}`,
+	} {
+		if got := string(namespaceColumnsJSON(in)); got != want {
+			t.Errorf("namespaceColumnsJSON(%s) = %s, want %s", in, got, want)
+		}
+	}
 	if string(namespaceColumnsJSON(`{"a":{"b":1}}`)) != `{"a":{"b":1}}` {
 		t.Error("namespace object not kept")
 	}

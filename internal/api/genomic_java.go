@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -51,13 +52,95 @@ func javaCount(s string) *int64 {
 
 // namespaceColumnsJSON is the annotation JSON of a record: absent (null) when
 // the record has no custom-namespace values, as NamespaceColumnParser stores
-// null for an empty namespace map.
+// null for an empty namespace map. Null map entries are left out, as Jackson's
+// NON_NULL inclusion drops them from Maps (a namespace whose columns are all
+// empty is written as {}).
 func namespaceColumnsJSON(s string) json.RawMessage {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "{}" || s == "null" || !json.Valid([]byte(s)) {
 		return nil
 	}
-	return json.RawMessage(s)
+	if !strings.Contains(s, "null") {
+		return json.RawMessage(s)
+	}
+	var b bytes.Buffer
+	if err := writeWithoutNullEntries(&b, json.NewDecoder(strings.NewReader(s))); err != nil {
+		return json.RawMessage(s)
+	}
+	return json.RawMessage(b.Bytes())
+}
+
+// writeWithoutNullEntries copies the next JSON value from dec to b, keeping
+// key order and leaving out object members whose value is null.
+func writeWithoutNullEntries(b *bytes.Buffer, dec *json.Decoder) error {
+	dec.UseNumber()
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch t := tok.(type) {
+	case json.Delim:
+		switch t {
+		case '{':
+			b.WriteByte('{')
+			first := true
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				var raw json.RawMessage
+				if err := dec.Decode(&raw); err != nil {
+					return err
+				}
+				if string(bytes.TrimSpace(raw)) == "null" {
+					continue
+				}
+				if !first {
+					b.WriteByte(',')
+				}
+				first = false
+				if err := writeJSONToken(b, keyTok); err != nil {
+					return err
+				}
+				b.WriteByte(':')
+				if err := writeWithoutNullEntries(b, json.NewDecoder(bytes.NewReader(raw))); err != nil {
+					return err
+				}
+			}
+			b.WriteByte('}')
+		case '[':
+			b.WriteByte('[')
+			for i := 0; dec.More(); i++ {
+				var raw json.RawMessage
+				if err := dec.Decode(&raw); err != nil {
+					return err
+				}
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				if err := writeWithoutNullEntries(b, json.NewDecoder(bytes.NewReader(raw))); err != nil {
+					return err
+				}
+			}
+			b.WriteByte(']')
+		}
+		_, err = dec.Token()
+		return err
+	default:
+		return writeJSONToken(b, t)
+	}
+}
+
+// writeJSONToken writes a scalar token without HTML escaping.
+func writeJSONToken(b *bytes.Buffer, tok json.Token) error {
+	enc := json.NewEncoder(b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(tok); err != nil {
+		return err
+	}
+	b.Truncate(b.Len() - 1) // Encode's newline
+	return nil
 }
 
 // driverAnnotation holds the alteration_driver_annotation columns of a
