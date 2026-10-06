@@ -13,8 +13,9 @@ A Go reimplementation of the cBioPortal backend — the study importer and the
 REST API — backed by ClickHouse, with the unmodified cBioPortal web frontend
 running on top.
 
-**Preview server:** <https://go.cbioportal.org> — a subset of public
-[datahub](https://github.com/cBioPortal/datahub) studies, re-imported daily.
+**Preview server:** <https://go.cbioportal.org> — the same data as
+www.cbioportal.org: a mirror of its production database, rebuilt within an
+hour of each production import.
 
 ```
 study files ──cbioportal-import──▶ ClickHouse ◀──cbioportal-api──▶ browser (API + frontend)
@@ -120,8 +121,8 @@ weekly.
 - [Rewrite method](docs/rewrite-method.md) — how the rewrite was built and
   checked against the Java backend: Java as the spec, test layers, production
   traffic replay, mirrored live traffic.
-- [Deployment](docs/deployment.md) — the container image and the daily
-  datahub import behind go.cbioportal.org.
+- [Deployment](docs/deployment.md) — the container image and the
+  production mirror behind go.cbioportal.org.
 
 ## License
 

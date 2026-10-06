@@ -74,7 +74,8 @@ redirect URI; the ingress sends `X-Forwarded-Proto: https`.
 
 [`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh) copies
 studies staged in a local ClickHouse to another ClickHouse and builds the
-portal database there — the way the preview is loaded today:
+portal database there, for a portal loaded from study files rather than
+mirrored from production:
 
 ```bash
 export CLICKHOUSE_URL=https://<host>:8443 CLICKHOUSE_USER=go_import
@@ -91,12 +92,14 @@ CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on them.
 
 ### Mirroring production
 
-[`deploy/mirror-prod.sh`](../deploy/mirror-prod.sh) is the daily job that
+[`deploy/mirror-prod.sh`](../deploy/mirror-prod.sh) is the hourly job that
 makes the preview serve exactly www.cbioportal.org's data, the same pattern as
 the LibreChat clone job:
 
-1. read the live production color from
-   `publicdb_update_management_database.update_status`;
+1. read the live production color and its last import from
+   `publicdb_update_management_database.update_status`; stop without changes
+   while an import is running or when the live Go color was already built
+   from that import (recorded in `<prefix>_<color>_ref._go_mirror_source`);
 2. empty the inactive Go color and zero-copy `CREATE TABLE … CLONE AS` every
    table of `cbioportal_public_<color>` (minus auth / credential tables) into
    `<prefix>_<color>_ref` (~20 s);
