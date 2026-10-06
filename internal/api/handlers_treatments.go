@@ -365,8 +365,8 @@ func (s *State) clinicalEventTypeCountsFetch(w http.ResponseWriter, r *http.Requ
 	args := newArgs()
 	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT event_type AS eventType, toInt64(uniqExact(patient_unique_id)) AS count FROM clinical_event_data_derived "+
-			"WHERE patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s) GROUP BY event_type ORDER BY event_type",
-		s.filterWhere(args, f)), args)
+			"WHERE %spatient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s) GROUP BY event_type ORDER BY event_type",
+		f.studyKey(args, "cancer_study_identifier"), s.filterWhere(args, f)), args)
 	out := make([]ClinicalEventTypeCount, len(rows))
 	for i, r := range rows {
 		out[i] = ClinicalEventTypeCount{EventType: r.EventType, Count: r.Count}

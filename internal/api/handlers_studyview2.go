@@ -67,14 +67,14 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		rows, err := queryA[countsRow](s.CH, fmt.Sprintf(
 			"WITH scope AS (%[1]s) SELECT gene, sum(m) AS mutated, sum(p) AS profiled FROM ("+
 				"SELECT hugo_gene_symbol AS gene, uniqExact(sample_unique_id) AS m, toUInt64(0) AS p FROM genomic_event_derived "+
-				"WHERE sample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN %[2]s "+
+				"WHERE %[3]ssample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN %[2]s "+
 				"AND variant_type = 'mutation' GROUP BY gene "+
 				"UNION ALL SELECT gpg.gene AS gene, toUInt64(0) AS m, uniqExact(sgp.sample_unique_id) AS p FROM sample_to_gene_panel_derived sgp "+
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
 				"WHERE sgp.sample_unique_id IN (SELECT sample_unique_id FROM scope) AND gpg.gene IN %[2]s "+
 				"AND sgp.alteration_type = 'MUTATION_EXTENDED' GROUP BY gene"+
 				") GROUP BY gene",
-			filtered, args.strs(genes)), args)
+			filtered, args.strs(genes), svf.studyKey(args, "cancer_study_identifier")), args)
 		if err != nil {
 			fail(w, err)
 			return
@@ -124,9 +124,9 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	rows, _ := queryA[typeRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
 			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM genomic_event_derived "+
-			"WHERE sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
+			"WHERE %ssample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
-		filtered, args.strs(genes)), args)
+		svf.studyKey(args, "cancer_study_identifier"), filtered, args.strs(genes)), args)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	for _, r := range rows {
@@ -156,8 +156,8 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
 				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'", filtered, gene)
 		mutated := fmt.Sprintf(
-			"SELECT sample_unique_id FROM genomic_event_derived WHERE sample_unique_id IN (%s) "+
-				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", filtered, gene)
+			"SELECT sample_unique_id FROM genomic_event_derived WHERE %ssample_unique_id IN (%s) "+
+				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", svf.studyKey(args, "cancer_study_identifier"), filtered, gene)
 		extra := []struct{ label, value, sql string }{
 			{"Not Mutated", "NOT_MUTATED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM (%s) WHERE sample_unique_id NOT IN (%s)", profiled, mutated)},
 			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM sample_derived WHERE cancer_study_identifier IN %s AND sample_unique_id NOT IN (%s)", args.strs(svf.studyIDs()), profiled)},
@@ -214,9 +214,10 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
 	rows, _ := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM genetic_alteration_derived "+
-			"WHERE NOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
+			"WHERE %sNOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, alteration_value ORDER BY hugo_gene_symbol, alteration_value",
-		isNASQL("assumeNotNull(alteration_value)"), args.str(profileType), s.filterSQL(args, svf), args.strs(genes)), args)
+		svf.studyKey(args, "cancer_study_identifier"), isNASQL("assumeNotNull(alteration_value)"), args.str(profileType),
+		s.filterSQL(args, svf), args.strs(genes)), args)
 	total := s.scopeSampleCount(svf)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string

@@ -80,11 +80,17 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	// resolves the groups' samples and patients inside ClickHouse.
 	args := newArgs()
 	var groupSelects []string
+	studySet := map[string]bool{}
 	for gi, g := range f.Groups {
 		groupSelects = append(groupSelects, fmt.Sprintf(
 			"SELECT toUInt32(%d) AS grp, study_id, sample_id, patient_id FROM sample WHERE %s",
 			gi, compactSampleScope(args, g.SampleIdentifiers)))
+		for _, id := range g.SampleIdentifiers {
+			studySet[id.StudyID] = true
+		}
 	}
+	// The groups' studies, the key range of the clinical tables they read.
+	studiesIn := args.strs(sortedKeys(studySet))
 	withGroups := "WITH group_samples AS (" + strings.Join(groupSelects, " UNION ALL ") + ") "
 
 	type groupRow struct {
@@ -176,25 +182,25 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if len(sampleIDs) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM group_samples g "+
-					"INNER JOIN clinical_sample c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
+					"INNER JOIN (SELECT * FROM clinical_sample WHERE study_id IN %s) c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), args.strs(sampleIDs), cond("c.attr_value")))
+				valueOf("c.attr_value"), studiesIn, args.strs(sampleIDs), cond("c.attr_value")))
 		}
 		groupPatients := "(SELECT DISTINCT grp, study_id, patient_id FROM group_samples)"
 		if p := ids[levelPatient]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
-					"INNER JOIN clinical_patient c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
+					"INNER JOIN (SELECT * FROM clinical_patient WHERE study_id IN %s) c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupPatients, args.strs(p), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupPatients, studiesIn, args.strs(p), cond("c.attr_value")))
 		}
 		if p := ids[levelConflicting]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
-					"INNER JOIN sample s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
-					"INNER JOIN clinical_patient c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
+					"INNER JOIN (SELECT * FROM sample WHERE study_id IN %s) s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
+					"INNER JOIN (SELECT * FROM clinical_patient WHERE study_id IN %s) c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupPatients, args.strs(p), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupPatients, studiesIn, studiesIn, args.strs(p), cond("c.attr_value")))
 		}
 		return strings.Join(parts, " UNION ALL ")
 	}
@@ -389,10 +395,10 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		// the sample and patient ids and attribute values.
 		like := args.str("%" + searchTerm + "%")
 		inner += fmt.Sprintf(
-			" AND (sample_id LIKE %s OR patient_id LIKE %s"+
-				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM clinical_sample WHERE attr_value LIKE %s)"+
-				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM clinical_patient WHERE attr_value LIKE %s))",
-			like, like, like, like)
+			" AND (sample_id LIKE %[1]s OR patient_id LIKE %[1]s"+
+				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM clinical_sample WHERE %[2]sattr_value LIKE %[1]s)"+
+				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM clinical_patient WHERE %[2]sattr_value LIKE %[1]s))",
+			like, f.studyKey(args, "study_id"))
 	}
 
 	// Total number of matching samples (before paging) -> total-count header.

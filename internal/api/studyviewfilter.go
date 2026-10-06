@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -133,6 +134,24 @@ func (f studyViewFilter) studyIDs() []string {
 	return out
 }
 
+// scopeStudies are the studies the filter's samples can belong to: its
+// studies and those of its sample identifiers, sorted.
+func (f studyViewFilter) scopeStudies() []string {
+	out := slices.Clone(f.StudyIDs)
+	for _, id := range f.SampleIdentifiers {
+		out = append(out, id.StudyID)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// studyKey is "<col> IN <scopeStudies> AND ": it holds a read of the
+// filtered samples' rows to their studies, the leading key of the study
+// tables and *_derived views.
+func (f studyViewFilter) studyKey(a *sqlArgs, col string) string {
+	return col + " IN " + a.strs(f.scopeStudies()) + " AND "
+}
+
 // hasSubFilters reports whether anything beyond the study/sample scope narrows
 // the selection.
 func (f studyViewFilter) hasSubFilters() bool {
@@ -151,7 +170,7 @@ func (f studyViewFilter) baseScope(a *sqlArgs) string {
 		for i, id := range f.SampleIdentifiers {
 			ids[i] = id.StudyID + "_" + id.id()
 		}
-		return "sample_unique_id IN " + a.strs(ids)
+		return f.studyKey(a, "cancer_study_identifier") + "sample_unique_id IN " + a.strs(ids)
 	}
 	if len(f.StudyIDs) > 0 {
 		return "cancer_study_identifier IN " + a.strs(f.StudyIDs)
@@ -907,7 +926,7 @@ func (s *State) sampleScope(a *sqlArgs, f studyViewFilter) string {
 		}
 		return falseClause
 	}
-	return fmt.Sprintf("concat(study_id, '_', sample_id) IN (%s)", s.filterSQL(a, f))
+	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.studyKey(a, "study_id"), s.filterSQL(a, f))
 }
 
 // sampleDerivedScope is the filter as a predicate over a *_derived view's

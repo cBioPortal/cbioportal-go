@@ -188,14 +188,20 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 	if unit == "patient_unique_id" {
 		countIf = "uniqExactIf(patient_unique_id, "
 	}
+	// genetic_alteration_derived leads its key with the study.
+	key := ""
+	if table == "genetic_alteration_derived" {
+		studies := studyViewFilter{StudyIDs: append(unfilteredScope.scopeStudies(), filteredScope.scopeStudies()...)}
+		key = studies.studyKey(args, "cancer_study_identifier")
+	}
 	rows, _ := queryA[row](s.CH, fmt.Sprintf(scopes+
 		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
-		"FROM %[3]s WHERE (%[1]s, profile_type) IN %[4]s AND NOT %[5]s "+
+		"FROM %[3]s WHERE %[7]s(%[1]s, profile_type) IN %[4]s AND NOT %[5]s "+
 		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
 		"GROUP BY key, profileType, value",
-		keyCol, valueCol, table, args.pairs(keys), naSQL, countIf), args)
+		keyCol, valueCol, table, args.pairs(keys), naSQL, countIf, key), args)
 	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
 		k := [2]string{r.Key, r.ProfileType}

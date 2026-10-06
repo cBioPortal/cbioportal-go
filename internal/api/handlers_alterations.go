@@ -227,9 +227,9 @@ func (s *State) geneCounts(args *sqlArgs, f studyViewFilter, variantType, altera
 	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS hugo, toInt64OrNull(toString(entrez_gene_id)) AS entrez, %s"+
 			"uniqExact(sample_unique_id) AS altered, uniqExactIf(sample_unique_id, off_panel = 0) AS onPanel, count() AS total "+
-			"FROM genomic_event_derived WHERE variant_type = '%s' AND sample_unique_id IN (%s) AND %s "+
+			"FROM genomic_event_derived WHERE %svariant_type = '%s' AND sample_unique_id IN (%s) AND %s "+
 			"GROUP BY %s ORDER BY total DESC, hugo ASC",
-		selectCNA, variantType, filtered, extra, groupCols), args)
+		selectCNA, f.studyKey(args, "cancer_study_identifier"), variantType, filtered, extra, groupCols), args)
 	if err != nil {
 		return nil, err
 	}
@@ -394,9 +394,9 @@ func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http
 	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT replaceOne(sp.molecular_profile_id, concat(sp.study_id, '_'), '') AS value, any(mp.name) AS label, count() AS count "+
 			"FROM sample_profile sp LEFT JOIN molecular_profile mp ON mp.molecular_profile_id = sp.molecular_profile_id "+
-			"WHERE concat(sp.study_id, '_', sp.sample_id) IN (%s) GROUP BY sp.molecular_profile_id, sp.study_id "+
+			"WHERE sp.study_id IN %s AND concat(sp.study_id, '_', sp.sample_id) IN (%s) GROUP BY sp.molecular_profile_id, sp.study_id "+
 			"ORDER BY sp.study_id, sp.molecular_profile_id",
-		s.filterSQL(args, f)), args)
+		args.strs(f.scopeStudies()), s.filterSQL(args, f)), args)
 	if err != nil {
 		fail(w, err)
 		return
@@ -484,9 +484,9 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		"SELECT site1_entrez_gene_id AS entrez1, any(site1_hugo_symbol) AS hugo1, site2_entrez_gene_id AS entrez2, "+
 			"any(site2_hugo_symbol) AS hugo2, uniqExact(study_id, sample_id) AS altered, count() AS total FROM ("+
 			"SELECT *, cbp_driver AS driver_filter, cbp_driver_tiers AS driver_tiers_filter, sv_status AS mutation_status "+
-			"FROM ("+svResolvedSQL+")) WHERE concat(study_id, '_', sample_id) IN (%s) AND %s "+
+			"FROM ("+svResolvedSQL+")) WHERE %sconcat(study_id, '_', sample_id) IN (%s) AND %s "+
 			"GROUP BY site1_entrez_gene_id, site2_entrez_gene_id ORDER BY total DESC, hugo1, hugo2",
-		filtered, joinPreds(a.driverClause(), a.statusClause())), args)
+		f.studyKey(args, "study_id"), filtered, joinPreds(a.driverClause(), a.statusClause())), args)
 	if err != nil {
 		fail(w, err)
 		return
