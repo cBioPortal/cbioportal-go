@@ -155,10 +155,16 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 		t := args.str(term)
 		conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', %s, '%%') OR sm.sample_id LIKE concat('%%', %s, '%%'))", t, t))
 	}
+	// Equal patient ids (one per study) come in the patient table's import
+	// order, as ClickHouse returns production's rows.
+	ties := "p.study_id, sm.sample_id"
+	if s.importOrdered() {
+		ties = "p.internal_id, sm.internal_id"
+	}
 	sql := fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
 		"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
-		"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, p.study_id, sm.sample_id",
-		strings.Join(conds, " AND "), args.str(kw))
+		"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, %s",
+		strings.Join(conds, " AND "), args.str(kw), ties)
 	s.writePatientRows(w, r, sql, args.params(sql))
 }
 
