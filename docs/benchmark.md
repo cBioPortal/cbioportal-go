@@ -2,29 +2,30 @@
 
 ## Summary
 
-On the same live API requests (2026-10-05, www's non-browser traffic
-mirrored 10% to go; details in [Mirrored production traffic](#mirrored-production-traffic)):
+On the same live API requests (2026-10-06 05:00–15:20 UTC, www's non-browser
+traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-production-traffic)),
+compared with 2026-10-05 before the fixes (streaming, Java's 400s, keyed
+reads, the molecular-data GET):
 
-- **Latency:** Java is faster at the median (all `/api/`: 34 vs 91 ms in
-  window A), mostly on small repeated requests that Redis answers; go has the
-  lower tail on most busy routes (all `/api/` p99: 1.2 vs 2.4 s).
-- **Weak spot:** `GET …/molecular-data` (a third of the traffic) is 5× slower
-  on go (p50 191 vs 40 ms): it reads the raw staging matrix, ≈ 40 MB per
-  request against ≈ 3.5 MB for Java.
-- **ClickHouse:** go costs 1.5–2.3× Java's ClickHouse CPU per request and
-  1.2–2.5× the bytes read.
-- **Stability:** go was OOMKilled 12 times before streaming; none since the
-  driver and streaming rollouts (21:30 UTC), with pods peaking at 0.4–1 GiB
-  of their 2 GiB. Java's pool restarted 6 times on failed liveness probes.
-- **Parity gaps:** go answers requests Java rejects with 400: a
-  `…/molecular-data` GET without `entrezGeneId` returns the whole profile
-  (16 million records, 174 MB, 72 s); `…/mutations/fetch` without exactly
-  one of `sampleListId`/`sampleIds` returns 200.
-- **Pods:** go runs at a tenth of Java's memory (60–330 MiB vs ≈ 1.5 GiB per
-  pod) and comparable CPU per request (0.07–0.38 vs 0.10–0.25 s; go's high
-  end is the whole-profile responses).
-- **Single uncached requests:** go matches or beats www's first response on
-  5 of 6 headline requests; www's repeats come from Redis.
+- **Latency:** go now matches Java at the median (all `/api/`: 31 vs 34 ms;
+  91 vs 34 ms before) and keeps the lower tail (p95 296 vs 746 ms, p99 1.4
+  vs 6.0 s).
+- **Molecular data GET:** no longer a weak spot: p50 70 vs 61 ms, p99 408
+  vs 987 ms (before: 191 vs 40 ms); go reads 3.7 MB per single-gene query,
+  against 51 MB per request before and 21 MB for Java today.
+- **ClickHouse:** per request go now uses 0.75× Java's ClickHouse CPU and
+  0.71× the bytes read (≈ 1.0× for both up to 11:40), against 2.3× / 2.5×
+  before.
+- **Errors:** go returns Java's 400s: per-route 400 rates match within a
+  point, and go had no 5xx (Java 60). Left: Java's 400 for paths with `;`
+  (go: 404) and for some `POST /api/studies/{id}/clinical-data/fetch`.
+- **Stability:** no go OOMKills or restarts since the streaming rollout
+  (2026-10-05 21:30 UTC); go pods peaked at 131 MiB of their 2 GiB. Java's
+  pool restarted 7 times in the window on failed liveness probes.
+- **Pods:** go uses 48 vs 1,838 MiB per pod on average and a third of Java's
+  CPU per request (0.11 vs 0.34 s).
+- **Parity:** 613 of 618 logged requests identical, 0 unexplained; the
+  nightly job's first run had 65 unexplained of 5,009, being fixed.
 
 ## Contents
 
@@ -34,7 +35,7 @@ mirrored 10% to go; details in [Mirrored production traffic](#mirrored-productio
 - [Pods: CPU, memory, restarts](#pods-cpu-memory-restarts)
 - [ClickHouse load per request](#clickhouse-load-per-request)
 - [Headline requests](#headline-requests)
-- [Parity on logged requests](#parity-on-logged-requests)
+- [Parity](#parity)
 - [Frontend e2e run](#frontend-e2e-run)
 - [Cost estimate](#cost-estimate)
 - [Code size](#code-size)
@@ -45,136 +46,131 @@ mirrored 10% to go; details in [Mirrored production traffic](#mirrored-productio
 |---|---|---|
 | Deployment | `cbioportal-backend-public-api-green`, 2 pods, `v7.1.2-web-shenandoah` | `cbioportal-go-api`, 2 pods, `cbioportal-go:latest` |
 | Memory request / limit | 4 / 7 GiB | 512 MiB / 2 GiB |
-| Response cache | Redis, 60 min TTL (`persistence.cache_type=redis`, `enable_persistent_cache=true`) | none (in-process metadata cache) |
-| Database | production DB | `dev_cbioportal_public_go_green`: same content, same ClickHouse service |
-| Requests | www's non-browser catch-all, plus api.cbioportal.org (≈ 1%) | 10% of the catch-all; responses discarded |
+| Response cache | Redis, 60 min TTL | none (in-process metadata cache) |
+| Database | production DB | same content, same ClickHouse service: `dev_cbioportal_public_go_green`, from 14:10 `dev_cbioportal_public_go_blue` (rebuilt with current code) |
+| Requests | www's non-browser catch-all, plus api.cbioportal.org (2%) | 10% of the catch-all; responses discarded |
 
 Traefik's `cbioportal-api-mirror-green` serves www's non-browser catch-all from
-the Java pool and copies 10% (POST bodies up to 1 MiB) to go, since 16:50 UTC
-(before that the mirror sat on api.cbioportal.org, ≈ 1,500 requests a day).
-Windows, split at go's rollouts:
+the Java pool and copies 10% to go. Browser traffic is not mirrored; at ≈ 3
+requests/s on Java this compares cost per request, not behaviour under load.
 
-| Window (UTC, 2026-10-05) | go image | Java requests | go requests |
+| Window (UTC) | go image | Java requests | go requests |
 |---|---|---|---|
-| **A** 16:50–21:30 | `b5539a9`, `6db788f`, `13d2f6b`: responses built in memory | 69,314 | 7,254 (10.5%) |
-| **B** 21:30–22:46 | `6419f10`, `5e7d317`: clickhouse-go driver, molecular data streamed | 31,526 | 3,196 (10.1%) |
-| **C** 22:46–23:30 | `b7ccfdf`, `186502c`: all large responses streamed | 7,550 | 852 (11.3%) |
+| 2026-10-05 A 16:50–21:30 | `b5539a9`…`13d2f6b`: responses built in memory | 69,314 | 7,254 (10.5%) |
+| **2026-10-06 05:00–15:20** | `c41452c`…`b17328c`: all fixes live | 114,938 | 11,924 (10.6%) |
 
-Coverage: 10–12% on every busy route, the same GET/POST/HEAD mix (79/18/3%);
-3 of 18,769 POSTs exceeded 1 MiB and were not mirrored. Browser traffic
-(≈ 15× the catch-all) is not mirrored. Traffic is light (≈ 4 requests/s on
-Java, 0.4 on go): this compares cost per request, not behaviour under load.
+The window ends at the weekly blue/green swap (15:20), which moved the
+catch-all to fresh `…-api-blue` pods. The mirror DB switch at 14:10 did not
+show in the numbers, so the window is not split.
 
 ## Latency by route
 
-Method: Java from Traefik's access log (`@OriginDuration`), go from its own
-(`duration_ms`); Datadog log percentiles, all statuses. Window A, ms:
+Method: Java from Traefik's access log (`@OriginDuration`, requests that
+reached the pool), go from its own (`duration_ms`); Datadog log
+percentiles, all statuses; ms.
 
 | Route | n Java / go | p50 Java / go | p95 Java / go | p99 Java / go |
 |---|---|---|---|---|
-| GET …/molecular-profiles/{id}/molecular-data | 21,538 / 2,158 | 40 / 191 | 163 / 686 | 342 / 1,437 |
-| GET …/molecular-profiles/{id}/mutations | 8,818 / 943 | 7.7 / 73 | 163 / 361 | 329 / 508 |
-| POST …/molecular-profiles/{id}/mutations/fetch | 4,800 / 493 | 52 / 50 | 732 / 302 | 3,552 / 743 |
-| GET /api/studies/{id}/molecular-profiles | 4,840 / 489 | 6.8 / 14 | 70 / 73 | 142 / 116 |
-| GET /api/studies/{id}/sample-lists | 3,564 / 367 | 18 / 18 | 195 / 54 | 1,387 / 136 |
-| GET /api/studies/{id}/clinical-data | 3,205 / 336 | 48 / 125 | 623 / 573 | 3,279 / 821 |
-| POST …/molecular-profiles/{id}/molecular-data/fetch | 1,967 / 241 | 119 / 228 | 23,748 / 1,495 | 39,154 / 3,606 |
-| GET /api/studies/{id}/samples | 1,858 / 187 | 34 / 36 | 154 / 162 | 462 / 273 |
-| POST /api/mutations/fetch | 1,329 / 137 | 91 / 76 | 378 / 233 | 1,049 / 550 |
-| POST /api/genes/fetch | 1,258 / 121 | 5.1 / 15 | 58 / 34 | 93 / 45 |
-| GET /api/studies | 1,035 / 135 | 21 / 25 | 394 / 518 | 3,481 / 1,620 |
-| POST …/discrete-copy-number/fetch | 941 / 105 | 188 / 169 | 2,029 / 2,276 | 8,393 / 6,312 |
-| **All /api/, window A** | 65,099 / 6,832 | **34 / 91** | **310 / 508** | **2,429 / 1,224** |
-| All /api/, window B | 30,501 / 3,107 | 6.9 / 15 | 216 / 206 | 1,415 / 758 |
-| All /api/, window C | 6,947 / 801 | 21 / 29 | 248 / 314 | 2,112 / 5,066 |
+| GET …/molecular-profiles/{id}/mutations | 13,500 / 1,377 | 28 / 36 | 121 / 141 | 675 / 296 |
+| GET …/molecular-profiles/{id}/molecular-data | 9,071 / 894 | 61 / 70 | 275 / 191 | 987 / 408 |
+| GET /api/studies/{id}/clinical-data | 8,409 / 777 | 116 / 39 | 858 / 314 | 6,095 / 573 |
+| GET /api/studies/{id}/molecular-profiles | 6,802 / 732 | 7.5 / 16 | 86 / 38 | 1,729 / 76 |
+| GET /api/genes/{id} | 6,160 / 679 | 8.0 / 7.6 | 60 / 32 | 139 / 66 |
+| POST …/molecular-profiles/{id}/mutations/fetch | 4,870 / 523 | 90 / 54 | 2,850 / 529 | 13,839 / 1,653 |
+| GET /api/studies/{id}/samples | 4,802 / 492 | 35 / 25 | 154 / 89 | 1,415 / 296 |
+| GET /api/molecular-profiles | 3,890 / 418 | 39 / 43 | 79 / 67 | 5,091 / 107 |
+| POST …/molecular-profiles/{id}/molecular-data/fetch | 3,823 / 426 | 192 / 183 | 26,245 / 12,712 | 39,945 / 22,704 |
+| GET /api/studies/{id}/patients/{id}/clinical-data | 3,532 / 350 | 72 / 19 | 253 / 81 | 808 / 99 |
+| GET /api/studies | 3,013 / 367 | 24 / 27 | 234 / 327 | 3,925 / 789 |
+| POST …/discrete-copy-number/fetch | 2,290 / 237 | 88 / 87 | 2,154 / 659 | 7,011 / 2,187 |
+| All /api/, 2026-10-05 A | 65,099 / 6,832 | 34 / 91 | 310 / 508 | 2,429 / 1,224 |
+| **All /api/, 2026-10-06** | 105,695 / 11,209 | **34 / 31** | **746 / 296** | **5,974 / 1,437** |
 
-Java's medians benefit from Redis; go pays a ClickHouse round trip
-(≈ 10–20 ms) on every request outside its metadata cache. go's p99 in window C
-is two whole-profile responses (see below). Window B's mix differs (one client
-sent ≈ 11,000 malformed `…/mutations` GETs), so compare within a window.
+Java keeps the lower median on small repeated requests that Redis answers
+(mutations and molecular-data GETs, profile lists); go has the lower median
+on clinical data, samples and the fetch routes, and the lower p99 on every
+busy route.
 
 ## Errors by status
 
 | Window | 2xx Java / go | 400 Java / go | 404 Java / go | 5xx Java / go |
 |---|---|---|---|---|
-| A | 94.9 / 95.6% | 2.4 / 2.3% | 2.4 / 2.1% | 35 (502, 500) / 0 |
-| B | 54.0 / 61.6% | 37.1 / 30.6% | 7.9 / 7.6% | 0 / 0 |
-| C | 73.4 / 74.8% | 11.3 / 11.4% | 14.3 / 13.6% | 0 / 0 |
+| 2026-10-05 A | 94.9 / 95.6% | 2.4 / 2.3% | 2.4 / 2.1% | 35 / 0 |
+| 2026-10-06 | 90.7 / 91.1% | 3.5 / 2.9% | 4.8 / 5.4% | 60 (502, 500) / 0 |
 
-go's lower 400 rate in B is parity gaps: Java rejected 1,635
-`…/mutations/fetch` requests (both or neither of `sampleListId`/`sampleIds`,
-or unknown JSON fields) that go answered, and go served whole profiles for
-`…/molecular-data` GETs without `entrezGeneId` (Java: 400 in 4 ms; go: 174 MB
-in ≈ 72 s, 2.1 GiB of ClickHouse memory). Requests cut off by go's OOMKills
-in window A are not in its log.
+Per route the 400 rates now match (molecular-data GET 1.3 / 1.6%, mutations
+GET 19.3 / 20.0%, mutations fetch 4.8 / 4.6%). The overall gap is paths
+ending in `;` (`/api/genes/lookup/ACSL1;`, 722 requests), which Java's
+firewall rejects with 400 and go answers 404, and `POST
+/api/studies/{id}/clinical-data/fetch`, where Java rejected 55 of 202 and go
+answered all 22 mirrored.
 
 ## Pods: CPU, memory, restarts
 
 Method: Datadog `kubernetes.cpu.usage.total` (sum over pods),
-`kubernetes.memory.usage`, `kubernetes_state.container.restarts`.
+`kubernetes.memory.usage`, `kubernetes_state.container.restarts`; go's
+requests exclude probes.
 
 | Window | CPU-s per request Java / go | Memory per pod, avg Java / go | Max pod Java / go | Restarts Java / go |
 |---|---|---|---|---|
-| A | 0.25 / 0.07 | 1,529 / 179 MiB | 6,690 / 1,900 MiB | 6 / 12 (OOMKilled) |
-| B | 0.10 / 0.12 | 1,371 / 331 MiB | 5,082 / 968 MiB | 0 / 0 |
-| C | 0.18 / 0.38 | 1,475 / 56 MiB | 4,110 / 400 MiB | 0 / 0 |
+| 2026-10-05 A | 0.25 / 0.07 | 1,529 / 179 MiB | 6,690 / 1,900 MiB | 6 / 12 (OOMKilled) |
+| 2026-10-06 | 0.34 / 0.11 | 1,838 / 48 MiB | 6,810 / 131 MiB | 7 / 0 |
 
-go's OOMKills (17:22–21:25) came from large responses built in memory; with
-streaming, a 174 MB response stays below 1 GiB. Java's restarts (20:40–21:13)
-were kills after failed liveness probes, not OOM. go's CPU in B and C includes
-the whole-profile responses Java rejects; Java's includes probes, GC and the
-Datadog profiler.
+Java's restarts were kills after failed liveness probes, not OOM; go has had
+no restart in any pod since 2026-10-05 21:30. go's CPU includes four
+rollouts in the window.
 
 ## ClickHouse load per request
 
 Method: `system.query_log` by `log_comment` (`cbioportal-api`,
-`cbioportal-go-api`, both live since 14:01 UTC) divided by each side's
-requests; Java's `SELECT 1` connection checks (0.15–0.27 per request) and
-go's whole-profile queries (B: 4, C: 2) excluded.
+`cbioportal-go-api`) divided by each side's requests; Java's `SELECT 1`
+connection checks excluded.
 
 | Window | Queries Java / go | Bytes read Java / go | Query time Java / go | ClickHouse CPU Java / go |
 |---|---|---|---|---|
-| A | 0.68 / 1.91 | 22.1 / 56.1 MB | 67 / 131 ms | 74 / 172 ms (2.3×) |
-| B | 0.22 / 1.16 | 18.9 / 23.3 MB | 23 / 39 ms | 48 / 71 ms (1.5×) |
-| C | 0.44 / 1.55 | 27.9 / 55.8 MB | 31 / 100 ms | 78 / 156 ms (2.0×) |
+| 2026-10-05 A | 0.68 / 1.91 | 22.1 / 56.1 MB | 67 / 131 ms | 74 / 172 ms (2.3×) |
+| 2026-10-06 | 0.65 / 1.66 | 54.7 / 39.1 MB | 83 / 93 ms | 131 / 99 ms (0.75×) |
 
-Single-gene `GET …/molecular-data` is most of the gap: in window A go read
-110 GB for 2,153 requests, Java 75 GB for 21,449. go's query count includes
-its metadata-cache freshness check (≈ 0.3 per request); Java's is below one
-because Redis answers repeats and invalid requests never reach ClickHouse.
+Up to 11:40 the two cost the same (CPU 0.96×, bytes 1.0×); Java's
+afternoon had more heavy study-view and segment queries, which a 10% sample
+catches less evenly. The single-gene molecular-data query now reads 3.7 MB
+on go (57 ms CPU, 742 queries) against 21 MB on Java (48 ms, 7,682); go's
+count includes its metadata-cache freshness check (≈ 0.6 per request).
 
 ## Headline requests
 
-Method: one client outside the cluster, 2026-10-05 ≈ 23:05 UTC, go on
-`186502c`; each request three times in a row, 1 s apart. Total ms, first /
+Method: one client outside the cluster, 2026-10-06 ≈ 17:24 UTC, go on
+`f08983a`; each request three times in a row, 1 s apart. Total ms, first /
 mean of the repeats:
 
 | Request | www | go |
 |---|---|---|
-| `GET /api/studies` | 256 / 205 | 222 / 177 |
-| `GET …/molecular-data`, 1 gene, brca_tcga_pub2015 | 260 / 178 | 470 / 335 |
-| `POST /api/molecular-data/fetch`, 5 genes × 2 profiles | 859 / 223 | 457 / 436 |
-| `POST …/mutations/fetch`, 3 genes, msk_impact_2017 | 677 / 313 | 337 / 338 |
-| `GET /api/studies/msk_impact_2017/clinical-data` | 3,339 / 1,733 | 956 / 896 |
-| `POST …/discrete-copy-number/fetch`, 6 genes, msk_impact_2017 | 261 / 182 | 245 / 220 |
+| `GET /api/studies` | 385 / 168 | 607 / 280 |
+| `GET …/molecular-data`, 1 gene, brca_tcga_pub2015 | 465 / 207 | 472 / 348 |
+| `POST /api/molecular-data/fetch`, 5 genes × 2 profiles | 908 / 382 | 738 / 491 |
+| `POST …/mutations/fetch`, 3 genes, msk_impact_2017 | 739 / 464 | 444 / 345 |
+| `GET /api/studies/msk_impact_2017/clinical-data` | 3,524 / 1,966 | 734 / 708 |
+| `POST …/discrete-copy-number/fetch`, 6 genes, msk_impact_2017 | 294 / 214 | 530 / 310 |
 
-www's repeats come from Redis; go has no response cache, so its first and
-repeated times match.
+go is faster on the three larger first responses, level on the
+molecular-data GET and slower on the two small ones; www's repeats come from
+Redis.
 
-## Parity on logged requests
+## Parity
 
-Method: `test/parity/loggedgen` samples production's request log
-(`cbioportal_qc.logged_requests`) and `cmd/paritydiff` replays it against
-api.cbioportal.org and go (see [Testing](testing.md)); 2026-10-03, 618
-requests over 114 endpoints.
+Method: `cmd/paritydiff` replays logged production requests against
+api.cbioportal.org and go (see [Testing](testing.md)); the logged corpus
+(`test/parity/loggedgen`) against the rebuilt mirror DB, the
+[nightly job](testing.md#nightly-parity-job) against go.cbioportal.org.
 
-| Identical | Known differences | Unexplained |
-|---|---|---|
-| 609 | 9 | 0 |
+| Corpus, 2026-10-06 | Requests | Identical | Known differences | Unexplained |
+|---|---|---|---|---|
+| Logged | 618 | 613 | 5 | 0 |
+| Nightly, first run | 5,009 | 4,918 | 26 | 65 |
 
-The known differences are www bugs, deployment fields, ids in www's session
-store and tied-row order. The log holds successful requests only, which is
-why the 400 gaps above did not show up here.
+Known differences are www bugs, deployment fields, ids in www's session
+store and tied-row order; the nightly run's unexplained ones are tracked in
+cBioPortal/cbioportal-go#1.
 
 ## Frontend e2e run
 
@@ -206,8 +202,8 @@ www's application tier (on-demand, us-east-1 list prices):
 go sized for www with headroom (two replicas, 1 core and 2 GiB each) fits on
 one r7g.large, ≈ $80/month: **≈ $500/month saved** on the application tier,
 plus Redis and the separate session service. Not included: ClickHouse
-Cloud, where go currently costs 1.5–2.3× Java per request, and a load test at
-www's request rate, which is still missing.
+Cloud, where go now costs 0.75–1.0× Java's CPU per request, and a load test
+at www's request rate, which is still missing.
 
 ## Code size
 
