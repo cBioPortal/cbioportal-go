@@ -376,6 +376,10 @@ func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 	a := f.NamespaceAttribute
 	args := newArgs()
 	scope := samplePairsScope(args, f.SampleIdentifiers)
+	studies := make([]string, len(f.SampleIdentifiers))
+	for i, id := range f.SampleIdentifiers {
+		studies[i] = id.StudyID
+	}
 	type row struct {
 		StudyID   string `json:"studyId"`
 		SampleID  string `json:"sampleId"`
@@ -384,10 +388,10 @@ func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 	for _, v := range f.Values {
 		rows, err := queryA[row](s.CH, fmt.Sprintf(
 			"SELECT DISTINCT n.study_id AS studyId, n.sample_id AS sampleId, sm.patient_id AS patientId FROM (%s) n "+
-				"JOIN sample sm ON sm.study_id = n.study_id AND sm.sample_id = n.sample_id "+
+				"JOIN (SELECT * FROM sample WHERE study_id IN %s) sm ON sm.study_id = n.study_id AND sm.sample_id = n.sample_id "+
 				"WHERE n.value = %s ORDER BY studyId, sampleId",
 			namespaceRows(fmt.Sprintf("study_id, sample_id, %s AS value", nsValue(args, a.OuterKey, a.InnerKey)), scope),
-			args.str(v)), args)
+			args.strs(studies), args.str(v)), args)
 		if err != nil {
 			fail(w, err)
 			return

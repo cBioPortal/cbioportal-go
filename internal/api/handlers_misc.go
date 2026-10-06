@@ -290,10 +290,14 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	scopeFilter := studyViewFilter{}
 	args := newArgs()
 	var sampleScope string
+	// studyCond holds the clinical rows to the scope's studies, a key range.
+	var studyCond string
 	switch {
 	case f.SampleListID != "":
-		sampleScope = "(study_id, sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE list_id = " +
-			args.str(f.SampleListID) + ")"
+		listCond := s.listStudyCondA(args, "study_id", f.SampleListID)
+		studyCond = listCond
+		sampleScope = listCond + "(study_id, sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE " +
+			listCond + "list_id = " + args.str(f.SampleListID) + ")"
 	case len(f.SampleIdentifiers) > 0:
 		scopeFilter.SampleIdentifiers = f.SampleIdentifiers
 	case len(f.StudyViewFilter.SampleIdentifiers) > 0 || len(f.StudyViewFilter.StudyIDs) > 0:
@@ -305,6 +309,7 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if sampleScope == "" {
+		studyCond = scopeFilter.studyKey(args, "study_id")
 		sampleScope = s.sampleScope(args, scopeFilter)
 	}
 	type countRow struct {
@@ -317,9 +322,9 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	// patient row joined to its samples). Sample counts come first.
 	queries := []string{
 		fmt.Sprintf("SELECT attr_id, count() AS c FROM clinical_sample WHERE %s GROUP BY attr_id ORDER BY attr_id", sampleScope),
-		fmt.Sprintf("SELECT cp.attr_id AS attr_id, count() AS c FROM clinical_patient cp "+
+		fmt.Sprintf("SELECT cp.attr_id AS attr_id, count() AS c FROM (SELECT * FROM clinical_patient WHERE %s1) cp "+
 			"JOIN (SELECT study_id, patient_id FROM sample WHERE %s) sm ON sm.study_id = cp.study_id AND sm.patient_id = cp.patient_id "+
-			"GROUP BY cp.attr_id ORDER BY attr_id", sampleScope),
+			"GROUP BY cp.attr_id ORDER BY attr_id", studyCond, sampleScope),
 	}
 	for _, q := range queries {
 		rows, err := queryA[countRow](s.CH, q, args)

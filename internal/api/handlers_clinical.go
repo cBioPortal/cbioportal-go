@@ -49,12 +49,13 @@ func toClinicalData(r *clinicalRow, patient bool) ClinicalData {
 
 // clinicalSQL selects clinical rows (sample- or patient-level) matching where,
 // which may reference study_id, the entity id column (sample_id / patient_id)
-// and attr_id. Sample rows carry their patient id. Rows are in
+// and attr_id, and holds the rows to the studies bound as studyIn. Sample rows
+// carry their patient id, read from those studies' samples. Rows are in
 // ClinicalDataMapper's order where the database carries internal ids: by the
 // internal id of their sample or patient, then attribute (the storage order
 // of clinical_sample / clinical_patient); a sorted page (ClinicalDataSortBy)
 // is read as sqlPageOrder orders it.
-func clinicalSQL(r *http.Request, patient, importOrder bool, where string) string {
+func clinicalSQL(r *http.Request, patient, importOrder bool, where, studyIn string) string {
 	def := "studyId, id, clinicalAttributeId"
 	if importOrder {
 		def = "c.internal_id, studyId, id, clinicalAttributeId"
@@ -66,7 +67,7 @@ func clinicalSQL(r *http.Request, patient, importOrder bool, where string) strin
 	}
 	return "SELECT c.study_id AS studyId, c.sample_id AS id, s.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 		"c.attr_value AS value FROM (SELECT * FROM clinical_sample WHERE " + where + ") c " +
-		"LEFT JOIN sample s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
+		"LEFT JOIN (SELECT * FROM sample WHERE study_id IN " + studyIn + ") s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
 }
 
 // clinicalDataSortable are the ClinicalDataSortBy columns (attrId,
@@ -90,9 +91,9 @@ type clinicalDataOut struct {
 }
 
 // writeClinical streams the query's rows in the requested projection (ID,
-// SUMMARY, DETAILED with the attribute metadata of studies, the studies the
-// rows can belong to, or META as a count header). where may hold
-// placeholders bound in args.
+// SUMMARY, DETAILED with the attribute metadata of studies, or META as a
+// count header). where holds the rows to studies and may hold placeholders
+// bound in args.
 func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, studies []string, where string, args *sqlArgs) {
 	projection := projectionParam(r)
 	if projection == "META" {
@@ -117,7 +118,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		attrs = s.clinicalAttributes(studies)
 	}
 	out := newJSONArray(w)
-	sql := clinicalSQL(r, patient, s.importOrdered(), where)
+	sql := clinicalSQL(r, patient, s.importOrdered(), where, args.strs(studies))
 	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *clinicalRow) error {
 		d := toClinicalData(row, patient)
 		o := clinicalDataOut{
