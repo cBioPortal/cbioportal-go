@@ -325,6 +325,24 @@ func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[str
 	return out, nil
 }
 
+// summaryMetaProperties keeps the properties GenericAssayServiceImpl returns
+// for the SUMMARY projection (SUMMARY_META_PROPERTY_NAMES), as the enrichments
+// attach them.
+func summaryMetaProperties(props map[string]javaStringMap) map[string]javaStringMap {
+	out := make(map[string]javaStringMap, len(props))
+	for id, m := range props {
+		var kept javaStringMap
+		for _, k := range m.keys {
+			switch k {
+			case "NAME", "DESCRIPTION", "URL":
+				kept.set(k, m.vals[k])
+			}
+		}
+		out[id] = kept
+	}
+	return out
+}
+
 // routeGenericAssay registers the generic-assay and geneset (GSVA) endpoints.
 func (s *State) routeGenericAssay(mux *http.ServeMux) {
 	// Generic assay data.

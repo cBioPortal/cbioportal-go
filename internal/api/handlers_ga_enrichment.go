@@ -286,13 +286,13 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 	return entities, values, nil
 }
 
-// gaMetaProperties returns the generic entity meta properties of the
-// profile's entities.
+// gaMetaProperties returns the SUMMARY meta properties of the profile's
+// entities.
 func (s *State) gaMetaProperties(meta profileMeta) map[string]javaStringMap {
 	args := newArgs()
 	props, _ := s.genericAssayMetaProperties(fmt.Sprintf(
 		"study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID)), args)
-	return props
+	return summaryMetaProperties(props)
 }
 
 func metaOrEmpty(props map[string]javaStringMap, stableID string) javaStringMap {
