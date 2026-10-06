@@ -85,7 +85,7 @@ var expectations = []expectation{
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return isProfileSamples(p) },
 		options: "ignore=label",
-		comment: "a profile type's label is the name of the profile ClickHouse's GROUP BY yields first; it varies between www requests",
+		comment: "a profile type's label is the name of the profile ClickHouse's unordered GROUP BY yields first, in hash-table order that shifts with the filtered samples",
 	},
 }
 

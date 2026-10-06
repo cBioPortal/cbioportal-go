@@ -45,12 +45,12 @@ const mpSelectTmpl = "SELECT molecular_profile_id AS molecularProfileId, study_i
 	"toUInt8(show_profile_in_analysis_tab) AS showFlag, generic_assay_type AS genericAssayType{extra} FROM molecular_profile"
 
 // mpSelect reads the molecular profiles, with the generic-assay pivot
-// threshold, sort order and patient level where the portal database carries
-// them (built from a production clone).
+// threshold (a Java Float, so its shortest Float32 text), sort order and
+// patient level where the portal database carries them.
 func (s *State) mpSelect() string {
 	extra := ""
 	if s.modelHasColumn("molecular_profile", "sort_order") {
-		extra = ", pivot_threshold AS pivotThreshold, sort_order AS sortOrder, toUInt8(patient_level) AS patientLevel"
+		extra = ", toFloat64OrNull(toString(toFloat32(pivot_threshold))) AS pivotThreshold, sort_order AS sortOrder, toUInt8(patient_level) AS patientLevel"
 	}
 	return strings.Replace(mpSelectTmpl, "{extra}", extra, 1)
 }
