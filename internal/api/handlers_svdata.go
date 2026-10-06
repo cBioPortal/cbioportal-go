@@ -379,6 +379,10 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 		SampleListID string   `json:"sampleListId"`
 	}
 	readBody(r, &f)
+	if noSamples(f.SampleIDs, f.SampleListID) {
+		writeJSON(w, []struct{}{})
+		return
+	}
 
 	var samples []string
 	switch {

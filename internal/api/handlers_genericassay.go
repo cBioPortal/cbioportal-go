@@ -136,6 +136,10 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 	mpid := r.PathValue("molecularProfileId")
 	var f genericAssayFilter
 	readBody(r, &f)
+	if noSamples(f.SampleIDs, f.SampleListID) {
+		writeJSON(w, []struct{}{})
+		return
+	}
 	sampleIDs := f.SampleIDs
 	if f.SampleListID != "" {
 		type idRow struct {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -35,7 +36,16 @@ func (s *State) javaContract(next http.Handler) http.Handler {
 			return
 		}
 		q := r.URL.Query()
-		if msg := checkParams(rt.params, q); msg != "" {
+		if rt.filter != nil && r.Method == http.MethodPost {
+			msg, done := rt.checkFilter(w, r, q)
+			if done {
+				return
+			}
+			if msg != "" {
+				writeError(w, http.StatusBadRequest, msg)
+				return
+			}
+		} else if msg := checkParams(rt.params, q); msg != "" {
 			readBody(r, nil)
 			writeError(w, http.StatusBadRequest, msg)
 			return
@@ -161,6 +171,9 @@ var (
 	directionParam  = enumParam("direction", "org.cbioportal.legacy.web.parameter.Direction", "ASC", "DESC")
 )
 
+// requiredText is a required String request parameter.
+func requiredText(name string) param { return param{name: name, required: true, text: true} }
+
 // paged is the projection / pageSize / pageNumber / sortBy / direction
 // parameter list of a Java list endpoint.
 func paged(projClass string, sort param) []param {
@@ -178,14 +191,28 @@ func pagedMax(projClass string, sort param, maxSize int) []param {
 // failure is the TypeMismatchException), then checks their bounds (a
 // ConstraintViolationException). Absent or blank values take the default.
 func checkParams(params []param, q map[string][]string) string {
+	return checkParamsAround(params, q, len(params), nil)
+}
+
+// checkParamsAround is checkParams with the request body read after the
+// first at parameters, where the controller declares it: body (when
+// non-nil) returns its 400 message or "".
+func checkParamsAround(params []param, q map[string][]string, at int, body func() string) string {
 	type bound struct {
 		p param
 		v int
 	}
 	var bounds []bound
-	for _, p := range params {
+	for i, p := range params {
+		if i == at && body != nil {
+			if msg := body(); msg != "" {
+				return msg
+			}
+		}
 		vs := q[p.name]
-		if len(vs) == 0 || strings.TrimSpace(vs[0]) == "" {
+		// A String parameter is present even when blank; other types read
+		// blank as absent.
+		if len(vs) == 0 || (!p.text && strings.TrimSpace(vs[0]) == "") {
 			if p.required {
 				return "Request parameter is missing: " + p.name
 			}
@@ -213,6 +240,11 @@ func checkParams(params []param, q map[string][]string) string {
 			return msgIntMismatch(v)
 		}
 		bounds = append(bounds, bound{p, n})
+	}
+	if at >= len(params) && body != nil {
+		if msg := body(); msg != "" {
+			return msg
+		}
 	}
 	for _, b := range bounds {
 		if b.p.hasMin && b.v < b.p.min {
@@ -292,6 +324,49 @@ type contractRoute struct {
 	nest string
 	// notFound turns the handler's 404 into Java's message.
 	notFound func(vals map[string]string) string
+	// filter is the Java filter class of a POST body, declared after the
+	// first bodyAt params.
+	filter *filterSchema
+	bodyAt int
+	// intercepted names the controller parameter of a filter that
+	// InvolvedCancerStudyExtractorInterceptor reads first: a body it cannot
+	// read ends the request with an empty 200, and violations name the
+	// parameter.
+	intercepted string
+	// unvalidated leaves the filter's violations to the handler, which
+	// answers them itself (GenericAssayDataController).
+	unvalidated bool
+}
+
+// checkFilter checks the parameters and filter body of a POST with a
+// filter: msg is the 400 message, done reports an answered request.
+func (rt *contractRoute) checkFilter(w http.ResponseWriter, r *http.Request, q map[string][]string) (msg string, done bool) {
+	raw, _ := io.ReadAll(r.Body)
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	ok, prop, violation := rt.filter.readFilter(raw)
+	if rt.intercepted != "" {
+		if !ok {
+			w.WriteHeader(http.StatusOK)
+			return "", true
+		}
+		// The filter is validated with the method's parameters, after
+		// they are converted.
+		return checkParamsAround(rt.params, q, len(rt.params), func() string {
+			if violation != "" && !rt.unvalidated {
+				return rt.intercepted + " " + violation
+			}
+			return ""
+		}), false
+	}
+	return checkParamsAround(rt.params, q, rt.bodyAt, func() string {
+		switch {
+		case !ok:
+			return msgBadJSON
+		case violation != "":
+			return prop + " " + violation
+		}
+		return ""
+	}), false
 }
 
 var (
@@ -330,12 +405,15 @@ var (
 	resourceDataSortParam       = sortBy("ResourceDataSortBy", "ResourceId", "url")
 	resourceDefinitionSortParam = sortBy("ResourceDefinitionSortBy", "resourceId", "displayName", "description", "resourceType",
 		"priority", "openByDefault", "studyId", "customMetaData")
-	copyNumberSegmentSort = sortBy("CopyNumberSegmentSortBy", "chromosome", "start", "end", "numberOfProbes", "segmentMean")
-	smgSort               = sortBy("SignificantlyMutatedGeneSortBy", "entrezGeneId", "hugoGeneSymbol", "rank", "numberOfMutations", "pValue", "qValue")
-	scnrSort              = sortBy("SignificantCopyNumberRegionSortBy", "chromosome", "cytoband", "widePeakStart", "widePeakEnd", "qValue", "amp")
-	resourceIDParam       = param{name: "resourceId", text: true}
-	clinicalDataType      = enumParam("clinicalDataType", "org.cbioportal.legacy.web.parameter.ClinicalDataType", "SAMPLE", "PATIENT")
-	geneIDType            = enumParam("geneIdType", "org.cbioportal.legacy.web.parameter.GeneIdType", "ENTREZ_GENE_ID", "HUGO_GENE_SYMBOL")
+	copyNumberSegmentSort       = sortBy("CopyNumberSegmentSortBy", "chromosome", "start", "end", "numberOfProbes", "segmentMean")
+	smgSort                     = sortBy("SignificantlyMutatedGeneSortBy", "entrezGeneId", "hugoGeneSymbol", "rank", "numberOfMutations", "pValue", "qValue")
+	scnrSort                    = sortBy("SignificantCopyNumberRegionSortBy", "chromosome", "cytoband", "widePeakStart", "widePeakEnd", "qValue", "amp")
+	resourceIDParam             = param{name: "resourceId", text: true}
+	sampleListIDParam           = requiredText("sampleListId")
+	discreteCopyNumberEventType = enumParam("discreteCopyNumberEventType", "org.cbioportal.legacy.web.parameter.DiscreteCopyNumberEventType",
+		"HOMDEL_AND_AMP", "HOMDEL", "AMP", "GAIN", "HETLOSS", "DIPLOID", "ALL")
+	clinicalDataType = enumParam("clinicalDataType", "org.cbioportal.legacy.web.parameter.ClinicalDataType", "SAMPLE", "PATIENT")
+	geneIDType       = enumParam("geneIdType", "org.cbioportal.legacy.web.parameter.GeneIdType", "ENTREZ_GENE_ID", "HUGO_GENE_SYMBOL")
 )
 
 func pathValue(key string, msg func(string) string) func(map[string]string) string {
@@ -412,22 +490,47 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study"},
 	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"},
-		params: append([]param{{name: "sampleListId", required: true, text: true}, {name: "entrezGeneId", required: true}},
+		params: append([]param{sampleListIDParam, {name: "entrezGeneId", required: true}},
 			paged(legacyProjection, mutationSort)...)},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations/fetch", exists: []string{"profile"},
-		params: paged(legacyProjection, mutationSort)},
-	{method: "POST", pattern: "/api/mutations/fetch", params: paged(legacyProjection, mutationSort)},
-	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"}},
-	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number", exists: []string{"profile"}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number/fetch", exists: []string{"profile"}},
+		params: paged(legacyProjection, mutationSort), filter: mutationFilterSchema},
+	{method: "POST", pattern: "/api/mutations/fetch", params: paged(legacyProjection, mutationSort),
+		filter: mutationMultipleStudyFilterSchema, intercepted: "interceptedMutationMultipleStudyFilter"},
+	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"},
+		params: []param{sampleListIDParam, {name: "entrezGeneId", required: true}, projectionParamOf(legacyProjection)}},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"},
+		params: []param{projectionParamOf(legacyProjection)}, filter: molecularDataFilterSchema},
+	{method: "POST", pattern: "/api/molecular-data/fetch", params: []param{projectionParamOf(legacyProjection)},
+		filter: molecularDataMultipleStudyFilterSchema, intercepted: "interceptedMolecularDataMultipleStudyFilter"},
+	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number", exists: []string{"profile"},
+		params: []param{sampleListIDParam, discreteCopyNumberEventType, projectionParamOf(legacyProjection)}},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number/fetch", exists: []string{"profile"},
+		params: []param{discreteCopyNumberEventType, projectionParamOf(legacyProjection)}, bodyAt: 1, filter: discreteCopyNumberFilterSchema},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number-counts/fetch", exists: []string{"profile"}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/gene-panel-data/fetch", exists: []string{"profile"}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mrna-percentile/fetch", exists: []string{"profile"}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutation-spectrums/fetch", exists: []string{"profile"}},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/gene-panel-data/fetch", exists: []string{"profile"},
+		filter: genePanelDataFilterSchema},
+	{method: "POST", pattern: "/api/gene-panel-data/fetch", filter: genePanelDataMultipleStudyFilterSchema,
+		intercepted: "interceptedGenePanelDataMultipleStudyFilter"},
+	{method: "POST", pattern: "/api/structural-variant/fetch", filter: structuralVariantFilterSchema,
+		intercepted: "interceptedStructuralVariantFilter"},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mrna-percentile/fetch", exists: []string{"profile"},
+		params: []param{requiredText("sampleId")}},
+	{method: "POST", pattern: "/api/molecular-profiles/co-expressions/fetch",
+		params: []param{requiredText("molecularProfileIdA"), requiredText("molecularProfileIdB")}},
+	{method: "POST", pattern: "/api/clinical-data-density-plot/fetch", params: []param{requiredText("xAxisAttributeId"),
+		{name: "xAxisBinCount"}, requiredText("yAxisAttributeId"), {name: "yAxisBinCount"}}},
+	{method: "POST", pattern: "/api/clinical-data-violin-plots/fetch",
+		params: []param{requiredText("categoricalAttributeId"), requiredText("numericalAttributeId")}},
+	{method: "POST", pattern: "/api/geneset-hierarchy/fetch", params: []param{requiredText("geneticProfileId"), {name: "percentile"}}},
+	{method: "POST", pattern: "/api/genesets/{genesetId}/expression-correlation/fetch", params: []param{requiredText("geneticProfileId")}},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutation-spectrums/fetch", exists: []string{"profile"},
+		filter: mutationSpectrumFilterSchema},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/variant-counts/fetch", exists: []string{"profile"}},
 	{method: "GET", pattern: "/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", exists: []string{"profile"}},
-	{method: "POST", pattern: "/api/generic_assay_data/{molecularProfileId}/fetch", exists: []string{"profile"}},
+	{method: "POST", pattern: "/api/generic_assay_data/{molecularProfileId}/fetch", exists: []string{"profile"},
+		params: []param{projectionParamOf(legacyProjection)}, filter: genericAssayFilterSchema},
+	{method: "POST", pattern: "/api/generic_assay_data/fetch", params: []param{projectionParamOf(legacyProjection)},
+		filter: genericAssayDataMultipleStudyFilterSchema, intercepted: "interceptedGenericAssayDataMultipleStudyFilter", unvalidated: true},
 
 	// Genes.
 	{method: "GET", pattern: "/api/genes", params: paged(legacyProjection, geneSort), shape: geneShape},
@@ -466,6 +569,19 @@ func matchContract(method, path string) (*contractRoute, map[string]string) {
 		}
 	}
 	return nil, nil
+}
+
+// noSamples reports a validated sample filter (sampleIds XOR sampleListId)
+// that selects no sample: the sample list "" (or a sampleListId Jackson
+// coerced from a number), which Java looks up and finds empty.
+func noSamples(sampleIDs []string, sampleListID string) bool {
+	return len(sampleIDs) == 0 && sampleListID == ""
+}
+
+// blankSampleList reports a sampleListId request parameter given blank: a
+// String parameter, so present, naming no list.
+func blankSampleList(q url.Values) bool {
+	return q.Has("sampleListId") && q.Get("sampleListId") == ""
 }
 
 // ---------- existence ----------

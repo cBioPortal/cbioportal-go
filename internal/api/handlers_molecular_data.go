@@ -134,12 +134,20 @@ type molecularDataFilter struct {
 func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f molecularDataFilter
 	readBody(r, &f)
+	if noSamples(f.SampleIDs, f.SampleListID) {
+		writeJSON(w, []NumericGeneMolecularData{})
+		return
+	}
 	s.streamMolecularData(w, r, r.PathValue("id"), f)
 }
 
 // molecularDataGet serves GET /api/molecular-profiles/{id}/molecular-data
 // (sampleListId and entrezGeneId query parameters).
 func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
+	if blankSampleList(r.URL.Query()) {
+		writeJSON(w, []NumericGeneMolecularData{})
+		return
+	}
 	f := molecularDataFilter{SampleListID: r.URL.Query().Get("sampleListId")}
 	for _, e := range r.URL.Query()["entrezGeneId"] {
 		var id int64

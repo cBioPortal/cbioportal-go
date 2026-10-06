@@ -100,6 +100,10 @@ func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) 
 		SampleListID  string   `json:"sampleListId"`
 	}
 	readBody(r, &f)
+	if noSamples(f.SampleIDs, f.SampleListID) {
+		writeJSON(w, []DiscreteCopyNumberData{})
+		return
+	}
 	s.writeDiscreteCopyNumber(w, mpid, f.EntrezGeneIDs, f.SampleIDs, f.SampleListID,
 		r.URL.Query().Get("discreteCopyNumberEventType"), projectionOf(r))
 }
@@ -107,6 +111,10 @@ func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) 
 func (s *State) discreteCopyNumberGet(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	q := r.URL.Query()
+	if blankSampleList(q) {
+		writeJSON(w, []DiscreteCopyNumberData{})
+		return
+	}
 	s.writeDiscreteCopyNumber(w, mpid, nil, nil, q.Get("sampleListId"), q.Get("discreteCopyNumberEventType"), projectionOf(r))
 }
 
@@ -394,6 +402,10 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		SampleListID string   `json:"sampleListId"`
 	}
 	readBody(r, &f)
+	if noSamples(f.SampleIDs, f.SampleListID) {
+		writeJSON(w, []struct{}{})
+		return
+	}
 	study := profileStudy(mpid)
 	// MutationSpectrumServiceImpl reads the profile's mutations with snpOnly:
 	// reference and tumor allele are both single bases.

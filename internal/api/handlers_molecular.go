@@ -406,6 +406,10 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 // mutations in the sampleListId sample list, for the entrezGeneId gene.
 func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if blankSampleList(q) {
+		writeJSON(w, []Mutation{})
+		return
+	}
 	args := newArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
 	where += sampleListClause(args, "sample_id", q.Get("sampleListId"))
@@ -463,6 +467,10 @@ func geneFilter(entrez []int64) string {
 func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
 	readBody(r, &f)
+	if noSamples(f.SampleIDs, f.SampleListID) {
+		writeJSON(w, []Mutation{})
+		return
+	}
 	args := newArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
 	// MutationFilter is EITHER explicit sample ids OR a sample list.
