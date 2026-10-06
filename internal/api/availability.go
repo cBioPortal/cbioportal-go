@@ -13,8 +13,9 @@ import (
 //
 //   - A study is unavailable while its cancer_study.status is not 1
 //     (AVAILABLE), i.e. while it is being (re)imported.
-//   - GET /api/studies lists it with readPermission false, whatever the
-//     settings.
+//   - With study_availability.enabled=true, GET /api/studies lists it with
+//     readPermission false (Java master does so whatever the setting;
+//     production v7.1.2 never does, see docs/configuration.md).
 //   - With study_availability.enabled=true, an API request whose input (path
 //     segment, query parameter or JSON body string, at any depth) names the
 //     study, one of its molecular profiles or sample lists, or a unique

@@ -149,6 +149,35 @@ without clinical events can time out there (HTTP 502), as
 `getDataOfClinicalEvents` without event ids reads all of
 `clinical_event_data`.
 
+### Nightly parity job
+
+`test/parity/nightly.sh` compares go.cbioportal.org with api.cbioportal.org
+on production traffic every day. It replays a corpus of ~5,000 logged
+requests (`test/parity/logged_corpus.sh`: read-only endpoints only, each
+endpoint's share growing with the square root of its volume, at least 3,
+known differences marked; seeded by ISO week; written to the gitignored
+`.parity/nightly/corpus.txt`, mode 600, as it is real user traffic) at
+4 requests/s with a fresh paritydiff cache, and sends requests that failed
+in transport or with 502/503/504 once more after 2 minutes, so a pod
+rollout is not reported as a regression. `runs/<date>/report.md` records
+both deployments' `/api/info` versions and the outcome counts (identical,
+known, unexplained difference, status mismatch, error) and details the
+unexplained requests (request, body cut to 200 bytes, first diff lines),
+marking those new since the previous run; runs are kept 7 days. The exit
+status is 1 when anything is unexplained.
+
+While anything is unexplained it keeps one issue open in this repository,
+"Nightly parity: unexplained differences" (label `parity`): opened with the
+report, commented with each later failing report, commented and closed on
+the first clean night. `--dry-run` prints the `gh` actions instead,
+`--regen` regenerates the corpus first.
+
+On the parity host it runs from cron at 15:17 UTC, after the 14:00 mirror
+rebuild: `~/.local/share/cbioportal-go-parity/run.sh` checks out
+`origin/main` (or the ref in `state/ref`) into `src/`, regenerates the
+corpus on Sundays, and logs to `logs/<date>.log`; a lock keeps runs from
+overlapping.
+
 ## Java oracle
 
 The Java backend itself, run on the same fixture studies, is the reference

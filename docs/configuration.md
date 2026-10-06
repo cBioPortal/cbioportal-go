@@ -214,6 +214,13 @@ TLS-terminating proxy or ingress, the proxy must send `X-Forwarded-Proto`
   attributes leave unreadable studies out
   (`skin.home_page.show_unauthorized_studies=true` lists them on the home
   page as not readable). Requests naming an unreadable study get `403`.
+- A study's `readPermission` in `/api/studies` also depends on its
+  `cancer_study.status` only when `study_availability.enabled=true`: then a
+  study with status ≠ 1 (being imported) is not readable. This deviates
+  from Java master, which applies the status rule whatever the setting, to
+  match production (v7.1.2 ignores status, and production's status is 0 for
+  every study): with the setting on this behaves as Java master, with it
+  off as production.
 - Login sessions end after 30 minutes of inactivity. They are kept in the
   server's memory (a restart logs everyone out), or in Redis, see
   [Login sessions in Redis](#login-sessions-in-redis).
