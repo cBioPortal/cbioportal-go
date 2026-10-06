@@ -52,6 +52,7 @@ jobs:
             ${{ env.IMAGE }}:sha-${{ steps.meta.outputs.short_sha }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
+            COMMIT=${{ github.sha }}
             FRONTEND_COMMIT=${{ steps.meta.outputs.frontend_commit }}
             FRONTEND_VERSION=${{ steps.meta.outputs.frontend_version }}
           labels: |

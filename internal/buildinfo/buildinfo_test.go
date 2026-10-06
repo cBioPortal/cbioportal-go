@@ -43,6 +43,15 @@ func TestString(t *testing.T) {
 	}
 }
 
+func TestCommitStamp(t *testing.T) {
+	old := commit
+	defer func() { commit = old }()
+	commit = "6b38ed6abcdef0123456789abcdef0123456789a"
+	if rev, modified := Commit(); rev != commit || modified {
+		t.Fatalf("Commit() = %q, %v, want the stamped commit", rev, modified)
+	}
+}
+
 func TestStampOverrides(t *testing.T) {
 	old := stamp
 	defer func() { stamp = old }()

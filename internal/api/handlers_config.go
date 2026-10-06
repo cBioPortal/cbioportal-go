@@ -4,9 +4,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"net/http"
-	"runtime/debug"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
@@ -101,21 +101,14 @@ func (s *State) info(w http.ResponseWriter, r *http.Request) {
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,
 		GitCommitMessageUserEmail: gitNotSet, GitCommitMessageUserName: gitNotSet,
 	}
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, kv := range bi.Settings {
-			switch kv.Key {
-			case "vcs.revision":
-				info.GitCommitID = kv.Value
-				info.GitCommitIDDescribe = kv.Value[:min(7, len(kv.Value))]
-				info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
-			case "vcs.modified":
-				info.GitDirty = kv.Value == "true"
-			}
-		}
-		if info.GitDirty && info.GitCommitID != gitNotSet {
+	if rev, modified := buildinfo.Commit(); rev != "" {
+		info.GitCommitID = rev
+		info.GitCommitIDDescribe = rev[:min(7, len(rev))]
+		info.GitDirty = modified
+		if modified {
 			info.GitCommitIDDescribe += "-dirty"
-			info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
 		}
+		info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
 	}
 	writeJSON(w, info)
 }

@@ -12,10 +12,13 @@ heavy steps.
 The image (alpine, non-root uid 10001, `WORKDIR /app`, port 8080) contains
 `/usr/local/bin/cbioportal-api` (the default command),
 `/usr/local/bin/cbioportal-import`, the built frontend in `/app/frontend` and
-the deployment scripts in `/app/deploy`.
+the deployment scripts in `/app/deploy`. The build arguments `VERSION` (the
+`-version` line) and `COMMIT` (the `gitCommitId` of `/api/info`) stamp the
+binaries, as the build context has no `.git`.
 
 ```bash
-docker build -t cbioportal/cbioportal-go:dev --build-arg VERSION="$(git rev-parse --short HEAD) (dev)" .
+docker build -t cbioportal/cbioportal-go:dev --build-arg VERSION="$(git rev-parse --short HEAD) (dev)" \
+  --build-arg COMMIT="$(git rev-parse HEAD)" .
 docker run --rm --network host cbioportal/cbioportal-go:dev -db cbioportal
 ```
 
