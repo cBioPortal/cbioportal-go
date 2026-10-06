@@ -168,7 +168,7 @@ gh_run() {
 
 # The alert issue: one open issue titled $TITLE with label $LABEL.
 issue="${PARITY_ISSUE:-}"
-[ -n "$issue" ] || issue=$(gh issue list -R "$ISSUE_REPO" --state open --search "\"$TITLE\" in:title" \
+[ -n "$issue" ] || issue=$(gh issue list -R "$ISSUE_REPO" --state open --label "$LABEL" \
   --json number,title -q ".[] | select(.title == \"$TITLE\") | .number" 2>/dev/null | head -n 1)
 body="$RUN/issue.md"
 head -c 60000 "$RUN/report.md" >"$body"
