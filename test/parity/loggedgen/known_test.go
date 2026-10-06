@@ -25,6 +25,7 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/clinical-data-table/fetch?pageSize=500", "{}", "known="},
 		{"POST", "/api/clinical-data-table/fetch", "{}", ""},
 		{"POST", "/api/molecular-profile-sample-counts/fetch", "{}", "ignore=label"},
+		{"POST", "/api/sample-lists-counts/fetch", "{}", "ignore=label"},
 	} {
 		got, _ := expect(c.method, c.target, c.body)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {

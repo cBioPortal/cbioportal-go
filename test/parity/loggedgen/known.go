@@ -36,6 +36,7 @@ var (
 	isSampleList     = pathIs(`^/api/samples/?$`)
 	isClinicalTable  = pathIs(`^/api/clinical-data-table/fetch$`)
 	isProfileSamples = pathIs(`^/api/molecular-profile-sample-counts/fetch$`)
+	isCaseListCounts = pathIs(`^/api/sample-lists-counts/fetch$`)
 )
 
 // versionFields are /api/info's fields that describe the deployment.
@@ -105,6 +106,11 @@ var expectations = []expectation{
 		match:   func(m, p string, q url.Values, b string) bool { return isProfileSamples(p) },
 		options: "ignore=label",
 		comment: "a profile type's label is the name of the profile ClickHouse's unordered GROUP BY yields first, in hash-table order that shifts with the filtered samples",
+	},
+	{
+		match:   func(m, p string, q url.Values, b string) bool { return isCaseListCounts(p) },
+		options: "ignore=label",
+		comment: "a case list type's label is the name of the list ClickHouse's unordered GROUP BY yields first (mergeCaseListCounts), in hash-table order that shifts with the filtered samples",
 	},
 }
 
