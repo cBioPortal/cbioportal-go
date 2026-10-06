@@ -188,3 +188,21 @@ func TestCompareResponsesOutcomes(t *testing.T) {
 		t.Fatalf("got %+v", r)
 	}
 }
+
+func TestTransient(t *testing.T) {
+	for _, c := range []struct {
+		r    result
+		want bool
+	}{
+		{result{Outcome: failed}, true},
+		{result{Outcome: status, StatusA: 502, StatusB: 200}, true},
+		{result{Outcome: status, StatusA: 200, StatusB: 504}, true},
+		{result{Outcome: status, StatusA: 500, StatusB: 200}, false},
+		{result{Outcome: differs, StatusA: 200, StatusB: 200}, false},
+		{result{Outcome: known, StatusA: 503, StatusB: 200}, false},
+	} {
+		if got := transient(c.r); got != c.want {
+			t.Errorf("transient(%+v) = %v, want %v", c.r, got, c.want)
+		}
+	}
+}

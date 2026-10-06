@@ -11,7 +11,9 @@
 // corpus sort arrays whose order Java leaves unspecified, drop keys, or
 // treat null as absent (see parseCorpus). Responses from -b are cached on
 // disk (-cache) and fetched at most -rate requests per second, so reruns do
-// not hit the remote origin again.
+// not hit the remote origin again. With -retry, requests that failed in
+// transport or with a gateway status (502, 503, 504, as while a deployment
+// rolls out) are sent once more after the given pause.
 package main
 
 import (
@@ -126,6 +128,8 @@ const (
 
 type result struct {
 	Name    string   `json:"name"`
+	Request string   `json:"request"`        // method and path
+	Body    string   `json:"body,omitempty"` // the request body, cut to 200 bytes
 	Outcome string   `json:"outcome"`
 	Count   int      `json:"differences,omitempty"`
 	Diffs   []string `json:"diffs,omitempty"`
@@ -133,6 +137,14 @@ type result struct {
 	StatusA int      `json:"statusA"`
 	StatusB int      `json:"statusB"`
 	MillisA int64    `json:"msA"`
+	Retried bool     `json:"retried,omitempty"`
+}
+
+// transient reports whether a result may be a passing failure of either
+// origin rather than a difference: a transport error or a gateway status.
+func transient(r result) bool {
+	gateway := func(code int) bool { return code == 502 || code == 503 || code == 504 }
+	return r.Outcome == failed || (r.Outcome == status && (gateway(r.StatusA) || gateway(r.StatusB)))
 }
 
 func compareResponses(rq request, ra, rb response, opts compareOptions) result {
@@ -198,6 +210,7 @@ func main() {
 	report := flag.String("json", "", "also write the results as JSON to this file")
 	dump := flag.String("dump", "", "write both bodies of every non-identical response to this directory (<name>.a.json, <name>.b.json)")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
+	retry := flag.Duration("retry", -1, "send requests that failed in transport or with 502/503/504 once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
 	flag.Parse()
 
@@ -226,12 +239,7 @@ func main() {
 	opts := defaultOptions()
 	opts.MaxDiffs = *maxDiffs
 
-	counts := map[string]int{}
-	var results []result
-	for _, rq := range reqs {
-		if filter != nil && !filter.MatchString(rq.Name) {
-			continue
-		}
+	compare := func(rq request) result {
 		start := time.Now()
 		ra, errA := fa.get(rq)
 		msA := time.Since(start).Milliseconds()
@@ -243,6 +251,11 @@ func main() {
 		default:
 			res = compareResponses(rq, ra, rb, opts)
 		}
+		res.Request = rq.Method + " " + rq.Path
+		res.Body = rq.Body
+		if len(res.Body) > 200 {
+			res.Body = res.Body[:200] + "…"
+		}
 		res.MillisA = msA
 		if *dump != "" && res.Outcome != identical && res.Outcome != failed {
 			if err := os.MkdirAll(*dump, 0o755); err != nil {
@@ -251,9 +264,41 @@ func main() {
 			_ = os.WriteFile(filepath.Join(*dump, rq.Name+".a.json"), []byte(ra.Body), 0o644)
 			_ = os.WriteFile(filepath.Join(*dump, rq.Name+".b.json"), []byte(rb.Body), 0o644)
 		}
-		counts[res.Outcome]++
+		return res
+	}
+
+	var results []result
+	var selected []request
+	for _, rq := range reqs {
+		if filter != nil && !filter.MatchString(rq.Name) {
+			continue
+		}
+		res := compare(rq)
+		selected = append(selected, rq)
 		results = append(results, res)
 		printResult(os.Stdout, res, *quiet)
+	}
+	if *retry >= 0 {
+		var again []int
+		for i, r := range results {
+			if transient(r) {
+				again = append(again, i)
+			}
+		}
+		if len(again) > 0 {
+			fmt.Printf("\nretrying %d requests in %s\n", len(again), *retry)
+			time.Sleep(*retry)
+			for _, i := range again {
+				res := compare(selected[i])
+				res.Retried = true
+				results[i] = res
+				printResult(os.Stdout, res, *quiet)
+			}
+		}
+	}
+	counts := map[string]int{}
+	for _, r := range results {
+		counts[r.Outcome]++
 	}
 	fmt.Printf("\n%d requests: %d identical, %d known differences, %d differ, %d status mismatches, %d errors (%d fetched from B)\n",
 		len(results), counts[identical], counts[known], counts[differs], counts[status], counts[failed], fb.fetched)
