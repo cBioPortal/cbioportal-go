@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // The study-view gene tables (mutated, CNA and structural-variant genes) count
@@ -26,8 +28,9 @@ type GeneAlterationCount struct {
 	MatchingGenePanelIDs        []string `json:"matchingGenePanelIds"`
 	EntrezGeneID                *int64   `json:"entrezGeneId,omitempty"`
 	HugoGeneSymbol              string   `json:"hugoGeneSymbol"`
+	QValue                      *float64 `json:"qValue,omitempty"`
 	Alteration                  *int64   `json:"alteration,omitempty"`
-	Cytoband                    string   `json:"cytoband,omitempty"`
+	Cytoband                    *string  `json:"cytoband,omitempty"`
 	EntrezGeneIDs               []*int64 `json:"entrezGeneIds"`
 	HugoGeneSymbols             []string `json:"hugoGeneSymbols"`
 	UniqueEventKey              string   `json:"uniqueEventKey"`
@@ -213,16 +216,16 @@ func (s *State) geneCounts(args *sqlArgs, f studyViewFilter, variantType, altera
 	selectCNA := ""
 	if cna {
 		groupCols += ", cna_alteration, cna_cytoband"
-		selectCNA = "toInt64(cna_alteration) AS alteration, ifNull(cna_cytoband, '') AS cytoband, "
+		selectCNA = "toInt64(cna_alteration) AS alteration, cna_cytoband AS cytoband, "
 	}
 	type row struct {
-		Hugo       string `json:"hugo"`
-		Entrez     *int64 `json:"entrez"`
-		Alteration *int64 `json:"alteration"`
-		Cytoband   string `json:"cytoband"`
-		Altered    uint64 `json:"altered"`
-		OnPanel    uint64 `json:"onPanel"`
-		Total      uint64 `json:"total"`
+		Hugo       string  `json:"hugo"`
+		Entrez     *int64  `json:"entrez"`
+		Alteration *int64  `json:"alteration"`
+		Cytoband   *string `json:"cytoband"`
+		Altered    uint64  `json:"altered"`
+		OnPanel    uint64  `json:"onPanel"`
+		Total      uint64  `json:"total"`
 	}
 	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS hugo, toInt64OrNull(toString(entrez_gene_id)) AS entrez, %s"+
@@ -257,10 +260,77 @@ func (s *State) geneCounts(args *sqlArgs, f studyViewFilter, variantType, altera
 		return []GeneAlterationCount{}, nil
 	}
 	s.populateProfiled(args, f, filtered, alterationType, out)
+	s.populateQValues(args, f, alterationType, out)
 	for i := range out {
 		out[i] = out[i].withEventKeys()
 	}
 	return out, nil
+}
+
+// populateQValues sets each gene's significance q-value when the filtered
+// samples come from a single study, as GetAlterationCountByGeneUseCase (MutSig
+// by symbol, for mutated and structural-variant genes) and
+// GetCnaAlterationCountByGeneUseCase (GISTIC by symbol and amplification or
+// deep deletion, the region with the lowest q-value) do.
+func (s *State) populateQValues(args *sqlArgs, f studyViewFilter, alterationType string, counts []GeneAlterationCount) {
+	type study struct {
+		ID string `json:"id"`
+	}
+	studies, err := queryA[study](s.CH,
+		"SELECT DISTINCT cancer_study_identifier AS id FROM sample_derived WHERE "+s.filterWhere(args, f)+" LIMIT 2", args)
+	if err != nil || len(studies) != 1 {
+		return
+	}
+	p := ch.Params{"study": studies[0].ID}
+	type significance struct {
+		Hugo  string  `json:"hugo"`
+		Amp   uint8   `json:"amp"`
+		Q     float64 `json:"q"`
+		QText string  `json:"qText"`
+	}
+	key := func(hugo string, alteration int64) string { return hugo + "\x00" + strconv.FormatInt(alteration, 10) }
+	best := map[string]float64{}
+	if alterationType == "COPY_NUMBER_ALTERATION" {
+		rows, err := queryView[significance](s.CH,
+			"SELECT gg.hugo_gene_symbol AS hugo, r.amp AS amp, r.q_value AS q, r.q_value_text AS qText "+
+				"FROM gistic r INNER JOIN gistic_to_gene gg ON gg.study_id = r.study_id AND gg.gistic_roi_id = r.gistic_roi_id "+
+				"WHERE r.study_id = {study:String}", p)
+		if err != nil {
+			return
+		}
+		for _, r := range rows {
+			alteration := int64(-2)
+			if r.Amp != 0 {
+				alteration = 2
+			}
+			k := key(r.Hugo, alteration)
+			q := importerFloat(r.QText, r.Q)
+			if cur, ok := best[k]; !ok || q < cur {
+				best[k] = q
+			}
+		}
+	} else {
+		rows, err := queryView[significance](s.CH,
+			"SELECT hugo_gene_symbol AS hugo, q_value AS q, q_value_text AS qText FROM mutsig WHERE study_id = {study:String}", p)
+		if err != nil {
+			return
+		}
+		for _, r := range rows {
+			best[key(r.Hugo, 0)] = importerFloat(r.QText, r.Q)
+		}
+	}
+	for i := range counts {
+		var alteration int64
+		if alterationType == "COPY_NUMBER_ALTERATION" {
+			if counts[i].Alteration == nil {
+				continue
+			}
+			alteration = *counts[i].Alteration
+		}
+		if q, ok := best[key(counts[i].HugoGeneSymbol, alteration)]; ok {
+			counts[i].QValue = &q
+		}
+	}
 }
 
 func (s *State) populateProfiled(args *sqlArgs, f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) {
