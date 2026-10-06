@@ -104,6 +104,14 @@ var (
 	genericAssayDataMultipleStudyFilterSchema = profilesOrIdentifiers(1,
 		[]string{"sampleMolecularIdentifiers", "molecularProfileIds", "genericAssayStableIds", "eitherMolecularProfileIdsOrSampleMolecularIdentifiersPresent"},
 		sizedProp("genericAssayStableIds", fStrings, 1, maxPageSize))
+	// ClinicalDataMultiStudyFilter (identifiers sized by
+	// ClinicalDataController.CLINICAL_DATA_MAX_PAGE_SIZE).
+	clinicalDataMultiStudyFilterSchema = func() *filterSchema {
+		ids := sizedProp("identifiers", fObjects, 1, maxPageSize)
+		ids.elem = &filterSchema{props: []filterProp{{name: "entityId", kind: fString}, {name: "studyId", kind: fString}}}
+		return &filterSchema{props: []filterProp{ids, sizedProp("attributeIds", fStrings, 1, maxPageSize)},
+			order: []string{"identifiers", "attributeIds"}}
+	}()
 	structuralVariantFilterSchema = func() *filterSchema {
 		s := profilesOrIdentifiers(0, []string{"eitherMolecularProfileIdsOrSampleMolecularIdentifiersPresent"},
 			sizedProp("entrezGeneIds", fInts, 0, maxPageSize), filterProp{name: "structuralVariantQueries", kind: fAnyArray})

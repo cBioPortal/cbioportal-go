@@ -478,7 +478,8 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-data", params: paged(legacyProjection, clinicalDataSort), exists: []string{"study", "patient"}},
 	{method: "GET", pattern: "/api/studies/{studyId}/clinical-data", params: append([]param{clinicalDataType}, paged(legacyProjection, clinicalDataSort)...), exists: []string{"study"}},
 	{method: "POST", pattern: "/api/studies/{studyId}/clinical-data/fetch", params: []param{clinicalDataType, projectionParamOf(legacyProjection)}, exists: []string{"study"}},
-	{method: "POST", pattern: "/api/clinical-data/fetch", params: []param{clinicalDataType, projectionParamOf(legacyProjection)}},
+	{method: "POST", pattern: "/api/clinical-data/fetch", params: []param{clinicalDataType, projectionParamOf(legacyProjection)},
+		filter: clinicalDataMultiStudyFilterSchema, intercepted: "interceptedClinicalDataMultiStudyFilter"},
 
 	// Clinical events (the study's list has its own page size bound).
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", params: paged(legacyProjection, clinicalEventSort)},
