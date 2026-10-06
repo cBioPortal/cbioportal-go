@@ -131,7 +131,9 @@ type contStatRow struct {
 // fewer than two values are left out, and entities need two remaining groups.
 // The p-value is Welch's t-test for two groups and a one-way ANOVA otherwise;
 // entities with an undefined p-value are skipped. Only per-group summary
-// statistics leave ClickHouse. keyCol is the matrix column that identifies a
+// statistics leave ClickHouse; the variance is the numerically stable
+// varSampStable, which agrees with commons-math's two-pass variance where the
+// one-pass varSamp loses precision (equal values give exactly 0). keyCol is the matrix column that identifies a
 // row (entity_stable_id for generic assay); withGene keys rows on hugo/entrez.
 func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene bool) ([]contResult, error) {
 	key := keyCol + " AS symbol, CAST(NULL AS Nullable(Int64)) AS entrez"
@@ -157,7 +159,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		return []contResult{}, nil
 	}
 	agg := fmt.Sprintf(
-		"SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSamp(v) AS var, min(pos_) AS pos FROM (%s) "+
+		"SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSampStable(v) AS var, min(pos_) AS pos FROM (%s) "+
 			"GROUP BY symbol, entrez, grp", strings.Join(parts, " UNION ALL "))
 	query := agg + " ORDER BY pos, symbol, grp"
 	if withGene {
@@ -301,6 +303,7 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
 		args := newArgs()
 		props, _ = s.genericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.pairs(pairs), args)
+		props = summaryMetaProperties(props)
 	}
 	out := make([]GenericAssayEnrichment, len(results))
 	for i, res := range results {
