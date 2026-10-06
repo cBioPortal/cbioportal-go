@@ -266,8 +266,8 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 
 // CaseListDataCount is the count of filtered samples in one case list.
 type CaseListDataCount struct {
-	Value string `json:"value"`
 	Label string `json:"label"`
+	Value string `json:"value"`
 	Count uint64 `json:"count"`
 }
 

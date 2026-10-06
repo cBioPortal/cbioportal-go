@@ -140,7 +140,7 @@ func TestDecimalJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b != `{"attributeId":"AGE","start":1.0E+8,"count":2}` {
+	if b != `{"start":1.0E+8,"count":2,"attributeId":"AGE"}` {
 		t.Errorf("marshal = %s", b)
 	}
 }

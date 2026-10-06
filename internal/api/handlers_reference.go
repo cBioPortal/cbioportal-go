@@ -205,13 +205,13 @@ func (s *State) resolveRefGene(geneID string) (int64, string, bool) {
 // ---------- 6/7. reference-genome-genes ----------
 
 type ReferenceGenomeGene struct {
-	Chromosome        string `json:"chromosome"`
-	Cytoband          string `json:"cytoband"`
-	End               int64  `json:"end"`
+	ReferenceGenomeID int64  `json:"referenceGenomeId"`
 	EntrezGeneID      int64  `json:"entrezGeneId"`
 	HugoGeneSymbol    string `json:"hugoGeneSymbol"`
-	ReferenceGenomeID int64  `json:"referenceGenomeId"`
+	Chromosome        string `json:"chromosome"`
+	Cytoband          string `json:"cytoband"`
 	Start             int64  `json:"start"`
+	End               int64  `json:"end"`
 }
 
 // referenceGenomeIDFor maps a genome name to the numeric reference-genome id used

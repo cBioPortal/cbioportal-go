@@ -290,9 +290,9 @@ func clinicalCategory(sampleVal, patientVal *string) (string, bool) {
 // ---------- 2. clinical data density plot ----------
 
 type DensityPlotBin struct {
+	Count int     `json:"count"`
 	BinX  float64 `json:"binX"`
 	BinY  float64 `json:"binY"`
-	Count int     `json:"count"`
 	MinX  float64 `json:"minX"`
 	MaxX  float64 `json:"maxX"`
 	MinY  float64 `json:"minY"`
@@ -447,11 +447,11 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 // ---------- 3. clinical data violin plots ----------
 
 type ClinicalViolinPlotBoxData struct {
+	WhiskerLower float64 `json:"whiskerLower"`
+	WhiskerUpper float64 `json:"whiskerUpper"`
 	Median       float64 `json:"median"`
 	Q1           float64 `json:"q1"`
 	Q3           float64 `json:"q3"`
-	WhiskerLower float64 `json:"whiskerLower"`
-	WhiskerUpper float64 `json:"whiskerUpper"`
 }
 
 type ClinicalViolinPlotIndividualPoint struct {
@@ -461,19 +461,19 @@ type ClinicalViolinPlotIndividualPoint struct {
 }
 
 type ClinicalViolinPlotRowData struct {
-	BoxData          ClinicalViolinPlotBoxData           `json:"boxData"`
 	Category         string                              `json:"category"`
-	CurveData        []float64                           `json:"curveData"`
-	IndividualPoints []ClinicalViolinPlotIndividualPoint `json:"individualPoints"`
 	NumSamples       int                                 `json:"numSamples"`
+	CurveData        []float64                           `json:"curveData"`
+	BoxData          ClinicalViolinPlotBoxData           `json:"boxData"`
+	IndividualPoints []ClinicalViolinPlotIndividualPoint `json:"individualPoints"`
 }
 
 // ClinicalViolinPlotData is the violin plot; without data its axis runs
 // from Infinity to -Infinity, as ViolinPlotServiceImpl leaves it.
 type ClinicalViolinPlotData struct {
+	Rows      []ClinicalViolinPlotRowData `json:"rows"`
 	AxisStart jacksonDouble               `json:"axisStart"`
 	AxisEnd   jacksonDouble               `json:"axisEnd"`
-	Rows      []ClinicalViolinPlotRowData `json:"rows"`
 }
 
 const violinShowOnlyPointsThreshold = 7

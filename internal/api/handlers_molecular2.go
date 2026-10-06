@@ -464,12 +464,12 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 // ---------- Variant counts ----------
 
 type VariantCount struct {
+	MolecularProfileID                string `json:"molecularProfileId"`
 	EntrezGeneID                      int64  `json:"entrezGeneId"`
 	Keyword                           string `json:"keyword"`
-	MolecularProfileID                string `json:"molecularProfileId"`
 	NumberOfSamples                   int64  `json:"numberOfSamples"`
-	NumberOfSamplesWithKeyword        int64  `json:"numberOfSamplesWithKeyword"`
 	NumberOfSamplesWithMutationInGene int64  `json:"numberOfSamplesWithMutationInGene"`
+	NumberOfSamplesWithKeyword        int64  `json:"numberOfSamplesWithKeyword"`
 }
 
 func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
@@ -585,10 +585,10 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 // ---------- Mutation counts by protein position (all studies) ----------
 
 type MutationCountByPosition struct {
-	Count           int64 `json:"count"`
 	EntrezGeneID    int64 `json:"entrezGeneId"`
-	ProteinPosEnd   int64 `json:"proteinPosEnd"`
 	ProteinPosStart int64 `json:"proteinPosStart"`
+	ProteinPosEnd   int64 `json:"proteinPosEnd"`
+	Count           int64 `json:"count"`
 }
 
 func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Request) {

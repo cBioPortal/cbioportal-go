@@ -304,14 +304,14 @@ func toStructuralVariant(r map[string]any) StructuralVariant {
 // ---------- Gene panel data (sample -> panel mapping) ----------
 
 type GenePanelData struct {
-	GenePanelID        string `json:"genePanelId,omitempty"`
-	MolecularProfileID string `json:"molecularProfileId"`
-	PatientID          string `json:"patientId"`
-	Profiled           bool   `json:"profiled"`
-	SampleID           string `json:"sampleId"`
-	StudyID            string `json:"studyId"`
-	UniquePatientKey   string `json:"uniquePatientKey"`
 	UniqueSampleKey    string `json:"uniqueSampleKey"`
+	UniquePatientKey   string `json:"uniquePatientKey"`
+	MolecularProfileID string `json:"molecularProfileId"`
+	SampleID           string `json:"sampleId"`
+	PatientID          string `json:"patientId"`
+	StudyID            string `json:"studyId"`
+	GenePanelID        string `json:"genePanelId,omitempty"`
+	Profiled           bool   `json:"profiled"`
 }
 
 type gpReq struct {

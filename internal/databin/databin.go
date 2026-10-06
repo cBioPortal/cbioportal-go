@@ -115,11 +115,11 @@ type Value struct {
 // Bin mirrors ClinicalDataBin. Nil fields are omitted from JSON, matching the
 // Jackson NON_NULL configuration of the Java API.
 type Bin struct {
-	AttributeID  string   `json:"attributeId"`
 	SpecialValue *string  `json:"specialValue,omitempty"`
 	Start        *Decimal `json:"start,omitempty"`
 	End          *Decimal `json:"end,omitempty"`
 	Count        int      `json:"count"`
+	AttributeID  string   `json:"attributeId"`
 }
 
 // Special returns the special value or "".

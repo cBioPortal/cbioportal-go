@@ -15,11 +15,12 @@ func (s *State) routeStudyTags(mux *http.ServeMux) {
 }
 
 // CancerStudyTags is the CancerStudyTags model: tags is the JSON document as a
-// string. The internal numeric cancerStudyId has no equivalent here and is
-// omitted.
+// string. cancerStudyId is the study's internal id, absent where the database
+// carries none.
 type CancerStudyTags struct {
-	StudyID string `json:"studyId"`
-	Tags    string `json:"tags"`
+	CancerStudyID *uint64 `json:"cancerStudyId,omitempty"`
+	StudyID       string  `json:"studyId"`
+	Tags          string  `json:"tags"`
 }
 
 type studyTagsRow struct {
@@ -61,9 +62,13 @@ func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	ranks := s.studyRanks()
 	out := make([]CancerStudyTags, len(rows))
 	for i, row := range rows {
-		out[i] = CancerStudyTags(row)
+		out[i] = CancerStudyTags{StudyID: row.StudyID, Tags: row.Tags}
+		if id, ok := ranks[row.StudyID]; ok {
+			out[i].CancerStudyID = &id
+		}
 	}
 	writeJSON(w, out)
 }

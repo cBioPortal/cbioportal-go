@@ -18,8 +18,8 @@ import (
 // GroupStatistics mirrors the client GroupStatistics: per-group mean/stddev of a
 // continuous molecular value.
 type GroupStatistics struct {
-	MeanExpression    float64 `json:"meanExpression"`
 	Name              string  `json:"name"`
+	MeanExpression    float64 `json:"meanExpression"`
 	StandardDeviation float64 `json:"standardDeviation"`
 }
 
@@ -27,8 +27,8 @@ type GroupStatistics struct {
 // ExpressionEnrichmentUtil, neither the cytoband nor a q-value is set (the
 // frontend computes q-values itself).
 type GenomicEnrichment struct {
-	EntrezGeneID     int64             `json:"entrezGeneId"`
 	GroupsStatistics []GroupStatistics `json:"groupsStatistics"`
+	EntrezGeneID     int64             `json:"entrezGeneId"`
 	HugoGeneSymbol   string            `json:"hugoGeneSymbol"`
 	PValue           float64           `json:"pValue"`
 }
@@ -36,38 +36,38 @@ type GenomicEnrichment struct {
 // GenericAssayEnrichment is the generic-assay-enrichments response element
 // (Java sets neither name nor qValue on numeric enrichments).
 type GenericAssayEnrichment struct {
-	GenericEntityMetaProperties javaStringMap     `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []GroupStatistics `json:"groupsStatistics"`
-	PValue                      float64           `json:"pValue"`
 	StableID                    string            `json:"stableId"`
+	GenericEntityMetaProperties javaStringMap     `json:"genericEntityMetaProperties"`
+	PValue                      float64           `json:"pValue"`
 }
 
 // GenericAssayCountSummary mirrors the client type for binary enrichments.
 type GenericAssayCountSummary struct {
-	Count      int    `json:"count"`
 	Name       string `json:"name"`
+	Count      int    `json:"count"`
 	TotalCount int    `json:"totalCount"`
 }
 
 // GenericAssayBinaryEnrichment is the generic-assay-binary-enrichments element
 // (Java leaves name unset, so it is not serialized).
 type GenericAssayBinaryEnrichment struct {
-	Counts                      []GenericAssayCountSummary `json:"counts"`
-	GenericEntityMetaProperties javaStringMap              `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []GroupStatistics          `json:"groupsStatistics"`
+	StableID                    string                     `json:"stableId"`
+	GenericEntityMetaProperties javaStringMap              `json:"genericEntityMetaProperties"`
+	Counts                      []GenericAssayCountSummary `json:"counts"`
 	PValue                      float64                    `json:"pValue"`
 	QValue                      float64                    `json:"qValue"`
-	StableID                    string                     `json:"stableId"`
 }
 
 // GenericAssayCategoricalEnrichment is the generic-assay-categorical-enrichments
 // element (Java leaves name unset, so it is not serialized).
 type GenericAssayCategoricalEnrichment struct {
-	GenericEntityMetaProperties javaStringMap                `json:"genericEntityMetaProperties"`
 	GroupsStatistics            []CategoricalGroupStatistics `json:"groupsStatistics"`
+	StableID                    string                       `json:"stableId"`
+	GenericEntityMetaProperties javaStringMap                `json:"genericEntityMetaProperties"`
 	PValue                      float64                      `json:"pValue"`
 	QValue                      float64                      `json:"qValue"`
-	StableID                    string                       `json:"stableId"`
 }
 
 // ---------------------------------------------------------------------------

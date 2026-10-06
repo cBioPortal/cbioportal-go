@@ -231,12 +231,12 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 }
 
 type GenomicDataBin struct {
-	HugoGeneSymbol string           `json:"hugoGeneSymbol"`
-	ProfileType    string           `json:"profileType"`
 	SpecialValue   *string          `json:"specialValue,omitempty"`
 	Start          *databin.Decimal `json:"start,omitempty"`
 	End            *databin.Decimal `json:"end,omitempty"`
 	Count          int              `json:"count"`
+	HugoGeneSymbol string           `json:"hugoGeneSymbol"`
+	ProfileType    string           `json:"profileType"`
 }
 
 func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
@@ -278,12 +278,12 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 }
 
 type GenericAssayDataBin struct {
-	StableID     string           `json:"stableId"`
-	ProfileType  string           `json:"profileType"`
 	SpecialValue *string          `json:"specialValue,omitempty"`
 	Start        *databin.Decimal `json:"start,omitempty"`
 	End          *databin.Decimal `json:"end,omitempty"`
 	Count        int              `json:"count"`
+	StableID     string           `json:"stableId"`
+	ProfileType  string           `json:"profileType"`
 }
 
 func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
