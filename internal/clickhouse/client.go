@@ -221,11 +221,30 @@ func (c *Client) CreateDatabase() error {
 // databases are left alone without issuing CREATE DATABASE, so a user granted
 // only table-level privileges on pre-provisioned databases can run imports.
 func (c *Client) EnsureDatabase(name string) error {
-	out, err := c.ExecuteServerwide(fmt.Sprintf(
-		"SELECT count() FROM system.databases WHERE name = '%s' FORMAT TabSeparated",
-		strings.ReplaceAll(name, "'", "\\'")))
-	if err == nil && strings.TrimSpace(out) == "1" {
+	var out string
+	var err error
+	for try := 0; try < 3; try++ {
+		if try > 0 {
+			time.Sleep(time.Duration(try) * time.Second)
+		}
+		out, err = c.ExecuteServerwide(fmt.Sprintf(
+			"SELECT count() FROM system.databases WHERE name = '%s' FORMAT TabSeparated",
+			strings.ReplaceAll(name, "'", "\\'")))
+		if t := strings.TrimSpace(out); err == nil && (t == "0" || t == "1") {
+			break
+		}
+	}
+	if err != nil {
+		// A failed lookup is no sign that the database is missing: creating
+		// it would need a privilege an import user may lack.
+		return fmt.Errorf("looking up database %s: %w", name, err)
+	}
+	switch strings.TrimSpace(out) {
+	case "1":
 		return nil
+	case "0":
+	default:
+		return fmt.Errorf("looking up database %s: unexpected answer %q", name, out)
 	}
 	_, err = c.ExecuteServerwide(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s`", name))
 	return err
