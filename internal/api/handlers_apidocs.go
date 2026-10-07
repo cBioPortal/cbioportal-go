@@ -45,6 +45,13 @@ func routeAPIDocs(mux *http.ServeMux, s *State) {
 		mux.HandleFunc("GET "+route, openAPIDoc(file))
 	}
 	mux.HandleFunc("GET /api/v3/api-docs/swagger-config", swaggerConfig)
+	// /api and /api/ lead to the API docs, as springdoc's redirect does on
+	// the Java portal for /api.
+	toDocs := func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, baseURL(r)+"/api/swagger-ui", http.StatusFound)
+	}
+	mux.HandleFunc("GET /api", toDocs)
+	mux.HandleFunc("GET /api/{$}", toDocs)
 	mux.HandleFunc("GET /api/swagger-ui", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, baseURL(r)+"/api/swagger-ui/index.html", http.StatusFound)
 	})

@@ -77,6 +77,11 @@ func TestOpenAPIDocs(t *testing.T) {
 	if w := get("/api/v3/api-docs/swagger-config"); !strings.Contains(w.Body.String(), `"oauth2RedirectUrl":"http://go.example.org/api/swagger-ui/oauth2-redirect.html"`) {
 		t.Errorf("swagger-config: %s", w.Body.String())
 	}
+	for _, path := range []string{"/api", "/api/"} {
+		if w := get(path); w.Code != http.StatusFound || w.Header().Get("Location") != "http://go.example.org/api/swagger-ui" {
+			t.Errorf("%s redirect: %d %q", path, w.Code, w.Header().Get("Location"))
+		}
+	}
 	if w := get("/api/swagger-ui"); w.Code != http.StatusFound || w.Header().Get("Location") != "http://go.example.org/api/swagger-ui/index.html" {
 		t.Errorf("swagger-ui redirect: %d %q", w.Code, w.Header().Get("Location"))
 	}
