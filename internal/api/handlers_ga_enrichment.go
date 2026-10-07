@@ -124,7 +124,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 	}
 	keys, err := s.gaCaseMatrixKeys(meta.StudyID, profileID, cases, patient, patientLevel)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return nil
 	}
 	in.sizes = make([]int, len(keys))
@@ -133,7 +133,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 	}
 	in.entities, in.values, err = s.gaValueSequences(meta, keys)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return nil
 	}
 	return in

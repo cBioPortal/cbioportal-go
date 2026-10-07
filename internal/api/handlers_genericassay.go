@@ -123,8 +123,8 @@ func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[str
 }
 
 // writeGenericAssayData streams genericAssayDataEach's records.
-func (s *State) writeGenericAssayData(w http.ResponseWriter, profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) {
-	out := newJSONArray(w)
+func (s *State) writeGenericAssayData(w http.ResponseWriter, r *http.Request, profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) {
+	out := newJSONArray(w, r)
 	out.finish(s.genericAssayDataEach(profileIDs, samplesByStudy, entityIDs, func(d GenericAssayData) error {
 		return out.add(d)
 	}))
@@ -148,7 +148,7 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 		p := ch.Params{}
 		rows, err := ch.QueryP[idRow](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, f.SampleListID), p)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		sampleIDs = make([]string, len(rows))
@@ -165,7 +165,7 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 		meta, _ := s.profileMeta(mpid)
 		byStudy = map[string][]string{meta.StudyID: sampleIDs}
 	}
-	s.writeGenericAssayData(w, []string{mpid}, byStudy, f.GenericAssayStableIDs)
+	s.writeGenericAssayData(w, r, []string{mpid}, byStudy, f.GenericAssayStableIDs)
 }
 
 type genericAssayMultipleStudyFilter struct {
@@ -190,7 +190,7 @@ func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if len(f.MolecularProfileIDs) > 0 {
-		s.writeGenericAssayData(w, f.MolecularProfileIDs, nil, f.GenericAssayStableIDs)
+		s.writeGenericAssayData(w, r, f.MolecularProfileIDs, nil, f.GenericAssayStableIDs)
 		return
 	}
 	var profiles []string
@@ -201,7 +201,7 @@ func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Req
 			byStudy[meta.StudyID] = append(byStudy[meta.StudyID], smi.SampleID)
 		}
 	}
-	s.writeGenericAssayData(w, profiles, byStudy, f.GenericAssayStableIDs)
+	s.writeGenericAssayData(w, r, profiles, byStudy, f.GenericAssayStableIDs)
 }
 
 // ---------- Generic assay meta ----------
@@ -259,7 +259,7 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	props, err := s.genericAssayMetaProperties(where, args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, genericAssayMetaList(props))

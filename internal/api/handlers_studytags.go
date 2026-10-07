@@ -35,7 +35,7 @@ func (s *State) studyTagsGet(w http.ResponseWriter, r *http.Request) {
 		"SELECT study_id AS studyId, tags FROM cancer_study_tags WHERE study_id = {study:String} LIMIT 1",
 		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 || !json.Valid([]byte(rows[0].Tags)) {
@@ -59,7 +59,7 @@ func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 	rows, err := queryView[studyTagsRow](s.CH,
 		"SELECT study_id AS studyId, tags FROM cancer_study_tags"+where+" ORDER BY study_id", p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	ranks := s.studyRanks()

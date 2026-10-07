@@ -330,7 +330,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := cachedQueryA[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", s.studySelect(), where, order), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if projection == "META" {
@@ -359,7 +359,7 @@ func (s *State) study(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("studyId")
 	rows, err := cachedQueryP[studyRow](s, s.studySelect()+" WHERE c.study_id = {study:String}", ch.Params{"study": id})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
@@ -382,7 +382,7 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 	rows, err := cachedQueryP[studyRow](s, s.studySelect()+" WHERE c.study_id IN {ids:Array(String)} ORDER BY c.study_id",
 		ch.Params{"ids": ids})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	projection := projectionParam(r)
@@ -553,10 +553,10 @@ func (s *State) patients(w http.ResponseWriter, r *http.Request) {
 // projection=META.
 func (s *State) writePatientRows(w http.ResponseWriter, r *http.Request, sql string, p ch.Params) {
 	if projectionOf(r) == "META" {
-		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sql+")", p)
+		writeMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", p)
 		return
 	}
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, p, func(r *idRow) error {
 		return out.add(Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID)})
 	})
@@ -594,7 +594,7 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} "+
 			"ORDER BY "+s.patientOrder(r), ch.Params{"ids": pairs})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, toPatients(rows))
@@ -621,7 +621,7 @@ type CancerType struct {
 func (s *State) cancerTypes(w http.ResponseWriter, r *http.Request) {
 	out, err := s.queryCancerTypes("", nil)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)

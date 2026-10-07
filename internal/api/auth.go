@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -66,7 +67,11 @@ func auth(cfg AuthConfig, next http.Handler) http.Handler {
 		tok := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		user, err := verifyHS256(tok, cfg.Secret)
 		if err != nil {
-			http.Error(w, "unauthorized: "+err.Error(), http.StatusUnauthorized)
+			// An empty 401, as Java's HttpStatusEntryPoint answers a refused
+			// API token; the reason goes to the server log.
+			slog.Warn("bearer token refused", slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
+			readBody(r, nil)
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, withUser(r, user))

@@ -74,14 +74,14 @@ func toMP(r mpRow) MolecularProfile {
 
 // mpQuery writes the molecular profiles matching where, whose placeholders
 // take their values from p.
-func (s *State) mpQuery(w http.ResponseWriter, where string, p ch.Params) {
+func (s *State) mpQuery(w http.ResponseWriter, r *http.Request, where string, p ch.Params) {
 	sql := s.mpSelect()
 	if where != "" {
 		sql += " WHERE " + where
 	}
 	rows, err := ch.QueryP[mpRow](s.CH, sql+" ORDER BY molecularProfileId", p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]MolecularProfile, len(rows))
@@ -91,16 +91,16 @@ func (s *State) mpQuery(w http.ResponseWriter, where string, p ch.Params) {
 	writeJSON(w, out)
 }
 
-func (s *State) molecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, "", nil) }
+func (s *State) molecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, r, "", nil) }
 
 func (s *State) studyMolecularProfiles(w http.ResponseWriter, r *http.Request) {
-	s.mpQuery(w, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
+	s.mpQuery(w, r, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
 func (s *State) molecularProfile(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[mpRow](s.CH, s.mpSelect()+" WHERE molecular_profile_id = {id:String}", ch.Params{"id": r.PathValue("id")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
@@ -118,9 +118,9 @@ func (s *State) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
 	readBody(r, &f)
 	switch {
 	case len(f.MolecularProfileIDs) > 0:
-		s.mpQuery(w, "molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": f.MolecularProfileIDs})
+		s.mpQuery(w, r, "molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": f.MolecularProfileIDs})
 	case len(f.StudyIDs) > 0:
-		s.mpQuery(w, "study_id IN {ids:Array(String)}", ch.Params{"ids": f.StudyIDs})
+		s.mpQuery(w, r, "study_id IN {ids:Array(String)}", ch.Params{"ids": f.StudyIDs})
 	default:
 		writeJSON(w, []MolecularProfile{})
 	}
@@ -383,7 +383,7 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 			Samples uint64 `json:"samples"`
 		}](s.CH, sql, args.params(sql))
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		w.Header().Set("total-count", fmt.Sprint(rows[0].N))
@@ -400,7 +400,7 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 		sql = sqlStablePageQuery(r, mutationSortable, sel+" WHERE "+where, mutationOrder)
 	}
 	projection := projectionOf(r)
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *mutationRow) error {
 		if projection == "ID" {
 			m := toMutation(*row, false)
@@ -563,7 +563,7 @@ func groupPanels(rows []panelGeneRow) []GenePanel {
 func (s *State) genePanels(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[panelGeneRow](s.CH, panelSelect+" ORDER BY genePanelId, hugoGeneSymbol")
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, groupPanels(rows))
@@ -582,7 +582,7 @@ func (s *State) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId IN {ids:Array(String)} ORDER BY genePanelId, hugoGeneSymbol",
 		ch.Params{"ids": ids})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, groupPanels(rows))
@@ -592,7 +592,7 @@ func (s *State) genePanel(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId = {id:String} ORDER BY hugoGeneSymbol",
 		ch.Params{"id": r.PathValue("id")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	panels := groupPanels(rows)

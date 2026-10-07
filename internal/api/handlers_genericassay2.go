@@ -82,7 +82,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 			"WHERE NOT %s AND %s%s GROUP BY entity_stable_id, value",
 		unit, isNASQL("value"), scope, entityClause), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	var total uint64
@@ -178,7 +178,7 @@ func leadingInt(s string) uint64 {
 func (s *State) genericAssayDataInProfileGet(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("molecularProfileId")
 	stableID := r.PathValue("genericAssayStableId")
-	s.writeGenericAssayData(w, []string{mpid}, nil, []string{stableID})
+	s.writeGenericAssayData(w, r, []string{mpid}, nil, []string{stableID})
 }
 
 // ---------- Single-entity metadata GETs ----------
@@ -202,7 +202,7 @@ func (s *State) genericAssayMetaByStableIdGet(w http.ResponseWriter, r *http.Req
 	args := newArgs()
 	out, err := s.genericAssayMetasWhere("entity_stable_id = "+args.str(stableID), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)
@@ -221,7 +221,7 @@ func (s *State) genericAssayMetaByIDGet(w http.ResponseWriter, r *http.Request) 
 	out, err := s.genericAssayMetasWhere(fmt.Sprintf(
 		"study_id = %s AND profile_stable_id = %s", args.str(m.StudyID), args.str(m.StableID)), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)

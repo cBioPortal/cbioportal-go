@@ -90,7 +90,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		}
 		rows, err := queryA[countRow](s.CH, "SELECT count() AS c FROM seg g WHERE "+where, args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		n := uint64(0)
@@ -107,7 +107,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		"WHERE " + where + " ORDER BY " + s.segOrder("g.study_id, g.sample_id, g.chrom, start")
 	body, err := s.CH.QueryStreamP(r.Context(), sql, "RowBinary", args.params(sql))
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	defer body.Close()
@@ -115,6 +115,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 	if err := writeSegments(w, ch.NewRowBinaryReader(body)); err != nil {
 		// The response is already under way: abort it so the client sees a
 		// truncated transfer rather than a well-formed partial list.
+		logServerError(r, "streamed response aborted", err)
 		panic(http.ErrAbortHandler)
 	}
 }
@@ -246,7 +247,7 @@ func (s *State) studyClinicalAttributes(w http.ResponseWriter, r *http.Request) 
 	rows, err := ch.QueryP[clinAttrRow](s.CH, clinAttrSelect+" WHERE study_id = {study:String} ORDER BY clinical_attribute_id",
 		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]ClinicalAttribute, len(rows))
@@ -260,7 +261,7 @@ func (s *State) studyClinicalAttribute(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[clinAttrRow](s.CH, clinAttrSelect+" WHERE study_id = {study:String} AND clinical_attribute_id = {attr:String} LIMIT 1",
 		ch.Params{"study": r.PathValue("studyId"), "attr": r.PathValue("clinicalAttributeId")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
@@ -329,7 +330,7 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	for _, q := range queries {
 		rows, err := queryA[countRow](s.CH, q, args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		for _, r := range rows {

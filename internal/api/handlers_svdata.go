@@ -189,7 +189,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 			"WHERE %s ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId",
 		strings.Join(cols, ", "), svSiteEntrezSQL, scope)
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, query, args.params(query), func(r *map[string]any) error {
 		return out.add(toStructuralVariant(*r))
 	})
@@ -593,10 +593,10 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	}
 	if projectionOf(r) == "META" && len(parts) > 0 {
 		sql := "SELECT count() AS n FROM (" + strings.Join(parts, " UNION ALL ") + ") WHERE " + javaNumericSQL("value")
-		writeMetaCount(w, s.CH, sql, args.params(sql))
+		writeMetaCount(w, r, s.CH, sql, args.params(sql))
 		return
 	}
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	if len(parts) == 0 {
 		out.finish(nil)
 		return

@@ -94,7 +94,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 	}
 
 	if s.hasGenesetRef() {
-		s.genesetMemberCorrelations(w, meta, genesetID, sampleListID, sampleIDs, threshold, expr.ID, expr.StableID, zscore.ID)
+		s.genesetMemberCorrelations(w, r, meta, genesetID, sampleListID, sampleIDs, threshold, expr.ID, expr.StableID, zscore.ID)
 		return
 	}
 
@@ -129,7 +129,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		s.rawSource("mrna_expression_matrix", geneMatrixCols...), querySub),
 		"1", threshold)+" ORDER BY sc DESC", p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 
@@ -169,7 +169,7 @@ func (s *State) geneAliases(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[aliasRow](s.CH, fmt.Sprintf(
 		"SELECT gene_alias AS alias FROM cbioportal_ref.gene_alias WHERE entrez_gene_id = %d ORDER BY gene_alias", entrez))
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]string, 0, len(rows))
@@ -279,7 +279,7 @@ func (s *State) refGenomeGenes(genomeName, where string, p ch.Params) ([]Referen
 func (s *State) referenceGenomeGenes(w http.ResponseWriter, r *http.Request) {
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), "1", nil)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)
@@ -295,7 +295,7 @@ func (s *State) referenceGenomeGeneGet(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), fmt.Sprintf("g.entrez_gene_id = %d", entrez), nil)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(out) == 0 {
@@ -335,7 +335,7 @@ func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request
 	}
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), where, p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)

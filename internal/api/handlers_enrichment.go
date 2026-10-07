@@ -130,7 +130,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 				"AND %[1]s IN %[3]s AND %[4]s GROUP BY hugo_gene_symbol",
 			unit, sc.profiles, sc.entities, a.enrichmentClause()), args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		sc.altered = altered
@@ -147,7 +147,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		}
 		profiled, err := s.profiledPerGene(args, unit, sc.profiles, sc.entities, geneList)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		for gene, n := range profiled {

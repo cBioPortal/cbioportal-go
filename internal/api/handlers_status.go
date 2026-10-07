@@ -55,7 +55,7 @@ func (s *State) timestamps(w http.ResponseWriter, r *http.Request) {
 			"WHERE database = 'cbioportal_ref' AND active GROUP BY table) p ON p.table = t.name "+
 			"WHERE t.database = 'cbioportal_ref' AND t.name IN (%s)", inList(timestampTables)))
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := map[string]string{}
@@ -182,7 +182,7 @@ func (s *State) sitemapIndex(w http.ResponseWriter, r *http.Request) {
 			"LEFT JOIN (SELECT study_id, count() AS n FROM patient GROUP BY study_id) p ON p.study_id = c.study_id "+
 			"ORDER BY c.study_id")
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	base := seoBaseURL(r)
@@ -234,7 +234,7 @@ func (s *State) sitemapStudy(w http.ResponseWriter, r *http.Request) {
 		"SELECT patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY patient_id LIMIT %d OFFSET %d",
 		patientsPerSitemap, page*patientsPerSitemap), ch.Params{"study": id})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if page > 0 && len(patients) == 0 {

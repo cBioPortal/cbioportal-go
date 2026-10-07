@@ -104,7 +104,7 @@ func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, []DiscreteCopyNumberData{})
 		return
 	}
-	s.writeDiscreteCopyNumber(w, mpid, f.EntrezGeneIDs, f.SampleIDs, f.SampleListID,
+	s.writeDiscreteCopyNumber(w, r, mpid, f.EntrezGeneIDs, f.SampleIDs, f.SampleListID,
 		r.URL.Query().Get("discreteCopyNumberEventType"), projectionOf(r))
 }
 
@@ -115,7 +115,7 @@ func (s *State) discreteCopyNumberGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []DiscreteCopyNumberData{})
 		return
 	}
-	s.writeDiscreteCopyNumber(w, mpid, nil, nil, q.Get("sampleListId"), q.Get("discreteCopyNumberEventType"), projectionOf(r))
+	s.writeDiscreteCopyNumber(w, r, mpid, nil, nil, q.Get("sampleListId"), q.Get("discreteCopyNumberEventType"), projectionOf(r))
 }
 
 // homdelOrAmpOnly is DiscreteCopyNumberServiceImpl.isHomdelOrAmpOnly: such
@@ -129,7 +129,7 @@ func homdelOrAmpOnly(alterations []int64) bool {
 	return true
 }
 
-func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entrez []int64, sampleIDs []string, sampleListID, eventType, projection string) {
+func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, mpid string, entrez []int64, sampleIDs []string, sampleListID, eventType, projection string) {
 	meta, ok := s.profileMeta(mpid)
 	if !ok || !strings.EqualFold(meta.AlterationType, "COPY_NUMBER_ALTERATION") {
 		writeJSON(w, []DiscreteCopyNumberData{})
@@ -148,11 +148,11 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 		}
 		sql := fmt.Sprintf("SELECT count() AS n FROM (%s) WHERE match(value, '^[+-]?0*[0-9]{1,10}$') AND "+
 			"toInt64OrNull(replaceRegexpOne(value, '^[+]', '')) IN (%s)", sel, intListSQL(alterations))
-		writeMetaCount(w, s.CH, sql, args.params(sql))
+		writeMetaCount(w, r, s.CH, sql, args.params(sql))
 		return
 	}
 	if !homdelOrAmpOnly(alterations) {
-		out := newJSONArray(w)
+		out := newJSONArray(w, r)
 		out.finish(s.discreteCopyNumberFromValues(mpid, meta, molecularDataFilter{
 			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, alterations, detailed, func(d DiscreteCopyNumberData) error {
 			return out.add(d)
@@ -184,10 +184,10 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, mpid string, entr
 			"LEFT JOIN %s rg ON rg.entrez_gene_id = toInt64OrNull(c.entrez_gene_id) "+
 			"WHERE %s AND toInt64OrNull(c.entrez_gene_id) > 0", genes, where)
 	if projection == "META" {
-		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sel+")", p)
+		writeMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sel+")", p)
 		return
 	}
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
 	err := ch.QueryEachP(s.CH, sel+" ORDER BY entrezGeneId, alteration, c.sample_id", p,
 		func(r *discreteCnaRow) error {
@@ -345,7 +345,7 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 			"WHERE (entrezGeneId, alteration) IN (%s) GROUP BY entrezGeneId, alteration",
 		strings.Join(pairs, ", ")), ch.Params{"study": meta.StudyID, "profile": meta.StableID})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	found := map[[2]int64]int64{}
@@ -438,7 +438,7 @@ func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 			"WHERE %s GROUP BY m.sample_id, sm.patient_id ORDER BY m.sample_id",
 		classes["CtoT"], classes["CtoG"], classes["CtoA"], classes["TtoC"], classes["TtoG"], classes["TtoA"], where), p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	// One entry per sample, in the iteration order of the HashMap the
@@ -623,7 +623,7 @@ func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 			"WHERE toInt64OrZero(entrez_gene_id) IN (%s) GROUP BY entrezGeneId, proteinPosition, proteinChange",
 		intListSQL(entrez)))
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	type located struct{ gene, start, end, n int64 }

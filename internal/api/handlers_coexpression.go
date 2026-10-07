@@ -130,7 +130,7 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		p := ch.Params{}
 		rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, *f.SampleListID), p)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		sampleIDs = sampleIDs[:0]
@@ -160,7 +160,7 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 	genes, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE entrez_gene_id = %d", *f.EntrezGeneID))
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(genes) == 0 {
@@ -202,7 +202,7 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		threshold), ch.Params{"studyA": metaA.StudyID, "typeA": typeA, "hugo": hugo, "samples": uniqueIDs,
 		"studyB": metaB.StudyID, "typeB": typeB})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	for _, row := range rows {

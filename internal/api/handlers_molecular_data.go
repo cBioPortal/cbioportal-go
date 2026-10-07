@@ -169,10 +169,10 @@ func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid
 			sel = "SELECT '' AS value WHERE 0"
 		}
 		sql := "SELECT count() AS n FROM (" + sel + ") WHERE " + javaNumericSQL("value")
-		writeMetaCount(w, s.CH, sql, args.params(sql))
+		writeMetaCount(w, r, s.CH, sql, args.params(sql))
 		return
 	}
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := s.molecularDataEach(mpid, f, func(d MolecularData) error {
 		if rec, ok := numericRecord(d, projection); ok {
 			return out.add(rec)

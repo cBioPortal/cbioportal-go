@@ -30,7 +30,7 @@ func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 			"WHERE s.study_id IN %s AND concat(s.study_id, '_', s.sample_id) IN (%s) ORDER BY s.sample_id, s.study_id",
 		args.strs(f.scopeStudies()), s.filterSQL(args, f)), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]filteredSample, len(rows))

@@ -13,6 +13,7 @@ import (
 	"html"
 	"io"
 	"log"
+	"log/slog"
 	"maps"
 	"net/http"
 	"net/http/httputil"
@@ -193,13 +194,14 @@ func writeJSON(w http.ResponseWriter, v any) {
 // so an error until then still answers as fail does.
 type jsonArray struct {
 	w   http.ResponseWriter
+	r   *http.Request
 	bw  *bufio.Writer
 	buf bytes.Buffer
 	enc *json.Encoder
 }
 
-func newJSONArray(w http.ResponseWriter) *jsonArray {
-	a := &jsonArray{w: w}
+func newJSONArray(w http.ResponseWriter, r *http.Request) *jsonArray {
+	a := &jsonArray{w: w, r: r}
 	a.enc = json.NewEncoder(&a.buf)
 	return a
 }
@@ -225,9 +227,9 @@ func (a *jsonArray) add(v any) error {
 func (a *jsonArray) finish(err error) {
 	switch {
 	case err != nil && a.bw == nil:
-		fail(a.w, err)
+		fail(a.w, a.r, err)
 	case err != nil:
-		log.Printf("streamed response aborted: %v", err)
+		logServerError(a.r, "streamed response aborted", err)
 		panic(http.ErrAbortHandler)
 	case a.bw == nil:
 		writeJSON(a.w, []struct{}{})
@@ -237,8 +239,17 @@ func (a *jsonArray) finish(err error) {
 	}
 }
 
-func fail(w http.ResponseWriter, err error) {
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+// fail answers an unexpected internal error as Java does, with Spring
+// Boot's generic 500: the error itself (SQL, database names, driver text)
+// goes to the server log only.
+func fail(w http.ResponseWriter, r *http.Request, err error) {
+	logServerError(r, "internal server error", err)
+	springError(w, r, http.StatusInternalServerError)
+}
+
+// logServerError logs an internal error of the request r.
+func logServerError(r *http.Request, msg string, err error) {
+	slog.Error(msg, slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
 }
 
 // sqlLit and inList write values into SQL text as escaped string literals,
@@ -267,8 +278,12 @@ func metaProjection(next http.Handler) http.Handler {
 		rec := &metaCounter{header: http.Header{}, status: http.StatusOK}
 		defer rec.close()
 		next.ServeHTTP(rec, r)
-		maps.Copy(w.Header(), rec.header)
 		n, samples, ok := rec.count()
+		if rec.err != nil {
+			fail(w, r, rec.err)
+			return
+		}
+		maps.Copy(w.Header(), rec.header)
 		if !ok {
 			w.WriteHeader(rec.status)
 			w.Write(rec.raw.Bytes())
@@ -289,12 +304,12 @@ func metaProjection(next http.Handler) http.Handler {
 // writeMetaCount answers projection=META with the record count sql reads (a
 // row with n) as the total-count header, as metaProjection would count the
 // records. p holds sql's placeholder values.
-func writeMetaCount(w http.ResponseWriter, c *ch.Client, sql string, p ch.Params) {
+func writeMetaCount(w http.ResponseWriter, r *http.Request, c *ch.Client, sql string, p ch.Params) {
 	rows, err := ch.QueryP[struct {
 		N uint64 `json:"n"`
 	}](c, sql, p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	var n uint64
@@ -315,6 +330,7 @@ type metaCounter struct {
 	status   int
 	raw      bytes.Buffer
 	counting bool
+	err      error // counting failed
 	pw       *io.PipeWriter
 	done     chan metaCount
 }
@@ -377,11 +393,7 @@ func (m *metaCounter) count() (n, samples int, ok bool) {
 	m.pw.Close()
 	c := <-m.done
 	if c.err != nil {
-		log.Printf("projection=META: counting the response: %v", c.err)
-		m.status = http.StatusInternalServerError
-		m.raw.Reset()
-		m.raw.WriteString(c.err.Error() + "\n")
-		m.header.Set("Content-Type", "text/plain; charset=utf-8")
+		m.err = fmt.Errorf("projection=META: counting the response: %w", c.err)
 		return 0, 0, false
 	}
 	return c.n, c.samples, true

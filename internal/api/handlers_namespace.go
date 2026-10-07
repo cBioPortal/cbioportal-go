@@ -135,7 +135,7 @@ func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request)
 			"SELECT t, namespace_columns, arrayJoin(JSONExtractKeys(namespace_columns)) AS outer FROM (%s))",
 		namespaceRows("namespace_columns", "study_id IN {studies:Array(String)}")), ch.Params{"studies": studyIDs})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -198,7 +198,7 @@ func (s *State) namespaceAttributeCountsFetch(w http.ResponseWriter, r *http.Req
 	}
 	rows, err := queryA[countRow](s.CH, "SELECT * FROM ("+strings.Join(parts, " UNION ALL ")+") ORDER BY a", args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	for _, row := range rows {
@@ -242,7 +242,7 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM sample_derived WHERE %s "+
 			"ORDER BY cancer_study_identifier, sample_stable_id", s.filterWhere(args, f.StudyViewFilter.studyViewFilter)), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	ids := make([]identifier, len(samples))
@@ -251,7 +251,7 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 	}
 	if len(f.StudyViewFilter.NamespaceDataFilters) > 0 {
 		if ids, err = s.applyNamespaceDataFilters(ids, f.StudyViewFilter.NamespaceDataFilters); err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 	}
@@ -268,7 +268,7 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 			namespaceRows(fmt.Sprintf("study_id, sample_id, %s AS has, %s AS value",
 				nsHas(args, a.OuterKey, a.InnerKey), nsValue(args, a.OuterKey, a.InnerKey)), scope)), args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		if len(counts) == 0 {
@@ -393,7 +393,7 @@ func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 			namespaceRows(fmt.Sprintf("study_id, sample_id, %s AS value", nsValue(args, a.OuterKey, a.InnerKey)), scope),
 			args.strs(studies), args.str(v)), args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		for _, rw := range rows {

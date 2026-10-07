@@ -66,7 +66,7 @@ func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, where s
 	}
 	// Small blocks: a list carries up to every sample of its study.
 	sql += " GROUP BY study_id, list_id" + sqlPageOrder(r, sampleListSortable, order) + " SETTINGS max_block_size = 64"
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, p, func(row *sampleListRow) error {
 		return out.add(toSampleList(*row))
 	})
@@ -90,7 +90,7 @@ func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect()+" WHERE "+s.sampleListCondP(p, id)+
 		" GROUP BY study_id, list_id", p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {

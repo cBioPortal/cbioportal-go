@@ -263,7 +263,7 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	}
 	results, err := s.computeContinuous(groups, "hugo_symbol", true)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]GenomicEnrichment, len(results))
@@ -296,7 +296,7 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	results, err := s.computeContinuous(groups, "entity_stable_id", false)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	props := map[string]javaStringMap{}

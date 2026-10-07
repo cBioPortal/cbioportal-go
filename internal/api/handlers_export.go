@@ -47,7 +47,7 @@ func (s *State) exportStudy(w http.ResponseWriter, r *http.Request) {
 	}
 	meta, err := s.exportStudyMetadata(studyID)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if meta == nil {
@@ -61,7 +61,11 @@ func (s *State) exportStudy(w http.ResponseWriter, r *http.Request) {
 	e := &studyExport{s: s, studyID: studyID, study: meta, zw: zip.NewWriter(bw), now: time.Now()}
 	for _, ex := range studyExporters {
 		if err := ex(e); err != nil {
-			fmt.Fprintf(bw, "ERROR: %s", err)
+			// The zip is corrupted on purpose, as Java's
+			// ZipOutputStreamWriterService.fail does; the error itself goes
+			// to the server log only.
+			logServerError(r, "study export failed", err)
+			bw.WriteString("ERROR: study export failed")
 			bw.Flush()
 			return
 		}

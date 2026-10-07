@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestJSONArrayMatchesWriteJSON(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/molecular-data", nil)
 	e := int64(7157)
 	rows := []NumericGeneMolecularData{
 		{UniqueSampleKey: "a<b>&", SampleID: "S1", Value: json.Number("1.5"), EntrezGeneID: &e},
@@ -18,7 +20,7 @@ func TestJSONArrayMatchesWriteJSON(t *testing.T) {
 		want := httptest.NewRecorder()
 		writeJSON(want, rows[:n])
 		got := httptest.NewRecorder()
-		a := newJSONArray(got)
+		a := newJSONArray(got, req)
 		for _, r := range rows[:n] {
 			if err := a.add(r); err != nil {
 				t.Fatal(err)
@@ -32,11 +34,13 @@ func TestJSONArrayMatchesWriteJSON(t *testing.T) {
 }
 
 func TestJSONArrayErrors(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/molecular-data", nil)
 	// Before the first element: the error response fail writes.
 	got, want := httptest.NewRecorder(), httptest.NewRecorder()
-	newJSONArray(got).finish(errors.New("boom"))
-	fail(want, errors.New("boom"))
-	if got.Code != want.Code || got.Body.String() != want.Body.String() {
+	newJSONArray(got, req).finish(errors.New("boom"))
+	fail(want, req, errors.New("boom"))
+	if got.Code != http.StatusInternalServerError || got.Code != want.Code ||
+		got.Header().Get("Content-Type") != want.Header().Get("Content-Type") || strings.Contains(got.Body.String(), "boom") {
 		t.Errorf("got %d %q, want %d %q", got.Code, got.Body, want.Code, want.Body)
 	}
 	// After it: the response is aborted.
@@ -45,7 +49,7 @@ func TestJSONArrayErrors(t *testing.T) {
 			t.Errorf("recovered %v, want ErrAbortHandler", v)
 		}
 	}()
-	a := newJSONArray(httptest.NewRecorder())
+	a := newJSONArray(httptest.NewRecorder(), req)
 	a.add(1)
 	a.finish(errors.New("boom"))
 }

@@ -38,7 +38,7 @@ func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 	out := []MrnaPercentile{}
 	data, err := s.molecularData(r.PathValue("id"), molecularDataFilter{EntrezGeneIDs: entrez})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	byGene := map[int64][]float64{}

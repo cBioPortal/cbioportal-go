@@ -139,7 +139,7 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 		bins, err := databin.Calculate(a.AttributeID, unfiltered[a.AttributeID], filtered[a.AttributeID],
 			a.binFilterOpts.options(method, false, methods[i]))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fail(w, r, err)
 			return
 		}
 		out = append(out, bins...)
@@ -266,7 +266,7 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 		bins, err := databin.Calculate(g.HugoGeneSymbol+g.ProfileType, unfiltered[keys[i]], filtered[keys[i]],
 			g.binFilterOpts.options(method, true, methods[i]))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fail(w, r, err)
 			return
 		}
 		for _, b := range bins {
@@ -316,7 +316,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 		bins, err := databin.Calculate(g.StableID+g.ProfileType, unfiltered[keys[i]], filtered[keys[i]],
 			g.binFilterOpts.options(method, true, methods[i]))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fail(w, r, err)
 			return
 		}
 		for _, b := range bins {
@@ -388,7 +388,7 @@ func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 		bins, err := databin.Calculate(a.AttributeID, values(unfilteredSamples), values(filteredSamples),
 			a.binFilterOpts.options(method, false, methods[i]))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			fail(w, r, err)
 			return
 		}
 		out = append(out, bins...)

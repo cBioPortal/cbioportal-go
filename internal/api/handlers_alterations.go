@@ -417,7 +417,7 @@ func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	out, err := s.geneCounts(args, f, "mutation", "MUTATION_EXTENDED",
 		joinPreds("mutation_status != 'UNCALLED'", a.mutationTypeClause(), a.driverClause(), a.statusClause()), false)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)
@@ -430,7 +430,7 @@ func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	a := s.alterationFilterOf(args, f)
 	out, err := s.geneCounts(args, f, "cna", "COPY_NUMBER_ALTERATION", joinPreds(a.cnaTypeClause(), a.driverClause()), true)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)
@@ -443,7 +443,7 @@ func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 	a := s.alterationFilterOf(args, f)
 	out, err := s.geneCounts(args, f, "structural_variant", "STRUCTURAL_VARIANT", joinPreds(a.driverClause(), a.statusClause()), false)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, out)
@@ -468,7 +468,7 @@ func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http
 			"ORDER BY sp.study_id, sp.molecular_profile_id",
 		args.strs(f.scopeStudies()), s.filterSQL(args, f)), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	// Merge the same profile suffix across studies under the first label, in
@@ -558,7 +558,7 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 			"GROUP BY site1_entrez_gene_id, site2_entrez_gene_id ORDER BY total DESC, hugo1, hugo2",
 		f.studyKey(args, "study_id"), filtered, joinPreds(a.driverClause(), a.statusClause())), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]StructuralVariantCount, 0, len(rows))

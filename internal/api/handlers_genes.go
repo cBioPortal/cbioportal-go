@@ -56,7 +56,7 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 			"FROM cbioportal_ref.gene WHERE %s",
 		strings.Join(conds, " OR ")), p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, rows)
@@ -73,7 +73,7 @@ func (s *State) gene(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[geneRow](s.CH,
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type FROM cbioportal_ref.gene WHERE "+cond+" LIMIT 1", p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {

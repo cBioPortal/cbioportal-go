@@ -117,7 +117,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 	if projection == "DETAILED" {
 		attrs = s.clinicalAttributes(studies)
 	}
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	sql := clinicalSQL(r, patient, s.importOrdered(), where, args.strs(studies))
 	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *clinicalRow) error {
 		d := toClinicalData(row, patient)
@@ -252,7 +252,7 @@ func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) 
 			"ORDER BY clinical_attribute_id, "+s.studyOrder("study_id"),
 		ch.Params{"studies": studyIDs})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]ClinicalAttribute, len(rows))

@@ -75,7 +75,7 @@ func (s *State) treatmentsDisplaySample(w http.ResponseWriter, r *http.Request) 
 			"AND lower(key) = 'sample_id' AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN')",
 		ch.Params{"studies": treated})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, ok)

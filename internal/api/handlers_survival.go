@@ -201,7 +201,7 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 	starts, ends, censors, order, err := s.survivalSpans(patientIdentifierPairs(req.PatientIdentifiers),
 		start.ClinicalEventRequests, end.ClinicalEventRequests, censored.ClinicalEventRequests)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	var kept []string
@@ -372,7 +372,7 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 			"FROM clinical_event_data_derived WHERE %s%s ORDER BY eventType, attrKey, attrValue",
 		patientEventScope(args, patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(args, req.ClinicalEventRequests, false)), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	for _, row := range rows {
@@ -414,7 +414,7 @@ func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, wher
 		def = "patientId, startDate, eventType"
 	}
 	if projectionOf(r) == "META" {
-		writeMetaCount(w, s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s WHERE %s)", sel, where), p)
+		writeMetaCount(w, r, s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s WHERE %s)", sel, where), p)
 		return
 	}
 	// Without clinical_event_id the order leaves ties.
@@ -424,7 +424,7 @@ func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, wher
 	// production clone carry their stored order.
 	staged := !slices.Contains(s.rawColumns("timeline"), "event_attributes")
 	idOnly := projectionOf(r) == "ID"
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, query, p, func(row *timelineRow) error {
 		if idOnly {
 			return out.add(clinicalEventID{StudyID: row.StudyID, PatientID: row.PatientID,

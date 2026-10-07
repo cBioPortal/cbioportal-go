@@ -130,10 +130,10 @@ func (s *State) existsIn(sql string, p ch.Params) (bool, error) {
 }
 
 // requireStudy writes a 404 and returns false when the study does not exist.
-func (s *State) requireStudy(w http.ResponseWriter, studyID string) bool {
+func (s *State) requireStudy(w http.ResponseWriter, r *http.Request, studyID string) bool {
 	ok, err := s.existsIn("SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": studyID})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return false
 	}
 	if !ok {
@@ -151,11 +151,11 @@ var resourceDefinitionSort = map[string]string{
 
 // writeResourceDefinitions writes the definitions matching where, whose
 // placeholders take their values from p.
-func (s *State) writeResourceDefinitions(w http.ResponseWriter, where string, p ch.Params, tail, projection string) {
+func (s *State) writeResourceDefinitions(w http.ResponseWriter, r *http.Request, where string, p ch.Params, tail, projection string) {
 	rows, err := queryView[resourceDefinitionRow](s.CH,
 		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE "+where+tail, p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]ResourceDefinition, len(rows))
@@ -168,10 +168,10 @@ func (s *State) writeResourceDefinitions(w http.ResponseWriter, where string, p 
 // resourceDefinitionsInStudy — GET /api/studies/{studyId}/resource-definitions.
 func (s *State) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Request) {
 	studyID := r.PathValue("studyId")
-	if !s.requireStudy(w, studyID) {
+	if !s.requireStudy(w, r, studyID) {
 		return
 	}
-	s.writeResourceDefinitions(w, "study_id = {study:String}", ch.Params{"study": studyID},
+	s.writeResourceDefinitions(w, r, "study_id = {study:String}", ch.Params{"study": studyID},
 		pagingClause(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
 }
 
@@ -179,14 +179,14 @@ func (s *State) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Reques
 // (DETAILED projection; 404 when the study or definition is unknown).
 func (s *State) resourceDefinitionInStudy(w http.ResponseWriter, r *http.Request) {
 	studyID, resourceID := r.PathValue("studyId"), r.PathValue("resourceId")
-	if !s.requireStudy(w, studyID) {
+	if !s.requireStudy(w, r, studyID) {
 		return
 	}
 	rows, err := queryView[resourceDefinitionRow](s.CH,
 		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE study_id = {study:String} AND resource_id = {resource:String} LIMIT 1",
 		ch.Params{"study": studyID, "resource": resourceID})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
@@ -204,7 +204,7 @@ func (s *State) resourceDefinitionsFetch(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "studyIds: size must be between 1 and 10000000", http.StatusBadRequest)
 		return
 	}
-	s.writeResourceDefinitions(w, "study_id IN {ids:Array(String)}", ch.Params{"ids": ids},
+	s.writeResourceDefinitions(w, r, "study_id IN {ids:Array(String)}", ch.Params{"ids": ids},
 		" ORDER BY resource_id ASC, study_id ASC", projectionParam(r))
 }
 
@@ -302,14 +302,14 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 
 func (s *State) writeResourceData(w http.ResponseWriter, r *http.Request, levels ...resourceDataLevel) {
 	studyID := r.PathValue("studyId")
-	if !s.requireStudy(w, studyID) {
+	if !s.requireStudy(w, r, studyID) {
 		return
 	}
 	out := []ResourceData{}
 	for _, lvl := range levels {
 		rows, err := s.fetchResourceData(r, lvl, studyID, "")
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		out = append(out, rows...)
@@ -331,13 +331,13 @@ func (s *State) allResourceDataInStudy(w http.ResponseWriter, r *http.Request) {
 // patientResourceData — GET /api/studies/{studyId}/patients/{patientId}/resource-data.
 func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 	studyID, patientID := r.PathValue("studyId"), r.PathValue("patientId")
-	if !s.requireStudy(w, studyID) {
+	if !s.requireStudy(w, r, studyID) {
 		return
 	}
 	ok, err := s.existsIn("SELECT count() AS n FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String}",
 		ch.Params{"study": studyID, "patient": patientID})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if !ok {
@@ -346,7 +346,7 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.fetchResourceData(r, patientResources, studyID, patientID)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, rows)
@@ -355,13 +355,13 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 // sampleResourceData — GET /api/studies/{studyId}/samples/{sampleId}/resource-data.
 func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 	studyID, sampleID := r.PathValue("studyId"), r.PathValue("sampleId")
-	if !s.requireStudy(w, studyID) {
+	if !s.requireStudy(w, r, studyID) {
 		return
 	}
 	ok, err := s.existsIn("SELECT count() AS n FROM sample WHERE study_id = {study:String} AND sample_id = {sample:String}",
 		ch.Params{"study": studyID, "sample": sampleID})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if !ok {
@@ -370,7 +370,7 @@ func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.fetchResourceData(r, sampleResources, studyID, sampleID)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, rows)

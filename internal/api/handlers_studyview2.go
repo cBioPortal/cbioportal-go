@@ -78,7 +78,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 				") GROUP BY gene",
 			filtered, args.strs(genes), svf.studyKey(args, "cancer_study_identifier")), args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		byGene := make(map[string]countsRow, len(rows))
@@ -304,7 +304,7 @@ func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 		"SELECT replaceAll(list_id, concat(study_id, '_'), '') AS value, any(name) AS label, count() AS count "+
 			"FROM sample_list WHERE %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", scope), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	writeJSON(w, mergeCaseListCounts(rows))

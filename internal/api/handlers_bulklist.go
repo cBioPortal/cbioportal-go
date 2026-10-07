@@ -89,10 +89,10 @@ var sampleSortable = map[string]string{"sampleId": "sampleId", "sampleType": "sa
 // projection=META.
 func (s *State) writeSampleRows(w http.ResponseWriter, r *http.Request, sql string, args *sqlArgs) {
 	if projectionOf(r) == "META" {
-		writeMetaCount(w, s.CH, "SELECT count() AS n FROM ("+sql+")", args.params(sql))
+		writeMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", args.params(sql))
 		return
 	}
-	out := newJSONArray(w)
+	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *sampleFullRow) error {
 		return out.add(toFullSample(*row))
 	})
@@ -124,7 +124,7 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[sampleFullRow](s.CH, sampleFullSelect("s.study_id = {study:String} AND s.sample_id = {sample:String}"),
 		ch.Params{"study": r.PathValue("studyId"), "sample": r.PathValue("sampleId")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
@@ -207,13 +207,13 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 			"genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s ORDER BY %s%s",
 		strings.Join(conds, " AND "), order, limit), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if keyword {
 		rows, err = s.keywordGenes(rows, kw[0], pageSize)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 	}
@@ -273,7 +273,7 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[row](s.CH,
 		"SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, r.PathValue("sampleListId"))+" ORDER BY "+order, p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]string, len(rows))
@@ -290,7 +290,7 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 func (s *State) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY clinical_attribute_id, "+s.studyOrder("study_id"))
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]ClinicalAttribute, len(rows))
@@ -320,7 +320,7 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 			"WHERE g.study_id = {study:String} AND g.sample_id = {sample:String}%s ORDER BY %s",
 		chrom, s.segOrder("g.chrom, start")), p)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	out := make([]CopyNumberSeg, len(rows))

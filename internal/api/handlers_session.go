@@ -790,7 +790,7 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	data["users"] = []any{allUsers}
 	exists, err := s.studyExists(id)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if exists {

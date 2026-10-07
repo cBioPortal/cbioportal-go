@@ -42,7 +42,7 @@ func (s *State) patient(w http.ResponseWriter, r *http.Request) {
 		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String} LIMIT 1",
 		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {

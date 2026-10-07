@@ -98,7 +98,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	present, err := queryA[groupRow](s.CH, withGroups+"SELECT DISTINCT grp FROM group_samples ORDER BY grp", args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	numGroups := len(present)
@@ -117,7 +117,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples) ORDER BY study_id, clinical_attribute_id",
 		withGroups), args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	// Unique attributes by id + patient flag, and each id's level.
@@ -222,7 +222,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			"%sSELECT attr_id, grp, v AS value, count() AS c FROM (%s) GROUP BY attr_id, grp, v ORDER BY attr_id, grp, v",
 			withGroups, groupValues(func(col string) string { return col }, naFilter, idsByLevel(categorical))), args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		for _, rw := range rows {
@@ -293,7 +293,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
 				func(col string) string { return "match(" + col + ", " + args.str(decimalCreatable) + ")" }, idsByLevel(numeric))), args)
 		if err != nil {
-			fail(w, err)
+			fail(w, r, err)
 			return
 		}
 		for _, rw := range rows {
@@ -455,7 +455,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	pageRows, err := queryA[idRow](s.CH, pageSQL, args)
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(pageRows) == 0 {

@@ -61,7 +61,7 @@ func (s *State) cancerType(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cancerTypeId")
 	rows, err := s.queryCancerTypes(" WHERE type_of_cancer_id = {id:String}", ch.Params{"id": id})
 	if err != nil {
-		fail(w, err)
+		fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
