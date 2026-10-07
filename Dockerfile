@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}'" -o /out/cbioportal-import ./cmd/cbioportal-import
 
 FROM alpine:${ALPINE_VERSION}
-RUN apk add --no-cache bash git git-lfs curl ca-certificates \
+RUN apk add --no-cache bash git git-lfs curl jq openssl ca-certificates \
  && addgroup -g 10001 cbioportal \
  && adduser -D -u 10001 -G cbioportal -h /home/cbioportal cbioportal
 COPY --from=go /out/cbioportal-api /out/cbioportal-import /usr/local/bin/

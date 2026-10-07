@@ -169,3 +169,18 @@ of a case list or profile type merged across studies (the first in GROUP BY
 order). Expression
 enrichments of a TCGA PanCancer study take a few seconds, since
 genetic_alteration_derived is sorted by gene before profile.
+
+## hub.cbioportal.org
+
+The hub previews the studies of `preview`-labelled cBioPortal/datahub pull
+requests, on the same ClickHouse Cloud service (`dev_cbioportal_hub_go` with
+its `_raw` and `_ref` databases; manifests in knowledgesystems-k8s-deployment
+`apps/cbioportal-hub/`). An Argo CD ApplicationSet starts a Job per PR commit
+that runs [`deploy/hub-import.sh`](../deploy/hub-import.sh): it checks out
+the PR's changed studies, ingests each, runs one `transform`, and reports a
+Check Run and a Deployment on the PR. Imports of different PRs take turns
+through a lock table in the raw database. A study that fails to ingest is
+removed (`cbioportal-import remove-study`); when the transform fails, the
+PR's studies are removed and the hub rebuilt without them, while the hub
+keeps serving its previous build. The script's header lists its settings;
+it runs locally against any ClickHouse and GitHub API (`GITHUB_API`).
