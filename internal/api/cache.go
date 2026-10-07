@@ -142,6 +142,17 @@ func (s *State) modelHasColumn(table, column string) bool {
 	return err == nil && len(rows) == 1 && rows[0].N > 0
 }
 
+// rawHasColumn reports whether a table of the raw database has a column.
+func (s *State) rawHasColumn(table, column string) bool {
+	type row struct {
+		N uint64 `json:"n"`
+	}
+	rows, err := cachedQueryP[row](s,
+		"SELECT count() AS n FROM system.columns WHERE database = 'cbioportal_raw' AND table = {table:String} AND name = {column:String}",
+		ch.Params{"table": table, "column": column})
+	return err == nil && len(rows) == 1 && rows[0].N > 0
+}
+
 // rawFileOrder is the expression ordering a raw staging table's rows of one
 // study as its files list them (transform.StagingOrderSQL); prefix qualifies
 // the columns (e.g. "t."). A MergeTree table has the storage position as

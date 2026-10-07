@@ -421,6 +421,11 @@ func (s *State) studyImportDates() map[string]string {
 	if s.modelHasColumn("cancer_study", "import_date") {
 		sql = "SELECT study_id AS studyId, formatDateTime(import_date, '%Y-%m-%d %H:%i:%S') AS importDate " +
 			"FROM cancer_study WHERE import_date IS NOT NULL"
+	} else if s.rawHasColumn("cancer_study", "import_time") {
+		// Ingest records the time; system.parts may not be readable (a
+		// ClickHouse Cloud user without that grant).
+		sql = "SELECT study_id AS studyId, formatDateTime(max(import_time), '%Y-%m-%d %H:%i:%S') AS importDate " +
+			"FROM cbioportal_raw.cancer_study WHERE import_time > 0 GROUP BY study_id"
 	}
 	rows, err := cachedQuery[row](s, sql)
 	if err != nil {
