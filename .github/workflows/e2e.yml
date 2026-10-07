@@ -49,7 +49,19 @@ jobs:
           echo "$SEED_SHA256  seed.sql.gz" | sha256sum -c -
       - name: Build test databases
         run: test/setup_test_db.sh fixtures seed.sql.gz
+      # The built frontend is cached by submodule commit and shared with the
+      # image workflow, so it is only rebuilt when the frontend changes.
+      - name: Frontend commit
+        id: frontend
+        run: echo "commit=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cached frontend build
+        id: frontend-cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/dist
+          key: frontend-dist-${{ steps.frontend.outputs.commit }}-node22.18.0
       - name: Build frontend
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
         working-directory: frontend
         run: pnpm install --frozen-lockfile && pnpm run buildAll
       - name: Install Playwright

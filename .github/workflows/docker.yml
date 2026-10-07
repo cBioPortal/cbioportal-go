@@ -36,6 +36,23 @@ jobs:
           echo "version=$(git rev-parse --short=7 HEAD) ($(git log -1 --format=%cI))" >> "$GITHUB_OUTPUT"
           echo "frontend_commit=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "frontend_version=$(git -C frontend describe --always --tags)" >> "$GITHUB_OUTPUT"
+      # The built frontend is cached by submodule commit (shared with the e2e
+      # workflow) and handed to the image build as the frontend-dist stage,
+      # so it is only rebuilt when the frontend changes.
+      - name: Cached frontend build
+        id: frontend-cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/dist
+          key: frontend-dist-${{ steps.meta.outputs.frontend_commit }}-node22.18.0
+      - uses: actions/setup-node@v4
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
+        with:
+          node-version: 22.18.0
+      - name: Build frontend
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: corepack enable && pnpm install --frozen-lockfile && pnpm run buildAll
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -58,5 +75,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+          build-contexts: |
+            frontend-dist=frontend/dist
           cache-from: type=gha
           cache-to: type=gha,mode=max

@@ -22,11 +22,18 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
     COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install --frozen-lockfile
 RUN pnpm run buildAll
 
+# The built frontend. CI passes a cached build as this stage
+# (--build-context frontend-dist=frontend/dist), which skips the build above.
+FROM scratch AS frontend-dist
+COPY --from=frontend /src/frontend/dist /
+
 FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS go
 ARG TARGETOS
 ARG TARGETARCH
 # Version stamp for builds without .git, e.g. "6b38ed6 (2026-10-02T21:00:00Z)".
 ARG VERSION=""
+# Full git commit, served as /api/info's gitCommitId.
+ARG COMMIT=""
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/ cmd/
@@ -43,7 +50,7 @@ RUN apk add --no-cache bash git git-lfs curl jq openssl ca-certificates \
  && addgroup -g 10001 cbioportal \
  && adduser -D -u 10001 -G cbioportal -h /home/cbioportal cbioportal
 COPY --from=go /out/cbioportal-api /out/cbioportal-import /usr/local/bin/
-COPY --from=frontend /src/frontend/dist /app/frontend
+COPY --from=frontend-dist / /app/frontend
 # Deployment scripts and configuration: the generic ones and cBioPortal.org's
 # own, side by side under /app/deploy where the cluster manifests expect them.
 COPY deploy/ ops/cbioportal.org/ /app/deploy/
