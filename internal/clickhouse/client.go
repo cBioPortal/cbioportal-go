@@ -170,10 +170,12 @@ func SetProcessSettings(settings map[string]string) {
 // ReplicaConsistentSettings make a writer's requests see each other's effects
 // on a replicated service such as ClickHouse Cloud, whose HTTP requests may
 // reach different replicas: ALTERs and mutations return once every replica
-// applied them, and reads see every insert acknowledged before them.
-// Single-node servers ignore them.
+// applied them, and reads see every insert acknowledged before them. Inserts
+// are not deduplicated: a replicated table drops a block identical to one
+// inserted before, so re-ingesting an unchanged file after deleting its rows
+// would leave them deleted. Single-node servers ignore these settings.
 var ReplicaConsistentSettings = map[string]string{
-	"alter_sync": "2", "mutations_sync": "2", "select_sequential_consistency": "1",
+	"alter_sync": "2", "mutations_sync": "2", "select_sequential_consistency": "1", "insert_deduplicate": "0",
 }
 
 // withSessionSettings adds the settings every request runs with. Queries can

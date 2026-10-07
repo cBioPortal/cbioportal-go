@@ -102,9 +102,11 @@ Current direct dependencies:
 - ClickHouse `ALTER … DELETE` is asynchronous; re-ingest uses
   `SETTINGS mutations_sync = 2` so a study's old rows are gone before the count.
 - On ClickHouse Cloud consecutive HTTP requests can reach different replicas:
-  an `INSERT` right after `ALTER … ADD COLUMN` failed with "no column". The
-  importer runs every request with `alter_sync = 2`, `mutations_sync = 2` and
-  `select_sequential_consistency = 1`.
+  an `INSERT` right after `ALTER … ADD COLUMN` failed with "no column". And
+  its replicated tables drop an inserted block identical to an earlier one,
+  so a re-ingested, unchanged file stayed deleted. The importer runs every
+  request with `alter_sync = 2`, `mutations_sync = 2`,
+  `select_sequential_consistency = 1` and `insert_deduplicate = 0`.
 - An `io.Reader` that returns one line per `Read` makes the HTTP transport do
   tiny writes; `BodyReader.Read` fills the whole buffer (12× faster on the seg
   file).
