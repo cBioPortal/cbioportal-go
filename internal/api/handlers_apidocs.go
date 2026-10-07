@@ -24,7 +24,7 @@ import (
 //   - /api/v3/api-docs/swagger-config and /api/swagger-ui/: Swagger UI.
 //
 // The v3 descriptions and Swagger UI are snapshots of api.cbioportal.org's
-// API (deploy/refresh-api-docs.sh refreshes them).
+// API (scripts/refresh-api-docs.sh refreshes them).
 //
 //go:embed apidocs
 var apiDocsFS embed.FS

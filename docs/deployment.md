@@ -92,7 +92,7 @@ CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on them.
 
 ### Mirroring production
 
-[`deploy/mirror-prod.sh`](../deploy/mirror-prod.sh) is the hourly job that
+[`ops/cbioportal.org/mirror-prod.sh`](../ops/cbioportal.org/mirror-prod.sh) is the hourly job that
 makes the preview serve exactly www.cbioportal.org's data, the same pattern as
 the LibreChat clone job:
 
@@ -176,7 +176,7 @@ The hub previews the studies of `preview`-labelled cBioPortal/datahub pull
 requests, on the same ClickHouse Cloud service (`dev_cbioportal_hub_go` with
 its `_raw` and `_ref` databases; manifests in knowledgesystems-k8s-deployment
 `apps/cbioportal-hub/`). An Argo CD ApplicationSet starts a Job per PR commit
-that runs [`deploy/hub-import.sh`](../deploy/hub-import.sh): it checks out
+that runs [`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh): it checks out
 the PR's changed studies, ingests each, runs one `transform`, and reports a
 Check Run and a Deployment on the PR. Imports of different PRs take turns
 through a lock table in the raw database. A study that fails to ingest is

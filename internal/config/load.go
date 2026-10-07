@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -25,6 +26,7 @@ func loadPortalProperties(file string, args []string, lookupEnv func(string) (st
 		if fromFile, err = ParseApplicationPropertiesFile(file); err != nil {
 			return nil, err
 		}
+		resolveFilePaths(fromFile, filepath.Dir(file))
 	}
 	fromArgs := map[string]string{}
 	for _, a := range args {
@@ -161,4 +163,35 @@ func backendProperty(k string) bool {
 		}
 	}
 	return false
+}
+
+// fileValuedProperties name other files; their contents are served to the
+// frontend.
+var fileValuedProperties = []string{
+	"frontend.config",
+	"querypage.setsofgenes.location",
+	"skin.patient_view.custom_sample_type_colors_json",
+	"oncoprint.clinical_tracks.config_json",
+	"download_custom_buttons_json",
+}
+
+// resolveFilePaths makes the relative file paths of a properties file
+// relative to the file's own directory when the file exists there, so a
+// properties file and the files it names can move together. Other paths are
+// left as given (relative to the working directory, as Java reads them).
+func resolveFilePaths(props map[string]string, dir string) {
+	for _, key := range fileValuedProperties {
+		v := strings.TrimSpace(props[key])
+		if v == "" || filepath.IsAbs(v) || strings.HasPrefix(v, "classpath:") {
+			continue
+		}
+		if p := filepath.Join(dir, v); fileExists(p) {
+			props[key] = p
+		}
+	}
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }

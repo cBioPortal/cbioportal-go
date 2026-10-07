@@ -3,7 +3,7 @@
 # hub.cbioportal.org databases and reports the result on the pull request:
 # the per-PR Job of the `datahub-pr-import-set` ApplicationSet.
 #
-#   PR_NUMBER=2327 HEAD_SHA=<sha> deploy/hub-import.sh
+#   PR_NUMBER=2327 HEAD_SHA=<sha> ops/cbioportal.org/hub-import.sh
 #
 # Steps: read the PR's changed files (public/<study>, crdc/gdc/<study>,
 # reference_data/gene_panels), narrowed by a `hub-import-only:` list in the

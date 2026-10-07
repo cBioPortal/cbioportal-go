@@ -5,7 +5,7 @@
 # server URL in them is taken from), and the legacy v2 description from the
 # cbioportal repository.
 #
-#   deploy/refresh-api-docs.sh [source-origin]
+#   scripts/refresh-api-docs.sh [source-origin]
 set -euo pipefail
 SRC=${1:-https://api.cbioportal.org}
 D="$(cd "$(dirname "$0")/.." && pwd)/internal/api/apidocs"

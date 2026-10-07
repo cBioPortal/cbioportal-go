@@ -44,7 +44,9 @@ RUN apk add --no-cache bash git git-lfs curl jq openssl ca-certificates \
  && adduser -D -u 10001 -G cbioportal -h /home/cbioportal cbioportal
 COPY --from=go /out/cbioportal-api /out/cbioportal-import /usr/local/bin/
 COPY --from=frontend /src/frontend/dist /app/frontend
-COPY deploy/ /app/deploy/
+# Deployment scripts and configuration: the generic ones and cBioPortal.org's
+# own, side by side under /app/deploy where the cluster manifests expect them.
+COPY deploy/ ops/cbioportal.org/ /app/deploy/
 WORKDIR /app
 USER 10001:10001
 ENV PORT=8080 FRONTEND_DIR=/app/frontend
