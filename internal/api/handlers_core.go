@@ -345,10 +345,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
 		out[i] = toCancerStudy(r, shape, dates)
-		// CancerStudyMetadataMapper.toDtos maps readPermission from publicStudy;
-		// with study_availability.enabled, nobody can read a study that is being
-		// (re)imported.
-		out[i].ReadPermission = r.PublicFlag != 0 && (!availability || r.Status == 1)
+		out[i].ReadPermission = studyReadable(availability, r.Status)
 	}
 	writeJSON(w, s.withResourceCounts(out))
 }
@@ -677,4 +674,13 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 		studies[i].ResourceCounts = &rc
 	}
 	return studies
+}
+
+// studyReadable is a listed study's readPermission before the permission
+// evaluator (studyAccess, with authorization on) applies, as
+// ColumnStoreStudyController.getAllStudies sets it: readable unless, with
+// study_availability.enabled, the study is being (re)imported (status other
+// than 1). The study's public flag plays no part.
+func studyReadable(availability bool, status int) bool {
+	return !availability || status == 1
 }
