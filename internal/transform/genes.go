@@ -122,9 +122,9 @@ type geneKeySource struct {
 // that table's importer (source = staging table name; structural variants use
 // source 'structural_variant' for both sites). Unresolvable keys are absent.
 // For wide matrices only the first key per (profile, gene) is kept — the
-// importer stores one row per gene and ignores later duplicates; with no line
-// order in staging, a key naming the gene directly wins, then the smallest
-// symbol. mirna = 1 marks matrix lines stored through ImportTabDelimData's
+// importer stores one row per gene and ignores later duplicates: the key of
+// the earliest line (smallest row_num), then (for tables staged without row
+// numbers) a key naming the gene directly, then the smallest symbol. mirna = 1 marks matrix lines stored through ImportTabDelimData's
 // microRNA branch, which creates no CNA events. Without a reference DB every
 // key maps to itself.
 func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) error {
@@ -153,6 +153,14 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		keys := fmt.Sprintf(
 			"SELECT DISTINCT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent FROM `%s`.`%s`",
 			prof, col(src.symCol), col(src.entCol), rawDB, src.table)
+		firstRow := "toUInt64(0)"
+		if src.mode == geneMatrix && cols["row_num"] {
+			keys = fmt.Sprintf(
+				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_num) AS first_row FROM `%s`.`%s` "+
+					"GROUP BY study_id, profile_stable_id, sym, ent",
+				prof, col(src.symCol), col(src.entCol), rawDB, src.table)
+			firstRow = "first_row"
+		}
 		sel := fmt.Sprintf(
 			"SELECT '%s' AS source, study_id, profile_stable_id, sym AS hugo_symbol, ent AS entrez_gene_id, "+
 				"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, toUInt8(0) AS mirna FROM (%s)",
@@ -161,10 +169,10 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 			sel = fmt.Sprintf(
 				"SELECT source, study_id, profile_stable_id, hugo_symbol, entrez_gene_id, resolved_entrez_gene_id, resolved_hugo_gene_symbol, mirna FROM ("+
 					"SELECT '%s' AS source, study_id, profile_stable_id, sym AS hugo_symbol, ent AS entrez_gene_id, "+
-					"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, gene_mirna AS mirna, gene_direct FROM (%s)) "+
-					"ORDER BY study_id, profile_stable_id, resolved_entrez_gene_id, gene_direct DESC, hugo_symbol, entrez_gene_id "+
+					"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, gene_mirna AS mirna, gene_direct, %s AS first_row FROM (%s)) "+
+					"ORDER BY study_id, profile_stable_id, resolved_entrez_gene_id, first_row, gene_direct DESC, hugo_symbol, entrez_gene_id "+
 					"LIMIT 1 BY study_id, profile_stable_id, resolved_entrez_gene_id",
-				src.table, resolve(src.mode, keys))
+				src.table, firstRow, resolve(src.mode, keys))
 		}
 		parts = append(parts, sel)
 	}

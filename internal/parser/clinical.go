@@ -2,7 +2,6 @@ package parser
 
 import (
 	"bufio"
-	"os"
 	"strings"
 )
 
@@ -23,7 +22,7 @@ type ClinicalAttrMeta struct {
 // patientDefault is the attribute type for non-MIXED files. PATIENT_ID/SAMPLE_ID
 // are relational keys and excluded.
 func ParseAttributeMeta(path string, patientDefault bool) ([]ClinicalAttrMeta, error) {
-	f, err := os.Open(path)
+	f, err := OpenText(path)
 	if err != nil {
 		return nil, err
 	}
@@ -49,12 +48,15 @@ func ParseAttributeMeta(path string, patientDefault bool) ([]ClinicalAttrMeta, e
 		}
 	}
 
-	get := func(row, col int) string {
+	// Display names and descriptions are kept as written, surrounding
+	// spaces included, as ImportClinicalData stores them.
+	raw := func(row, col int) string {
 		if row < len(metaRows) && col < len(metaRows[row]) {
-			return strings.TrimSpace(metaRows[row][col])
+			return metaRows[row][col]
 		}
 		return ""
 	}
+	get := func(row, col int) string { return strings.TrimSpace(raw(row, col)) }
 	hasTypes := len(metaRows) >= 5
 
 	var out []ClinicalAttrMeta
@@ -69,14 +71,23 @@ func ParseAttributeMeta(path string, patientDefault bool) ([]ClinicalAttrMeta, e
 		}
 		out = append(out, ClinicalAttrMeta{
 			AttrID:           attrID,
-			DisplayName:      firstNonEmpty(get(0, i), attrID),
-			Description:      get(1, i),
+			DisplayName:      displayName(raw(0, i), attrID),
+			Description:      raw(1, i),
 			Datatype:         firstNonEmpty(get(2, i), "STRING"),
 			Priority:         firstNonEmpty(get(3, i), "1"),
 			PatientAttribute: patientAttr,
 		})
 	}
 	return out, nil
+}
+
+// displayName is the display name as written, or the attribute id when it
+// is blank.
+func displayName(name, attrID string) string {
+	if strings.TrimSpace(name) == "" {
+		return attrID
+	}
+	return name
 }
 
 func firstNonEmpty(a, b string) string {

@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -125,8 +126,17 @@ func addOrderColumns(c *ch.Client, table string, existing map[string]bool) error
 	return nil
 }
 
+// sampleIDColumns names, per staging table of record files, the column whose
+// ids cbioportal-core's importer reads through StableIdUtil.getSampleId.
+var sampleIDColumns = map[string]string{
+	"clinical_sample": "sample_id", "clinical_mixed": "sample_id",
+	"mutation_extended": "tumor_sample_barcode", "mutation_uncalled": "tumor_sample_barcode",
+	"cna_seg": "id", "cna_discrete_long": "sample_id", "gene_panel_matrix": "sample_id",
+}
+
 // insertSQL inserts a numbered body (row_num, then the data columns) with
-// the provenance and file_num as constants.
+// the provenance and file_num as constants, and the table's sample ids (see
+// sampleIDColumns) as the importer stores them.
 func insertSQL(c *ch.Client, table string, prov [5]string, fileNum int, dataColumns []string) string {
 	colList := backtick(append(append(append([]string{}, provColumns[:]...), fileNumColumn, rowNumColumn), dataColumns...))
 	consts := make([]string, len(prov), len(prov)+1)
@@ -139,9 +149,14 @@ func insertSQL(c *ch.Client, table string, prov [5]string, fileNum int, dataColu
 	for _, col := range dataColumns {
 		inputStruct = append(inputStruct, fmt.Sprintf("`%s` String", col))
 	}
+	star := "*"
+	if col := sampleIDColumns[table]; col != "" && slices.Contains(dataColumns, col) {
+		q := "`" + col + "`"
+		star = fmt.Sprintf("* REPLACE (%s AS %s)", parser.SampleIDSQL(q), q)
+	}
 	return fmt.Sprintf(
-		"INSERT INTO `%s`.`%s` (%s) SELECT %s, * FROM input('%s') FORMAT TabSeparatedRaw",
-		c.Database(), table, colList, strings.Join(consts, ", "), strings.Join(inputStruct, ", "))
+		"INSERT INTO `%s`.`%s` (%s) SELECT %s, %s FROM input('%s') FORMAT TabSeparatedRaw",
+		c.Database(), table, colList, strings.Join(consts, ", "), star, strings.Join(inputStruct, ", "))
 }
 
 // runInsert streams a numbered body (see insertSQL) into f's staging table.
@@ -208,6 +223,11 @@ func ingestMatrix(c *ch.Client, studyID string, fileNum int, f *parser.DataFile)
 		return FileStat{}, err
 	}
 	shape := f.MatrixShape(h.Columns)
+	if !f.IsPatientLevel() {
+		for i, id := range shape.SampleColumns {
+			shape.SampleColumns[i] = parser.SampleID(id)
+		}
+	}
 	cols := append(append([]string{}, shape.IDColumns...), "sample_id", "value")
 	var emitted uint64
 	body, err := parser.OpenMatrix(f.DataPath, shape, &emitted)

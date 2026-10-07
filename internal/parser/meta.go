@@ -36,7 +36,7 @@ func ReadMeta(path string) (*MetaFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseMeta(string(b)), nil
+	return ParseMeta(normalizeLineEnds(string(b))), nil
 }
 
 func (m *MetaFile) Get(key string) string { return m.Fields[key] }

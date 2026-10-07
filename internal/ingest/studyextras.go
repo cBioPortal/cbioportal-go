@@ -3,7 +3,6 @@ package ingest
 import (
 	"bufio"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,7 +44,7 @@ var mutSigColumns = []string{"rank", "gene", "num_bases_covered", "num_mutations
 // column means rank is the 1-based line number, and '<' is dropped from p/q.
 // It returns TSV rows in mutSigColumns order.
 func mutSigRows(path string) ([]string, error) {
-	f, err := os.Open(path)
+	f, err := parser.OpenText(path)
 	if err != nil {
 		return nil, err
 	}

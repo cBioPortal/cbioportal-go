@@ -12,6 +12,7 @@ $ cbioportal-import help
 Commands:
   plan               list a study's data files and the staging tables they load into
   ingest             stage a study's data files in the raw database
+  remove-study       delete studies' staged rows from the raw database
   ingest-case-lists  restage only the case lists of one or more studies
   load-reference     load genes, gene aliases and cancer types from a seed dump
   load-genesets      load gene sets and their hierarchy into the reference database
@@ -24,6 +25,7 @@ Commands:
 ```bash
 cbioportal-import plan <study-dir>                                  # no ClickHouse needed
 cbioportal-import ingest <study-dir> --db cbioportal_raw
+cbioportal-import remove-study <study-id>... --db cbioportal_raw     # then transform
 cbioportal-import ingest-case-lists <study-dir>... --db cbioportal_raw
 cbioportal-import load-reference <seed.sql.gz> --db cbioportal_ref
 cbioportal-import load-genesets <genesets.gmt> --version msigdb_7.5.1 \

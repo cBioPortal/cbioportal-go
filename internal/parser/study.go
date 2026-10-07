@@ -77,10 +77,18 @@ func (d *DataFile) MatrixShape(columns []string) MatrixShape {
 	return ShapeWithFeatures(columns, d.EntityMetaProperties)
 }
 
+// IsPatientLevel reports whether a generic assay file's columns are patient
+// ids (patient_level: true in its meta file).
+func (d *DataFile) IsPatientLevel() bool {
+	return strings.EqualFold(strings.TrimSpace(d.PatientLevel), "true")
+}
+
 // IsMolecularProfile reports whether this is a molecular genetic profile (has a
 // stable id and a genomic alteration type) vs clinical/cancer-type/panel data.
+// Segment files are not, even with a stable_id in their meta file:
+// ImportCopyNumberSegmentData stores no genetic profile.
 func (d *DataFile) IsMolecularProfile() bool {
-	if d.StableID == "" {
+	if d.StableID == "" || strings.EqualFold(d.Datatype, "SEG") {
 		return false
 	}
 	switch strings.ToUpper(d.AlterationType) {

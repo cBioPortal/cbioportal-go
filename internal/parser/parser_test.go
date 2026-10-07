@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestSanitizeIdent(t *testing.T) {
@@ -43,6 +45,23 @@ func TestMatrixShape(t *testing.T) {
 	ga := Shape([]string{"ENTITY_STABLE_ID", "name", "description", "S1", "S2"})
 	if !reflect.DeepEqual(ga.IDColumns, []string{"entity_stable_id", "name", "description"}) {
 		t.Errorf("generic-assay id columns: %v", ga.IDColumns)
+	}
+}
+
+// A gene's repeated rows are ignored, as ImportTabDelimData ignores them
+// (acc_tcga_pan_can_atlas_2018's data_cna.txt lists RNU6-28P twice).
+func TestMatrixUnpivotSkipsDuplicateRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.txt")
+	os.WriteFile(path, []byte("Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\nRNU6-28P\t100873756\t0\t0\nTP53\t7157\t1\t2\nRNU6-28P\t100873756\t-2\t0\n"), 0o644)
+	h, _ := ReadHeader(path)
+	r, err := OpenMatrix(path, Shape(h.Columns), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := io.ReadAll(r)
+	want := []string{"1\tRNU6-28P\t100873756\tS1\t0", "2\tRNU6-28P\t100873756\tS2\t0", "3\tTP53\t7157\tS1\t1", "4\tTP53\t7157\tS2\t2"}
+	if got := splitLines(string(out)); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %q want %q", got, want)
 	}
 }
 
@@ -89,14 +108,83 @@ func TestBodyReaderNumbersDataRows(t *testing.T) {
 		return splitLines(string(out)), emitted
 	}
 	got, n := read(true)
-	want := []string{"1\tP1\tS1", "2\tP2\tS2\r", "3\tP3\tS3"}
+	want := []string{"1\tP1\tS1", "2\tP2\tS2", "3\tP3\tS3"}
 	if !reflect.DeepEqual(got, want) || n != 3 {
 		t.Errorf("with header: got %q (%d) want %q (3)", got, n, want)
 	}
 	got, n = read(false)
-	want = append([]string{"1\tPATIENT_ID\tSAMPLE_ID"}, "2\tP1\tS1", "3\tP2\tS2\r", "4\tP3\tS3")
+	want = append([]string{"1\tPATIENT_ID\tSAMPLE_ID"}, "2\tP1\tS1", "3\tP2\tS2", "4\tP3\tS3")
 	if !reflect.DeepEqual(got, want) || n != 4 {
 		t.Errorf("headerless: got %q (%d) want %q (4)", got, n, want)
+	}
+}
+
+// Files with CRLF line ends (datahub's brca_hta9_htan_2022 timeline) and
+// with classic Mac CR line ends (chol_tcga_pan_can_atlas_2018's patient
+// file) read as Java's readLine reads them: lines without carriage returns.
+func TestReadersSplitCarriageReturnLines(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"crlf": "#Patient Identifier\tStart\r\nPATIENT_ID\tSTART_DATE\r\nP1\t1\r\n\r\nP2\t2\r\n",
+		"cr":   "#Patient Identifier\tStart\rPATIENT_ID\tSTART_DATE\rP1\t1\r\rP2\t2\r",
+	} {
+		path := filepath.Join(dir, name+".txt")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		h, err := ReadHeader(path)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if want := []string{"PATIENT_ID", "START_DATE"}; !reflect.DeepEqual(h.Columns, want) {
+			t.Errorf("%s: header %q want %q", name, h.Columns, want)
+		}
+		r, err := OpenBody(path, true, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "1\tP1\t1\n2\tP2\t2\n"; string(out) != want {
+			t.Errorf("%s: body %q want %q", name, out, want)
+		}
+	}
+}
+
+// ImportClinicalData stores display names and descriptions as written
+// (pdac_msk_2024's "Ancestry " on www); a blank display name falls back to
+// the attribute id.
+func TestParseAttributeMetaKeepsSpaces(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data_clinical_patient.txt")
+	os.WriteFile(path, []byte("#Patient Identifier\tAncestry \t \n#Patient id\tAncestry label \tx\n#STRING\tSTRING\tSTRING\n#1\t1\t1\n"+
+		"PATIENT_ID\tANCESTRY\tOTHER\nP1\ta\tb\n"), 0o644)
+	attrs, err := ParseAttributeMeta(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := [][2]string{}
+	for _, a := range attrs {
+		got = append(got, [2]string{a.DisplayName, a.Description})
+	}
+	if want := [][2]string{{"Ancestry ", "Ancestry label "}, {"OTHER", "x"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestLineEndsAcrossReads(t *testing.T) {
+	// One byte per read: a CRLF split over two reads is still one line end.
+	r := &lineEnds{r: iotest.OneByteReader(strings.NewReader("a\r\nb\rc\n\r\r\nd"))}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "a\nb\nc\n\n\nd"; string(out) != want {
+		t.Errorf("got %q want %q", out, want)
+	}
+	if got := ParseMeta(normalizeLineEnds("a: 1\rb: 2\r\n")).Get("b"); got != "2" {
+		t.Errorf("meta with CR line ends: b = %q", got)
 	}
 }
 
@@ -154,5 +242,32 @@ func TestReadSequencedSamples(t *testing.T) {
 	}
 	if want := []string{"S1", "S2", "S3"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("ReadSequencedSamples = %v, want %v", got, want)
+	}
+}
+
+// A segment file is no molecular profile, even when its meta file has a
+// stable_id (TCGA PanCancer studies' meta_cna_hg19_seg.txt).
+func TestSegmentFileIsNoMolecularProfile(t *testing.T) {
+	seg := DataFile{AlterationType: "COPY_NUMBER_ALTERATION", Datatype: "SEG", StableID: "s_segment"}
+	cna := DataFile{AlterationType: "COPY_NUMBER_ALTERATION", Datatype: "DISCRETE", StableID: "gistic"}
+	if seg.IsMolecularProfile() || !cna.IsMolecularProfile() {
+		t.Errorf("IsMolecularProfile: segment %v, discrete CNA %v", seg.IsMolecularProfile(), cna.IsMolecularProfile())
+	}
+}
+
+func TestSampleID(t *testing.T) {
+	for in, want := range map[string]string{
+		"TCGA-RZ-AB0B-01A":             "TCGA-RZ-AB0B-01",
+		"TCGA-RZ-AB0B-01A-11D-A39W-08": "TCGA-RZ-AB0B-01",
+		"TCGA-RZ-AB0B-01":              "TCGA-RZ-AB0B-01",
+		"TCGA-RZ-AB0B":                 "TCGA-RZ-AB0B-01",
+		"TCGA-13-1479-Tumor":           "TCGA-13-1479-01",
+		"TCGA-13-1479-Normal":          "TCGA-13-1479-11",
+		"TCGA-XY-1234-1A":              "TCGA-XY-1234-1A",
+		"P-0001776-T02-IM6":            "P-0001776-T02-IM6",
+	} {
+		if got := SampleID(in); got != want {
+			t.Errorf("SampleID(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -18,7 +17,7 @@ type Header struct {
 
 // ReadHeader reads the first non-`#` line of a TSV file as its column header.
 func ReadHeader(path string) (*Header, error) {
-	f, err := os.Open(path)
+	f, err := OpenText(path)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +44,7 @@ func ReadHeader(path string) (*Header, error) {
 // lines among a MAF's leading comment lines (whitespace-separated), in file
 // order. Lines after the first non-`#` line are not inspected.
 func ReadSequencedSamples(path string) ([]string, error) {
-	f, err := os.Open(path)
+	f, err := OpenText(path)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +112,7 @@ func SanitizeColumns(columns []string) []string {
 // leading column. It optionally counts emitted data lines.
 type BodyReader struct {
 	inner      *bufio.Reader
-	f          *os.File
+	f          io.Closer
 	skipHeader bool
 	headerDone bool
 	buf        []byte
@@ -124,7 +123,7 @@ type BodyReader struct {
 }
 
 func OpenBody(path string, skipHeader bool, emitted *uint64) (*BodyReader, error) {
-	f, err := os.Open(path)
+	f, err := OpenText(path)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +257,7 @@ func ShapeWithFeatures(columns, features []string) MatrixShape {
 // lines are consumed at construction.
 type MatrixUnpivotReader struct {
 	inner       *bufio.Reader
-	f           *os.File
+	f           io.Closer
 	idCount     int
 	sampleNames [][]byte
 	out         bytes.Buffer
@@ -266,10 +265,11 @@ type MatrixUnpivotReader struct {
 	line        []byte
 	eof         bool
 	emitted     *uint64
+	seen        map[string]struct{} // identifier fields of the lines read
 }
 
 func OpenMatrix(path string, shape MatrixShape, emitted *uint64) (*MatrixUnpivotReader, error) {
-	f, err := os.Open(path)
+	f, err := OpenText(path)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +289,7 @@ func OpenMatrix(path string, shape MatrixShape, emitted *uint64) (*MatrixUnpivot
 		names[i] = []byte(s)
 	}
 	return &MatrixUnpivotReader{
-		inner: r, f: f, idCount: len(shape.IDColumns), sampleNames: names, emitted: emitted,
+		inner: r, f: f, idCount: len(shape.IDColumns), sampleNames: names, emitted: emitted, seen: map[string]struct{}{},
 	}, nil
 }
 
@@ -325,6 +325,16 @@ func (m *MatrixUnpivotReader) fill() bool {
 			continue
 		}
 		prefix := bytes.Join(fields[:m.idCount], []byte{'\t'})
+		// A line repeating an earlier line's identifiers is skipped, as
+		// ImportTabDelimData ignores a duplicated gene's later rows.
+		if _, dup := m.seen[string(prefix)]; dup {
+			if err != nil {
+				m.eof = true
+				return false
+			}
+			continue
+		}
+		m.seen[string(prefix)] = struct{}{}
 		var count uint64
 		for j, sample := range m.sampleNames {
 			idx := m.idCount + j

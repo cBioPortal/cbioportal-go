@@ -28,6 +28,10 @@
   ids the importer would assign them (studies in ingest order, then the order
   in which it reads a study's directory and files), since the Java backend
   returns many lists in that order.
+  Every object is built under a staging name (`__next_<name>`) and
+  published at the end — tables swapped in with `EXCHANGE TABLES`, views
+  recreated over the published names — so the API serves the previous
+  build while a transform runs, and a failed transform changes nothing.
   `transform --from-prod` builds the same objects from a clone of cBioPortal's
   production ClickHouse database instead, mostly as views over its `*_derived`
   tables (see [Deployment](deployment.md#mirroring-production)).

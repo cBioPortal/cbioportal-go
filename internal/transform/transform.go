@@ -13,6 +13,7 @@ import (
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/javaorder"
+	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
 type ViewCount struct {
@@ -23,11 +24,44 @@ type ViewCount struct {
 // Apply builds every view and table the API reads in targetDB from rawDB,
 // resolving gene symbols against refDB when present. Objects whose staging
 // data is absent are built empty, with the same columns (see stagingSources).
+//
+// The objects are built under staged names (stagePrefix) and published once
+// all of them are complete, so a failed run leaves the portal database as it
+// was, and the API keeps serving the previous objects while a run builds.
 func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	c := newClient(base, rawDB)
 	if err := c.EnsureDatabase(targetDB); err != nil {
 		return nil, err
 	}
+	if err := dropStaged(c, targetDB); err != nil {
+		return nil, err
+	}
+	c.stage = newStaging(targetDB)
+	counts, err := build(c, rawDB, targetDB, refDB)
+	if err == nil && beforePublish != nil {
+		err = beforePublish()
+	}
+	if err != nil {
+		if dropErr := dropStaged(c, targetDB); dropErr != nil {
+			return nil, fmt.Errorf("%w (and removing the staged objects: %v)", err, dropErr)
+		}
+		return nil, err
+	}
+	if err := publish(c, c.stage); err != nil {
+		return nil, err
+	}
+	if err := dropStaged(c, targetDB); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+// beforePublish, when set (by tests), runs between the build and publishing.
+var beforePublish func() error
+
+// build creates every object of targetDB through c and returns their row
+// counts.
+func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	hasRefText, _ := c.Execute(fmt.Sprintf(
 		"SELECT count() FROM system.tables WHERE database = '%s' AND name = 'gene' FORMAT TabSeparated", refDB))
 	hasRef := strings.TrimSpace(hasRefText) != "0" && strings.TrimSpace(hasRefText) != ""
@@ -41,6 +75,9 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 
 	var created []string
 	engineOf := func(name string) string {
+		if c.stage != nil {
+			name = c.stage.name(name)
+		}
 		engine, _ := c.Execute(fmt.Sprintf(
 			"SELECT engine FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated", targetDB, name))
 		return strings.TrimSpace(engine)
@@ -409,8 +446,8 @@ func mutationSQL(c *client, rawDB, targetDB string) string {
 // stores in genetic_alteration (every integer level -2..2 per gene x sample, so
 // GAIN/HETLOSS/DIPLOID queries work), from the DISCRETE wide matrices
 // (ImportTabDelimData) and the discrete long files (ImportCnaDiscreteLongData,
-// which stores a partial deletion -1.5 as -2 and keeps the first line per gene
-// and sample). Genes are resolved through gene_key_map; unresolved lines are
+// which keeps the first line per gene and sample). Both importers store a
+// partial deletion -1.5 as a deep deletion -2 in cna_event. Genes are resolved through gene_key_map; unresolved lines are
 // skipped, as are matrix lines stored through the microRNA branch, which
 // ImportTabDelimData keeps out of cna_event.
 func cnaSQL(c *client, rawDB, targetDB string, fromMatrix, fromLong bool) string {
@@ -419,9 +456,9 @@ func cnaSQL(c *client, rawDB, targetDB string, fromMatrix, fromLong bool) string
 	if fromMatrix {
 		parts = append(parts, fmt.Sprintf(
 			"SELECT c.study_id AS study_id, c.sample_id AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
-				"toString(gk.resolved_entrez_gene_id) AS entrez_gene_id, c.value AS alteration, c.profile_stable_id AS profile_stable_id, "+
+				"toString(gk.resolved_entrez_gene_id) AS entrez_gene_id, if(c.value = '-1.5', '-2', c.value) AS alteration, c.profile_stable_id AS profile_stable_id, "+
 				"'' AS cbp_driver, '' AS cbp_driver_tiers, '' AS cbp_driver_annotation, '' AS cbp_driver_tiers_annotation, '{}' AS namespace_columns "+
-				"FROM `%s`.cna_matrix c%s WHERE c.datatype = 'DISCRETE' AND gk.mirna = 0 AND c.value IN %s",
+				"FROM `%s`.cna_matrix c%s WHERE c.datatype = 'DISCRETE' AND gk.mirna = 0 AND alteration IN %s",
 			rawDB, geneKeyJoin(targetDB, "cna_matrix", "c", "hugo_symbol", "entrez_gene_id"), levels))
 	}
 	if fromLong {
@@ -499,8 +536,45 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 		sel = fmt.Sprintf(
 			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, %s AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
 			idCol, idCol, value, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
+		renames, err := attrIDRenames(c, rawDB)
+		if err != nil {
+			return "", err
+		}
+		if renames != "" {
+			sel = fmt.Sprintf(
+				"SELECT l.study_id AS study_id, l.%[1]s AS %[1]s, if(r.attr_id != '', r.attr_id, l.attr_id) AS attr_id, l.attr_value AS attr_value "+
+					"FROM (%[2]s) l LEFT JOIN (%[3]s) r ON r.study_id = l.study_id AND r.col = l.attr_id",
+				idCol, sel, renames)
+		}
 	}
 	return sel, nil
+}
+
+// attrIDRenames selects (study_id, col, attr_id) for the clinical attributes
+// whose id is not the upper-cased name of their staging column, e.g.
+// "BMI>25" (column bmi_25) or "1P19Q_STATUS" (column _1p19q_status): the
+// importer keeps the header's id as written. Empty when there are none.
+func attrIDRenames(c *client, rawDB string) (string, error) {
+	if ok, _ := c.TableExists("clinical_attribute_meta"); !ok {
+		return "", nil
+	}
+	text, err := c.Execute(fmt.Sprintf(
+		"SELECT DISTINCT study_id, attr_id FROM `%s`.clinical_attribute_meta ORDER BY study_id, attr_id FORMAT TabSeparated", rawDB))
+	if err != nil {
+		return "", err
+	}
+	var rows []string
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
+		study, attr, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		if col := strings.ToUpper(parser.SanitizeIdent(attr)); col != attr {
+			rows = append(rows, fmt.Sprintf("SELECT '%s' AS study_id, '%s' AS col, '%s' AS attr_id",
+				ch.SQLLit(study), ch.SQLLit(col), ch.SQLLit(attr)))
+		}
+	}
+	return strings.Join(rows, " UNION ALL "), nil
 }
 
 // molecularProfileSQL builds the molecular profiles from the staged meta

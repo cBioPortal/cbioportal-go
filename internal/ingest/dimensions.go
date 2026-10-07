@@ -163,6 +163,9 @@ func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 			if id == "" || strings.ContainsAny(id, "\t\n\r") {
 				continue
 			}
+			if !f.IsPatientLevel() {
+				id = parser.SampleID(id)
+			}
 			row++
 			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%d\t%d\n", s.StudyID, fileName(f.DataPath), f.StableID, kind, id, i+1, row)
 		}
@@ -306,7 +309,7 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 		samples := strings.FieldsFunc(meta.Get("case_list_ids"), func(r rune) bool { return r == '\t' })
 		var b strings.Builder
 		for _, s2 := range samples {
-			s2 = strings.TrimSpace(s2)
+			s2 = parser.SampleID(strings.TrimSpace(s2))
 			if s2 == "" {
 				continue
 			}

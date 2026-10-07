@@ -72,6 +72,7 @@ var positionedSources = map[string]bool{
 type client struct {
 	*ch.Client
 	subst []sourceSubst
+	stage *staging // nil: portal objects are written in place
 }
 
 type sourceSubst struct {
@@ -129,8 +130,18 @@ func tableRef(db, table string) *regexp.Regexp {
 	return regexp.MustCompile("(?:`" + d + "`|\\b" + d + "\\b)\\.(?:`" + t + "`|" + t + "\\b)")
 }
 
-// Execute runs sql with staging-table stand-ins substituted.
+// Execute runs sql with staging-table stand-ins substituted and, while a
+// transform stages its build, portal objects under their staged names.
 func (c *client) Execute(sql string) (string, error) {
+	if c.stage != nil {
+		c.stage.record(sql)
+		sql = c.stage.rewrite(sql)
+	}
+	return c.executeUnstaged(sql)
+}
+
+// executeUnstaged runs sql with staging-table stand-ins substituted.
+func (c *client) executeUnstaged(sql string) (string, error) {
 	for _, s := range c.subst {
 		sql = s.ref.ReplaceAllLiteralString(sql, s.with)
 	}

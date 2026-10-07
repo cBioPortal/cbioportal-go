@@ -17,10 +17,17 @@ func TestInsertSQLNumbersRows(t *testing.T) {
 	f := &parser.DataFile{DataPath: "/s/data_clinical_sample.txt"}
 	got := insertSQL(c, "clinical_sample", provenance("st", f), 3, []string{"patient_id", "sample_id"})
 	want := "INSERT INTO `raw`.`clinical_sample` (`study_id`, `source_file`, `alteration_type`, `datatype`, `profile_stable_id`, " +
-		"`file_num`, `row_num`, `patient_id`, `sample_id`) SELECT 'st', 'data_clinical_sample.txt', '', '', '', toUInt32(3), * " +
+		"`file_num`, `row_num`, `patient_id`, `sample_id`) SELECT 'st', 'data_clinical_sample.txt', '', '', '', toUInt32(3), " +
+		"* REPLACE (" + parser.SampleIDSQL("`sample_id`") + " AS `sample_id`) " +
 		"FROM input('`row_num` UInt64, `patient_id` String, `sample_id` String') FORMAT TabSeparatedRaw"
 	if got != want {
 		t.Errorf("insertSQL:\n got %s\nwant %s", got, want)
+	}
+	// Timeline rows keep their sample ids as written.
+	f = &parser.DataFile{DataPath: "/s/data_timeline.txt"}
+	got = insertSQL(c, "timeline", provenance("st", f), 1, []string{"patient_id", "sample_id"})
+	if strings.Contains(got, "REPLACE") {
+		t.Errorf("timeline insert rewrites sample ids: %s", got)
 	}
 }
 
@@ -138,5 +145,40 @@ func TestIngestRowNumbers(t *testing.T) {
 	got := query("SELECT study_id, sample_id FROM `" + db + "`.clinical_sample ORDER BY study_id, file_num, row_num")
 	if want := []string{"old\tSO", "rn_study\tS3", "rn_study\tS1", "rn_study\tS2"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("after removal: clinical_sample %q, want %q", got, want)
+	}
+
+	// Removing the study deletes its rows from every table, and only its rows.
+	if n, err := RemoveStudy(c, "rn_study"); err != nil || n == 0 {
+		t.Fatalf("RemoveStudy: %d tables, %v", n, err)
+	}
+	if got := query("SELECT study_id, sample_id FROM `" + db + "`.clinical_sample"); !reflect.DeepEqual(got, []string{"old\tSO"}) {
+		t.Errorf("after RemoveStudy: clinical_sample %q", got)
+	}
+	left := query("SELECT arrayStringConcat(groupArray(table), ',') FROM (SELECT table FROM system.columns WHERE database = '" + db +
+		"' AND name = 'study_id' ORDER BY table)")
+	for _, table := range strings.Split(left[0], ",") {
+		if got := query("SELECT count() FROM `" + db + "`.`" + table + "` WHERE study_id = 'rn_study'"); got[0] != "0" {
+			t.Errorf("after RemoveStudy: %s holds %s rows of the study", table, got[0])
+		}
+	}
+}
+
+// TestLiveSampleIDSQL checks parser.SampleIDSQL against parser.SampleID on
+// the server named by CLICKHOUSE_TEST_URL.
+func TestLiveSampleIDSQL(t *testing.T) {
+	base := os.Getenv("CLICKHOUSE_TEST_URL")
+	if base == "" {
+		t.Skip("CLICKHOUSE_TEST_URL not set")
+	}
+	c := ch.New(base, "default")
+	for _, id := range []string{"TCGA-RZ-AB0B-01A", "TCGA-RZ-AB0B-01A-11D-A39W-08", "TCGA-RZ-AB0B-01", "TCGA-RZ-AB0B",
+		"TCGA-13-1479-Tumor", "TCGA-13-1479-Normal", "TCGA-XY-1234-1A", "P-0001776-T02-IM6", "TCGAX"} {
+		out, err := c.Execute("SELECT " + parser.SampleIDSQL("'"+ch.SQLLit(id)+"'") + " FORMAT TabSeparatedRaw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := strings.TrimSpace(out), parser.SampleID(id); got != want {
+			t.Errorf("%q: SQL %q, Go %q", id, got, want)
+		}
 	}
 }

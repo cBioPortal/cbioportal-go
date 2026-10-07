@@ -51,6 +51,15 @@ transform afterwards to make the study queryable.`,
 		setup: setupIngest,
 	},
 	{
+		name: "remove-study", args: "<study-id>...", minArgs: 1, maxArgs: -1,
+		short: "delete studies' staged rows from the raw database",
+		long: `Remove-study deletes every staged row of each study from the raw
+database. Run transform afterwards to remove the studies from the portal
+database.`,
+		examples: []string{"remove-study acbc_mskcc_2015 --db cbioportal_raw"},
+		setup:    setupRemoveStudy,
+	},
+	{
 		name: "ingest-case-lists", args: "<study-dir>...", minArgs: 1, maxArgs: -1,
 		short: "restage only the case lists of one or more studies",
 		long: `Ingest-case-lists restages only the case_lists/ directory of each study,
@@ -181,6 +190,22 @@ func setupIngest(fs *flag.FlagSet) func([]string, io.Writer) error {
 		fmt.Fprintf(w, "TOTAL: %d rows, %.1f MB in %.2fs  =>  %.0f MB/s, %.0f krows/s\n", totalRows, mb, elapsed, mbps, krps)
 		if mismatch > 0 {
 			fmt.Fprintf(w, "WARNING: %d file(s) had a row-count mismatch (marked !) — check TSV escaping.\n", mismatch)
+		}
+		return nil
+	}
+}
+
+func setupRemoveStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
+	url := urlFlag(fs)
+	db := fs.String("db", "cbioportal_raw", "raw staging `database` to delete from")
+	return func(args []string, w io.Writer) error {
+		c := ch.New(*url, *db)
+		for _, id := range args {
+			n, err := ingest.RemoveStudy(c, id)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "removed study=%s from %d tables of `%s`\n", id, n, *db)
 		}
 		return nil
 	}
