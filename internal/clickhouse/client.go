@@ -155,6 +155,27 @@ func (c *Client) post(query url.Values, body io.Reader) (string, error) {
 	return string(out), nil
 }
 
+// processSettings are added to every request of this process (see
+// SetProcessSettings).
+var processSettings = map[string]string{}
+
+// SetProcessSettings makes every request of this process run with these
+// settings, unless a request sets them itself. Call it before any request.
+func SetProcessSettings(settings map[string]string) {
+	for k, v := range settings {
+		processSettings[k] = v
+	}
+}
+
+// ReplicaConsistentSettings make a writer's requests see each other's effects
+// on a replicated service such as ClickHouse Cloud, whose HTTP requests may
+// reach different replicas: ALTERs and mutations return once every replica
+// applied them, and reads see every insert acknowledged before them.
+// Single-node servers ignore them.
+var ReplicaConsistentSettings = map[string]string{
+	"alter_sync": "2", "mutations_sync": "2", "select_sequential_consistency": "1",
+}
+
 // withSessionSettings adds the settings every request runs with. Queries can
 // embed id lists for a whole study (tens of thousands of samples), well past
 // ClickHouse's default 256 KiB max_query_size.
@@ -164,6 +185,11 @@ func withSessionSettings(query url.Values) url.Values {
 	}
 	if query.Get("max_query_size") == "" {
 		query.Set("max_query_size", "268435456")
+	}
+	for k, v := range processSettings {
+		if query.Get(k) == "" {
+			query.Set(k, v)
+		}
 	}
 	return query
 }
@@ -175,11 +201,12 @@ func insertSQLHead(q string) string {
 	return q
 }
 
-// DeleteWhere runs a synchronous ALTER … DELETE (mutations_sync=1) so the rows
-// are gone before any subsequent count, making re-ingest idempotent.
+// DeleteWhere runs a synchronous ALTER … DELETE (mutations_sync=2: on every
+// replica) so the rows are gone before any subsequent count, making re-ingest
+// idempotent.
 func (c *Client) DeleteWhere(table, where string) {
 	c.Execute(fmt.Sprintf(
-		"ALTER TABLE `%s`.`%s` DELETE WHERE %s SETTINGS mutations_sync = 1",
+		"ALTER TABLE `%s`.`%s` DELETE WHERE %s SETTINGS mutations_sync = 2",
 		c.database, table, where))
 }
 

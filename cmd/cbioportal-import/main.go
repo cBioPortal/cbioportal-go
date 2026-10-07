@@ -13,11 +13,13 @@ import (
 	"text/tabwriter"
 
 	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 const name = "cbioportal-import"
 
 func main() {
+	ch.SetProcessSettings(ch.ReplicaConsistentSettings)
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
