@@ -27,7 +27,9 @@
 // top-level arrays larger than -stream-above are compared element by element
 // with an external sort of their element records (compareStream, within
 // -sort-budget), and other bodies larger than -decode-above are compared
-// byte for byte. Without GOMEMLIMIT the collector's soft limit is 1 GiB.
+// byte for byte. A body over -max-body (2 GiB) fails its request, which
+// bounds the disk and time one request takes. Without GOMEMLIMIT the
+// collector's soft limit is 1 GiB.
 package main
 
 import (
@@ -140,7 +142,10 @@ func readBody(status int, src io.Reader) (response, error) {
 		return response{}, err
 	}
 	r := response{Status: status, spool: f, temp: true}
-	k, err := io.Copy(f, io.MultiReader(&buf, src))
+	k, err := io.Copy(f, io.LimitReader(io.MultiReader(&buf, src), maxBody+1))
+	if err == nil && k > maxBody {
+		err = fmt.Errorf("body larger than %d bytes (-max-body)", maxBody)
+	}
 	if err != nil {
 		r.release()
 		return response{}, err
@@ -148,6 +153,10 @@ func readBody(status int, src io.Reader) (response, error) {
 	r.size = k
 	return r, nil
 }
+
+// maxBody is the largest body read, in bytes; a larger one fails the
+// request, bounding the disk and time one request takes.
+var maxBody int64 = 2 << 30
 
 // cacheHeader is the first line of a cache file; the response body follows
 // it as sent. (Files of one JSON line also holding the body as a string are
@@ -493,6 +502,7 @@ func main() {
 	flag.IntVar(&decodeAbove, "decode-above", decodeAbove, "compare bodies that are not arrays only byte for byte when the two together exceed this many bytes")
 	flag.IntVar(&spoolAbove, "spool-above", spoolAbove, "keep response bodies larger than this many bytes in temporary files instead of memory")
 	flag.IntVar(&sortBudget, "sort-budget", sortBudget, "memory in bytes one sort of a large array's element records may use before it spills to disk")
+	flag.Int64Var(&maxBody, "max-body", maxBody, "fail requests whose body is larger than this many bytes")
 	flag.StringVar(&spoolDir, "spool", "", "directory of spooled bodies and sort runs (default: the system's temporary directory)")
 	flag.Parse()
 	if os.Getenv("GOMEMLIMIT") == "" {

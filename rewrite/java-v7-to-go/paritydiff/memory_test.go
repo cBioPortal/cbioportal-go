@@ -110,6 +110,12 @@ func TestLargeResponsesBoundedMemory(t *testing.T) {
 	fa := &fetcher{origin: srv.URL + "/a", client: srv.Client()}
 	fb := &fetcher{origin: srv.URL + "/b", client: srv.Client()}
 	const limit = 8 << 20
+	prevMax := maxBody
+	maxBody = 10 << 20
+	if _, err := fa.get(request{Method: "GET", Path: "/x"}); err == nil || !strings.Contains(err.Error(), "-max-body") {
+		t.Errorf("body over -max-body: %v", err)
+	}
+	maxBody = prevMax
 	for _, c := range []struct {
 		path  string
 		count int
