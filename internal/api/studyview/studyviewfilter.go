@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/json"
@@ -174,7 +174,7 @@ func (f studyViewFilter) baseScope(a *core.SQLArgs) string {
 
 // filterWhere compiles the filter to a predicate over sample_derived columns
 // (sample_unique_id, patient_unique_id, cancer_study_identifier).
-func (s *State) filterWhere(a *core.SQLArgs, f studyViewFilter) string {
+func (s Server) filterWhere(a *core.SQLArgs, f studyViewFilter) string {
 	preds := []string{f.baseScope(a)}
 	if !f.hasSubFilters() {
 		return preds[0]
@@ -219,7 +219,7 @@ func (s *State) filterWhere(a *core.SQLArgs, f studyViewFilter) string {
 // filterCompiler builds the predicates of one filter; studyIn is the bound
 // array of its study ids, sc the scope of those studies.
 type filterCompiler struct {
-	s       *State
+	s       Server
 	a       *core.SQLArgs
 	studies []string
 	studyIn string
@@ -946,7 +946,7 @@ func (f studyViewFilter) withoutMutation(gene, profileType, categorization strin
 
 // sampleScope is the filter as a predicate over views keyed by
 // (study_id, sample_id).
-func (s *State) sampleScope(a *core.SQLArgs, f studyViewFilter) string {
+func (s Server) sampleScope(a *core.SQLArgs, f studyViewFilter) string {
 	if !f.hasSubFilters() {
 		if len(f.SampleIdentifiers) > 0 {
 			pairs := make([][2]string, len(f.SampleIdentifiers))
@@ -965,7 +965,7 @@ func (s *State) sampleScope(a *core.SQLArgs, f studyViewFilter) string {
 
 // sampleDerivedScope is the filter as a predicate over a *_derived view's
 // sample_unique_id or patient_unique_id column.
-func (s *State) sampleDerivedScope(a *core.SQLArgs, f studyViewFilter, uniqueCol string) string {
+func (s Server) sampleDerivedScope(a *core.SQLArgs, f studyViewFilter, uniqueCol string) string {
 	if !f.hasSubFilters() && len(f.SampleIdentifiers) == 0 {
 		if len(f.StudyIDs) > 0 {
 			return core.ByStudies(f.StudyIDs).Cond(a, core.TSampleDerived, "")
@@ -978,7 +978,7 @@ func (s *State) sampleDerivedScope(a *core.SQLArgs, f studyViewFilter, uniqueCol
 	return fmt.Sprintf("%s IN (%s)", uniqueCol, s.filterSQL(a, f))
 }
 
-func (s *State) scopeSampleCount(f studyViewFilter) uint64 {
+func (s Server) scopeSampleCount(f studyViewFilter) uint64 {
 	type c struct {
 		N uint64 `json:"n"`
 	}

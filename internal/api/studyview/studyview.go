@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"fmt"
@@ -20,20 +20,20 @@ type filteredSample struct {
 	UniquePatientKey string `json:"uniquePatientKey"`
 }
 
-// filteredSampleSortable are the sortBy fields of filtered samples.
-var filteredSampleSortable = map[string]string{"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId"}
+// FilteredSampleSortable are the sortBy fields of filtered samples.
+var FilteredSampleSortable = map[string]string{"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId"}
 
-// filteredSamplesFetch serves POST /api/filtered-samples/fetch: the samples
+// FilteredSamplesFetch serves POST /api/filtered-samples/fetch: the samples
 // passing the study-view filter, by sample id (negateFilters is
 // accepted and ignored, as in Java). A page is read in SQL.
-func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) FilteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
 	rows, err := core.QueryA[studies.IDRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM %s "+
 			"AND concat(study_id, '_', sample_id) IN (%s)%s",
-		f.scope().From(args, core.TSample), s.filterSQL(args, f), core.SQLListOrder(r, filteredSampleSortable, "sample_id, study_id")), args)
+		f.scope().From(args, core.TSample), s.filterSQL(args, f), core.SQLListOrder(r, FilteredSampleSortable, "sample_id, study_id")), args)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -59,7 +59,7 @@ type ClinicalDataCountItem struct {
 	Counts      []ClinicalDataCount `json:"counts"`
 }
 
-func (s *State) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes []struct {
 			AttributeID string `json:"attributeId"`
@@ -85,7 +85,7 @@ func (s *State) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 // (StudyViewColumnarServiceUtil.addClinicalDataCountsForMissingAttributes):
 // all filtered patients for a patient attribute, all filtered samples
 // otherwise, once per study defining it.
-func (s *State) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+func (s Server) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
 	all := s.clinicalDataCounts(f, attrIDs)
 	out := []ClinicalDataCountItem{}
 	withData := map[string]bool{}
@@ -140,7 +140,7 @@ func (s *State) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 // samples (sample attributes) or patients (patient attributes), with the
 // remainder reported as NA. An attribute defined at both levels in the
 // involved studies is counted per sample.
-func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
 	out := []ClinicalDataCountItem{}
 	studies := f.studyIDs()
 	if len(attrIDs) == 0 || len(studies) == 0 {

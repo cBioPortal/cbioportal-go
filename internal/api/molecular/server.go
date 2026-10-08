@@ -3,8 +3,14 @@
 // gene sets, gene panels, significance results and co-expression.
 package molecular
 
-import "github.com/cbioportal/cbioportal-go/internal/api/studies"
+import (
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
+)
 
 // Server serves the endpoints of this package; it embeds the studies
 // Server, whose lookups the molecular endpoints share.
 type Server struct{ studies.Server }
+
+// New returns the Server over s.
+func New(s *core.State) Server { return Server{studies.New(s)} }

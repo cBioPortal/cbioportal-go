@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/json"
@@ -109,7 +109,7 @@ func decodeBinRequest(r *http.Request, v any, key string) []json.RawMessage {
 	return filters
 }
 
-func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes []struct {
 			AttributeID string `json:"attributeId"`
@@ -154,7 +154,7 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 // keyCol names the entity column and valueCol the value column; naSQL is the
 // predicate that marks a value as NA; unit is the case column counted
 // (sample_unique_id, or patient_unique_id for a patient-level profile).
-func (s *State) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, unit string, keys [][2]string,
+func (s Server) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, unit string, keys [][2]string,
 	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value) {
 	unfiltered, filtered = map[[2]string][]databin.Value{}, map[[2]string][]databin.Value{}
 	if len(keys) == 0 {
@@ -243,7 +243,7 @@ type GenomicDataBin struct {
 	ProfileType    string           `json:"profileType"`
 }
 
-func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		GenomicDataBinFilters []struct {
 			HugoGeneSymbol string `json:"hugoGeneSymbol"`
@@ -290,7 +290,7 @@ type GenericAssayDataBin struct {
 	ProfileType  string           `json:"profileType"`
 }
 
-func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) GenericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		GenericAssayDataBinFilters []struct {
 			StableID    string `json:"stableId"`
@@ -333,7 +333,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 
 // customDataBinCountsFetch bins numeric custom-chart data (custom_data
 // sessions) over the filtered samples.
-func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes []struct {
 			AttributeID string `json:"attributeId"`

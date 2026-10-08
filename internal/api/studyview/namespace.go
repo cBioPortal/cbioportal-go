@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ import (
 // structural_variant and sample_cna_event tables. sample_cna_event holds only
 // the amplification and deep-deletion events.
 
-func (s *State) routeNamespace(mux *http.ServeMux) {
+func (s Server) RouteNamespace(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/namespace-attributes/fetch", s.namespaceAttributesFetch)
 	mux.HandleFunc("POST /api/namespace-attributes/counts/fetch", s.namespaceAttributeCountsFetch)
 	mux.HandleFunc("POST /api/namespace-data-counts/fetch", s.namespaceDataCountsFetch)
@@ -118,7 +118,7 @@ func mysqlJSONKeyLess(a, b string) bool {
 // MySQL's JSON key order, first occurrence wins. Java reads one arbitrary
 // record per table and study (LIMIT 1, no ORDER BY); this reads them all, so a
 // namespace is found whichever record carries it.
-func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
 	out := []NamespaceAttribute{}
@@ -174,7 +174,7 @@ func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request)
 // namespaceAttributeCountsFetch serves POST /api/namespace-attributes/counts/fetch:
 // per requested attribute, the number of the given samples with a non-null
 // value in any of their records. Attributes no sample has are left out.
-func (s *State) namespaceAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) namespaceAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers   []core.Identifier    `json:"sampleIdentifiers"`
 		NamespaceAttributes []NamespaceAttribute `json:"namespaceAttributes"`
@@ -225,7 +225,7 @@ type namespaceDataFilter struct {
 // distinct-sample count and record count of every value among the filtered
 // samples. An attribute without values yields a null entry, as Java's
 // stream maps it to null.
-func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes      []NamespaceAttribute `json:"attributes"`
 		StudyViewFilter struct {
@@ -286,7 +286,7 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 // the attribute is among them, or it has none and "NA" is selected. Each list
 // is applied to the full sample set; the first non-empty result seeds the
 // selection and later results are intersected with it.
-func (s *State) applyNamespaceDataFilters(ids []core.Identifier, filters []namespaceDataFilter) ([]core.Identifier, error) {
+func (s Server) applyNamespaceDataFilters(ids []core.Identifier, filters []namespaceDataFilter) ([]core.Identifier, error) {
 	if len(ids) == 0 {
 		return ids, nil
 	}
@@ -362,7 +362,7 @@ func (s *State) applyNamespaceDataFilters(ids []core.Identifier, filters []names
 // (NamespaceDataServiceImpl.fetchNamespaceDataForComparison): for each
 // requested value, the samples among the given ones with a record carrying
 // that value, one entry per sample.
-func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers  []core.Identifier  `json:"sampleIdentifiers"`
 		NamespaceAttribute NamespaceAttribute `json:"namespaceAttribute"`

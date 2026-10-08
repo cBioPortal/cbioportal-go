@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/json"
@@ -75,9 +75,9 @@ func TestLiveTreatmentTiers(t *testing.T) {
 
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, refDB)
-	s := newState(&core.State{CH: c})
+	s := New(&core.State{CH: c})
 	mux := http.NewServeMux()
-	s.routeTreatments(mux)
+	s.RouteTreatments(mux)
 	post := func(path, body string) string {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))

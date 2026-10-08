@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/csv"
@@ -11,7 +11,7 @@ import (
 // NumberUtils.isCreatable (internal/databin/testdata/numbers.tsv) on the
 // strings it covers: neither hexadecimal nor with a type suffix.
 func TestDecimalCreatable(t *testing.T) {
-	f, err := os.Open("../databin/testdata/numbers.tsv")
+	f, err := os.Open("../../databin/testdata/numbers.tsv")
 	if err != nil {
 		t.Fatal(err)
 	}

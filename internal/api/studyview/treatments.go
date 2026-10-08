@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"fmt"
@@ -10,10 +10,10 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeTreatments registers the study-view treatment and clinical-event-type
+// RouteTreatments registers the study-view treatment and clinical-event-type
 // charts, all computed from clinical_event_data_derived over the filtered
 // samples/patients.
-func (s *State) routeTreatments(mux *http.ServeMux) {
+func (s Server) RouteTreatments(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/treatments/patient-counts/fetch", s.patientTreatmentCountsFetch)
 	mux.HandleFunc("POST /api/treatments/sample-counts/fetch", s.sampleTreatmentCountsFetch)
 	mux.HandleFunc("POST /api/treatments/patient", s.treatmentsPatient)
@@ -37,7 +37,7 @@ func treatmentTierKey(r *http.Request) string {
 
 // studiesWithTreatments returns the studies (of studyIDs) having treatment
 // events with the given key.
-func (s *State) studiesWithTreatments(studyIDs []string, key string) []string {
+func (s Server) studiesWithTreatments(studyIDs []string, key string) []string {
 	type row struct {
 		Study string `json:"study"`
 	}
@@ -54,7 +54,7 @@ func (s *State) studiesWithTreatments(studyIDs []string, key string) []string {
 
 // treatmentsDisplayPatient serves POST /api/treatments/display-patient (body:
 // study ids): whether any of the studies has treatment data for the tier.
-func (s *State) treatmentsDisplayPatient(w http.ResponseWriter, r *http.Request) {
+func (s Server) treatmentsDisplayPatient(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
 	core.WriteJSON(w, len(s.studiesWithTreatments(studyIDs, treatmentTierKey(r))) > 0)
@@ -63,7 +63,7 @@ func (s *State) treatmentsDisplayPatient(w http.ResponseWriter, r *http.Request)
 // treatmentsDisplaySample serves POST /api/treatments/display-sample (body:
 // study ids): whether the studies with treatment data also have sample
 // acquisition timeline events.
-func (s *State) treatmentsDisplaySample(w http.ResponseWriter, r *http.Request) {
+func (s Server) treatmentsDisplaySample(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
 	treated := s.studiesWithTreatments(studyIDs, treatmentTierKey(r))
@@ -113,7 +113,7 @@ type SampleTreatmentReport struct {
 }
 
 // treatmentEvents selects the AGENT treatment events of the filtered patients.
-func (s *State) treatmentEvents(a *core.SQLArgs, f studyViewFilter) string {
+func (s Server) treatmentEvents(a *core.SQLArgs, f studyViewFilter) string {
 	return s.treatmentEventsByTier(a, f, treatmentTiers["Agent"])
 }
 
@@ -145,7 +145,7 @@ func tierParam(w http.ResponseWriter, r *http.Request) (treatmentTier, bool) {
 
 // treatmentEventsByTier selects the treatment events of the filtered
 // patients for one tier, one row per (split) treatment value.
-func (s *State) treatmentEventsByTier(a *core.SQLArgs, f studyViewFilter, tier treatmentTier) string {
+func (s Server) treatmentEventsByTier(a *core.SQLArgs, f studyViewFilter, tier treatmentTier) string {
 	value := "value"
 	if tier.split != "" {
 		value = fmt.Sprintf("arrayJoin(splitByRegexp(%s, value))", a.Str(tier.split))
@@ -157,7 +157,7 @@ func (s *State) treatmentEventsByTier(a *core.SQLArgs, f studyViewFilter, tier t
 		value, core.ByStudies(f.studyIDs()).From(a, core.TClinicalEventDataDerived), a.Str(tier.key), s.filterFrom(a, f))
 }
 
-func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
+func (s Server) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
 	type row struct {
 		Treatment string `json:"treatment"`
 		Count     int    `json:"count"`
@@ -182,7 +182,7 @@ func (s *State) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
 	return out, n
 }
 
-func (s *State) patientTreatmentCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) patientTreatmentCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	treatments, total := s.patientTreatments(f)
@@ -192,7 +192,7 @@ func (s *State) patientTreatmentCountsFetch(w http.ResponseWriter, r *http.Reque
 // sampleTreatmentRows pairs every filtered sample's acquisition time with the
 // first dose of each treatment its patient received: Pre when the sample was
 // taken on or before that dose, Post otherwise.
-func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treatmentTier) []SampleTreatmentRow {
+func (s Server) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treatmentTier) []SampleTreatmentRow {
 	args := core.NewArgs()
 	events := core.ByStudies(f.studyIDs()).From(args, core.TClinicalEventDataDerived)
 	value := "value"
@@ -255,7 +255,7 @@ func (s *State) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 	return out
 }
 
-func (s *State) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	detailed := strings.EqualFold(r.URL.Query().Get("projection"), "DETAILED")
@@ -281,7 +281,7 @@ func (s *State) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Reques
 // patients' filtered samples, without acquisition times) for POST
 // /api/treatments/patient, in the order of TreatmentServiceImpl's HashMap
 // keyed by treatment.
-func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
+func (s Server) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
 	tier, ok := tierParam(w, r)
 	if !ok {
 		return
@@ -330,7 +330,7 @@ func (s *State) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
 // treatmentsSample serves the Pre/Post sample rows for POST
 // /api/treatments/sample, in the order of TreatmentServiceImpl's HashMap
 // keyed by treatment + Pre/Post.
-func (s *State) treatmentsSample(w http.ResponseWriter, r *http.Request) {
+func (s Server) treatmentsSample(w http.ResponseWriter, r *http.Request) {
 	tier, ok := tierParam(w, r)
 	if !ok {
 		return
@@ -356,7 +356,7 @@ type ClinicalEventTypeCount struct {
 	Count     int    `json:"count"`
 }
 
-func (s *State) clinicalEventTypeCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalEventTypeCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	type row struct {

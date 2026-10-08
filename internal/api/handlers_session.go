@@ -488,7 +488,7 @@ func (s *State) filterSamples(filter any) ([]studies.Sample, error) {
 	req := httptest.NewRequest(http.MethodPost, "/api/filtered-samples/fetch", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	s.filteredSamplesFetch(rec, req)
+	s.FilteredSamplesFetch(rec, req)
 	if rec.Code != http.StatusOK {
 		return nil, fmt.Errorf("filtered-samples: %d %s", rec.Code, strings.TrimSpace(rec.Body.String()))
 	}

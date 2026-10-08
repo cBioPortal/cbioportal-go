@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"fmt"
@@ -8,10 +8,10 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// routeStudyView2 registers the remaining study-view aggregation endpoints:
+// RouteStudyView2 registers the remaining study-view aggregation endpoints:
 // numeric clinical bins, mutation/genomic data counts, treatments, and
 // case-list (sample-list) counts.
-func (s *State) routeStudyView2(mux *http.ServeMux) {
+func (s Server) RouteStudyView2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clinical-data-bin-counts/fetch", s.clinicalDataBinCountsFetch)
 	mux.HandleFunc("POST /api/mutation-data-counts/fetch", s.mutationDataCountsFetch)
 	mux.HandleFunc("POST /api/genomic-data-counts/fetch", s.genomicDataCountsFetch)
@@ -38,7 +38,7 @@ type genomicDataCountFilter struct {
 // mutationDataCountsFetch serves the per-gene mutation charts: the SUMMARY
 // projection gives the Mutated / Not Mutated / Not Profiled pie, DETAILED the
 // per-mutation-type table.
-func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f genomicDataCountFilter
 	core.ReadBody(r, &f)
 	// Only SUMMARY counts mutated / not mutated / not profiled samples; the
@@ -193,7 +193,7 @@ var cnaLabels = map[string]string{
 
 // genomicDataCountsFetch counts discrete CNA values per gene over the filtered
 // samples (the endpoint is CNA-specific), with the remainder reported as NA.
-func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f genomicDataCountFilter
 	core.ReadBody(r, &f)
 	out := []GenomicDataCountItem{}
@@ -298,7 +298,7 @@ func mergeCaseListCounts(rows []CaseListDataCount) []CaseListDataCount {
 
 // sampleListsCountsFetch counts the filtered samples in each case list
 // (ClickhousePatientMapper.getCaseListDataCounts), keyed by list type.
-func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()

@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/json"
@@ -14,9 +14,9 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
 
-// routeStudyView3 registers study-view endpoints for clinical-data enrichments,
+// RouteStudyView3 registers study-view endpoints for clinical-data enrichments,
 // the clinical-data table and custom (session) charts.
-func (s *State) routeStudyView3(mux *http.ServeMux) {
+func (s Server) RouteStudyView3(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clinical-data-enrichments/fetch", s.clinicalDataEnrichmentsFetch)
 	mux.HandleFunc("POST /api/clinical-data-table/fetch", s.clinicalDataTableFetch)
 	mux.HandleFunc("POST /api/custom-data-counts/fetch", s.customDataCountsFetch)
@@ -62,7 +62,7 @@ const (
 // (STRING) attributes first, then numeric (NUMBER) ones. Statistics are
 // Datumbox's (internal/stats DatumboxKruskalWallisFromRanks /
 // DatumboxChisquare).
-func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Groups []struct {
 			Name              string            `json:"name"`
@@ -357,7 +357,7 @@ type sampleClinicalDataCollection struct {
 // or ids contain searchTerm (case-sensitively, LIKE wildcards included),
 // ordered by sampleId, patientId or an attribute (numerically for NUMBER
 // attributes, samples without a value last), then paged.
-func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 
@@ -502,7 +502,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 // attrIsPatientLevel reports whether a clinical attribute is patient-level in any
 // of the given studies.
-func (s *State) attrIsPatientLevel(studyIDs []string, attrID string) bool {
+func (s Server) attrIsPatientLevel(studyIDs []string, attrID string) bool {
 	if len(studyIDs) == 0 || attrID == "" {
 		return false
 	}
@@ -518,7 +518,7 @@ func (s *State) attrIsPatientLevel(studyIDs []string, attrID string) bool {
 
 // attrIsNumber reports whether a clinical attribute has the NUMBER datatype
 // in any of the given studies.
-func (s *State) attrIsNumber(studyIDs []string, attrID string) bool {
+func (s Server) attrIsNumber(studyIDs []string, attrID string) bool {
 	if len(studyIDs) == 0 || attrID == "" {
 		return false
 	}
@@ -535,7 +535,7 @@ func (s *State) attrIsNumber(studyIDs []string, attrID string) bool {
 // customDataCountsFetch counts the values of user-defined (custom chart) data
 // stored as custom_data sessions over the filtered samples — or their patients
 // for patient-level data — with the remainder reported as NA.
-func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes []struct {
 			AttributeID string `json:"attributeId"`

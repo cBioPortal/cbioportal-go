@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
@@ -10,12 +10,12 @@ func (f studyViewFilter) scope() core.Scope { return core.ByStudies(f.scopeStudi
 
 // filterFrom is the sample_derived rows of the samples a study-view filter
 // selects, as a FROM source: filterWhere leads with the filter's studies.
-func (s *State) filterFrom(a *core.SQLArgs, f studyViewFilter) string {
+func (s Server) filterFrom(a *core.SQLArgs, f studyViewFilter) string {
 	return core.TSampleDerived.Name + " WHERE " + s.filterWhere(a, f)
 }
 
 // filterSQL compiles the filter to a SELECT of the matching sample_unique_ids.
-func (s *State) filterSQL(a *core.SQLArgs, f studyViewFilter) string {
+func (s Server) filterSQL(a *core.SQLArgs, f studyViewFilter) string {
 	return "SELECT sample_unique_id FROM " + s.filterFrom(a, f)
 }
 
@@ -23,6 +23,6 @@ func (s *State) filterSQL(a *core.SQLArgs, f studyViewFilter) string {
 // a table with study_id and sample_id columns) of the samples a study-view
 // filter selects, as a FROM source: sampleScope names their studies or
 // samples.
-func (s *State) sampleScopeFrom(a *core.SQLArgs, f studyViewFilter, t core.KeyedTable) string {
+func (s Server) sampleScopeFrom(a *core.SQLArgs, f studyViewFilter, t core.KeyedTable) string {
 	return t.Name + " WHERE " + s.sampleScope(a, f)
 }

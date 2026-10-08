@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/json"
@@ -32,7 +32,7 @@ type scopedAttrRow struct {
 // scope to its sample- and patient-level values of attributes A and B, and
 // returns only the samples that have some value for both, ordered by study and
 // sample id. Precedence between the two levels is resolved by the caller.
-func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scopedAttrRow {
+func (s Server) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scopedAttrRow {
 	if attrA == "" || attrB == "" {
 		return nil
 	}
@@ -136,7 +136,7 @@ func queryIntDefault(r *http.Request, name string, def int) int {
 	return def
 }
 
-func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 
@@ -277,7 +277,7 @@ type ClinicalViolinPlotData struct {
 
 const violinShowOnlyPointsThreshold = 7
 
-func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 

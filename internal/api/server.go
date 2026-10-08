@@ -9,15 +9,14 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
-	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
-	"github.com/cbioportal/cbioportal-go/internal/api/studies"
+	"github.com/cbioportal/cbioportal-go/internal/api/studyview"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
 // State is the API's state: the handlers' servers plus the login.
 type State struct {
-	molecular.Server
+	studyview.Server
 	// login is the OAuth2 login (authenticate=oauth2 or optional_oauth2) and
 	// access its study authorization; nil login serves every study
 	// anonymously.
@@ -33,7 +32,7 @@ func NewState(c *ch.Client) *State { return newState(core.NewState(c)) }
 
 // newState returns the API state over cs, without a login.
 func newState(cs *core.State) *State {
-	return &State{Server: molecular.Server{Server: studies.Server{State: cs}}}
+	return &State{Server: studyview.New(cs)}
 }
 
 // MetricsHandler serves the Prometheus metrics.

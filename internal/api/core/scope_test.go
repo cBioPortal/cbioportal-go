@@ -24,17 +24,17 @@ var scopeAllowlist = map[string]string{
 
 	// sample_to_gene_panel_derived is sorted by panel, alteration type and
 	// profile, without the study.
-	"handlers_alterations.go:State.populateProfiled:sample_to_gene_panel_derived": "reads name the profiles, the WES panel or the alteration type its key holds",
-	"handlers_alterations.go:State.svCountsFetch:sample_to_gene_panel_derived":    "reads name the profiles or the WES panel its key holds",
+	"studyview/alterations.go:Server.populateProfiled:sample_to_gene_panel_derived": "reads name the profiles, the WES panel or the alteration type its key holds",
+	"studyview/alterations.go:Server.SVCountsFetch:sample_to_gene_panel_derived":    "reads name the profiles or the WES panel its key holds",
 
 	// generic_assay_data_derived has no study column; its key leads with the
 	// profile type and entity.
-	"handlers_genericassay2.go:State.genericAssayDataCountsFetch:generic_assay_data_derived": "reads name the profile type its key leads with",
-	"studyviewfilter.go:filterCompiler.genericAssayData:generic_assay_data_derived":          "reads name the profile type and entity its key leads with",
-	"studyviewfilter.go:filterCompiler.genericAssaySelection:generic_assay_data_derived":     "reads name the profile type its key leads with",
+	"studyview/genericassaycounts.go:Server.GenericAssayDataCountsFetch:generic_assay_data_derived": "reads name the profile type its key leads with",
+	"studyview/studyviewfilter.go:filterCompiler.genericAssayData:generic_assay_data_derived":       "reads name the profile type and entity its key leads with",
+	"studyview/studyviewfilter.go:filterCompiler.genericAssaySelection:generic_assay_data_derived":  "reads name the profile type its key leads with",
 
 	// The studies are a subquery: those of the filter defining the attribute.
-	"studyviewfilter.go:filterCompiler.clinicalData:clinical_data_derived": "keyed by the filter's studies that define the attribute (a subquery)",
+	"studyview/studyviewfilter.go:filterCompiler.clinicalData:clinical_data_derived": "keyed by the filter's studies that define the attribute (a subquery)",
 }
 
 // TestKeyedTablesReadThroughScope fails when SQL in internal/api (any of its

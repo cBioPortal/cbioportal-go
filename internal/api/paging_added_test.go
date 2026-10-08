@@ -11,6 +11,7 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
+	"github.com/cbioportal/cbioportal-go/internal/api/studyview"
 )
 
 // TestAddedPagingWired pins that every endpoint with added paging is paged
@@ -59,7 +60,7 @@ func TestAddedSortables(t *testing.T) {
 		{core.DiscreteCopyNumberSort, molecular.CNAEventSortable},
 		{core.DiscreteCopyNumberSort, molecular.CNAValueSortable},
 		{core.GenericAssayDataSort, molecular.GenericAssayDataSortable},
-		{core.FilteredSampleSort, filteredSampleSortable},
+		{core.FilteredSampleSort, studyview.FilteredSampleSortable},
 		{core.StructuralVariantSortParam, molecular.StructuralVariantSortable},
 		{core.CopyNumberSegmentSort, molecular.SegmentSortable},
 		{core.ClinicalDataSort, studies.ClinicalDataSortable},

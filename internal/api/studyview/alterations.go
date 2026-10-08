@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"fmt"
@@ -56,16 +56,16 @@ func (c GeneAlterationCount) withEventKeys() GeneAlterationCount {
 	return c
 }
 
-// alterationSQL renders the alteration filter (AlterationFilterHelper semantics)
+// AlterationSQL renders the alteration filter (AlterationFilterHelper semantics)
 // as predicates over genomic_event_derived for the given event kind, binding
 // request values in args.
-type alterationSQL struct {
-	af   core.AlterationFilter
-	args *core.SQLArgs
+type AlterationSQL struct {
+	Filter core.AlterationFilter
+	Args   *core.SQLArgs
 }
 
-func (a alterationSQL) driverClause() string {
-	af := a.af
+func (a AlterationSQL) driverClause() string {
+	af := a.Filter
 	d, v, u := core.IncludeFlag(af.IncludeDriver), core.IncludeFlag(af.IncludeVUS), core.IncludeFlag(af.IncludeUnknownOncogenicity)
 	var out []string
 	switch {
@@ -103,7 +103,7 @@ func (a alterationSQL) driverClause() string {
 	default:
 		var ors []string
 		if len(tiers) > 0 {
-			ors = append(ors, "driver_tiers_filter IN "+a.args.Strs(tiers))
+			ors = append(ors, "driver_tiers_filter IN "+a.Args.Strs(tiers))
 		}
 		if unknownTier {
 			ors = append(ors, "driver_tiers_filter IS NULL OR lower(driver_tiers_filter) IN ('', 'na', 'unknown')")
@@ -113,8 +113,8 @@ func (a alterationSQL) driverClause() string {
 	return strings.Join(out, " AND ")
 }
 
-func (a alterationSQL) statusClause() string {
-	af := a.af
+func (a AlterationSQL) statusClause() string {
+	af := a.Filter
 	g, s, u := core.IncludeFlag(af.IncludeGermline), core.IncludeFlag(af.IncludeSomatic), core.IncludeFlag(af.IncludeUnknownStatus)
 	switch {
 	case g && s && u:
@@ -138,8 +138,8 @@ func (a alterationSQL) statusClause() string {
 // mutationTypeClause applies mutationEventTypes: "any" or all-true selects all;
 // with "other" selected the unselected types are excluded, otherwise only the
 // selected ones are kept.
-func (a alterationSQL) mutationTypeClause() string {
-	m := a.af.MutationEventTypes
+func (a AlterationSQL) mutationTypeClause() string {
+	m := a.Filter.MutationEventTypes
 	if len(m) == 0 || m["any"] {
 		return ""
 	}
@@ -160,16 +160,16 @@ func (a alterationSQL) mutationTypeClause() string {
 		return ""
 	}
 	if m["other"] {
-		return "lower(mutation_type) NOT IN " + a.args.Strs(off)
+		return "lower(mutation_type) NOT IN " + a.Args.Strs(off)
 	}
 	if len(on) == 0 {
 		return "mutation_type = 'NA'"
 	}
-	return "lower(mutation_type) IN " + a.args.Strs(append(on, "na"))
+	return "lower(mutation_type) IN " + a.Args.Strs(append(on, "na"))
 }
 
-func (a alterationSQL) cnaTypeClause() string {
-	m := a.af.CopyNumberAlterationEventTypes
+func (a AlterationSQL) cnaTypeClause() string {
+	m := a.Filter.CopyNumberAlterationEventTypes
 	var codes []string
 	all := true
 	for _, k := range core.SortedKeys(m) {
@@ -190,17 +190,17 @@ func (a alterationSQL) cnaTypeClause() string {
 	return fmt.Sprintf("(cna_alteration IN (%s) OR cna_alteration IS NULL)", strings.Join(codes, ", "))
 }
 
-func (s *State) alterationFilterOf(args *core.SQLArgs, f studyViewFilter) alterationSQL {
+func (s Server) alterationFilterOf(args *core.SQLArgs, f studyViewFilter) AlterationSQL {
 	if f.AlterationFilter == nil {
-		return alterationSQL{args: args}
+		return AlterationSQL{Args: args}
 	}
-	return alterationSQL{*f.AlterationFilter, args}
+	return AlterationSQL{*f.AlterationFilter, args}
 }
 
 // geneCounts runs the per-gene event count for one variant type and attaches
 // profiled counts and matching panels.
 // extra may hold placeholders bound in args.
-func (s *State) geneCounts(args *core.SQLArgs, f studyViewFilter, variantType, alterationType, extra string, cna bool) ([]GeneAlterationCount, error) {
+func (s Server) geneCounts(args *core.SQLArgs, f studyViewFilter, variantType, alterationType, extra string, cna bool) ([]GeneAlterationCount, error) {
 	filtered := s.filterSQL(args, f)
 	groupCols := "hugo_gene_symbol, entrez_gene_id"
 	selectCNA := ""
@@ -262,7 +262,7 @@ func (s *State) geneCounts(args *core.SQLArgs, f studyViewFilter, variantType, a
 // by symbol, for mutated and structural-variant genes) and
 // GetCnaAlterationCountByGeneUseCase (GISTIC by symbol and amplification or
 // deep deletion, the region with the lowest q-value) do.
-func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alterationType string, counts []GeneAlterationCount) {
+func (s Server) populateQValues(args *core.SQLArgs, f studyViewFilter, alterationType string, counts []GeneAlterationCount) {
 	type study struct {
 		ID string `json:"id"`
 	}
@@ -323,7 +323,7 @@ func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 	}
 }
 
-func (s *State) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) {
+func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) {
 	// First non-continuous profile of the type per study.
 	type prof struct {
 		ID    string `json:"id"`
@@ -399,7 +399,7 @@ func (s *State) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 	}
 }
 
-func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) MutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
@@ -413,7 +413,7 @@ func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, out)
 }
 
-func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) CNAGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
@@ -426,7 +426,7 @@ func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, out)
 }
 
-func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) SVGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
@@ -439,10 +439,10 @@ func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, out)
 }
 
-// molecularProfileSampleCountsFetch counts the filtered samples in each
+// MolecularProfileSampleCountsFetch counts the filtered samples in each
 // molecular profile, keyed by the profile's stable-id suffix and labelled with
 // its name.
-func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) MolecularProfileSampleCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	type row struct {
@@ -480,10 +480,10 @@ func (s *State) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http
 	core.WriteJSON(w, out)
 }
 
-// enrichmentClause is the alteration filter over mutation, CNA and SV events
+// EnrichmentClause is the alteration filter over mutation, CNA and SV events
 // together (getAlterationCountByGeneGiven): mutation-type, CNA-type and
 // driver/tier/status predicates leave rows of the other kinds untouched.
-func (a alterationSQL) enrichmentClause() string {
+func (a AlterationSQL) EnrichmentClause() string {
 	var preds []string
 	if mt := a.mutationTypeClause(); mt != "" {
 		preds = append(preds, "(variant_type != 'mutation' OR "+mt+")")
@@ -497,7 +497,7 @@ func (a alterationSQL) enrichmentClause() string {
 	if d := a.driverClause(); d != "" {
 		preds = append(preds, d)
 	}
-	if a.af.StructuralVariants != nil && !*a.af.StructuralVariants {
+	if a.Filter.StructuralVariants != nil && !*a.Filter.StructuralVariants {
 		preds = append(preds, "variant_type != 'structural_variant'")
 	}
 	return molecular.JoinPreds(preds...)
@@ -522,11 +522,11 @@ type StructuralVariantCount struct {
 	UniqueEventKey        string    `json:"uniqueEventKey"`
 }
 
-// svCountsFetch serves POST /api/structuralvariant-counts/fetch: structural
+// SVCountsFetch serves POST /api/structuralvariant-counts/fetch: structural
 // variants of the filtered samples counted per (gene1, gene2) pair under the
 // alteration filter's driver and status settings. A pair's profiled count is
 // the samples on panels covering either gene plus the whole-exome samples.
-func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) SVCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()

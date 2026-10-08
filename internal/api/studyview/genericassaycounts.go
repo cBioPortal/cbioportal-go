@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"fmt"
@@ -9,11 +9,11 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 )
 
-// genericAssayDataCountsFetch handles POST /api/generic-assay-data-counts/fetch:
+// GenericAssayDataCountsFetch handles POST /api/generic-assay-data-counts/fetch:
 // per entity, the filtered samples (or patients, for patient-level profiles)
 // having each categorical value, with the remainder reported as NA. Entities
 // come from the data filters, or every entity of the top-level profileType.
-func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) GenericAssayDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		GenericAssayDataFilters []genericAssayDataFilter `json:"genericAssayDataFilters"`
 		ProfileType             string                   `json:"profileType"`

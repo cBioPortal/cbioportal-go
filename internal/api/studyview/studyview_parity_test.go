@@ -1,4 +1,4 @@
-package api
+package studyview
 
 import (
 	"encoding/json"

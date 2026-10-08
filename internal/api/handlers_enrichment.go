@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studyview"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
 
@@ -80,9 +81,9 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		unit = "patient_unique_id"
 	}
 	args := core.NewArgs()
-	a := alterationSQL{args: args}
+	a := studyview.AlterationSQL{Args: args}
 	if body.AlterationEventTypes != nil {
-		a.af = *body.AlterationEventTypes
+		a.Filter = *body.AlterationEventTypes
 	}
 	profileStudy := s.profileStudies(body.Groups)
 	type geneRow struct {
@@ -132,7 +133,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			"SELECT hugo_gene_symbol AS gene, any(toInt64OrNull(toString(entrez_gene_id))) AS entrez, toInt64(uniqExact(%[1]s)) AS n "+
 				"FROM %[2]s AND mutation_status != 'UNCALLED' "+
 				"AND %[1]s IN %[3]s AND %[4]s GROUP BY hugo_gene_symbol",
-			unit, sc.profiles.From(args, core.TGenomicEventDerived), sc.entities, a.enrichmentClause()), args)
+			unit, sc.profiles.From(args, core.TGenomicEventDerived), sc.entities, a.EnrichmentClause()), args)
 		if err != nil {
 			core.Fail(w, r, err)
 			return
