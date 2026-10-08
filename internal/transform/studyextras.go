@@ -42,13 +42,18 @@ func studyExtraViews(c *client, rawDB, targetDB, refDB string, hasRef bool, exis
 			meta = fmt.Sprintf("if(%s, CAST(NULL AS Nullable(String)), CAST(%s AS Nullable(String)))",
 				missingClinicalValue(trim("custom_metadata")), trim("custom_metadata"))
 		}
+		// File order: the definitions file, then the row within it.
+		order := "study_id, source_file"
+		if cols["row_num"] {
+			order += ", row_num"
+		}
 		rdSQL = fmt.Sprintf(
 			"SELECT study_id, upper(%s) AS resource_id, %s AS display_name, %s AS description, %s AS resource_type, "+
 				"%s AS open_by_default, %s AS priority, %s AS custom_metadata FROM `%s`.resource_definition "+
 				"WHERE NOT %s AND %s IN ('SAMPLE', 'PATIENT', 'STUDY') "+
-				"ORDER BY study_id, source_file LIMIT 1 BY study_id, resource_id",
+				"ORDER BY %s LIMIT 1 BY study_id, resource_id",
 			trim("resource_id"), trim("display_name"), desc, trim("resource_type"), open, prio, meta, rawDB,
-			missingClinicalValue(trim("resource_id")), trim("resource_type"))
+			missingClinicalValue(trim("resource_id")), trim("resource_type"), order)
 	}
 	out = append(out, view{"resource_definition", rdSQL})
 
