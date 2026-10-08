@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/portal"
 )
 
 // keycloakProps are the properties of a login through the fake provider.
@@ -36,7 +37,7 @@ func optionalPortal(t *testing.T, props map[string]string) *httptest.Server {
 		t.Fatalf("ConfigureAuth: %v", err)
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /config_service", s.configService)
+	mux.HandleFunc("GET /config_service", portal.New(s.State).ConfigService)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		u, ok := core.GetUser(r.Context())
 		fmt.Fprintf(w, "%s %s user=%s known=%v", r.Method, r.URL.Path, u.Name, ok)

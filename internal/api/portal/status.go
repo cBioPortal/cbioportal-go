@@ -1,4 +1,4 @@
-package api
+package portal
 
 import (
 	"fmt"
@@ -11,9 +11,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeStatus registers the server-status, static-data timestamp, cache
+// RouteStatus registers the server-status, static-data timestamp, cache
 // eviction and SEO endpoints.
-func (s *State) routeStatus(mux *http.ServeMux) {
+func (s Server) RouteStatus(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/timestamps", s.timestamps)
 	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +30,7 @@ func (s *State) routeStatus(mux *http.ServeMux) {
 
 // health serves GET /api/health (ServerStatusServiceImpl): UP while the
 // database answers with at least one cancer type, else DOWN.
-func (s *State) health(w http.ResponseWriter, r *http.Request) {
+func (s Server) health(w http.ResponseWriter, r *http.Request) {
 	status := "DOWN"
 	if v, err := s.CH.Execute("SELECT count() FROM cbioportal_ref.type_of_cancer FORMAT TabSeparated"); err == nil {
 		if n, _ := strconv.Atoi(strings.TrimSpace(v)); n > 0 {
@@ -46,7 +46,7 @@ var timestampTables = []string{"gene", "reference_genome_gene"}
 // timestamps serves GET /api/timestamps: when each static reference table
 // last changed, as MySQL's COALESCE(update_time, create_time) — here the
 // newest active part's modification time, else the table's metadata time.
-func (s *State) timestamps(w http.ResponseWriter, r *http.Request) {
+func (s Server) timestamps(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		Name string `json:"name"`
 		T    string `json:"t"`
@@ -71,7 +71,7 @@ func (s *State) timestamps(w http.ResponseWriter, r *http.Request) {
 // (CacheController): enabled by cache.endpoint.enabled, authorised by the
 // X-API-KEY header matching cache.endpoint.api-key. It drops the metadata
 // cache; the study id only names the study in the reply.
-func (s *State) clearCache(w http.ResponseWriter, r *http.Request) {
+func (s Server) clearCache(w http.ResponseWriter, r *http.Request) {
 	key, ok := r.Header["X-Api-Key"]
 	if !ok {
 		core.SpringError(w, r, http.StatusBadRequest)
@@ -98,7 +98,7 @@ func (s *State) clearCache(w http.ResponseWriter, r *http.Request) {
 
 // sitemapsEnabled is the `sitemaps` flag (SitemapFeature); without it the
 // SEO endpoints answer 404 with an empty body.
-func (s *State) sitemapsEnabled(w http.ResponseWriter) bool {
+func (s Server) sitemapsEnabled(w http.ResponseWriter) bool {
 	if s.Props["sitemaps"] == "true" {
 		return true
 	}
@@ -134,7 +134,7 @@ func seoBaseURL(r *http.Request) string {
 // robots serves GET /robots.txt (RobotsController), tuned by
 // robots.disallow_user_agents, robots.disallow_paths and robots.crawl_delay,
 // and pointing to /llms.txt when llms_txt.location is set.
-func (s *State) robots(w http.ResponseWriter, r *http.Request) {
+func (s Server) robots(w http.ResponseWriter, r *http.Request) {
 	if !s.sitemapsEnabled(w) {
 		return
 	}
@@ -173,7 +173,7 @@ const patientsPerSitemap = 50000 - 1
 
 // sitemapIndex serves GET /sitemap_index.xml: one entry per sitemap page of
 // every study.
-func (s *State) sitemapIndex(w http.ResponseWriter, r *http.Request) {
+func (s Server) sitemapIndex(w http.ResponseWriter, r *http.Request) {
 	if !s.sitemapsEnabled(w) {
 		return
 	}
@@ -207,7 +207,7 @@ func (s *State) sitemapIndex(w http.ResponseWriter, r *http.Request) {
 // sitemapStudy serves GET /sitemap_study.xml?studyId=&page=: the study summary
 // URL (page 0) and one patient-view URL per patient of the page, patients
 // ordered by id.
-func (s *State) sitemapStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) sitemapStudy(w http.ResponseWriter, r *http.Request) {
 	if !s.sitemapsEnabled(w) {
 		return
 	}

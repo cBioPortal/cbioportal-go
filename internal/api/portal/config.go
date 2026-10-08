@@ -1,4 +1,4 @@
-package api
+package portal
 
 import (
 	_ "embed"
@@ -11,11 +11,11 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
-// configService returns the full frontend property set (as the Java
+// ConfigService returns the full frontend property set (as the Java
 // FrontendPropertiesService does), so feature-gating flags like
 // skin_show_settings_menu drive the UI correctly. Runtime bits (auth, session)
 // are layered on top of the embedded defaults.
-func (s *State) configService(w http.ResponseWriter, r *http.Request) {
+func (s Server) ConfigService(w http.ResponseWriter, r *http.Request) {
 	cfg := config.FrontendConfig("/", s.Props, s.PropsReplaceDefaults)
 	cfg["authenticationMethod"] = "noauthsessionservice"
 	if s.AuthMethod != "" {
@@ -30,11 +30,11 @@ func (s *State) configService(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, cfg)
 }
 
-// customDriverAnnotationReport reports whether the given mutation profiles carry
+// CustomDriverAnnotationReport reports whether the given mutation profiles carry
 // custom driver annotations (binary cbp_driver and/or tier classes), so the
 // settings menu exposes the corresponding filter controls. Values come from the
 // mutation, CNA and SV events of genomic_event_derived.
-func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Request) {
+func (s Server) CustomDriverAnnotationReport(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	type row struct {
@@ -90,7 +90,7 @@ const (
 	gitNotSet           = "not set"
 )
 
-func (s *State) info(w http.ResponseWriter, r *http.Request) {
+func (s Server) Info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
 		PortalVersion: portalVersion, DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,

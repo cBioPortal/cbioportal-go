@@ -5,14 +5,15 @@ import (
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/export"
+	"github.com/cbioportal/cbioportal-go/internal/api/portal"
 	"github.com/cbioportal/cbioportal-go/internal/api/session"
 )
 
 func (s *State) routes(mux *http.ServeMux) {
 	s.SetMux(mux)
 	// Bootstrap / config
-	mux.HandleFunc("GET /config_service", s.configService)
-	mux.HandleFunc("GET /api/info", s.info)
+	mux.HandleFunc("GET /config_service", portal.New(s.State).ConfigService)
+	mux.HandleFunc("GET /api/info", portal.New(s.State).Info)
 	routeAPIDocs(mux, s)
 	mux.HandleFunc("GET /api/cancer-types", s.CancerTypes)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
@@ -114,9 +115,9 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.RouteSignificance(mux)
 	s.RouteStudyTags(mux)
 	s.RouteNamespace(mux)
-	s.routeStatus(mux)
+	portal.New(s.State).RouteStatus(mux)
 	s.RouteCancerTypes(mux)
-	mux.HandleFunc("POST /api/custom-driver-annotation-report/fetch", s.customDriverAnnotationReport)
+	mux.HandleFunc("POST /api/custom-driver-annotation-report/fetch", portal.New(s.State).CustomDriverAnnotationReport)
 	s.RouteTreatments(mux)
 	s.RouteCompat(mux)
 	s.routeProxy(mux)
