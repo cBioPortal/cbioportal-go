@@ -52,6 +52,8 @@ type State struct {
 	access accessPolicy
 	// dat serves and verifies data access tokens (dat.method=oauth2).
 	dat *datProvider
+	// llmsTxt caches the llms_txt.location file /llms.txt serves.
+	llmsTxt llmsTxtCache
 }
 
 // ConfigureAuth sets up the login and study authorization the portal

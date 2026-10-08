@@ -22,6 +22,7 @@ func (s *State) routeStatus(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/cache", s.clearCache)
 	mux.HandleFunc("DELETE /api/cache/{studyId}", s.clearCache)
 	mux.HandleFunc("GET /robots.txt", s.robots)
+	mux.HandleFunc("GET /llms.txt", s.serveLlmsTxt)
 	mux.HandleFunc("GET /sitemap_index.xml", s.sitemapIndex)
 	mux.HandleFunc("GET /sitemap_study.xml", s.sitemapStudy)
 }
@@ -132,7 +133,8 @@ func seoBaseURL(r *http.Request) string {
 }
 
 // robots serves GET /robots.txt (RobotsController), tuned by
-// robots.disallow_user_agents, robots.disallow_paths and robots.crawl_delay.
+// robots.disallow_user_agents, robots.disallow_paths and robots.crawl_delay,
+// and pointing to /llms.txt when llms_txt.location is set.
 func (s *State) robots(w http.ResponseWriter, r *http.Request) {
 	if !s.sitemapsEnabled(w) {
 		return
@@ -144,6 +146,9 @@ func (s *State) robots(w http.ResponseWriter, r *http.Request) {
 		return def
 	}
 	var b strings.Builder
+	if strings.TrimSpace(prop(llmsTxtProperty, "")) != "" {
+		b.WriteString("# Guidance for AI agents and bulk data access: " + seoBaseURL(r) + "/llms.txt\n\n")
+	}
 	for _, a := range strings.Split(prop("robots.disallow_user_agents", ""), ",") {
 		if a = strings.TrimSpace(a); a != "" {
 			b.WriteString("User-agent: " + a + "\nDisallow: /\n\n")

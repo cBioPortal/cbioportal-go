@@ -142,3 +142,14 @@ func TestContractSitemapsDisabled(t *testing.T) {
 		}
 	}
 }
+
+// /llms.txt is served only with llms_txt.location, which the e2e properties
+// leave unset: 404 with no body.
+func TestContractLlmsTxtUnset(t *testing.T) {
+	requireAPI(t)
+	resp, body := rawDo(t, http.MethodGet, "/llms.txt", "")
+	wantEq(t, resp.StatusCode, http.StatusNotFound)
+	if strings.TrimSpace(string(body)) != "" {
+		t.Errorf("body %q", body)
+	}
+}

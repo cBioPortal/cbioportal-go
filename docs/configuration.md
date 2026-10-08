@@ -161,7 +161,8 @@ A few of the Java backend's server-side properties apply here too:
 endpoint, which drops the metadata cache), `sitemaps` with
 `robots.disallow_paths`, `robots.crawl_delay` and
 `robots.disallow_user_agents` (`/robots.txt`, `/sitemap_index.xml`,
-`/sitemap_study.xml`), and `feature.study.export` (study download as
+`/sitemap_study.xml`), `llms_txt.location` (a file, optionally `file:`-prefixed,
+served as `/llms.txt` and re-read every 5 minutes), and `feature.study.export` (study download as
 `/export/study/<id>.zip`).
 
 Such files also hold the Java backend's own settings (`spring.datasource.*`,
