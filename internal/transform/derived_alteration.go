@@ -4,32 +4,41 @@ import "fmt"
 
 // geneticAlterationDerivedSQL builds prod's `genetic_alteration_derived`: the
 // generic per-(sample, gene, profile) value table covering every non-mutation,
-// non-SV, non-generic-assay molecular profile. Prod derives it from the
+// non-SV, non-generic-assay molecular profile (copy number, expression,
+// methylation and protein levels). Prod derives it from the
 // genetic_alteration blob keyed by gene; we source directly from the per-gene
 // long/matrix staging tables, with each line's gene resolved through
 // gene_key_map as the importers store it (unresolved and duplicate-gene lines
-// are not stored), so hugo_gene_symbol is the reference symbol.
+// are not stored, an RPPA line is stored under each of its genes), so
+// hugo_gene_symbol is the reference symbol.
 //
 // profile_type matches prod's INSERT semantics — the profile stable id with the
 // study prefix stripped (e.g. `gistic`, `log2CNA`, `mrna`), which in our staging
 // is already the bare `profile_stable_id` column. alteration_value drops NA
 // and empty just as prod does (prod maps empty to NULL then filters out NA).
 func geneticAlterationDerivedSQL(rawDB, targetDB string) string {
-	part := func(table string) string {
+	part := func(table, from string) string {
 		return fmt.Sprintf(
 			"SELECT concat(t.study_id, '_', t.sample_id) AS sample_unique_id, "+
 				"t.study_id AS cancer_study_identifier, "+
 				"gk.resolved_hugo_gene_symbol AS hugo_gene_symbol, "+
 				"t.profile_stable_id AS profile_type, "+
 				"nullIf(t.value, '') AS alteration_value "+
-				"FROM `%s`.%s t%s "+
+				"FROM %s t%s "+
 				"WHERE t.value NOT IN ('NA', '') AND t.sample_id != ''",
-			rawDB, table, geneKeyJoin(targetDB, table, "t", "hugo_symbol", "entrez_gene_id"))
+			from, geneKeyJoin(targetDB, table, "t", "gene_key", "entrez_gene_id"))
 	}
-	return part("cna_discrete_long") + " UNION ALL " +
-		part("cna_matrix") + " UNION ALL " +
-		part("methylation_matrix") + " UNION ALL " +
-		part("mrna_expression_matrix")
+	table := func(name string) string {
+		return fmt.Sprintf("(SELECT *, hugo_symbol AS gene_key FROM `%s`.%s)", rawDB, name)
+	}
+	// RPPA lines are keyed by their Composite.Element.REF value.
+	protein := fmt.Sprintf("(SELECT *, if(composite_element_ref != '', composite_element_ref, hugo_symbol) AS gene_key "+
+		"FROM `%s`.protein_level_matrix)", rawDB)
+	return part("cna_discrete_long", table("cna_discrete_long")) + " UNION ALL " +
+		part("cna_matrix", table("cna_matrix")) + " UNION ALL " +
+		part("methylation_matrix", table("methylation_matrix")) + " UNION ALL " +
+		part("mrna_expression_matrix", table("mrna_expression_matrix")) + " UNION ALL " +
+		part("protein_level_matrix", protein)
 }
 
 // genericAssayDataDerivedSQL builds prod's `generic_assay_data_derived` from the
