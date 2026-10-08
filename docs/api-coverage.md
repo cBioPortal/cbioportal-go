@@ -1,8 +1,36 @@
 # API coverage
 
-Endpoints of the Java backend ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) `master`, controllers under `org.cbioportal.legacy.web` and `org.cbioportal.application`) and their status here. Generated from the controllers' request mappings; `params` lists the projection, paging and other request parameters Java accepts.
+This page lists every endpoint of cBioPortal's Java backend and says whether
+go (this project) serves it. Use it to check whether a request you need
+works on go, and which ones are left out on purpose.
 
-**190 endpoints** (method + path, aliases below not counted): 176 implemented, 0 stubs, 14 missing; 160 covered by tests (`Tested`).
+**Summary.** The Java backend has 190 endpoints. go serves 176 of them and
+leaves out 14. Tests cover 160. An endpoint here is one method and path,
+such as `GET /api/studies`. The list comes from the request mappings of the
+Java controllers on the `master` branch of
+[cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) (the
+packages `org.cbioportal.legacy.web` and `org.cbioportal.application`).
+
+## Contents
+
+- [How to read the tables](#how-to-read-the-tables)
+- [Studies, cancer types, server info](#studies-cancer-types-server-info)
+- [Patients, samples, sample lists](#patients-samples-sample-lists)
+- [Clinical data, attributes, events](#clinical-data-attributes-events)
+- [Molecular profiles and data](#molecular-profiles-and-data)
+- [Generic assays](#generic-assays)
+- [Genes, gene sets, reference genome](#genes-gene-sets-reference-genome)
+- [Study view](#study-view)
+- [Group comparison](#group-comparison)
+- [Resources, MutSig / GISTIC](#resources-mutsig--gistic)
+- [Sessions, virtual studies](#sessions-virtual-studies)
+- [Authentication, data-access tokens](#authentication-data-access-tokens)
+- [Portal, proxies, operations](#portal-proxies-operations)
+- [Not ported, and why](#not-ported-and-why)
+
+This table counts the endpoints in each area. The last two columns count
+the endpoints that take a `projection` parameter and the endpoints that
+take paging or sorting parameters.
 
 | Area | Endpoints | Implemented | Missing | Tested | Take `projection` | Take paging / sort |
 |---|---|---|---|---|---|---|
@@ -20,10 +48,27 @@ Endpoints of the Java backend ([cBioPortal/cbioportal](https://github.com/cBioPo
 | [Portal, proxies, operations](#portal-proxies-operations) | 35 | 22 | 13 | 15 | — | — |
 | **Total** | **190** | **176** | **14** | **160** | **58** | **36** |
 
-The 33 `/api/legacy/…` and `/api/not-ready-yet/…` aliases (legacy MyBatis and unfinished column-store controllers) are served by the `/api/…` handler of the same name.
+## How to read the tables
 
-Status: **implemented** — served with Java's fields, ordering and errors (contract tests in `test/`); **stub** — answers with a fixed placeholder; **missing** — not served (404 / the frontend).
+Java also has 33 extra paths that start with `/api/legacy/` or
+`/api/not-ready-yet/`. Each one is a second name for an `/api/…` endpoint of
+the same name. go answers them with the same code, and they are not counted
+above.
 
+Each table below has these columns:
+
+| Column | Meaning |
+|---|---|
+| Method | The HTTP method, such as GET or POST. ANY means every method. |
+| Path | The URL path. Parts in braces, such as `{studyId}`, are filled in by the caller. |
+| Body | The type of the JSON body that a POST sends, as Java names it. |
+| Params | The query parameters Java accepts. "projection" picks how much of each record to return (`ID`, `SUMMARY`, `DETAILED` or `META`). "paging" means `pageSize` and `pageNumber`. "sort" means `sortBy` and `direction`. |
+| Status | "implemented" means go serves the endpoint with the same fields, order and errors as Java. "missing" means go does not serve it. go answers 404, or for a path outside `/api/`, the frontend page. |
+| Tested | "yes" means a contract test in `test/` checks the endpoint. |
+| Notes | Anything that differs from a plain copy of Java. |
+
+Where go fixes a Java bug or copies an odd Java behaviour, the details are
+in [Java quirks](java-quirks.md).
 
 ## Studies, cancer types, server info
 
@@ -33,7 +78,7 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | GET | `/api/cancer-types/{cancerTypeId}` |  |  | implemented | yes |  |
 | GET | `/api/studies` |  | projection, paging, sort, keyword | implemented | yes |  |
 | GET | `/api/studies/{studyId}` |  |  | implemented | yes |  |
-| GET | `/api/studies/meta` |  | sort, keyword | implemented | yes | headers only |
+| GET | `/api/studies/meta` |  | sort, keyword | implemented | yes | Returns only the total count, in a header. |
 | GET | `/api/info` |  |  | implemented | yes |  |
 | POST | `/api/studies/fetch` | List&lt;String&gt; | projection | implemented | yes |  |
 | GET | `/api/studies/{studyId}/tags` |  |  | implemented | yes |  |
@@ -127,13 +172,13 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | GET | `/api/genes/{geneId}` |  |  | implemented | yes |  |
 | GET | `/api/genes/{geneId}/aliases` |  |  | implemented |  |  |
 | POST | `/api/genes/fetch` | List&lt;String&gt; | projection, geneIdType | implemented | yes |  |
-| GET | `/api/genesets` |  | projection, paging | implemented | yes | needs `load-genesets` (else synthesized from GSVA profiles) |
+| GET | `/api/genesets` |  | projection, paging | implemented | yes | Needs gene sets loaded with `load-genesets`. Without them, go builds the list from the GSVA profiles. |
 | GET | `/api/genesets/{genesetId}` |  |  | implemented | yes |  |
 | POST | `/api/genesets/fetch` | List&lt;String&gt; |  | implemented | yes |  |
 | GET | `/api/genesets/version` |  |  | implemented | yes |  |
 | POST | `/api/genesets/{genesetId}/expression-correlation/fetch` | List&lt;String&gt; | correlationThreshold, geneticProfileId, sampleListId | implemented | yes |  |
 | POST | `/api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch` | GenesetDataFilterCriteria |  | implemented | yes |  |
-| POST | `/api/geneset-hierarchy/fetch` | List&lt;String&gt; | geneticProfileId, percentile, pvalueThreshold, sampleListId, scoreThreshold | implemented | yes | needs `load-genesets` |
+| POST | `/api/geneset-hierarchy/fetch` | List&lt;String&gt; | geneticProfileId, percentile, pvalueThreshold, sampleListId, scoreThreshold | implemented | yes | Needs gene sets loaded with `load-genesets`. |
 | GET | `/api/reference-genome-genes/{genomeName}` |  |  | implemented |  |  |
 | GET | `/api/reference-genome-genes/{genomeName}/{geneId}` |  |  | implemented | yes |  |
 | POST | `/api/reference-genome-genes/{genomeName}/fetch` | List&lt;String&gt; |  | implemented | yes |  |
@@ -162,13 +207,13 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | POST | `/api/genomic-data-bin-counts/fetch` | GenomicDataBinCountFilter | dataBinMethod | implemented | yes |  |
 | POST | `/api/generic-assay-data-bin-counts/fetch` | GenericAssayDataBinCountFilter | dataBinMethod | implemented | yes |  |
 | POST | `/api/custom-data-counts/fetch` | ClinicalDataCountFilter |  | implemented | yes |  |
-| POST | `/api/namespace-attributes/fetch` | List&lt;String&gt; |  | implemented | yes | keys from every record, not Java's arbitrary LIMIT 1 record |
+| POST | `/api/namespace-attributes/fetch` | List&lt;String&gt; |  | implemented | yes | go reads the keys from every record. Java reads them from one record picked at random. |
 | POST | `/api/namespace-attributes/counts/fetch` | NamespaceAttributeCountFilter |  | implemented | yes |  |
 | POST | `/api/namespace-data/fetch` | NamespaceComparisonFilter |  | implemented | yes |  |
 | POST | `/api/custom-data-bin-counts/fetch` | ClinicalDataBinCountFilter | dataBinMethod | implemented | yes |  |
 | POST | `/api/structuralvariant-counts/fetch` | StudyViewFilter |  | implemented | yes |  |
 | POST | `/api/clinical-data-table/fetch` | StudyViewFilter | paging, sort, searchTerm | implemented | yes |  |
-| POST | `/api/namespace-data-counts/fetch` | NamespaceDataCountFilter |  | implemented | yes | applies namespaceDataFilters like the legacy filter applier |
+| POST | `/api/namespace-data-counts/fetch` | NamespaceDataCountFilter |  | implemented | yes | Applies `namespaceDataFilters` the same way Java's older filter code does. |
 | POST | `/api/survival-data/fetch` | SurvivalRequest |  | implemented | yes |  |
 | POST | `/api/treatments/patient` | StudyViewFilter | tier | implemented | yes |  |
 | POST | `/api/treatments/sample` | StudyViewFilter | tier | implemented | yes |  |
@@ -180,7 +225,7 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/api/clinical-data-enrichments/fetch` | GroupFilter |  | implemented | yes |  |
-| POST | `/api/molecular-profiles/co-expressions/fetch` | CoExpressionFilter | molecularProfileIdA, molecularProfileIdB, threshold | implemented | yes | column-store use case: gene sets give [] |
+| POST | `/api/molecular-profiles/co-expressions/fetch` | CoExpressionFilter | molecularProfileIdA, molecularProfileIdB, threshold | implemented | yes | Works like Java's newer ClickHouse code, so a request for a gene set instead of a gene returns an empty list. |
 | POST | `/api/alteration-enrichments/fetch` | MolecularProfileCasesGroupAndAlterationTypeFilter | enrichmentType | implemented | yes |  |
 | POST | `/api/expression-enrichments/fetch` | List&lt;MolecularProfileCasesGroupFilter&gt; | enrichmentType | implemented | yes |  |
 | POST | `/api/generic-assay-enrichments/fetch` | List&lt;MolecularProfileCasesGroupFilter&gt; | enrichmentType | implemented | yes |  |
@@ -209,10 +254,10 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 | POST | `/api/public_virtual_studies/{id}` | VirtualStudyData | pmid, typeOfCancerId | implemented | yes |  |
 | DELETE | `/api/public_virtual_studies/{id}` |  | softDelete | implemented | yes |  |
 | GET | `/api/session/{type}/{id}` |  |  | implemented | yes |  |
-| GET | `/api/session/virtual_study` |  |  | implemented | yes | anonymous: [] (Java: 500) |
+| GET | `/api/session/virtual_study` |  |  | implemented | yes | A user who is not logged in gets an empty list. Java answers 500. |
 | POST | `/api/session/{type}` | JSONObject |  | implemented | yes |  |
 | POST | `/api/session/virtual_study/save` | JSONObject |  | implemented | yes |  |
-| GET | `/api/session/{type:virtual_study\|group\|custom_data\|custom_gene_list}/{operation}/{id}` |  |  | implemented | yes | built-in store or session service |
+| GET | `/api/session/{type:virtual_study\|group\|custom_data\|custom_gene_list}/{operation}/{id}` |  |  | implemented | yes | Works with the built-in store and with the session service. |
 | POST | `/api/session/groups/fetch` | List&lt;String&gt; |  | implemented | yes |  |
 | POST | `/api/session/settings` | PageSettingsData |  | implemented | yes |  |
 | POST | `/api/session/settings/fetch` | PageSettingsIdentifier |  | implemented | yes |  |
@@ -224,71 +269,71 @@ Status: **implemented** — served with Java's fields, ordering and errors (cont
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/api/data-access-token` |  |  | implemented | yes | with `dat.method=oauth2`: redirects to the provider for an offline token (docs/configuration.md); otherwise a placeholder |
-| GET | `/api/data-access-token/oauth2` |  | code | implemented | yes | with `dat.method=oauth2`: downloads the offline token |
-| POST | `/api/data-access-tokens` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise returns {} |
-| GET | `/api/data-access-tokens` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise returns [] |
-| GET | `/api/data-access-tokens/{token}` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise returns {} |
-| DELETE | `/api/data-access-tokens` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise a no-op |
-| DELETE | `/api/data-access-tokens/{token}` |  |  | implemented | yes | `501` with `dat.method=oauth2`, as Java; otherwise a no-op |
-| POST | `/login` |  |  | implemented |  | with `authenticate=oauth2`: redirects to the provider (see docs/configuration.md) |
-| GET | `/login` |  |  | implemented |  | with `authenticate=oauth2`: redirects to the provider, or explains a refused login (`?logout_failure`) |
-| GET | `/restful_login` |  |  | missing |  | SAML/basic login page (SAML not supported) |
+| GET | `/api/data-access-token` |  |  | implemented | yes | With `dat.method=oauth2`, it sends the user to the login provider to get a token (see [Data access tokens](configuration.md#data-access-tokens)). Otherwise it returns a placeholder. |
+| GET | `/api/data-access-token/oauth2` |  | code | implemented | yes | With `dat.method=oauth2`, it downloads the token as a file. |
+| POST | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it returns `{}`. |
+| GET | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it returns `[]`. |
+| GET | `/api/data-access-tokens/{token}` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it returns `{}`. |
+| DELETE | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it does nothing. |
+| DELETE | `/api/data-access-tokens/{token}` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it does nothing. |
+| POST | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider (see [Login](configuration.md#login-and-study-authorization)). |
+| GET | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider. With `?logout_failure`, it explains why a login was refused. |
+| GET | `/restful_login` |  |  | missing |  | The SAML and password login page. go does not support SAML. |
 
 ## Portal, proxies, operations
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| DELETE | `/api/cache` |  | boolean | implemented | yes | cache.endpoint.enabled / api-key; drops the metadata cache |
-| DELETE | `/api/cache/{studyId}` |  | boolean | implemented | yes | cache.endpoint.enabled / api-key; drops the metadata cache |
-| GET | `/api/{cache}/keysInCache` |  |  | implemented | yes | 404, as Java without a configured cache |
-| GET | `/api/{cache}/keyCountsPerClass` |  |  | implemented |  | 404, as Java without a configured cache |
-| GET | `/api/cacheStatistics` |  |  | implemented | yes | 404, as Java without a configured cache |
-| GET | `/export/study/{studyId}.zip` |  |  | implemented | yes | feature.study.export; protein-level and generic-assay profiles and virtual studies not exported |
-| GET | `/api/getexternalpage.json` |  | sourceURL | missing |  | unauthenticated fetch of any URL (SSRF); not ported on purpose |
-| ANY | `/` |  |  | implemented | yes | the frontend build (FRONTEND_DIR / FRONTEND_URL) |
-| ANY | `/index` |  |  | implemented |  | frontend |
-| ANY | `/index.html` |  |  | implemented |  | frontend |
-| ANY | `/study/summary` |  |  | implemented |  | frontend (POST too) |
-| ANY | `/results` |  |  | implemented |  | frontend (POST too) |
-| GET | `/config_service` |  |  | implemented | yes | from portal properties |
-| GET | `/api/v2/api-docs` |  |  | implemented | yes | the Java portal's legacy-api.json (Swagger 2.0), host set to the request's |
-| GET | `/api/v3/api-docs[/{public,internal}]`, `/api/v3/api-docs.yaml[/{public,internal}]` |  |  | implemented | yes | springdoc's OpenAPI 3.1 descriptions, snapshots of api.cbioportal.org (`scripts/refresh-api-docs.sh`), server URL set to the request's origin |
-| GET | `/api/v3/api-docs/swagger-config`, `/api/swagger-ui/**` |  |  | implemented | yes | Swagger UI, as springdoc serves it |
-| ANY | `/api/proxy/{path}` | String |  | missing |  | legacy generic proxy (bitly, 3dHotspots); unused by the frontend |
-| GET | `/api/proxy/bitly` |  |  | missing |  | legacy Bitly proxy; unused by the frontend |
-| ANY | `/api/matchminer/api/**` | JSONObject |  | missing |  | MatchMiner proxy (matchminer.url); MSK deployment only |
-| GET | `/api-legacy/epic/sample/{sampleID}` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/cis/{sampleID}` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/crdb/{sampleID}` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/darwin/{sampleID}` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/cis/{sampleID}/exists` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/crdb/{sampleID}/exists` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/darwin/{sampleID}/exists` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| GET | `/api-legacy/epic/{sampleID}/exists` |  |  | missing |  | MSK entity translation (msk_entity_translation_enabled); MSK-internal systems |
-| ANY | `/proxy/dev/oncokb/**` | String |  | implemented |  | OncoKB reverse proxy |
-| ANY | `/proxy/A8F74CD7851BDEE8DCD2E86AB4E2A711/**` | String |  | implemented |  | OncoKB reverse proxy |
-| GET | `/robots.txt` |  |  | implemented | yes | behind the sitemaps flag |
+| DELETE | `/api/cache` |  | boolean | implemented | yes | Clears go's metadata cache. Needs `cache.endpoint.enabled` and the `cache.endpoint.api-key` key. |
+| DELETE | `/api/cache/{studyId}` |  | boolean | implemented | yes | Clears go's metadata cache. Needs `cache.endpoint.enabled` and the `cache.endpoint.api-key` key. |
+| GET | `/api/{cache}/keysInCache` |  |  | implemented | yes | Answers 404, as Java does when no cache is set up. |
+| GET | `/api/{cache}/keyCountsPerClass` |  |  | implemented |  | Answers 404, as Java does when no cache is set up. |
+| GET | `/api/cacheStatistics` |  |  | implemented | yes | Answers 404, as Java does when no cache is set up. |
+| GET | `/export/study/{studyId}.zip` |  |  | implemented | yes | Needs `feature.study.export`. Protein-level and generic assay profiles and virtual studies are not exported. |
+| GET | `/api/getexternalpage.json` |  | sourceURL | missing |  | Lets anyone make the server fetch any URL, which is a security hole. Left out on purpose. |
+| ANY | `/` |  |  | implemented | yes | Serves the frontend (see `FRONTEND_DIR` and `FRONTEND_URL` in [Configuration](configuration.md#cbioportal-api)). |
+| ANY | `/index` |  |  | implemented |  | Serves the frontend. |
+| ANY | `/index.html` |  |  | implemented |  | Serves the frontend. |
+| ANY | `/study/summary` |  |  | implemented |  | Serves the frontend, also for POST. |
+| ANY | `/results` |  |  | implemented |  | Serves the frontend, also for POST. |
+| GET | `/config_service` |  |  | implemented | yes | Built from the portal properties. |
+| GET | `/api/v2/api-docs` |  |  | implemented | yes | The Java portal's Swagger 2.0 API description, with the host set to the one the request used. |
+| GET | `/api/v3/api-docs[/{public,internal}]`, `/api/v3/api-docs.yaml[/{public,internal}]` |  |  | implemented | yes | The OpenAPI 3.1 API descriptions, copied from api.cbioportal.org with `scripts/refresh-api-docs.sh`. The server URL is set to the one the request used. |
+| GET | `/api/v3/api-docs/swagger-config`, `/api/swagger-ui/**` |  |  | implemented | yes | The Swagger UI page for browsing the API, as Java serves it. |
+| ANY | `/api/proxy/{path}` | String |  | missing |  | An old proxy for Bitly and 3D Hotspots. The frontend no longer uses it. |
+| GET | `/api/proxy/bitly` |  |  | missing |  | An old Bitly proxy. The frontend no longer uses it. |
+| ANY | `/api/matchminer/api/**` | JSONObject |  | missing |  | A proxy to MatchMiner (`matchminer.url`). Only MSK's own portal uses it. |
+| GET | `/api-legacy/epic/sample/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/cis/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/crdb/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/darwin/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/cis/{sampleID}/exists` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/crdb/{sampleID}/exists` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/darwin/{sampleID}/exists` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| GET | `/api-legacy/epic/{sampleID}/exists` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
+| ANY | `/proxy/dev/oncokb/**` | String |  | implemented |  | Passes requests on to OncoKB. |
+| ANY | `/proxy/A8F74CD7851BDEE8DCD2E86AB4E2A711/**` | String |  | implemented |  | Passes requests on to OncoKB. |
+| GET | `/robots.txt` |  |  | implemented | yes | Needs the `sitemaps` property. |
 | GET | `/api/health` |  |  | implemented | yes |  |
-| GET | `/sitemap_index.xml` |  |  | implemented | yes | behind the sitemaps flag |
-| GET | `/sitemap_study.xml` |  | page, studyId | implemented | yes | behind the sitemaps flag |
+| GET | `/sitemap_index.xml` |  |  | implemented | yes | Needs the `sitemaps` property. |
+| GET | `/sitemap_study.xml` |  | page, studyId | implemented | yes | Needs the `sitemaps` property. |
 | GET | `/api/hello` |  |  | implemented | yes |  |
-| GET | `/api/url-shortener` |  | url | missing |  | Bitly API client; the frontend calls Bitly directly |
+| GET | `/api/url-shortener` |  | url | missing |  | Shortens URLs through Bitly. The frontend calls Bitly itself. |
 
 ## Not ported, and why
 
-- **Data-access tokens other than `dat.method=oauth2`** (`uuid`, `jwt`): need
-  a token store; without `dat.method=oauth2` the endpoints answer placeholders.
-- **SAML login pages, MSK entity translation, MatchMiner**:
-  depend on Spring Security / deployment-specific services.
-- **`/api/getexternalpage.json`**: fetches any URL for any caller; left out on
-  purpose.
-- **URL shortener and the legacy `/api/proxy/*`**: Bitly / 3D Hotspots
-  proxies the frontend no longer calls.
+These parts of the Java backend are left out of go:
 
-`DocRedirectController` (`/api-docs`, `/swagger-ui.html`) is not registered
-in Java either and is not listed.
+| What | Why |
+|---|---|
+| Data access tokens other than `dat.method=oauth2` (the `uuid` and `jwt` methods) | They need a place to store tokens. Without `dat.method=oauth2`, the token endpoints return placeholders. |
+| SAML login pages, MSK sample id translation, MatchMiner | They depend on Spring Security or on services that only some deployments have. |
+| `/api/getexternalpage.json` | It fetches any URL for anyone who asks, which is a security hole. It is left out on purpose. |
+| The URL shortener and the old `/api/proxy/*` endpoints | They pass requests on to Bitly and 3D Hotspots. The frontend no longer calls them. |
 
-Regenerate this file's table from the controllers when the Java backend gains
-endpoints; endpoints Go serves that Java does not are removed (they would be a
-404 there).
+Java has one more controller, `DocRedirectController` (`/api-docs`,
+`/swagger-ui.html`). Java does not turn it on, so it is not listed.
+
+When the Java backend gains endpoints, update the tables from its
+controllers. Do not list endpoints that go serves and Java does not. Java
+would answer 404 for them.
