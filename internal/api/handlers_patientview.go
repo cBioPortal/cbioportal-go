@@ -10,7 +10,7 @@ import (
 // samplesOfPatient — GET /api/studies/{studyId}/patients/{patientId}/samples
 func (s *State) samplesOfPatient(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
-	s.writeSamples(w, r, "s.study_id = "+args.str(r.PathValue("studyId"))+" AND s.patient_id = "+args.str(r.PathValue("patientId")), args)
+	s.writeSamples(w, r, byPatient(r.PathValue("studyId"), r.PathValue("patientId")), "1", args)
 }
 
 // patientClinicalData — GET /api/studies/{studyId}/patients/{patientId}/clinical-data
@@ -38,9 +38,9 @@ func attributeIDClause(r *http.Request, args *sqlArgs) string {
 
 // patient — GET /api/studies/{studyId}/patients/{patientId}
 func (s *State) patient(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String} LIMIT 1",
-		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
+	params := ch.Params{}
+	rows, err := ch.QueryP[idRow](s.CH, "SELECT study_id AS studyId, patient_id AS patientId FROM "+
+		byPatient(r.PathValue("studyId"), r.PathValue("patientId")).from(paramsBinder(params), tPatient)+" LIMIT 1", params)
 	if err != nil {
 		fail(w, r, err)
 		return

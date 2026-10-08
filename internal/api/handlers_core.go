@@ -455,7 +455,7 @@ type Sample struct {
 
 func (s *State) samples(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
-	s.writeSamples(w, r, "s.study_id = "+args.str(r.PathValue("studyId")), args)
+	s.writeSamples(w, r, byStudy(r.PathValue("studyId")), "1", args)
 }
 
 type identifier struct {
@@ -487,6 +487,7 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 	// sample keys. The results view uses the sampleListIds form to expand a case
 	// set into its samples.
 	var where string
+	var sc scope
 	args := newArgs()
 	switch {
 	case len(f.SampleIdentifiers) > 0:
@@ -494,7 +495,7 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 		for i, id := range f.SampleIdentifiers {
 			pairs[i] = [2]string{id.StudyID, id.id()}
 		}
-		where = "(s.study_id, s.sample_id) IN " + args.pairs(pairs)
+		sc, where = byStudies(pairStudies(pairs)), "(s.study_id, s.sample_id) IN "+args.pairs(pairs)
 	case len(f.UniqueSampleKeys) > 0:
 		var pairs [][2]string
 		for _, k := range f.UniqueSampleKeys {
@@ -506,16 +507,15 @@ func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, []Sample{})
 			return
 		}
-		where = "(s.study_id, s.sample_id) IN " + args.pairs(pairs)
+		sc, where = byStudies(pairStudies(pairs)), "(s.study_id, s.sample_id) IN "+args.pairs(pairs)
 	case len(f.SampleListIDs) > 0:
-		sc := s.bySampleLists(f.SampleListIDs...)
-		where = sc.key(args, tSample, "s") +
-			"(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM " + sc.from(args, tSampleList) + ")"
+		sc = s.bySampleLists(f.SampleListIDs...)
+		where = "(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM " + sc.from(args, tSampleList) + ")"
 	default:
 		writeJSON(w, []Sample{})
 		return
 	}
-	s.writeSamples(w, r, where, args)
+	s.writeSamples(w, r, sc, where, args)
 }
 
 // ---------- Patients ----------
@@ -542,8 +542,9 @@ func (s *State) patientOrder(r *http.Request) string {
 var patientSortable = map[string]string{"patientId": "patient_id"}
 
 func (s *State) patients(w http.ResponseWriter, r *http.Request) {
-	s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE study_id = {study:String}"+
-		sqlPageOrder(r, patientSortable, s.patientOrder(r)), ch.Params{"study": r.PathValue("studyId")})
+	p := ch.Params{}
+	s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+byStudy(r.PathValue("studyId")).from(paramsBinder(p), tPatient)+
+		sqlPageOrder(r, patientSortable, s.patientOrder(r)), p)
 }
 
 // writePatientRows streams the patients sql selects, or counts them for
@@ -587,9 +588,10 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []Patient{})
 		return
 	}
+	p := ch.Params{"ids": pairs}
 	rows, err := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, patient_id AS patientId FROM patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} "+
-			"ORDER BY "+s.patientOrder(r), ch.Params{"ids": pairs})
+		"SELECT study_id AS studyId, patient_id AS patientId FROM "+byStudies(pairStudies(pairs)).from(paramsBinder(p), tPatient)+
+			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY "+s.patientOrder(r), p)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -643,6 +645,7 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 	for i, st := range studies {
 		ids[i] = st.StudyID
 	}
+	p := ch.Params{"ids": ids}
 	rows, err := cachedQueryP[ResourceCount](s,
 		"SELECT rd.resource_id AS resourceId, any(rd.display_name) AS displayName, any(rd.description) AS description, "+
 			"any(rd.resource_type) AS resourceType, toString(any(rd.priority)) AS priority, toBool(any(rd.open_by_default) = 1) AS openByDefault, "+
@@ -650,10 +653,9 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 			"toInt64(uniqExact(x.sample_id)) AS sampleCount, toInt64(uniqExact(x.patient_id)) AS patientCount FROM ("+
 			"SELECT study_id, resource_id, sample_id, patient_id FROM resource_sample "+
 			"UNION ALL SELECT r.study_id, r.resource_id, s.sample_id, r.patient_id FROM resource_patient r "+
-			"LEFT JOIN sample s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+
+			"LEFT JOIN "+byStudies(ids).samples(paramsBinder(p))+" s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+
 			"JOIN resource_definition rd ON rd.study_id = x.study_id AND rd.resource_id = x.resource_id "+
-			"WHERE x.study_id IN {ids:Array(String)} GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId",
-		ch.Params{"ids": ids})
+			"WHERE x.study_id IN {ids:Array(String)} GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId", p)
 	if err != nil {
 		rows = nil
 	}

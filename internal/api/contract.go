@@ -638,13 +638,13 @@ func (s *State) missing(kind string, v map[string]string) string {
 			return msgStudyNotFound(study)
 		}
 	case "patient":
-		if !s.rowExists("SELECT 1 FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String} LIMIT 1",
-			ch.Params{"study": study, "patient": v["patientId"]}) {
+		p := ch.Params{}
+		if !s.rowExists("SELECT 1 FROM "+byPatient(study, v["patientId"]).from(paramsBinder(p), tPatient)+" LIMIT 1", p) {
 			return msgPatientNotFound(study, v["patientId"])
 		}
 	case "sample":
-		if !s.rowExists("SELECT 1 FROM sample WHERE study_id = {study:String} AND sample_id = {sample:String} LIMIT 1",
-			ch.Params{"study": study, "sample": v["sampleId"]}) {
+		p := ch.Params{}
+		if !s.rowExists("SELECT 1 FROM "+bySample(study, v["sampleId"]).from(paramsBinder(p), tSample)+" LIMIT 1", p) {
 			return msgSampleNotFound(study, v["sampleId"])
 		}
 	case "sampleList":

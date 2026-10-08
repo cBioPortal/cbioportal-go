@@ -83,14 +83,14 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	studySet := map[string]bool{}
 	for gi, g := range f.Groups {
 		groupSelects = append(groupSelects, fmt.Sprintf(
-			"SELECT toUInt32(%d) AS grp, study_id, sample_id, patient_id FROM sample WHERE %s",
-			gi, compactSampleScope(args, g.SampleIdentifiers)))
+			"SELECT toUInt32(%d) AS grp, study_id, sample_id, patient_id FROM %s",
+			gi, identifiersFrom(args, tSample, g.SampleIdentifiers)))
 		for _, id := range g.SampleIdentifiers {
 			studySet[id.StudyID] = true
 		}
 	}
 	// The groups' studies, the key range of the clinical tables they read.
-	studiesIn := args.strs(sortedKeys(studySet))
+	groupStudies := byStudies(sortedKeys(studySet))
 	withGroups := "WITH group_samples AS (" + strings.Join(groupSelects, " UNION ALL ") + ") "
 
 	type groupRow struct {
@@ -182,25 +182,25 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if len(sampleIDs) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM group_samples g "+
-					"INNER JOIN (SELECT * FROM clinical_sample WHERE study_id IN %s) c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
+					"INNER JOIN %s c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), studiesIn, args.strs(sampleIDs), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupStudies.rows(args, tClinicalSample), args.strs(sampleIDs), cond("c.attr_value")))
 		}
 		groupPatients := "(SELECT DISTINCT grp, study_id, patient_id FROM group_samples)"
 		if p := ids[levelPatient]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
-					"INNER JOIN (SELECT * FROM clinical_patient WHERE study_id IN %s) c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
+					"INNER JOIN %s c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupPatients, studiesIn, args.strs(p), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupPatients, groupStudies.rows(args, tClinicalPatient), args.strs(p), cond("c.attr_value")))
 		}
 		if p := ids[levelConflicting]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
-					"INNER JOIN (SELECT * FROM sample WHERE study_id IN %s) s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
-					"INNER JOIN (SELECT * FROM clinical_patient WHERE study_id IN %s) c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
+					"INNER JOIN %s s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
+					"INNER JOIN %s c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupPatients, studiesIn, studiesIn, args.strs(p), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupPatients, groupStudies.samples(args), groupStudies.rows(args, tClinicalPatient), args.strs(p), cond("c.attr_value")))
 		}
 		return strings.Join(parts, " UNION ALL ")
 	}
@@ -333,24 +333,6 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 // with a leading zero only as octal literals. Hexadecimal literals and Java
 // type suffixes, which it also accepts, are left out.
 const decimalCreatable = `^[+-]?(0[0-7]+|(0|[1-9][0-9]*)([eE][+-]?[0-9]+)?|([0-9]+\.[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?)$`
-
-// compactSampleScope is a predicate over the sample view selecting the given
-// samples, written per study as sample_id IN <ids> so a study's sample ids
-// are bound once rather than as (study, sample) pairs.
-func compactSampleScope(a *sqlArgs, ids []identifier) string {
-	byStudy := map[string][]string{}
-	for _, id := range ids {
-		byStudy[id.StudyID] = append(byStudy[id.StudyID], id.id())
-	}
-	if len(byStudy) == 0 {
-		return falseClause
-	}
-	var ors []string
-	for _, st := range sortedKeys(byStudy) {
-		ors = append(ors, fmt.Sprintf("(study_id = %s AND sample_id IN %s)", a.str(st), a.strs(byStudy[st])))
-	}
-	return strings.Join(ors, " OR ")
-}
 
 // ---------- Clinical data table (study-view Clinical tab) ----------
 

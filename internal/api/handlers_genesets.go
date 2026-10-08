@@ -235,8 +235,8 @@ func (s *State) genesetScores(meta profileMeta, sampleIDs, genesetIDs []string) 
 	}
 	return ch.QueryP[genesetScore](s.CH, fmt.Sprintf(
 		"SELECT m.geneset_id AS genesetId, m.sample_id AS sampleId, sm.patient_id AS patientId, "+javaTruncatedValueSQL("m.value")+" AS value "+
-			"FROM %s m JOIN sample sm ON sm.study_id = m.study_id AND sm.sample_id = m.sample_id %s"+
-			"WHERE %s ORDER BY %s", genesetScoreSource(s), join, where, order), p)
+			"FROM %s m JOIN %s sm ON sm.study_id = m.study_id AND sm.sample_id = m.sample_id %s"+
+			"WHERE %s ORDER BY %s", genesetScoreSource(s), byStudy(meta.StudyID).samples(paramsBinder(p)), join, where, order), p)
 }
 
 // GenesetMolecularData is GenesetMolecularDataDTO as the controller fills it.

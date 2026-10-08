@@ -334,8 +334,8 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 	if !s.requireStudy(w, r, studyID) {
 		return
 	}
-	ok, err := s.existsIn("SELECT count() AS n FROM patient WHERE study_id = {study:String} AND patient_id = {patient:String}",
-		ch.Params{"study": studyID, "patient": patientID})
+	p := ch.Params{}
+	ok, err := s.existsIn("SELECT count() AS n FROM "+byPatient(studyID, patientID).from(paramsBinder(p), tPatient), p)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -358,8 +358,8 @@ func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 	if !s.requireStudy(w, r, studyID) {
 		return
 	}
-	ok, err := s.existsIn("SELECT count() AS n FROM sample WHERE study_id = {study:String} AND sample_id = {sample:String}",
-		ch.Params{"study": studyID, "sample": sampleID})
+	p := ch.Params{}
+	ok, err := s.existsIn("SELECT count() AS n FROM "+bySample(studyID, sampleID).from(paramsBinder(p), tSample), p)
 	if err != nil {
 		fail(w, r, err)
 		return

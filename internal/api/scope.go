@@ -76,6 +76,7 @@ var (
 		study: "study_id", patient: "patient_id"}
 	tSampleProfile = keyedTable{name: "sample_profile", key: []string{"study_id", "profile_stable_id", "sample_id"},
 		study: "study_id", profile: "molecular_profile_id", sample: "sample_id"}
+	tSeg = keyedTable{name: "seg", key: []string{"study_id", "sample_id"}, study: "study_id", sample: "sample_id"}
 )
 
 // keyedTables are the tables only a scope may name in internal/api SQL
@@ -149,6 +150,51 @@ func bySample(studyID, sampleID string) scope {
 // byPatient holds a read to one patient.
 func byPatient(studyID, patientID string) scope {
 	return scope{study: oneOf(studyID), patient: oneOf(patientID)}
+}
+
+// pairStudies returns the sorted distinct studies of (study, id) pairs, for
+// a scope over them.
+func pairStudies(pairs [][2]string) []string {
+	out := make([]string, len(pairs))
+	for i, p := range pairs {
+		out[i] = p[0]
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// identifiersCond selects identified samples over t's study and sample key
+// columns (qualified by alias if any): one (study = s AND sample IN [...])
+// term per study, in study order; false when there are none.
+func identifiersCond(b binder, t keyedTable, alias string, ids []identifier) string {
+	if len(ids) == 0 {
+		return falseClause
+	}
+	byStudy := map[string][]string{}
+	for _, id := range ids {
+		byStudy[id.StudyID] = append(byStudy[id.StudyID], id.id())
+	}
+	terms := make([]string, 0, len(byStudy))
+	for _, st := range sortedKeys(byStudy) {
+		terms = append(terms, "("+bySamples(st, byStudy[st]).cond(b, t, alias)+")")
+	}
+	return "(" + strings.Join(terms, " OR ") + ")"
+}
+
+// identifiersFrom is "<t> WHERE <identifiersCond>", a FROM source of the
+// identified samples' rows.
+func identifiersFrom(b binder, t keyedTable, ids []identifier) string {
+	return t.name + " WHERE " + identifiersCond(b, t, "", ids)
+}
+
+// identifierStudies returns the sorted distinct studies of identifiers.
+func identifierStudies(ids []identifier) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.StudyID
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // byProfiles holds a read to molecular profiles, by their ids alone: for

@@ -184,7 +184,7 @@ func (s *State) sitemapIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := ch.Query[row](s.CH,
 		"SELECT c.study_id AS studyId, ifNull(p.n, 0) AS patients FROM cancer_study c "+
-			"LEFT JOIN (SELECT study_id, count() AS n FROM patient GROUP BY study_id) p ON p.study_id = c.study_id "+
+			"LEFT JOIN (SELECT study_id, count() AS n FROM "+acrossStudies.rows(paramsBinder{}, tPatient)+" GROUP BY study_id) p ON p.study_id = c.study_id "+
 			"ORDER BY c.study_id")
 	if err != nil {
 		fail(w, r, err)
@@ -235,9 +235,10 @@ func (s *State) sitemapStudy(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		PatientID string `json:"patientId"`
 	}
+	p := ch.Params{}
 	patients, err := ch.QueryP[row](s.CH, fmt.Sprintf(
-		"SELECT patient_id AS patientId FROM patient WHERE study_id = {study:String} ORDER BY patient_id LIMIT %d OFFSET %d",
-		patientsPerSitemap, page*patientsPerSitemap), ch.Params{"study": id})
+		"SELECT patient_id AS patientId FROM %s ORDER BY patient_id LIMIT %d OFFSET %d",
+		byStudy(id).from(paramsBinder(p), tPatient), patientsPerSitemap, page*patientsPerSitemap), p)
 	if err != nil {
 		fail(w, r, err)
 		return

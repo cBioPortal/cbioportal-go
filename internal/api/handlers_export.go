@@ -255,11 +255,12 @@ func (e *studyExport) loadCases() error {
 					e.s.rawFileOrder("clinical_patient", ""), p)
 		}
 	} else {
+		sc := byStudy(e.studyID)
 		samples, err = ch.QueryP[sampleRow](e.s.CH,
-			"SELECT sample_id, patient_id FROM sample WHERE study_id = {study:String} ORDER BY sample_id", p)
+			"SELECT sample_id, patient_id FROM "+sc.from(paramsBinder(p), tSample)+" ORDER BY sample_id", p)
 		if err == nil {
 			patients, err = ch.QueryP[patientRow](e.s.CH,
-				"SELECT patient_id FROM patient WHERE study_id = {study:String} ORDER BY patient_id", p)
+				"SELECT patient_id FROM "+sc.from(paramsBinder(p), tPatient)+" ORDER BY patient_id", p)
 		}
 	}
 	if err != nil {
@@ -817,13 +818,14 @@ func (e *studyExport) structuralVariants() error {
 		if err := e.writeMeta(metaFile, profileMetaEntries(e.studyID, "STRUCTURAL_VARIANT", "SV", p, dataFile)); err != nil {
 			return err
 		}
+		params := ch.Params{"study": e.studyID, "profile": p.StableID}
 		rows, err := ch.QueryP[map[string]any](e.s.CH, fmt.Sprintf(
 			"SELECT %s FROM (%s) sv "+
-				"INNER JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
+				"INNER JOIN %s sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
 				"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 				"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 				"WHERE sv.study_id = {study:String} AND sv.profile_stable_id = {profile:String} ORDER BY sampleId, site1HugoSymbol, site2HugoSymbol",
-			strings.Join(cols, ", "), svSiteEntrezSQL), ch.Params{"study": e.studyID, "profile": p.StableID})
+			strings.Join(cols, ", "), svSiteEntrezSQL, byStudy(e.studyID).samples(paramsBinder(params))), params)
 		if err != nil {
 			return err
 		}
@@ -1233,10 +1235,12 @@ func (e *studyExport) caseLists() error {
 		Description string `json:"description"`
 		SampleID    string `json:"sample_id"`
 	}
+	p := ch.Params{}
+	sc := byStudy(e.studyID)
 	rows, err := ch.QueryP[row](e.s.CH,
 		"SELECT DISTINCT sl.list_id AS list_id, sl.name AS name, sl.description AS description, sl.sample_id AS sample_id "+
-			"FROM sample_list sl INNER JOIN sample s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id "+
-			"WHERE sl.study_id = {study:String} ORDER BY list_id, sample_id", ch.Params{"study": e.studyID})
+			"FROM "+sc.rows(paramsBinder(p), tSampleList)+" sl INNER JOIN "+sc.samples(paramsBinder(p))+
+			" s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id ORDER BY list_id, sample_id", p)
 	if err != nil {
 		return err
 	}

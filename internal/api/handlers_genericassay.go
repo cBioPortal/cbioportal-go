@@ -82,10 +82,12 @@ func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[str
 			}
 			sampleCond = " AND s.sample_id IN " + args.strs(sampleIDs)
 		}
-		where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
+		sc := byStudy(meta.StudyID)
+		rest := " AND profile_stable_id = " + args.str(meta.StableID)
 		if entityIDs != nil {
-			where += " AND entity_stable_id IN " + args.strs(entityIDs)
+			rest += " AND entity_stable_id IN " + args.strs(entityIDs)
 		}
+		matrix := rawMatrix("generic_assay_matrix")
 		join := "s.sample_id = m.sample_id"
 		if s.gaProfilePatientLevel(meta) {
 			join = "s.patient_id = m.sample_id"
@@ -94,11 +96,12 @@ func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[str
 		parts = append(parts, fmt.Sprintf(
 			"SELECT s.sample_id AS sampleId, m.entity_stable_id AS stableId, s.patient_id AS patientId, %s AS value, "+
 				"%s AS molecularProfileId, %s AS studyId, %s AS sampleRank, en.o AS entityRank "+
-				"FROM (SELECT * FROM %s WHERE %s) m JOIN (SELECT * FROM sample WHERE study_id = %s) s ON s.study_id = m.study_id AND %s%s "+
-				"JOIN (SELECT entity_stable_id AS e, min(%s) AS o FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
+				"FROM (SELECT * FROM %s WHERE %s) m JOIN %s s ON s.study_id = m.study_id AND %s%s "+
+				"JOIN (SELECT entity_stable_id AS e, min(%s) AS o FROM %s "+
 				"GROUP BY entity_stable_id) en ON en.e = m.entity_stable_id",
 			javaTruncatedValueSQL("m.value"), args.str(mpid), args.str(meta.StudyID), sampleRank,
-			genericAssaySource(s), where, args.str(meta.StudyID), join, sampleCond, s.rawFileOrder("generic_assay_matrix", ""), where))
+			genericAssaySource(s), sc.cond(args, matrix, "")+rest, sc.samples(args), join, sampleCond,
+			s.rawFileOrder("generic_assay_matrix", ""), sc.from(args, matrix)+rest))
 	}
 	if len(parts) == 0 {
 		return nil

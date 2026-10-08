@@ -162,9 +162,9 @@ func (s *State) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 	}
 	patientOf := map[string]string{}
 	if len(all) > 0 {
+		p := ch.Params{}
 		rows, _ := ch.QueryP[idRow](s.CH,
-			"SELECT sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id = {study:String} AND sample_id IN {ids:Array(String)}",
-			ch.Params{"study": studyID, "ids": all})
+			"SELECT sample_id AS sampleId, patient_id AS patientId FROM "+bySamples(studyID, all).from(paramsBinder(p), tSample), p)
 		for _, r := range rows {
 			patientOf[r.SampleID] = "p:" + r.PatientID
 		}
@@ -198,12 +198,12 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 	}
 	samplesOf := map[string][]idRow{}
 	if len(all) > 0 {
+		p := ch.Params{"study": studyID, "ids": all, "profile": profileID}
 		rows, err := ch.QueryP[idRow](s.CH, fmt.Sprintf(
-			"SELECT sample_id AS sampleId, patient_id AS patientId FROM sample "+
-				"WHERE study_id = {study:String} AND %s IN {ids:Array(String)} "+
+			"SELECT sample_id AS sampleId, patient_id AS patientId FROM %s "+
+				"AND %s IN {ids:Array(String)} "+
 				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE study_id = {study:String} AND molecular_profile_id = {profile:String}) "+
-				"ORDER BY sample_id", idCol),
-			ch.Params{"study": studyID, "ids": all, "profile": profileID})
+				"ORDER BY sample_id", byStudy(studyID).from(paramsBinder(p), tSample), idCol), p)
 		if err != nil {
 			return nil, err
 		}
@@ -235,13 +235,13 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 // with the empty string for a cell without a stored value.
 func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, gaGroupValues, error) {
 	args := newArgs()
-	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
+	from := byStudy(meta.StudyID).from(args, rawMatrix("generic_assay_matrix")) + " AND profile_stable_id = " + args.str(meta.StableID)
 	type entityRow struct {
 		E string `json:"e"`
 	}
 	ents, err := queryA[entityRow](s.CH, fmt.Sprintf(
-		"SELECT entity_stable_id AS e FROM cbioportal_raw.generic_assay_matrix WHERE %s "+
-			"GROUP BY entity_stable_id ORDER BY min(%s), entity_stable_id", where, s.rawFileOrder("generic_assay_matrix", "")), args)
+		"SELECT entity_stable_id AS e FROM %s "+
+			"GROUP BY entity_stable_id ORDER BY min(%s), entity_stable_id", from, s.rawFileOrder("generic_assay_matrix", "")), args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -259,8 +259,8 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 		parts = append(parts, fmt.Sprintf(
 			"SELECT e, toUInt32(%d) AS grp, arrayMap(k -> m[k], %s) AS vs FROM ("+
 				"SELECT entity_stable_id AS e, mapFromArrays(groupArray(sample_id), groupArray(%s)) AS m "+
-				"FROM cbioportal_raw.generic_assay_matrix WHERE %s AND sample_id IN %s GROUP BY e)",
-			gi, list, javaTruncatedValueSQL("trimBoth(value)"), where, list))
+				"FROM %s AND sample_id IN %s GROUP BY e)",
+			gi, list, javaTruncatedValueSQL("trimBoth(value)"), from, list))
 	}
 	values := gaGroupValues{}
 	if len(parts) == 0 {

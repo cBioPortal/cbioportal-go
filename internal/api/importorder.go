@@ -85,8 +85,8 @@ func (s *State) sampleInternalIDs(samples []sampleKey) map[sampleKey]uint64 {
 		InternalID uint64 `json:"internal_id"`
 	}
 	args := newArgs()
-	rows, err := queryA[row](s.CH, "SELECT study_id, sample_id, min(internal_id) AS internal_id FROM sample "+
-		"WHERE (study_id, sample_id) IN "+args.pairs(pairs)+" GROUP BY study_id, sample_id", args)
+	rows, err := queryA[row](s.CH, "SELECT study_id, sample_id, min(internal_id) AS internal_id FROM "+
+		byStudies(pairStudies(pairs)).from(args, tSample)+" AND (study_id, sample_id) IN "+args.pairs(pairs)+" GROUP BY study_id, sample_id", args)
 	if err != nil {
 		return nil
 	}

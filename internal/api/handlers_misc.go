@@ -80,7 +80,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	args := newArgs()
-	where := segSampleWhere(args, f.SampleIdentifiers)
+	where := identifiersCond(args, tSeg, "g", f.SampleIdentifiers)
 	if f.Chromosome != "" {
 		where += " AND g.chrom = " + args.str(f.Chromosome)
 	}
@@ -103,7 +103,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 	}
 	sql := "SELECT g.study_id, g.sample_id, ifNull(sp.patient_id, ''), g.chrom, toInt64OrZero(g.start) AS start, " +
 		"toInt64OrZero(g.end), toInt64OrZero(g.num_probes), toFloat64OrZero(g.segment_mean) " +
-		"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id " +
+		"FROM seg g LEFT JOIN " + byStudies(identifierStudies(f.SampleIdentifiers)).samples(args) + " sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id " +
 		"WHERE " + where + " ORDER BY " + s.segOrder("g.study_id, g.sample_id, g.chrom, start")
 	body, err := s.CH.QueryStreamP(r.Context(), sql, "RowBinary", args.params(sql))
 	if err != nil {
@@ -127,24 +127,6 @@ func (s *State) segOrder(fallback string) string {
 		return "g.seg_id"
 	}
 	return fallback
-}
-
-// segSampleWhere restricts seg (alias g) to the identified samples, one
-// study_id = … AND sample_id IN … term per study.
-func segSampleWhere(a *sqlArgs, ids []identifier) string {
-	byStudy := map[string][]string{}
-	var studies []string
-	for _, id := range ids {
-		if _, ok := byStudy[id.StudyID]; !ok {
-			studies = append(studies, id.StudyID)
-		}
-		byStudy[id.StudyID] = append(byStudy[id.StudyID], id.id())
-	}
-	terms := make([]string, len(studies))
-	for i, st := range studies {
-		terms[i] = fmt.Sprintf("(g.study_id = %s AND g.sample_id IN %s)", a.str(st), a.strs(byStudy[st]))
-	}
-	return "(" + strings.Join(terms, " OR ") + ")"
 }
 
 // writeSegments encodes RowBinary segment rows (study, sample, patient,

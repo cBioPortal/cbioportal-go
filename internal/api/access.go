@@ -122,7 +122,7 @@ func (s *State) studyIndex() (studyIndex, error) {
 	}{
 		{idx.groups, "SELECT study_id AS k, ifNull(groups, '') AS v FROM cancer_study"},
 		{idx.profiles, "SELECT molecular_profile_id AS k, any(study_id) AS v FROM molecular_profile GROUP BY k"},
-		{idx.lists, "SELECT list_id AS k, any(study_id) AS v FROM sample_list GROUP BY k"},
+		{idx.lists, "SELECT list_id AS k, any(study_id) AS v FROM " + acrossStudies.rows(paramsBinder{}, tSampleList) + " GROUP BY k"},
 	} {
 		rows, err := cachedQuery[pair](s, q.sql)
 		if err != nil {

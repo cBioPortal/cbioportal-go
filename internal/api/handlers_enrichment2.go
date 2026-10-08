@@ -378,10 +378,10 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	}
 	samplesOf := map[string][]string{}
 	if len(pairs) > 0 {
+		p := ch.Params{"ids": pairs}
 		rows, _ := ch.QueryP[idRow](s.CH,
-			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample "+
-				"WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id",
-			ch.Params{"ids": pairs})
+			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+byStudies(pairStudies(pairs)).from(paramsBinder(p), tSample)+
+				" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id", p)
 		for _, r := range rows {
 			k := jkey(r.StudyID, r.PatientID)
 			samplesOf[k] = append(samplesOf[k], r.SampleID)

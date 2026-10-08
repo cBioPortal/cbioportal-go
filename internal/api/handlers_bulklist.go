@@ -64,20 +64,21 @@ func toFullSample(r sampleFullRow) Sample {
 	}
 }
 
-// sampleFullSelect builds the sample rows plus sampleType / sequenced / seg
-// flags for the given WHERE predicate over alias `s`.
-func sampleFullSelect(where string) string {
-	return sampleFullSelectFrom(where) + " ORDER BY " + sampleDefaultOrder
+// sampleFullSelect builds the sample rows of the scope plus sampleType /
+// sequenced / seg flags, for the given WHERE predicate over alias `s`.
+func sampleFullSelect(b binder, sc scope, where string) string {
+	return sampleFullSelectFrom(b, sc, where) + " ORDER BY " + sampleDefaultOrder
 }
 
 const sampleDefaultOrder = "s.study_id, s.sample_id"
 
 // sampleFullSelectFrom is sampleFullSelect without its ORDER BY.
-func sampleFullSelectFrom(where string) string {
+func sampleFullSelectFrom(b binder, sc scope, where string) string {
 	return "SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId, " +
 		"ifNull(sd.sample_type, '') AS sampleType, toUInt8(ifNull(sd.sequenced, 0)) AS sequencedFlag, " +
 		"toUInt8(ifNull(sd.copy_number_segment_present, 0)) AS segFlag " +
-		"FROM sample s LEFT JOIN sample_derived sd ON sd.cancer_study_identifier = s.study_id AND sd.sample_stable_id = s.sample_id " +
+		"FROM " + sc.samples(b) + " s LEFT JOIN " + sc.studiesOnly().rows(b, tSampleDerived) +
+		" sd ON sd.cancer_study_identifier = s.study_id AND sd.sample_stable_id = s.sample_id " +
 		"WHERE " + where
 }
 
@@ -116,13 +117,13 @@ func (s *State) allSamples(w http.ResponseWriter, r *http.Request) {
 		// unordered.
 		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id, s.study_id", args.str(kw))
 	}
-	s.writeSampleRows(w, r, sampleFullSelectFrom(strings.Join(conds, " AND "))+sqlPageOrder(r, sampleSortable, order), args)
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, acrossStudies, strings.Join(conds, " AND "))+sqlPageOrder(r, sampleSortable, order), args)
 }
 
 // sampleInStudy — GET /api/studies/{studyId}/samples/{sampleId}. Single Sample.
 func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.QueryP[sampleFullRow](s.CH, sampleFullSelect("s.study_id = {study:String} AND s.sample_id = {sample:String}"),
-		ch.Params{"study": r.PathValue("studyId"), "sample": r.PathValue("sampleId")})
+	p := ch.Params{}
+	rows, err := ch.QueryP[sampleFullRow](s.CH, sampleFullSelect(paramsBinder(p), bySample(r.PathValue("studyId"), r.PathValue("sampleId")), "1"), p)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -145,7 +146,7 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	args := newArgs()
 	if !q.Has("keyword") {
-		s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM patient"+
+		s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+acrossStudies.patients(args)+
 			sqlPageOrder(r, patientSortable, s.patientOrder(r)), nil)
 		return
 	}
@@ -161,10 +162,10 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	if s.importOrdered() {
 		ties = "p.internal_id, sm.internal_id"
 	}
-	sql := fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM patient p "+
-		"JOIN sample sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
+	sql := fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM %s p "+
+		"JOIN %s sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
 		"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, %s",
-		strings.Join(conds, " AND "), args.str(kw), ties)
+		acrossStudies.patients(args), acrossStudies.samples(args), strings.Join(conds, " AND "), args.str(kw), ties)
 	s.writePatientRows(w, r, sql, args.params(sql))
 }
 
@@ -306,7 +307,8 @@ func (s *State) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
 // /api/studies/{studyId}/samples/{sampleId}/copy-number-segments. Returns
 // []CopyNumberSeg for one sample (same shape as copyNumberSegmentsFetch).
 func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request) {
-	p := ch.Params{"study": r.PathValue("studyId"), "sample": r.PathValue("sampleId")}
+	study, sample := r.PathValue("studyId"), r.PathValue("sampleId")
+	p := ch.Params{"study": study, "sample": sample}
 	chrom := ""
 	if c := r.URL.Query().Get("chromosome"); c != "" {
 		chrom = " AND g.chrom = {chrom:String}"
@@ -316,9 +318,9 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 		"SELECT g.study_id AS studyId, g.sample_id AS sampleId, ifNull(sp.patient_id, '') AS patientId, "+
 			"g.chrom AS chromosome, toInt64OrZero(g.start) AS start, toInt64OrZero(g.end) AS end, "+
 			"toInt64OrZero(g.num_probes) AS numberOfProbes, toFloat64OrZero(g.segment_mean) AS segmentMean "+
-			"FROM seg g LEFT JOIN sample sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id "+
+			"FROM seg g LEFT JOIN %s sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id "+
 			"WHERE g.study_id = {study:String} AND g.sample_id = {sample:String}%s ORDER BY %s",
-		chrom, s.segOrder("g.chrom, start")), p)
+		bySample(study, sample).samples(paramsBinder(p)), chrom, s.segOrder("g.chrom, start")), p)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -337,9 +339,10 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, out)
 }
 
-// writeSamples writes the samples matching a predicate over the `sample` view
-// (aliased s), with type, sequenced and segment flags. where may hold
-// placeholders bound in args. A sorted page is read as sqlPageOrder orders it.
-func (s *State) writeSamples(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs) {
-	s.writeSampleRows(w, r, sampleFullSelectFrom(where)+sqlPageOrder(r, sampleSortable, sampleDefaultOrder), args)
+// writeSamples writes the samples of the scope matching a predicate over the
+// `sample` view (aliased s), with type, sequenced and segment flags. where
+// may hold placeholders bound in args. A sorted page is read as sqlPageOrder
+// orders it.
+func (s *State) writeSamples(w http.ResponseWriter, r *http.Request, sc scope, where string, args *sqlArgs) {
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+sqlPageOrder(r, sampleSortable, sampleDefaultOrder), args)
 }
