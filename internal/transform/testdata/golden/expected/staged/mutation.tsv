@@ -2,6 +2,15 @@ amino_acid_change	ascn_ccf_expected_copies	ascn_ccf_expected_copies_upper	ascn_c
 String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String	String
 														10	89692905	5728	PTEN	golden_b_mutations	Somatic			{"Cust":{}}		GB-P2	X41_splice		G		GB-P2-01	89692905	golden_b	8	8	A		Splice_Site	SNP
 														10	89692905	5728	PTEN	golden_c_mutations	Somatic			{}		GC-P1	R130R		C		GC-P1-01	89692905	golden_c			T		Silent	SNP
+														17	0	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A12V		C		GC-P2-01	0	golden_c			T	Wildtype_x	Missense_Mutation	SNP
+														17	100	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A2V		C		GC-P2-01	100	golden_c			T		Missense_Mutation	SNP
+														17	101	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A3V		C		GC-P2-01	101	golden_c					Missense_Mutation	SNP
+														17	103	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A4fs		-		GC-P2-01	102	golden_c			A		Missense_Mutation	SNP
+														17	104	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A5V		C		GC-P2-01	104	golden_c			A		Missense_Mutation	SNP
+														17	106	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A6fs		AT		GC-P2-01	105	golden_c			G		Frame_Shift_Del	SNP
+														17	107	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A8V		NA		GC-P2-01	107	golden_c			T		Missense_Mutation	SNP
+														17	108	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A9V		C		GC-P2-01	108	golden_c			na		Missense_Mutation	SNP
+														17	109	7157	TP53	golden_c_mutations	Somatic			{}		GC-P2	A10V		C		GC-P2-01	109	golden_c			G		Frame_Shift_Del	SNP
 														17	37880000	2064	ERBB2	golden_c_mutations	Somatic			{}		GC-P2	MUTATED		C		GC-P2-01	37880000	golden_c			T		IGR	SNP
 														17	41244000	672	BRCA1	golden_c_mutations	Somatic			{}		GC-P2	MUTATED		C		GC-P2-01	41244000	golden_c			T		intron	SNP
 														17	7577120	7157	TP53	golden_b_mutations	Somatic			{"Cust":{"score":1.5e3,"label":"x"}}		GB-P1	R273C		C		GB-P1-01	7577120	golden_b	3	10	T		Missense_Mutation	SNP

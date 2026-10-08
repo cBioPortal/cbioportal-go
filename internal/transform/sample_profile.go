@@ -10,9 +10,9 @@ import (
 // ImportExtendedMutationData applies it, as a WHERE condition over a MAF
 // staging alias; entrez is the resolved Entrez id expression and targetDB
 // holds the variant_classification_filter table. Records whose chromosome
-// DaoGeneOptimized.normalizeChr does not recognize, RNA records and
-// records with a None, LOH or Wildtype mutation status or a Redacted
-// validation status are skipped. A profile whose meta file sets
+// DaoGeneOptimized.normalizeChr does not recognize, RNA records, records
+// whose validation status is Wildtype and records with a None, LOH or
+// Wildtype mutation status or a Redacted validation status are skipped. A profile whose meta file sets
 // variant_classification_filter skips exactly the listed
 // Variant_Classification values; otherwise the default filter skips
 // Silent, Intron, 3'UTR, 3'Flank, 5'UTR and IGR, and 5'Flank except in the
@@ -29,7 +29,7 @@ func mutationFilterSQL(a, entrez, targetDB string) string {
 	profile := fmt.Sprintf("(%[1]s.study_id, %[1]s.profile_stable_id)", a)
 	filters := fmt.Sprintf("`%s`.variant_classification_filter", targetDB)
 	return normalizedChrSQL(a+".chromosome") + " != '' AND " + fmt.Sprintf(
-		"NOT %[2]s AND NOT %[3]s AND lower(%[1]s.variant_classification) != 'rna' "+
+		"NOT %[2]s AND NOT %[3]s AND lower(%[1]s.variant_classification) != 'rna' AND lower(%[1]s.validation_status) != 'wildtype' "+
 			"AND if(%[4]s IN (SELECT study_id, profile_stable_id FROM %[5]s), "+
 			"(%[1]s.study_id, %[1]s.profile_stable_id, %[1]s.variant_classification) NOT IN "+
 			"(SELECT study_id, profile_stable_id, variant_classification FROM %[5]s), "+

@@ -7,7 +7,8 @@ import (
 
 // computedClinicalAttributes adds the sample attributes cbioportal-core derives
 // at import time to the clinical_sample view and clinical_attribute_meta:
-//   - MUTATION_COUNT: distinct non-germline variants (chr, start, end, ref, alt)
+//   - MUTATION_COUNT: distinct non-germline variants (chr, start, end, ref,
+//     tumor allele, as the importer stores them)
 //     of the stored (gene-resolved, filtered) mutations per sample of each
 //     mutation profile, 0 for profiled samples without any
 //     (DaoMutation.createMutationCountClinicalData). Samples profiled only
@@ -25,7 +26,8 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 	if hasMutations {
 		computed = append(computed, fmt.Sprintf(
 			"SELECT sp.study_id AS study_id, sp.sample_id AS sample_id, 'MUTATION_COUNT' AS attr_id, "+
-				"toString(uniqExactIf((m.chromosome, m.start_position, m.end_position, m.reference_allele, m.tumor_seq_allele2), m.study_id != '')) AS attr_value "+
+				"toString(uniqExactIf(("+normalizedChrSQL("m.chromosome")+", "+mafPositionSQL("m.start_position")+", "+
+				mafPositionSQL("m.end_position")+", "+mafPartSQL("m.reference_allele")+", "+tumorSeqAlleleSQL("m")+"), m.study_id != '')) AS attr_value "+
 				"FROM `%[2]s`.sample_profile sp "+
 				"LEFT JOIN (SELECT m.* FROM `%[1]s`.mutation_extended m%[4]s WHERE %[3]s AND upper(m.mutation_status) != 'GERMLINE') m "+
 				"ON m.study_id = sp.study_id AND m.tumor_sample_barcode = sp.sample_id AND m.profile_stable_id = sp.profile_stable_id "+

@@ -441,8 +441,9 @@ func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 	nsCol := namespaceColumnsExpr(c, rawDB, has, "m.")
 	return fmt.Sprintf(
 		"SELECT m.study_id AS study_id, m.tumor_sample_barcode AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
-			"%s AS entrez_gene_id, "+normalizedChrSQL("m.chromosome")+" AS chromosome, m.start_position AS start_position, "+
-			"m.end_position AS end_position, m.reference_allele AS reference_allele, m.tumor_seq_allele2 AS tumor_seq_allele2, "+
+			"%s AS entrez_gene_id, "+normalizedChrSQL("m.chromosome")+" AS chromosome, "+mafPositionSQL("m.start_position")+" AS start_position, "+
+			mafPositionSQL("m.end_position")+" AS end_position, "+mafPartSQL("m.reference_allele")+" AS reference_allele, "+
+			tumorSeqAlleleSQL("m")+" AS tumor_seq_allele2, "+
 			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
 			"m.validation_status AS validation_status, "+
 			proteinChangeSQL(has)+" AS protein_change, "+
@@ -452,6 +453,32 @@ func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 			"ON sp.study_id = m.study_id AND sp.sample_id = m.tumor_sample_barcode "+
 			"WHERE "+mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
 		entrez, rawDB, table, join)
+}
+
+// mafPartSQL is a MAF value as the importer reads it
+// (TabDelimitedFileUtil.getPartString): "NA" when empty or missing.
+func mafPartSQL(col string) string {
+	return fmt.Sprintf("if(%[1]s = '', 'NA', %[1]s)", col)
+}
+
+// mafPositionSQL is a MAF start or end position as ImportExtendedMutationData
+// stores it: a negative or unreadable position is 0.
+func mafPositionSQL(col string) string {
+	return fmt.Sprintf("if(ifNull(toInt64OrNull(%[1]s), -1) < 0, '0', %[1]s)", col)
+}
+
+// tumorSeqAlleleSQL is the tumor allele the importer stores for a MAF record
+// (alias a), MafUtil.resolveTumorSeqAllele over Reference_Allele,
+// Tumor_Seq_Allele1 and Tumor_Seq_Allele2: the allele that differs from the
+// reference, Tumor_Seq_Allele1 when both do (Tumor_Seq_Allele2 when one of
+// them is a deletion "-" and the other a valid sequence and Tumor_Seq_Allele1
+// is the "-"), empty when neither is given.
+func tumorSeqAlleleSQL(a string) string {
+	ref, t1, t2 := mafPartSQL(a+".reference_allele"), mafPartSQL(a+".tumor_seq_allele1"), mafPartSQL(a+".tumor_seq_allele2")
+	return fmt.Sprintf("multiIf(upper(%[2]s) = 'NA' AND upper(%[3]s) = 'NA', '', "+
+		"%[2]s = 'NA' OR %[2]s = %[1]s, %[3]s, %[3]s = 'NA' OR %[3]s = %[1]s, %[2]s, "+
+		"(%[2]s = '-' OR %[3]s = '-') AND (match(upper(%[2]s), '^[ATGC]*$') OR match(upper(%[3]s), '^[ATGC]*$')), if(%[3]s = '-', %[2]s, %[3]s), "+
+		"%[2]s)", ref, t1, t2)
 }
 
 // cnaSQL builds the `cna` view: the discrete copy-number values cbioportal-core
