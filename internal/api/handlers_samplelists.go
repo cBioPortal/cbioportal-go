@@ -3,8 +3,6 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"slices"
-	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
@@ -154,38 +152,4 @@ func (s *State) listStudyCondP(p ch.Params, col string, listIDs ...string) strin
 	}
 	p["listStudies"] = studies
 	return col + " IN {listStudies:Array(String)} AND "
-}
-
-// sampleListsStudies returns the sorted studies whose sample_list rows carry
-// any of the list ids; ok is false when the list index cannot be read.
-func (s *State) sampleListsStudies(listIDs []string) (studies []string, ok bool) {
-	for _, id := range listIDs {
-		st, ok := s.sampleListStudies(id)
-		if !ok {
-			return nil, false
-		}
-		studies = append(studies, st...)
-	}
-	slices.Sort(studies)
-	return slices.Compact(studies), true
-}
-
-// sampleListStudies returns the studies whose sample_list rows carry a list
-// id (normally one), from a cached index of all lists; ok is false when the
-// index could not be read.
-func (s *State) sampleListStudies(listID string) (studies []string, ok bool) {
-	type listStudy struct {
-		ListID  string `json:"listId"`
-		StudyID string `json:"studyId"`
-	}
-	rows, err := cachedQuery[listStudy](s,
-		"SELECT DISTINCT list_id AS listId, study_id AS studyId FROM sample_list ORDER BY listId, studyId")
-	if err != nil {
-		return nil, false
-	}
-	i, _ := slices.BinarySearchFunc(rows, listID, func(r listStudy, id string) int { return strings.Compare(r.ListID, id) })
-	for ; i < len(rows) && rows[i].ListID == listID; i++ {
-		studies = append(studies, rows[i].StudyID)
-	}
-	return studies, true
 }
