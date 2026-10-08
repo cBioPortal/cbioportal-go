@@ -93,13 +93,13 @@ func (s Server) mpQuery(w http.ResponseWriter, r *http.Request, where string, p 
 	core.WriteJSON(w, out)
 }
 
-func (s Server) MolecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, r, "", nil) }
+func (s Server) molecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, r, "", nil) }
 
-func (s Server) StudyMolecularProfiles(w http.ResponseWriter, r *http.Request) {
+func (s Server) studyMolecularProfiles(w http.ResponseWriter, r *http.Request) {
 	s.mpQuery(w, r, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
-func (s Server) MolecularProfile(w http.ResponseWriter, r *http.Request) {
+func (s Server) molecularProfile(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[mpRow](s.CH, s.mpSelect()+" WHERE molecular_profile_id = {id:String}", ch.Params{"id": r.PathValue("id")})
 	if err != nil {
 		core.Fail(w, r, err)
@@ -112,7 +112,7 @@ func (s Server) MolecularProfile(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, toMP(rows[0]))
 }
 
-func (s Server) MolecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		StudyIDs            []string `json:"studyIds"`
 		MolecularProfileIDs []string `json:"molecularProfileIds"`
@@ -423,9 +423,9 @@ func (s Server) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 	out.Finish(err)
 }
 
-// Mutations serves GET /api/molecular-profiles/{id}/mutations: the profile's
+// mutations serves GET /api/molecular-profiles/{id}/mutations: the profile's
 // mutations in the sampleListId sample list, for the entrezGeneId gene.
-func (s Server) Mutations(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if core.BlankSampleList(q) {
 		core.WriteJSON(w, []Mutation{})
@@ -490,7 +490,7 @@ func geneFilter(entrez []int64) string {
 	return fmt.Sprintf(" AND toInt64OrNull(entrez_gene_id) IN (%s)", strings.Join(ids, ", "))
 }
 
-func (s Server) MutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
 	core.ReadBody(r, &f)
 	if core.NoSamples(f.SampleIDs, f.SampleListID) {
@@ -509,7 +509,7 @@ func (s Server) MutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 }
 
-func (s Server) MutationsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
 	core.ReadBody(r, &f)
 	// MutationMultipleStudyFilter is EITHER a set of (profile, sample) pairs OR a
@@ -576,7 +576,7 @@ func groupPanels(rows []panelGeneRow) []GenePanel {
 	return out
 }
 
-func (s Server) GenePanels(w http.ResponseWriter, r *http.Request) {
+func (s Server) genePanels(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[panelGeneRow](s.CH, panelSelect+" ORDER BY genePanelId, hugoGeneSymbol")
 	if err != nil {
 		core.Fail(w, r, err)
@@ -585,10 +585,10 @@ func (s Server) GenePanels(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, groupPanels(rows))
 }
 
-// GenePanelsFetch returns gene panels (with their gene lists) for the posted
+// genePanelsFetch returns gene panels (with their gene lists) for the posted
 // panel IDs (raw JSON array of strings) — used by results/patient views to build
 // per-gene coverage.
-func (s Server) GenePanelsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
@@ -604,7 +604,7 @@ func (s Server) GenePanelsFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, groupPanels(rows))
 }
 
-func (s Server) GenePanel(w http.ResponseWriter, r *http.Request) {
+func (s Server) genePanel(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId = {id:String} ORDER BY hugoGeneSymbol",
 		ch.Params{"id": r.PathValue("id")})
 	if err != nil {

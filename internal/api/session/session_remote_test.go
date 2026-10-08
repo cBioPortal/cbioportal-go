@@ -258,7 +258,7 @@ func newRemoteSessionTestEnv(t *testing.T) (*sessionTestEnv, *fakeSessionService
 	}
 	s := New(&core.State{Sessions: st})
 	mux := http.NewServeMux()
-	s.RouteSession(mux)
+	s.Routes(mux)
 	return &sessionTestEnv{t: t, s: s, mux: mux}, f
 }
 

@@ -403,7 +403,7 @@ func (s Server) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	return out
 }
 
-func (s Server) RouteEnrichment2(mux *http.ServeMux) {
+func (s Server) routeEnrichment2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/expression-enrichments/fetch", s.expressionEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-enrichments/fetch", s.genericAssayEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-binary-enrichments/fetch", s.genericAssayBinaryEnrichmentsFetch)

@@ -31,12 +31,12 @@ var oneBasedPaths = map[string]bool{
 	"/api/studies": true,
 }
 
-// PagedEndpoints are the Java endpoints that take pageSize / pageNumber /
+// pagedEndpoints are the Java endpoints that take pageSize / pageNumber /
 // sortBy / direction (their controller methods declare them); every other
 // endpoint ignores those params, as Java does. The /api/legacy/ and
 // /api/not-ready-yet/ aliases reach pageList as the /api/ path that serves
 // them (extraEndpoints).
-var PagedEndpoints = []string{
+var pagedEndpoints = []string{
 	"GET /api/cancer-types",
 	"GET /api/clinical-attributes",
 	"GET /api/gene-panels",
@@ -79,10 +79,10 @@ var unsortedEndpoints = map[string]bool{
 	"GET /api/genesets":                  true,
 }
 
-// SortIgnored reports whether the request's sortBy is ignored: only on the
+// sortIgnored reports whether the request's sortBy is ignored: only on the
 // endpoints that declare none. Every other paged endpoint sorts by it, also
 // for a keyword search and for projection=ID.
-func SortIgnored(endpoint string) bool {
+func sortIgnored(endpoint string) bool {
 	return unsortedEndpoints[endpoint]
 }
 
@@ -103,7 +103,7 @@ func pagedEndpoint(method, path string) bool {
 // pagedEndpointOf returns the pagedEndpoints entry the request is for, or "".
 func pagedEndpointOf(method, path string) string {
 	segs := strings.Split(strings.TrimSuffix(path, "/"), "/")
-	for _, e := range PagedEndpoints {
+	for _, e := range pagedEndpoints {
 		m, tmpl, _ := strings.Cut(e, " ")
 		if m != method {
 			continue
@@ -140,7 +140,7 @@ func PageList(next http.Handler) http.Handler {
 		q := r.URL.Query()
 		endpoint := pagedEndpointOf(r.Method, r.URL.Path)
 		sortBy := q.Get("sortBy")
-		if sortBy != "" && SortIgnored(endpoint) {
+		if sortBy != "" && sortIgnored(endpoint) {
 			sortBy = ""
 			q.Del("sortBy")
 		}
@@ -171,13 +171,13 @@ func PageList(next http.Handler) http.Handler {
 		r2 := r.Clone(r.Context())
 		r2.URL.RawQuery = q.Encode()
 
-		pg := Page{SortBy: sortBy, Desc: strings.EqualFold(q.Get("direction"), "DESC"), Size: -1}
+		pg := page{SortBy: sortBy, Desc: strings.EqualFold(q.Get("direction"), "DESC"), Size: -1}
 		if sizeErr == nil && size >= 0 {
 			pg.Start, pg.Size = max(number, 0)*size, size
 		}
 		if a := addedPagingOf(endpoint); a != nil {
 			if pg.SortBy == "" {
-				pg.SortBy, pg.Desc = a.DefaultSort, false
+				pg.SortBy, pg.Desc = a.defaultSort, false
 			}
 			pg.numeric = slices.Contains(a.numeric, pg.SortBy)
 		}
@@ -191,10 +191,10 @@ func PageList(next http.Handler) http.Handler {
 			writePage(w, rec.header, rec.Status, rec.Body.Bytes(), pg)
 			return
 		}
-		sp := &SQLPage{Page: pg}
+		sp := &SQLPage{page: pg}
 		cw := &claimWriter{w: w, sp: sp, header: http.Header{}}
 		defer cw.close()
-		next.ServeHTTP(cw, r2.WithContext(context.WithValue(r2.Context(), SQLPageKey{}, sp)))
+		next.ServeHTTP(cw, r2.WithContext(context.WithValue(r2.Context(), sqlPageKey{}, sp)))
 		cw.finish()
 	})
 }
@@ -202,13 +202,13 @@ func PageList(next http.Handler) http.Handler {
 // SQLPage is the sorted page pageList asks a handler for; claimed when the
 // handler reads it in SQL.
 type SQLPage struct {
-	Page
-	Claimed bool
+	page
+	claimed bool
 }
 
-// SQLPageKey is the request context key of the *SQLPage pageList asks a
+// sqlPageKey is the request context key of the *SQLPage pageList asks a
 // handler for.
-type SQLPageKey struct{}
+type sqlPageKey struct{}
 
 // SQLPageOrder is the ORDER BY clause of a list query. When pageList asks
 // for a sorted page by one of the sortable fields (sortBy value -> SQL
@@ -250,7 +250,7 @@ func SQLStablePageQuery(r *http.Request, sortable map[string]string, base, def s
 // the SQL expression of its sortBy, claiming it, or nil when there is none
 // or sortBy is not among sortable.
 func claimSortedPage(r *http.Request, sortable map[string]string) (*SQLPage, string) {
-	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
+	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
 	if sp == nil || sp.SortBy == "" {
 		return nil, ""
 	}
@@ -258,7 +258,7 @@ func claimSortedPage(r *http.Request, sortable map[string]string) (*SQLPage, str
 	if !ok {
 		return nil, ""
 	}
-	sp.Claimed = true
+	sp.claimed = true
 	return sp, expr
 }
 
@@ -269,8 +269,8 @@ func claimSortedPage(r *http.Request, sortable map[string]string) (*SQLPage, str
 // with LIMIT / OFFSET (orderLimit). It returns nil when the request asks
 // for no page or its sortBy is not among sortable.
 func ClaimListPage(r *http.Request, sortable map[string]string) (*SQLPage, string) {
-	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
-	if sp == nil || sp.Claimed {
+	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
+	if sp == nil || sp.claimed {
 		return nil, ""
 	}
 	expr := ""
@@ -280,7 +280,7 @@ func ClaimListPage(r *http.Request, sortable map[string]string) (*SQLPage, strin
 			return nil, ""
 		}
 	}
-	sp.Claimed = true
+	sp.claimed = true
 	return sp, expr
 }
 
@@ -298,7 +298,7 @@ func SQLListOrder(r *http.Request, sortable map[string]string, def string) strin
 // PageAsked reports whether pageList asks the request for a page, sorted
 // or not, for handlers that make their order stable only then.
 func PageAsked(r *http.Request) bool {
-	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
+	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
 	return sp != nil
 }
 
@@ -307,19 +307,19 @@ func PageAsked(r *http.Request) bool {
 // with an object that has the field, and the rows are sorted as pageList
 // sorts them.
 type KeyedPage struct {
-	pg    Page
+	pg    page
 	items []sortItem
 }
 
 // ClaimKeyedPage claims the sorted page pageList asks the request for, when
 // the handler has not read it in SQL, or returns nil.
 func ClaimKeyedPage(r *http.Request) *KeyedPage {
-	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
-	if sp == nil || sp.Claimed || sp.SortBy == "" {
+	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
+	if sp == nil || sp.claimed || sp.SortBy == "" {
 		return nil
 	}
-	sp.Claimed = true
-	return &KeyedPage{pg: sp.Page}
+	sp.claimed = true
+	return &KeyedPage{pg: sp.page}
 }
 
 // Add adds the row out, sorted by key's sortBy field.
@@ -385,13 +385,13 @@ func (c *claimWriter) decide() {
 		return
 	}
 	switch {
-	case c.sp.Claimed:
+	case c.sp.claimed:
 		c.out = c.w
 	case c.sp.SortBy == "":
-		c.window = &pageWindow{w: c.w, header: http.Header{}, status: http.StatusOK, page: c.sp.Page}
+		c.window = &pageWindow{w: c.w, header: http.Header{}, status: http.StatusOK, page: c.sp.page}
 		c.out = c.window
 	default:
-		c.top = newTopPage(c.w, c.sp.Page)
+		c.top = newTopPage(c.w, c.sp.page)
 		c.out = c.top
 	}
 	maps.Copy(c.out.Header(), c.header)
@@ -435,16 +435,16 @@ func (c *claimWriter) close() {
 // of the page and those before it (all when the page is unbounded). Any
 // other response passes as it is.
 type topPage struct {
-	*ElementWriter
+	*elementWriter
 	w     http.ResponseWriter
-	pg    Page
+	pg    page
 	items []sortItem // a heap of the kept items, worst first, while bounded
 	n     int
 }
 
-func newTopPage(w http.ResponseWriter, pg Page) *topPage {
+func newTopPage(w http.ResponseWriter, pg page) *topPage {
 	t := &topPage{w: w, pg: pg}
-	t.ElementWriter = NewElementWriter(func(http.Header) bool { return true }, t.add)
+	t.elementWriter = NewElementWriter(func(http.Header) bool { return true }, t.add)
 	return t
 }
 
@@ -509,7 +509,7 @@ func (t *topPage) down(i int) {
 
 // finish writes the page of a streamed array, or the response as it is.
 func (t *topPage) finish() {
-	if !t.ElementWriter.Finish() {
+	if !t.elementWriter.Finish() {
 		writePage(t.w, t.header, t.Status, t.Raw.Bytes(), t.pg)
 		return
 	}
@@ -534,9 +534,9 @@ func (t *topPage) finish() {
 	bw.Flush()
 }
 
-// Page is the requested page of a list: sorted by sortBy (if set), from
+// page is the requested page of a list: sorted by sortBy (if set), from
 // start, size items (all when size < 0).
-type Page struct {
+type page struct {
 	SortBy      string
 	Desc        bool
 	Start, Size int
@@ -546,7 +546,7 @@ type Page struct {
 }
 
 // item is the list item raw at index, with its key for the page's sortBy.
-func (pg Page) item(raw []byte, index int) sortItem {
+func (pg page) item(raw []byte, index int) sortItem {
 	it := newSortItem(raw, pg.SortBy, index)
 	if pg.numeric && !it.null && it.num == nil {
 		f, err := strconv.ParseFloat(strings.TrimSpace(it.str), 64)
@@ -561,7 +561,7 @@ func (pg Page) item(raw []byte, index int) sortItem {
 
 // writePage writes the page of a handler's whole response: an array of a
 // successful response is sorted and sliced, anything else passes as it is.
-func writePage(w http.ResponseWriter, header http.Header, status int, body []byte, pg Page) {
+func writePage(w http.ResponseWriter, header http.Header, status int, body []byte, pg page) {
 	maps.Copy(w.Header(), header)
 	var items []json.RawMessage
 	if status != http.StatusOK || json.Unmarshal(body, &items) != nil {
@@ -606,7 +606,7 @@ type pageWindow struct {
 	w         http.ResponseWriter
 	header    http.Header
 	status    int
-	page      Page
+	page      page
 	raw       bytes.Buffer
 	streaming bool
 	pw        *io.PipeWriter
@@ -757,7 +757,7 @@ func newSortItem(raw []byte, field string, index int) sortItem {
 // before reports whether a precedes b in the sorted list: keyed items in
 // the page's direction, then the items without a key (ClickHouse's NULLS
 // LAST, either direction), ties in list order.
-func (pg Page) before(a, b sortItem) bool {
+func (pg page) before(a, b sortItem) bool {
 	if a.null != b.null {
 		return b.null
 	}
@@ -779,7 +779,7 @@ func (pg Page) before(a, b sortItem) bool {
 }
 
 // compare is before as a comparison function.
-func (pg Page) compare(a, b sortItem) int {
+func (pg page) compare(a, b sortItem) int {
 	switch {
 	case a.index == b.index:
 		return 0
@@ -792,7 +792,7 @@ func (pg Page) compare(a, b sortItem) int {
 // sortItems sorts JSON objects by one top-level field as page.before orders
 // them.
 func sortItems(items []json.RawMessage, field string, desc bool) {
-	pg := Page{SortBy: field, Desc: desc}
+	pg := page{SortBy: field, Desc: desc}
 	ks := make([]sortItem, len(items))
 	for i, it := range items {
 		ks[i] = newSortItem(it, field, i)

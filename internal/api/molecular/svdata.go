@@ -13,9 +13,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteSvData registers the structural-variant detail, gene-panel-data, and
+// routeSvData registers the structural-variant detail, gene-panel-data, and
 // multi-study molecular-data endpoints.
-func (s Server) RouteSvData(mux *http.ServeMux) {
+func (s Server) routeSvData(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/structural-variant/fetch", s.structuralVariantFetch)
 	mux.HandleFunc("POST /api/gene-panel-data/fetch", s.genePanelDataFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/gene-panel-data/fetch", s.genePanelDataProfileFetch)
@@ -188,7 +188,7 @@ func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 
 	cols := SVSelectColumns(s.SVViewColumns())
 	order := " ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId"
-	if sp, expr := core.ClaimListPage(r, StructuralVariantSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, structuralVariantSortable); sp != nil {
 		// Records of one gene pair in a sample tie in that order; a page
 		// breaks the ties by every field, so pages do not overlap.
 		tie := []string{"site1HugoSymbol", "site2HugoSymbol", "studyId", "sampleId"}
@@ -213,10 +213,10 @@ func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	out.Finish(err)
 }
 
-// StructuralVariantSortable are the sortBy fields of structural variants
+// structuralVariantSortable are the sortBy fields of structural variants
 // over svSelectColumns' aliases, as the records carry them: counts and
 // positions as numbers (-1 when empty), empty text as "NA".
-var StructuralVariantSortable = map[string]string{
+var structuralVariantSortable = map[string]string{
 	"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId", "molecularProfileId": "molecularProfileId",
 	"site1EntrezGeneId": "site1EntrezGeneId", "site1HugoSymbol": "site1HugoSymbol", "site1Chromosome": svNA("site1Chromosome"),
 	"site1Position":     svNum("site1Position"),
@@ -355,18 +355,21 @@ type gpReq struct {
 	sampleID  string
 }
 
-type panelProfile struct {
+// PanelProfile is a molecular profile's id, study and stable id.
+type PanelProfile struct {
 	MolecularProfileID string `json:"molecularProfileId"`
 	StudyID            string `json:"studyId"`
 	StableID           string `json:"stableId"`
 }
 
-func (s Server) ResolvePanelProfiles(ids []string) map[string]panelProfile {
-	out := map[string]panelProfile{}
+// ResolvePanelProfiles looks up the molecular profiles ids (cached), keyed
+// by id; unknown ids are left out.
+func (s Server) ResolvePanelProfiles(ids []string) map[string]PanelProfile {
+	out := map[string]PanelProfile{}
 	if len(ids) == 0 {
 		return out
 	}
-	rows, _ := core.CachedQueryP[panelProfile](s.State,
+	rows, _ := core.CachedQueryP[PanelProfile](s.State,
 		"SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, profile_stable_id AS stableId "+
 			"FROM molecular_profile WHERE molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": ids})
 	for _, r := range rows {
@@ -375,6 +378,7 @@ func (s Server) ResolvePanelProfiles(ids []string) map[string]panelProfile {
 	return out
 }
 
+// JoinKey joins parts into one map key.
 func JoinKey(parts ...string) string { return strings.Join(parts, "\x00") }
 
 func (s Server) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +668,7 @@ func (s Server) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	query := "SELECT sampleId, patientId, entrezGeneId, hugoGeneSymbol, geneType, value, molecularProfileId, studyId FROM (" +
 		strings.Join(parts, " UNION ALL ") + ")"
 	// A page holds the records the numeric filter below keeps.
-	if sp, expr := core.ClaimListPage(r, MolecularDataMultiSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, molecularDataMultiSortable); sp != nil {
 		query += " WHERE " + core.JavaNumericSQL("value") + sp.OrderLimit(expr, order)
 	} else {
 		query += " ORDER BY " + order
@@ -685,9 +689,9 @@ func (s Server) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	out.Finish(err)
 }
 
-// MolecularDataMultiSortable are molecularDataSortable over the columns of
+// molecularDataMultiSortable are molecularDataSortable over the columns of
 // the multi-profile fetch.
-var MolecularDataMultiSortable = map[string]string{
+var molecularDataMultiSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId",
 	"studyId": "studyId", "molecularProfileId": "molecularProfileId", "value": "toFloat64OrNull(value)",
 }
@@ -718,6 +722,7 @@ func (s Server) SVViewColumns() map[string]bool {
 	return out
 }
 
+// JoinPreds joins the non-empty SQL predicates with AND ("1 = 1" for none).
 func JoinPreds(preds ...string) string {
 	var out []string
 	for _, p := range preds {

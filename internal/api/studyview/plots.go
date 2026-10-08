@@ -136,7 +136,7 @@ func queryIntDefault(r *http.Request, name string, def int) int {
 	return def
 }
 
-func (s Server) ClinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 
@@ -277,7 +277,7 @@ type ClinicalViolinPlotData struct {
 
 const violinShowOnlyPointsThreshold = 7
 
-func (s Server) ClinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 

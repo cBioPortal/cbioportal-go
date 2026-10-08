@@ -10,10 +10,10 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteResources registers the resource-definition and resource-data
+// routeResources registers the resource-definition and resource-data
 // endpoints (ResourceDefinitionController / ResourceDataController), served
 // from the resource_definition and resource_{study,patient,sample} views.
-func (s Server) RouteResources(mux *http.ServeMux) {
+func (s Server) routeResources(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/resource-definitions", s.resourceDefinitionsInStudy)
 	mux.HandleFunc("GET /api/studies/{studyId}/resource-definitions/{resourceId}", s.resourceDefinitionInStudy)
 	mux.HandleFunc("POST /api/resource-definitions/fetch", s.resourceDefinitionsFetch)

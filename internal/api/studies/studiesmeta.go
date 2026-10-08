@@ -28,7 +28,7 @@ func (s Server) StudiesMeta(w http.ResponseWriter, r *http.Request) {
 	r2.URL.RawPath = ""
 	r2.URL.RawQuery = meta.Encode()
 	rec := core.NewBufferedResponse()
-	s.Studies(rec, r2)
+	s.studies(rec, r2)
 	if rec.Status != http.StatusOK {
 		w.WriteHeader(rec.Status)
 		w.Write(rec.Body.Bytes())

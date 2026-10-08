@@ -9,10 +9,10 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteGenericAssay2 registers the generic-assay study-view aggregation
+// routeGenericAssay2 registers the generic-assay study-view aggregation
 // endpoints (categorical value counts + numeric bin counts) and the
 // single-entity metadata / data GETs.
-func (s Server) RouteGenericAssay2(mux *http.ServeMux) {
+func (s Server) routeGenericAssay2(mux *http.ServeMux) {
 	// Single-entity data + metadata GETs.
 	mux.HandleFunc("GET /api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", s.genericAssayDataInProfileGet)
 	mux.HandleFunc("GET /api/generic-assay-meta/generic-assay/{genericAssayStableId}", s.genericAssayMetaByStableIdGet)

@@ -127,11 +127,11 @@ func (a *arraySplitter) feed(p []byte, elem func([]byte) error) error {
 // complete reports whether the whole array has been fed.
 func (a *arraySplitter) complete() bool { return a.state == splitDone }
 
-// ElementWriter receives a handler's response. A successful response whose
+// elementWriter receives a handler's response. A successful response whose
 // body is a JSON array is handed to its consumer element by element as the
 // handler writes it, so the array is never held; any other response is kept
 // whole for whole.
-type ElementWriter struct {
+type elementWriter struct {
 	header    http.Header
 	Status    int
 	Raw       bytes.Buffer
@@ -148,22 +148,22 @@ type ElementWriter struct {
 
 // NewElementWriter returns an ElementWriter calling start with the response
 // header and elem with each array element.
-func NewElementWriter(start func(http.Header) bool, elem func([]byte) error) *ElementWriter {
-	return &ElementWriter{header: http.Header{}, Status: http.StatusOK, start: start, elem: elem}
+func NewElementWriter(start func(http.Header) bool, elem func([]byte) error) *elementWriter {
+	return &elementWriter{header: http.Header{}, Status: http.StatusOK, start: start, elem: elem}
 }
 
 // Header returns the response header the handler sets.
-func (e *ElementWriter) Header() http.Header { return e.header }
+func (e *elementWriter) Header() http.Header { return e.header }
 
 // WriteHeader records the status of a response not yet streamed.
-func (e *ElementWriter) WriteHeader(code int) {
+func (e *elementWriter) WriteHeader(code int) {
 	if e.Raw.Len() == 0 && !e.streaming {
 		e.Status = code
 	}
 }
 
 // Write streams the array's elements, or keeps the response it cannot split.
-func (e *ElementWriter) Write(p []byte) (int, error) {
+func (e *elementWriter) Write(p []byte) (int, error) {
 	if e.err != nil {
 		return 0, e.err
 	}
@@ -196,7 +196,7 @@ func (e *ElementWriter) Write(p []byte) (int, error) {
 
 // Finish reports whether the response was streamed; one that ended
 // incomplete or failed to split aborts the response.
-func (e *ElementWriter) Finish() bool {
+func (e *elementWriter) Finish() bool {
 	if !e.streaming {
 		return false
 	}

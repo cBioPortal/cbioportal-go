@@ -14,8 +14,8 @@ type ClinicalAttributeCount struct {
 	Count               uint64 `json:"count"`
 }
 
-// ClinicalAttributeCountsFetch serves POST /api/clinical-attributes/counts/fetch.
-func (s Server) ClinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
+// clinicalAttributeCountsFetch serves POST /api/clinical-attributes/counts/fetch.
+func (s Server) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers []core.Identifier `json:"sampleIdentifiers"`
 		SampleListID      string            `json:"sampleListId"`

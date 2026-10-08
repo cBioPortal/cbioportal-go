@@ -76,12 +76,12 @@ var sampleListSortable = map[string]string{
 	"sampleListId": "list_id", "category": "category", "studyId": "study_id", "name": "name", "description": "description",
 }
 
-func (s Server) StudySampleLists(w http.ResponseWriter, r *http.Request) {
+func (s Server) studySampleLists(w http.ResponseWriter, r *http.Request) {
 	s.sampleListsQuery(w, r, core.ByStudy(r.PathValue("studyId")), false)
 }
 
-// SampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
-func (s Server) SampleList(w http.ResponseWriter, r *http.Request) {
+// sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
+func (s Server) sampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p := ch.Params{}
 	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect(core.ParamsBinder(p), s.BySampleList(id))+
@@ -97,7 +97,7 @@ func (s Server) SampleList(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, toSampleList(rows[0]))
 }
 
-func (s Server) SampleListsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 {

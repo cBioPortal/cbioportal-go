@@ -9,9 +9,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteSignificance registers the per-study GISTIC and MutSig endpoints
+// routeSignificance registers the per-study GISTIC and MutSig endpoints
 // (SignificantCopyNumberRegionController / SignificantlyMutatedGenesController).
-func (s Server) RouteSignificance(mux *http.ServeMux) {
+func (s Server) routeSignificance(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/significant-copy-number-regions", s.significantCopyNumberRegions)
 	mux.HandleFunc("GET /api/studies/{studyId}/significantly-mutated-genes", s.significantlyMutatedGenes)
 }

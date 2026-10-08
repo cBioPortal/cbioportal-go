@@ -19,11 +19,11 @@ type GeneRow struct {
 	Type           string `json:"type"`
 }
 
-// GenesFetch resolves gene identifiers against the reference. Body is a JSON
+// genesFetch resolves gene identifiers against the reference. Body is a JSON
 // array of entrez ids (numbers) or Hugo symbols (strings); `geneIdType` query
 // param (ENTREZ_GENE_ID / HUGO_GENE_SYMBOL) hints which, but we detect per
 // item. Unknown identifiers are skipped.
-func (s Server) GenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesFetch(w http.ResponseWriter, r *http.Request) {
 	var raw []json.RawMessage
 	core.ReadBody(r, &raw)
 	if len(raw) == 0 {
@@ -63,8 +63,8 @@ func (s Server) GenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, rows)
 }
 
-// Gene by id (entrez or hugo).
-func (s Server) Gene(w http.ResponseWriter, r *http.Request) {
+// gene by id (entrez or hugo).
+func (s Server) gene(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cond := "upper(hugo_gene_symbol) = {symbol:String}"
 	p := ch.Params{"symbol": strings.ToUpper(id)}

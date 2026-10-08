@@ -102,12 +102,12 @@ func TestReshape(t *testing.T) {
 }
 
 func TestMatchContract(t *testing.T) {
-	rt, vals := MatchContract("GET", "/api/studies/s1/patients/p1/samples")
+	rt, vals := matchContract("GET", "/api/studies/s1/patients/p1/samples")
 	if rt == nil || rt.pattern != "/api/studies/{studyId}/patients/{patientId}/samples" ||
 		vals["studyId"] != "s1" || vals["patientId"] != "p1" {
 		t.Fatalf("match = %v %v", rt, vals)
 	}
-	if rt, _ := MatchContract("POST", "/api/studies/s1/patients/p1/samples"); rt != nil {
+	if rt, _ := matchContract("POST", "/api/studies/s1/patients/p1/samples"); rt != nil {
 		t.Fatal("method ignored")
 	}
 }

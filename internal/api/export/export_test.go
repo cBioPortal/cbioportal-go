@@ -60,7 +60,7 @@ func TestLongMatrixSamples(t *testing.T) {
 func TestExportDisabled(t *testing.T) {
 	s := New(&core.State{})
 	mux := http.NewServeMux()
-	s.RouteExport(mux)
+	s.Routes(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/export/study/study_es_0.zip", nil))
 	if w.Header().Get("Content-Type") == "application/zip" || w.Header().Get("Content-Disposition") != "" {

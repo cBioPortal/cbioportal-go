@@ -25,7 +25,7 @@ type sessionTestEnv struct {
 func newSessionTestEnv(t *testing.T, storePath string) *sessionTestEnv {
 	s := New(&core.State{Sessions: sessionstore.NewMemoryStore(storePath)})
 	mux := http.NewServeMux()
-	s.RouteSession(mux)
+	s.Routes(mux)
 	return &sessionTestEnv{t: t, s: s, mux: mux}
 }
 

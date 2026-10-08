@@ -14,9 +14,9 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
 
-// RouteStudyView3 registers study-view endpoints for clinical-data enrichments,
+// routeStudyView3 registers study-view endpoints for clinical-data enrichments,
 // the clinical-data table and custom (session) charts.
-func (s Server) RouteStudyView3(mux *http.ServeMux) {
+func (s Server) routeStudyView3(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clinical-data-enrichments/fetch", s.clinicalDataEnrichmentsFetch)
 	mux.HandleFunc("POST /api/clinical-data-table/fetch", s.clinicalDataTableFetch)
 	mux.HandleFunc("POST /api/custom-data-counts/fetch", s.customDataCountsFetch)

@@ -7,9 +7,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteCancerTypes registers the single cancer type lookup; the list endpoint
+// routeCancerTypes registers the single cancer type lookup; the list endpoint
 // is registered in routes.go.
-func (s Server) RouteCancerTypes(mux *http.ServeMux) {
+func (s Server) routeCancerTypes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/cancer-types/{cancerTypeId}", s.cancerType)
 }
 

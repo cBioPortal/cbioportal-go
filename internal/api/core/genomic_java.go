@@ -143,23 +143,23 @@ func writeJSONToken(b *bytes.Buffer, tok json.Token) error {
 	return nil
 }
 
-// DriverAnnotation holds the alteration_driver_annotation columns of a
+// driverAnnotation holds the alteration_driver_annotation columns of a
 // record. The importer writes that row only when the driver filter or the
 // driver tiers filter has a value other than empty / NA; without the row all
 // four fields are null.
-type DriverAnnotation struct {
+type driverAnnotation struct {
 	Filter, FilterAnn, TiersFilter, TiersFilterAnn *string
 }
 
 // NewDriverAnnotation returns the driver annotation columns of an alteration
 // (nil where not given or NA); fieldValue reads the record's columns.
-func NewDriverAnnotation(filter, filterAnn, tiers, tiersAnn string, fieldValue func(string) string) DriverAnnotation {
+func NewDriverAnnotation(filter, filterAnn, tiers, tiersAnn string, fieldValue func(string) string) driverAnnotation {
 	given := func(v string) bool { return v != "" && !strings.EqualFold(v, "NA") }
 	if !given(filter) && !given(tiers) {
-		return DriverAnnotation{}
+		return driverAnnotation{}
 	}
 	ptr := func(v string) *string { v = fieldValue(v); return &v }
-	return DriverAnnotation{ptr(filter), ptr(filterAnn), ptr(tiers), ptr(tiersAnn)}
+	return driverAnnotation{ptr(filter), ptr(filterAnn), ptr(tiers), ptr(tiersAnn)}
 }
 
 // MAFDriverFilter is how MafUtil reads the driver filter columns

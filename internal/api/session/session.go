@@ -97,7 +97,8 @@ func readObject(r *http.Request) (map[string]any, error) {
 	return m, nil
 }
 
-func (s Server) RouteSession(mux *http.ServeMux) {
+// Routes registers the session service and virtual study endpoints.
+func (s Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/session/{type}", s.sessionAdd)
 	mux.HandleFunc("POST /api/session/virtual_study/save", s.sessionAddWith("virtual_study", true))
 	mux.HandleFunc("POST /api/session/custom_gene_list/save", s.sessionAddWith("custom_gene_list", true))

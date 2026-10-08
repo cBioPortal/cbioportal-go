@@ -7,15 +7,16 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/auth"
-	"github.com/cbioportal/cbioportal-go/internal/api/comparison"
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
-// State is the API's state: the handlers' servers plus the login.
+// State is the API's state: the core.State the handler packages serve
+// from, plus the login.
 type State struct {
-	comparison.Server
+	*core.State
 	// auth is the login; nil serves every study anonymously.
 	auth *auth.Login
 }
@@ -26,7 +27,7 @@ func NewState(c *ch.Client) *State { return newState(core.NewState(c)) }
 
 // newState returns the API state over cs, without a login.
 func newState(cs *core.State) *State {
-	return &State{Server: comparison.New(cs)}
+	return &State{State: cs}
 }
 
 // MetricsHandler serves the Prometheus metrics.
@@ -52,7 +53,7 @@ func (s *State) ConfigureAuth() error {
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	h := auth.BearerAuth(s.auth != nil, s.StudyAvailability(core.ExtraEndpoints(s.StudiesMeta, core.UninterceptedFetch(core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
+	h := auth.BearerAuth(s.auth != nil, s.StudyAvailability(core.ExtraEndpoints(studies.New(s.State).StudiesMeta, core.UninterceptedFetch(core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
 	if s.auth != nil {
 		h = s.auth.Wrap(s.State, h)
 	}

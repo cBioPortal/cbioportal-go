@@ -10,9 +10,9 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// RouteCompat registers endpoints that are thin views over others: the GET
+// routeCompat registers endpoints that are thin views over others: the GET
 // molecular-data form and mRNA percentiles.
-func (s Server) RouteCompat(mux *http.ServeMux) {
+func (s Server) routeCompat(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/molecular-profiles/{id}/molecular-data", s.molecularDataGet)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/mrna-percentile/fetch", s.mrnaPercentileFetch)
 }

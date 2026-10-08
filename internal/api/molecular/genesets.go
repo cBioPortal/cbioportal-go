@@ -127,8 +127,8 @@ func (s Server) genesetsForIDs(ids []string) ([]Geneset, error) {
 	return out, nil
 }
 
-// GenesetsList serves GET /api/genesets: every gene set by id.
-func (s Server) GenesetsList(w http.ResponseWriter, r *http.Request) {
+// genesetsList serves GET /api/genesets: every gene set by id.
+func (s Server) genesetsList(w http.ResponseWriter, r *http.Request) {
 	out, err := s.genesetsForIDs(nil)
 	if err != nil {
 		core.Fail(w, r, err)
@@ -177,11 +177,11 @@ func (s Server) genesetGet(w http.ResponseWriter, r *http.Request) {
 // reported when the reference database has none.
 const SeedGenesetVersion = "msigdb_v2025.1.Hs"
 
-// GenesetVersion serves GET /api/genesets/version (GenesetMapper
+// genesetVersion serves GET /api/genesets/version (GenesetMapper
 // .getGenesetVersion, the info table's geneset_version): the version
 // load-genesets recorded, else that of a reference database with cBioPortal's
 // info table (a production clone), else the seed's.
-func (s Server) GenesetVersion(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesetVersion(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		V string `json:"v"`
 	}
@@ -385,12 +385,12 @@ func hierarchyParam(w http.ResponseWriter, q map[string][]string, name, def stri
 	return x, true
 }
 
-// GenesetHierarchyFetch serves POST /api/geneset-hierarchy/fetch
+// genesetHierarchyFetch serves POST /api/geneset-hierarchy/fetch
 // (GenesetHierarchyController, GenesetHierarchyServiceImpl): the hierarchy
 // nodes leading to gene sets that the GSVA-SCORE profile scores and whose
 // representative score and p-value pass the thresholds, over the samples of
 // sampleListId, the body's sample ids, or the whole study.
-func (s Server) GenesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
 	var bodyIDs []string
 	core.ReadBody(r, &bodyIDs)
 	q := r.URL.Query()
@@ -828,11 +828,11 @@ type GenesetCorrelation struct {
 	ZScoreGeneticProfileID     string  `json:"zScoreGeneticProfileId"`
 }
 
-// GenesetExpressionCorrelationFetch computes, for the given geneset, the Spearman
+// genesetExpressionCorrelationFetch computes, for the given geneset, the Spearman
 // correlation of its per-sample GSVA score against each gene's mRNA expression
 // (like co-expression). The correlation is pushed into ClickHouse (spearmanSQL) so
 // only genes above the threshold cross the wire. Shape: []GenesetCorrelation.
-func (s Server) GenesetExpressionCorrelationFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http.Request) {
 	genesetID := r.PathValue("genesetId")
 
 	// Optional body: a custom list of sample ids to restrict the correlation to.

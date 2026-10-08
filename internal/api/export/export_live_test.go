@@ -102,7 +102,7 @@ func TestLiveExportGeneKeyColumns(t *testing.T) {
 	c.SetDatabaseAliases(rawDB, refDB)
 	s := New(&core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}})
 	mux := http.NewServeMux()
-	s.RouteExport(mux)
+	s.Routes(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/export/study/export_gene_keys.zip", nil))
 	body := w.Body.Bytes()

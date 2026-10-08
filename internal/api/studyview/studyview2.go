@@ -8,10 +8,10 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// RouteStudyView2 registers the remaining study-view aggregation endpoints:
+// routeStudyView2 registers the remaining study-view aggregation endpoints:
 // numeric clinical bins, mutation/genomic data counts, treatments, and
 // case-list (sample-list) counts.
-func (s Server) RouteStudyView2(mux *http.ServeMux) {
+func (s Server) routeStudyView2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/clinical-data-bin-counts/fetch", s.clinicalDataBinCountsFetch)
 	mux.HandleFunc("POST /api/mutation-data-counts/fetch", s.mutationDataCountsFetch)
 	mux.HandleFunc("POST /api/genomic-data-counts/fetch", s.genomicDataCountsFetch)

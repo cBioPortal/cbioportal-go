@@ -84,7 +84,7 @@ type molecularDataFilter struct {
 	SampleListID  string   `json:"sampleListId"`
 }
 
-func (s Server) MolecularDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f molecularDataFilter
 	core.ReadBody(r, &f)
 	if core.NoSamples(f.SampleIDs, f.SampleListID) {
@@ -105,12 +105,12 @@ func (s Server) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 	s.streamMolecularData(w, r, r.PathValue("id"), f)
 }
 
-// MolecularDataSortable are the sortBy fields of molecular data records
+// molecularDataSortable are the sortBy fields of molecular data records
 // (MolecularDataSortBy) as SQL expressions over molecularDataRow's columns,
 // plus the profile and study of the multi-profile fetch. value sorts as a
 // number. A field that is the same in every record leaves the order as it
 // is.
-var MolecularDataSortable = map[string]string{
+var molecularDataSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId",
 	"studyId": "", "molecularProfileId": "", "value": "toFloat64OrNull(value)",
 }
@@ -130,7 +130,7 @@ func (s Server) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid
 		return
 	}
 	out := core.NewJSONArray(w, r)
-	err := s.molecularDataPage(r, mpid, f, MolecularDataSortable, core.JavaNumericSQL("value"), func(d MolecularData) error {
+	err := s.molecularDataPage(r, mpid, f, molecularDataSortable, core.JavaNumericSQL("value"), func(d MolecularData) error {
 		if rec, ok := numericRecord(d, projection); ok {
 			return out.Add(rec)
 		}

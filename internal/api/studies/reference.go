@@ -11,9 +11,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteReference registers gene-alias resolution and the
+// routeReference registers gene-alias resolution and the
 // reference-genome-gene endpoints.
-func (s Server) RouteReference(mux *http.ServeMux) {
+func (s Server) routeReference(mux *http.ServeMux) {
 	// Gene aliases + reference genome genes.
 	mux.HandleFunc("GET /api/genes/{geneId}/aliases", s.geneAliases)
 	mux.HandleFunc("GET /api/reference-genome-genes/{genomeName}", s.referenceGenomeGenes)

@@ -49,7 +49,7 @@ func TestSplitTopLevelValue(t *testing.T) {
 
 func TestOpenAPIDocs(t *testing.T) {
 	mux := http.NewServeMux()
-	New(&core.State{}).RouteAPIDocs(mux)
+	New(&core.State{}).Routes(mux)
 	get := func(path string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Host = "go.example.org"

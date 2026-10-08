@@ -8,9 +8,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteStudyTags registers the study-tags endpoints (StudyController), served
+// routeStudyTags registers the study-tags endpoints (StudyController), served
 // from the cancer_study_tags view (the study's tags_file YAML stored as JSON).
-func (s Server) RouteStudyTags(mux *http.ServeMux) {
+func (s Server) routeStudyTags(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/tags", s.studyTagsGet)
 	mux.HandleFunc("POST /api/studies/tags/fetch", s.studyTagsFetch)
 }

@@ -4,123 +4,31 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/apidocs"
+	"github.com/cbioportal/cbioportal-go/internal/api/comparison"
 	"github.com/cbioportal/cbioportal-go/internal/api/export"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/portal"
 	"github.com/cbioportal/cbioportal-go/internal/api/session"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
+	"github.com/cbioportal/cbioportal-go/internal/api/studyview"
 )
 
+// routes registers every endpoint on mux: each area package's, the health
+// check, the OncoKB proxy, the data-access-token endpoints and the
+// catch-all.
 func (s *State) routes(mux *http.ServeMux) {
 	s.SetMux(mux)
-	// Bootstrap / config
-	mux.HandleFunc("GET /config_service", portal.New(s.State).ConfigService)
-	mux.HandleFunc("GET /api/info", portal.New(s.State).Info)
-	apidocs.New(s.State).RouteAPIDocs(mux)
-	mux.HandleFunc("GET /api/cancer-types", s.CancerTypes)
+	portal.New(s.State).Routes(mux)
+	apidocs.New(s.State).Routes(mux)
+	session.New(s.State).Routes(mux)
+	studies.New(s.State).Routes(mux)
+	molecular.New(s.State).Routes(mux)
+	studyview.New(s.State).Routes(mux)
+	comparison.New(s.State).Routes(mux)
+	export.New(s.State).Routes(mux)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
+	s.routeProxy(mux)
+	s.auth.RouteDataAccessTokens(s.State, mux)
 	// Catch-all: 404 for unknown /api/ paths, the portal UI for the rest.
 	mux.HandleFunc("/", s.CatchAll)
-
-	// Session service + public virtual studies
-	session.New(s.State).RouteSession(mux)
-
-	// Studies
-	mux.HandleFunc("GET /api/studies", s.Studies)
-	mux.HandleFunc("POST /api/studies/fetch", s.StudiesFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}", s.Study)
-
-	// Samples / patients
-	mux.HandleFunc("GET /api/studies/{studyId}/samples", s.Samples)
-	mux.HandleFunc("POST /api/samples/fetch", s.SamplesFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients", s.Patients)
-	mux.HandleFunc("POST /api/patients/fetch", s.PatientsFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}", s.Patient)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/samples", s.SamplesOfPatient)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-data", s.PatientClinicalData)
-	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/clinical-data", s.SampleClinicalData)
-
-	// Clinical
-	mux.HandleFunc("GET /api/studies/{studyId}/clinical-data", s.ClinicalData)
-	mux.HandleFunc("POST /api/studies/{studyId}/clinical-data/fetch", s.ClinicalDataStudyFetch)
-	mux.HandleFunc("POST /api/clinical-attributes/fetch", s.ClinicalAttributesFetch)
-	mux.HandleFunc("POST /api/clinical-attributes/counts/fetch", s.ClinicalAttributeCountsFetch)
-
-	// Molecular profiles
-	mux.HandleFunc("GET /api/molecular-profiles", s.MolecularProfiles)
-	mux.HandleFunc("POST /api/molecular-profiles/fetch", s.MolecularProfilesFetch)
-	mux.HandleFunc("GET /api/molecular-profiles/{id}", s.MolecularProfile)
-	mux.HandleFunc("GET /api/studies/{studyId}/molecular-profiles", s.StudyMolecularProfiles)
-
-	// Mutations
-	mux.HandleFunc("GET /api/molecular-profiles/{id}/mutations", s.Mutations)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/mutations/fetch", s.MutationsFetchProfile)
-	mux.HandleFunc("POST /api/mutations/fetch", s.MutationsFetch)
-
-	// Molecular (CNA/expression/…) data
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/molecular-data/fetch", s.MolecularDataFetch)
-
-	// Sample lists (case sets)
-	mux.HandleFunc("GET /api/studies/{studyId}/sample-lists", s.StudySampleLists)
-	mux.HandleFunc("GET /api/sample-lists/{id}", s.SampleList)
-	mux.HandleFunc("POST /api/sample-lists/fetch", s.SampleListsFetch)
-
-	// Genes
-	mux.HandleFunc("POST /api/genes/fetch", s.GenesFetch)
-	mux.HandleFunc("GET /api/genes/{id}", s.Gene)
-
-	// Gene panels
-	mux.HandleFunc("GET /api/gene-panels", s.GenePanels)
-	mux.HandleFunc("POST /api/gene-panels/fetch", s.GenePanelsFetch)
-	mux.HandleFunc("GET /api/gene-panels/{id}", s.GenePanel)
-
-	// Study-view aggregations
-	mux.HandleFunc("POST /api/filtered-samples/fetch", s.FilteredSamplesFetch)
-	mux.HandleFunc("POST /api/clinical-data-counts/fetch", s.ClinicalDataCountsFetch)
-	mux.HandleFunc("POST /api/mutated-genes/fetch", s.MutatedGenesFetch)
-	mux.HandleFunc("POST /api/cna-genes/fetch", s.CNAGenesFetch)
-	mux.HandleFunc("POST /api/structuralvariant-genes/fetch", s.SVGenesFetch)
-	mux.HandleFunc("POST /api/molecular-profile-sample-counts/fetch", s.MolecularProfileSampleCountsFetch)
-
-	mux.HandleFunc("POST /api/clinical-data/fetch", s.ClinicalDataFetch)
-
-	// Gene sets and copy-number segments.
-	mux.HandleFunc("GET /api/genesets", s.GenesetsList)
-	mux.HandleFunc("GET /api/genesets/version", s.GenesetVersion)
-	mux.HandleFunc("POST /api/geneset-hierarchy/fetch", s.GenesetHierarchyFetch)
-	mux.HandleFunc("POST /api/genesets/{genesetId}/expression-correlation/fetch", s.GenesetExpressionCorrelationFetch)
-	mux.HandleFunc("POST /api/copy-number-segments/fetch", s.CopyNumberSegmentsFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/copy-number-segments", s.SampleCopyNumberSegments)
-
-	// Study-view plots and counts.
-	mux.HandleFunc("POST /api/clinical-data-density-plot/fetch", s.ClinicalDataDensityPlotFetch)
-	mux.HandleFunc("POST /api/clinical-data-violin-plots/fetch", s.ClinicalDataViolinPlotsFetch)
-	mux.HandleFunc("POST /api/generic-assay-data-counts/fetch", s.GenericAssayDataCountsFetch)
-	mux.HandleFunc("POST /api/generic-assay-data-bin-counts/fetch", s.GenericAssayDataBinCountsFetch)
-	mux.HandleFunc("POST /api/structuralvariant-counts/fetch", s.SVCountsFetch)
-
-	// Endpoint groups implemented in separate handler files.
-	s.RouteGenericAssay(mux)
-	s.RouteStudyView2(mux)
-	s.RouteSvData(mux)
-	s.RouteEnrichment(mux)
-	s.RouteEnrichment2(mux)
-	s.RouteMisc(mux)
-	s.RouteCoexpression(mux)
-	s.RouteSurvival(mux)
-	s.RouteStudyView3(mux)
-	s.RouteGenericAssay2(mux)
-	s.RouteMolecular2(mux)
-	s.RouteReference(mux)
-	s.RouteBulkList(mux)
-	s.RouteResources(mux)
-	s.RouteSignificance(mux)
-	s.RouteStudyTags(mux)
-	s.RouteNamespace(mux)
-	portal.New(s.State).RouteStatus(mux)
-	s.RouteCancerTypes(mux)
-	mux.HandleFunc("POST /api/custom-driver-annotation-report/fetch", portal.New(s.State).CustomDriverAnnotationReport)
-	s.RouteTreatments(mux)
-	s.RouteCompat(mux)
-	s.routeProxy(mux)
-	export.New(s.State).RouteExport(mux)
-	s.auth.RouteDataAccessTokens(s.State, mux)
 }

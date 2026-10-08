@@ -38,7 +38,8 @@ import (
 // genetic entities (phosphoprotein genes, generic assay entities and their
 // meta properties) are not modeled here — and virtual studies.
 
-func (s Server) RouteExport(mux *http.ServeMux) {
+// Routes registers the study export endpoint.
+func (s Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /export/study/{file}", s.exportStudy)
 }
 

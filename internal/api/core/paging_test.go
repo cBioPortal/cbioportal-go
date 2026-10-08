@@ -55,7 +55,7 @@ func TestPageListStreams(t *testing.T) {
 		if status == 0 {
 			status = http.StatusOK
 		}
-		pg := Page{Size: -1}
+		pg := page{Size: -1}
 		var size, number int
 		if _, err := fmt.Sscanf(c.query, "pageSize=%d&pageNumber=%d", &size, &number); err == nil || size > 0 || strings.HasPrefix(c.query, "pageSize=0") {
 			pg.Start, pg.Size = number*size, size

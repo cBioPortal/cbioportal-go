@@ -11,11 +11,11 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteMolecular2 registers discrete copy-number, mutation-spectrum,
+// routeMolecular2 registers discrete copy-number, mutation-spectrum,
 // variant-count, mutation-count-by-position and structural-variant-count
 // endpoints. All filtering/aggregation is pushed into ClickHouse; Go only maps
 // the final rows into the cBioPortal client JSON shapes.
-func (s Server) RouteMolecular2(mux *http.ServeMux) {
+func (s Server) routeMolecular2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number/fetch", s.discreteCopyNumberFetch)
 	mux.HandleFunc("GET /api/molecular-profiles/{id}/discrete-copy-number", s.discreteCopyNumberGet)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number-counts/fetch", s.copyNumberCountsFetch)
@@ -181,7 +181,7 @@ func (s Server) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 	}
 	out := core.NewJSONArray(w, r)
 	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
-	query := sel + core.SQLListOrder(r, CNAEventSortable, "entrezGeneId, alteration, c.sample_id")
+	query := sel + core.SQLListOrder(r, cnaEventSortable, "entrezGeneId, alteration, c.sample_id")
 	err := ch.QueryEachP(s.CH, query, p,
 		func(r *discreteCnaRow) error {
 			// CnaUtil reads the driver columns with getPartString: empty is "NA".
@@ -209,15 +209,15 @@ func (s Server) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 	out.Finish(err)
 }
 
-// CNAEventSortable are the sortBy fields of discrete copy-number records
+// cnaEventSortable are the sortBy fields of discrete copy-number records
 // read from the CNA events.
-var CNAEventSortable = map[string]string{
+var cnaEventSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId", "alteration": "alteration",
 }
 
-// CNAValueSortable are the sortBy fields of discrete copy-number records
+// cnaValueSortable are the sortBy fields of discrete copy-number records
 // read from the profile's values.
-var CNAValueSortable = map[string]string{
+var cnaValueSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId", "alteration": cnaValueSQL,
 }
 
@@ -242,7 +242,7 @@ func (s Server) discreteCopyNumberFromValues(r *http.Request, mpid string, meta 
 	for _, a := range alterations {
 		want[a] = true
 	}
-	return s.molecularDataPage(r, mpid, f, CNAValueSortable, cnaValueKept(alterations), func(d MolecularData) error {
+	return s.molecularDataPage(r, mpid, f, cnaValueSortable, cnaValueKept(alterations), func(d MolecularData) error {
 		v, err := strconv.ParseInt(d.Value, 10, 32)
 		if err != nil || !want[v] || d.EntrezGeneID == nil {
 			return nil
@@ -305,6 +305,7 @@ func (s Server) countQuery(sql string, p ch.Params) int64 {
 	return rows[0].N
 }
 
+// DerefInt returns *p, 0 for nil.
 func DerefInt(p *int64) int64 {
 	if p == nil {
 		return 0

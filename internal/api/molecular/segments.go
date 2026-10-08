@@ -16,10 +16,10 @@ import (
 
 // ---------- Single-sample copy-number segments ----------
 
-// SampleCopyNumberSegments — GET
+// sampleCopyNumberSegments — GET
 // /api/studies/{studyId}/samples/{sampleId}/copy-number-segments. Returns
 // []CopyNumberSeg for one sample (same shape as copyNumberSegmentsFetch).
-func (s Server) SampleCopyNumberSegments(w http.ResponseWriter, r *http.Request) {
+func (s Server) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request) {
 	study, sample := r.PathValue("studyId"), r.PathValue("sampleId")
 	p := ch.Params{"study": study, "sample": sample}
 	chrom := ""
@@ -82,10 +82,10 @@ type CopyNumberSeg struct {
 	Genes            []any   `json:"-"`
 }
 
-// CopyNumberSegmentsFetch serves POST /api/copy-number-segments/fetch like
+// copyNumberSegmentsFetch serves POST /api/copy-number-segments/fetch like
 // CopyNumberSegmentController: META answers with only a total-count header
 // from a count query; every other projection returns the same fields.
-func (s Server) CopyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers []core.Identifier `json:"sampleIdentifiers"`
 		Chromosome        string            `json:"chromosome"`
@@ -135,7 +135,7 @@ func (s Server) CopyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 	sql := "SELECT g.study_id, g.sample_id, ifNull(sp.patient_id, ''), g.chrom, toInt64OrZero(g.start) AS start, " +
 		"toInt64OrZero(g.end), toInt64OrZero(g.num_probes), toFloat64OrZero(g.segment_mean) " +
 		"FROM seg g LEFT JOIN " + core.ByStudies(core.IdentifierStudies(f.SampleIdentifiers)).Samples(args) + " sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id " +
-		"WHERE " + where + core.SQLListOrder(r, SegmentSortable, s.segOrder("g.study_id, g.sample_id, g.chrom, start"))
+		"WHERE " + where + core.SQLListOrder(r, segmentSortable, s.segOrder("g.study_id, g.sample_id, g.chrom, start"))
 	body, err := s.CH.QueryStreamP(r.Context(), sql, "RowBinary", args.Params(sql))
 	if err != nil {
 		core.Fail(w, r, err)
@@ -160,10 +160,10 @@ func (s Server) segOrder(fallback string) string {
 	return fallback
 }
 
-// SegmentSortable are CopyNumberSegmentSortBy's fields as SQL over the
+// segmentSortable are CopyNumberSegmentSortBy's fields as SQL over the
 // fetched segments (alias g), sorted as the JSON values compare: the
 // chromosome as text, the others as numbers.
-var SegmentSortable = map[string]string{
+var segmentSortable = map[string]string{
 	"chromosome": "g.chrom", "start": "start", "end": "toInt64OrZero(g.end)",
 	"numberOfProbes": "toInt64OrZero(g.num_probes)", "segmentMean": "toFloat64OrZero(g.segment_mean)",
 }

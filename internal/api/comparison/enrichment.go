@@ -235,7 +235,7 @@ func (s Server) profileStudies(groups []casesGroup) map[string]string {
 	return out
 }
 
-func (s Server) RouteEnrichment(mux *http.ServeMux) {
+func (s Server) routeEnrichment(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/alteration-enrichments/fetch", s.alterationEnrichmentsFetch)
 }
 

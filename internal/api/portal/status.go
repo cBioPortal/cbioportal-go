@@ -11,9 +11,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteStatus registers the server-status, static-data timestamp, cache
+// routeStatus registers the server-status, static-data timestamp, cache
 // eviction and SEO endpoints.
-func (s Server) RouteStatus(mux *http.ServeMux) {
+func (s Server) routeStatus(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/timestamps", s.timestamps)
 	mux.HandleFunc("GET /api/hello", func(w http.ResponseWriter, r *http.Request) {

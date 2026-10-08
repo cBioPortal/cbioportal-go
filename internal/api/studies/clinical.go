@@ -9,6 +9,7 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
+// ClinicalRow is a clinical data value as read from ClickHouse.
 type ClinicalRow struct {
 	StudyID             string `json:"studyId"`
 	ID                  string `json:"id"`
@@ -61,7 +62,7 @@ func clinicalSQL(r *http.Request, b core.Binder, patient, importOrder bool, wher
 	if importOrder {
 		def = "c.internal_id, studyId, id, clinicalAttributeId"
 	}
-	order := core.SQLListOrder(r, ClinicalDataSortable, def)
+	order := core.SQLListOrder(r, clinicalDataSortable, def)
 	if patient {
 		return "SELECT c.study_id AS studyId, c.patient_id AS id, c.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 			"c.attr_value AS value FROM clinical_patient c WHERE " + where + order
@@ -71,9 +72,9 @@ func clinicalSQL(r *http.Request, b core.Binder, patient, importOrder bool, wher
 		"LEFT JOIN " + core.ByStudies(studies).Samples(b) + " s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
 }
 
-// ClinicalDataSortable are the ClinicalDataSortBy columns (attrId,
+// clinicalDataSortable are the ClinicalDataSortBy columns (attrId,
 // attrValue) as clinicalSQL names them.
-var ClinicalDataSortable = map[string]string{"clinicalAttributeId": "clinicalAttributeId", "value": "value"}
+var clinicalDataSortable = map[string]string{"clinicalAttributeId": "clinicalAttributeId", "value": "value"}
 
 // clinicalDataOut is a legacy ClinicalData record as Jackson writes it
 // (NON_NULL, see ClinicalDataMapper.selectSample / selectPatient): ID carries
@@ -138,7 +139,7 @@ func (s Server) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 	out.Finish(err)
 }
 
-func (s Server) ClinicalData(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalData(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	where := "study_id = " + args.Str(r.PathValue("studyId"))
 	if a := r.URL.Query().Get("attributeId"); a != "" {
@@ -147,7 +148,7 @@ func (s Server) ClinicalData(w http.ResponseWriter, r *http.Request) {
 	s.writeClinical(w, r, isPatient(r), []string{r.PathValue("studyId")}, where, args)
 }
 
-func (s Server) ClinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		IDs          []string `json:"ids"`
 		AttributeIDs []string `json:"attributeIds"`
@@ -169,10 +170,10 @@ func (s Server) ClinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
 	s.writeClinical(w, r, patient, []string{r.PathValue("studyId")}, where, args)
 }
 
-// ClinicalDataFetch serves POST /api/clinical-data/fetch: clinical data for
+// clinicalDataFetch serves POST /api/clinical-data/fetch: clinical data for
 // (studyId, entityId) identifiers across studies, optionally limited to
 // attributeIds.
-func (s Server) ClinicalDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Identifiers []struct {
 			StudyID  string `json:"studyId"`
@@ -218,6 +219,7 @@ func (s Server) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribu
 	return out
 }
 
+// ClinAttrRow is a clinical attribute as read from ClickHouse.
 type ClinAttrRow struct {
 	StudyID             string `json:"studyId"`
 	ClinicalAttributeID string `json:"clinicalAttributeId"`
@@ -238,9 +240,9 @@ type ClinicalAttribute struct {
 	StudyID             string `json:"studyId"`
 }
 
-// ClinicalAttributesFetch serves POST /api/clinical-attributes/fetch, ordered
+// clinicalAttributesFetch serves POST /api/clinical-attributes/fetch, ordered
 // as ClinicalAttributeMapper does: by attribute id, then internal study id.
-func (s Server) ClinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
 	if len(studyIDs) == 0 {

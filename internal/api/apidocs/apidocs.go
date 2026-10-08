@@ -35,7 +35,8 @@ var apiDocsFS embed.FS
 // snapshotOrigin is the server URL the v3 snapshots were taken with.
 const snapshotOrigin = "https://api.cbioportal.org"
 
-func (s Server) RouteAPIDocs(mux *http.ServeMux) {
+// Routes registers the API description and Swagger UI endpoints.
+func (s Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/api-docs", s.legacyAPIDocs)
 	for route, file := range map[string]string{
 		"/api/v3/api-docs":               "v3.json",

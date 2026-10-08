@@ -1,4 +1,4 @@
-package api
+package core
 
 import (
 	"context"
@@ -7,27 +7,22 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/cbioportal/cbioportal-go/internal/api/core"
-	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
-	"github.com/cbioportal/cbioportal-go/internal/api/studies"
-	"github.com/cbioportal/cbioportal-go/internal/api/studyview"
 )
 
 // TestAddedPagingWired pins that every endpoint with added paging is paged
 // by pageList and validates its parameters as the Java list endpoints do.
 func TestAddedPagingWired(t *testing.T) {
-	for _, a := range core.AddedPagedEndpoints {
-		if !slices.Contains(core.PagedEndpoints, a.Endpoint()) {
+	for _, a := range AddedPagedEndpoints {
+		if !slices.Contains(pagedEndpoints, a.Endpoint()) {
 			t.Errorf("%s: not in pagedEndpoints", a.Endpoint())
 		}
-		rt, _ := core.MatchContract(a.Method, strings.ReplaceAll(core.TemplatePath(a.Path), "{}", "x"))
+		rt, _ := matchContract(a.Method, strings.ReplaceAll(templatePath(a.Path), "{}", "x"))
 		if rt == nil {
 			t.Errorf("%s: no contract route", a.Endpoint())
 			continue
 		}
 		names := map[string]int{}
-		for _, p := range rt.Params {
+		for _, p := range rt.params {
 			names[p.Name]++
 		}
 		want := []string{"pageSize", "pageNumber"}
@@ -39,41 +34,11 @@ func TestAddedPagingWired(t *testing.T) {
 				t.Errorf("%s: %d %s params", a.Endpoint(), names[n], n)
 			}
 		}
-		if !a.Sorted() && (names["sortBy"] > 0 || !core.SortIgnored(a.Endpoint())) {
+		if !a.Sorted() && (names["sortBy"] > 0 || !sortIgnored(a.Endpoint())) {
 			t.Errorf("%s: pages only, but takes sortBy", a.Endpoint())
 		}
-		if a.DefaultSort != "" && !slices.Contains(a.Sort.Values, a.DefaultSort) {
-			t.Errorf("%s: default sort %s is no sortBy value", a.Endpoint(), a.DefaultSort)
-		}
-	}
-}
-
-// TestAddedSortables pins that the endpoints paging in SQL can sort by
-// every sortBy value they accept.
-func TestAddedSortables(t *testing.T) {
-	for _, c := range []struct {
-		sort     core.Param
-		sortable map[string]string
-	}{
-		{core.MolecularDataSortParam, molecular.MolecularDataSortable},
-		{core.MolecularDataSortParam, molecular.MolecularDataMultiSortable},
-		{core.DiscreteCopyNumberSort, molecular.CNAEventSortable},
-		{core.DiscreteCopyNumberSort, molecular.CNAValueSortable},
-		{core.GenericAssayDataSort, molecular.GenericAssayDataSortable},
-		{core.FilteredSampleSort, studyview.FilteredSampleSortable},
-		{core.StructuralVariantSortParam, molecular.StructuralVariantSortable},
-		{core.CopyNumberSegmentSort, molecular.SegmentSortable},
-		{core.ClinicalDataSort, studies.ClinicalDataSortable},
-		{core.SampleSort, studies.SampleSortable},
-		{core.PatientSort, studies.PatientSortable},
-	} {
-		for _, v := range c.sort.Values {
-			if _, ok := c.sortable[v]; !ok {
-				t.Errorf("%s: no SQL for %s", c.sort.Class, v)
-			}
-		}
-		if len(c.sortable) != len(c.sort.Values) {
-			t.Errorf("%s: %d SQL sorts for %d values", c.sort.Class, len(c.sortable), len(c.sort.Values))
+		if a.defaultSort != "" && !slices.Contains(a.Sort.Values, a.defaultSort) {
+			t.Errorf("%s: default sort %s is no sortBy value", a.Endpoint(), a.defaultSort)
 		}
 	}
 }
@@ -85,28 +50,28 @@ func TestAddedSortables(t *testing.T) {
 func TestClaimListPage(t *testing.T) {
 	sortable := map[string]string{"v": "toFloat64OrNull(v)", "same": ""}
 	r := httptest.NewRequest("POST", "/api/x", nil)
-	if got := core.SQLListOrder(r, sortable, "id"); got != " ORDER BY id" {
+	if got := SQLListOrder(r, sortable, "id"); got != " ORDER BY id" {
 		t.Errorf("no page: %q", got)
 	}
 	for _, c := range []struct {
-		pg   core.Page
+		pg   page
 		want string
 	}{
-		{core.Page{Size: 3, Start: 6}, " ORDER BY id LIMIT 3 OFFSET 6"},
-		{core.Page{SortBy: "v", Desc: true, Size: 2}, " ORDER BY toFloat64OrNull(v) DESC NULLS LAST, id LIMIT 2 OFFSET 0"},
-		{core.Page{SortBy: "v", Size: -1}, " ORDER BY toFloat64OrNull(v) ASC NULLS LAST, id"},
-		{core.Page{SortBy: "same", Size: 1}, " ORDER BY id LIMIT 1 OFFSET 0"},
-		{core.Page{SortBy: "other", Size: 1}, " ORDER BY id"},
+		{page{Size: 3, Start: 6}, " ORDER BY id LIMIT 3 OFFSET 6"},
+		{page{SortBy: "v", Desc: true, Size: 2}, " ORDER BY toFloat64OrNull(v) DESC NULLS LAST, id LIMIT 2 OFFSET 0"},
+		{page{SortBy: "v", Size: -1}, " ORDER BY toFloat64OrNull(v) ASC NULLS LAST, id"},
+		{page{SortBy: "same", Size: 1}, " ORDER BY id LIMIT 1 OFFSET 0"},
+		{page{SortBy: "other", Size: 1}, " ORDER BY id"},
 	} {
-		sp := &core.SQLPage{Page: c.pg}
-		r := r.WithContext(context.WithValue(r.Context(), core.SQLPageKey{}, sp))
-		if got := core.SQLListOrder(r, sortable, "id"); got != c.want || sp.Claimed != (c.pg.SortBy != "other") {
-			t.Errorf("%+v: %q claimed %v, want %q", c.pg, got, sp.Claimed, c.want)
+		sp := &SQLPage{page: c.pg}
+		r := r.WithContext(context.WithValue(r.Context(), sqlPageKey{}, sp))
+		if got := SQLListOrder(r, sortable, "id"); got != c.want || sp.claimed != (c.pg.SortBy != "other") {
+			t.Errorf("%+v: %q claimed %v, want %q", c.pg, got, sp.claimed, c.want)
 		}
 	}
 	// A keyed page is for sorted pages only.
-	sp := &core.SQLPage{Page: core.Page{Size: 1}}
-	if core.ClaimKeyedPage(r.WithContext(context.WithValue(r.Context(), core.SQLPageKey{}, sp))) != nil {
+	sp := &SQLPage{page: page{Size: 1}}
+	if ClaimKeyedPage(r.WithContext(context.WithValue(r.Context(), sqlPageKey{}, sp))) != nil {
 		t.Error("unsorted page claimed as keyed")
 	}
 }
@@ -124,7 +89,7 @@ func TestAddedPagingInMemory(t *testing.T) {
 	})
 	serve := func(path string) string {
 		got := httptest.NewRecorder()
-		core.PageList(handler).ServeHTTP(got, httptest.NewRequest("POST", path, nil))
+		PageList(handler).ServeHTTP(got, httptest.NewRequest("POST", path, nil))
 		return got.Body.String()
 	}
 	const coexp = "/api/molecular-profiles/co-expressions/fetch"

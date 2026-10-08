@@ -290,7 +290,7 @@ type GenericAssayDataBin struct {
 	ProfileType  string           `json:"profileType"`
 }
 
-func (s Server) GenericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		GenericAssayDataBinFilters []struct {
 			StableID    string `json:"stableId"`

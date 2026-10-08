@@ -31,7 +31,7 @@ import (
 //     DETAILED adds the nested study where the Java model has one.
 func (s *State) JavaContract(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rt, vals := MatchContract(r.Method, r.URL.Path)
+		rt, vals := matchContract(r.Method, r.URL.Path)
 		if rt == nil {
 			next.ServeHTTP(w, r)
 			return
@@ -46,7 +46,7 @@ func (s *State) JavaContract(next http.Handler) http.Handler {
 				WriteError(w, http.StatusBadRequest, msg)
 				return
 			}
-		} else if msg := CheckParams(rt.Params, q); msg != "" {
+		} else if msg := CheckParams(rt.params, q); msg != "" {
 			ReadBody(r, nil)
 			WriteError(w, http.StatusBadRequest, msg)
 			return
@@ -321,7 +321,7 @@ func sampleFilterBody(raw []byte) string {
 // contractRoute describes one Java endpoint.
 type contractRoute struct {
 	method, pattern string
-	Params          []Param
+	params          []Param
 	// body validates a POST body; it returns the 400 message or "".
 	body func([]byte) string
 	// exists lists the path entities checked before the handler runs:
@@ -367,14 +367,14 @@ func (rt *contractRoute) checkFilter(w http.ResponseWriter, r *http.Request, q m
 		}
 		// The filter is validated with the method's parameters, after
 		// they are converted.
-		return checkParamsAround(rt.Params, q, len(rt.Params), func() string {
+		return checkParamsAround(rt.params, q, len(rt.params), func() string {
 			if violation != "" && !rt.unvalidated {
 				return rt.intercepted + " " + violation
 			}
 			return ""
 		}), false
 	}
-	return checkParamsAround(rt.Params, q, rt.bodyAt, func() string {
+	return checkParamsAround(rt.params, q, rt.bodyAt, func() string {
 		switch {
 		case !ok:
 			return MsgBadJSON
@@ -446,94 +446,94 @@ func pathValue(key string, msg func(string) string) func(map[string]string) stri
 
 var contractRoutes = []contractRoute{
 	// Studies (ColumnStoreStudyController; /studies/fetch is legacy).
-	{method: "GET", pattern: "/api/studies", Params: []Param{projectionParamOf(projectionType), studySort, pageSizeParam, pageNumberParam, directionParam}},
+	{method: "GET", pattern: "/api/studies", params: []Param{projectionParamOf(projectionType), studySort, pageSizeParam, pageNumberParam, directionParam}},
 	{method: "GET", pattern: "/api/studies/{studyId}", exists: []string{"study"}},
-	{method: "POST", pattern: "/api/studies/fetch", Params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
+	{method: "POST", pattern: "/api/studies/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
 
 	// Cancer types.
-	{method: "GET", pattern: "/api/cancer-types", Params: paged(legacyProjection, cancerTypeSort), shape: cancerTypeShape},
+	{method: "GET", pattern: "/api/cancer-types", params: paged(legacyProjection, cancerTypeSort), shape: cancerTypeShape},
 	{method: "GET", pattern: "/api/cancer-types/{cancerTypeId}", fixed: "DETAILED", notFound: pathValue("cancerTypeId", msgCancerTypeNotFound)},
 
 	// Samples (ColumnStoreSampleController).
-	{method: "GET", pattern: "/api/samples", Params: []Param{projectionParamOf(projectionType), pageSizeParam, pageNumberParam, SampleSort, directionParam}, shape: sampleShape},
-	{method: "GET", pattern: "/api/studies/{studyId}/samples", Params: paged(projectionType, SampleSort), exists: []string{"study"}, shape: sampleShape},
+	{method: "GET", pattern: "/api/samples", params: []Param{projectionParamOf(projectionType), pageSizeParam, pageNumberParam, SampleSort, directionParam}, shape: sampleShape},
+	{method: "GET", pattern: "/api/studies/{studyId}/samples", params: paged(projectionType, SampleSort), exists: []string{"study"}, shape: sampleShape},
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}", exists: []string{"study", "sample"}, fixed: "DETAILED"},
-	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/samples", Params: paged(projectionType, SampleSort), exists: []string{"study", "patient"}, shape: sampleShape},
-	{method: "POST", pattern: "/api/samples/fetch", Params: []Param{projectionParamOf(projectionType)}, body: sampleFilterBody, shape: sampleShape},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/samples", params: paged(projectionType, SampleSort), exists: []string{"study", "patient"}, shape: sampleShape},
+	{method: "POST", pattern: "/api/samples/fetch", params: []Param{projectionParamOf(projectionType)}, body: sampleFilterBody, shape: sampleShape},
 	// The study view's filtered samples carry the ID fields only (the SampleDTO's
 	// other fields are not selected, so null and not serialized).
 	{method: "POST", pattern: "/api/filtered-samples/fetch", fixed: "ID", shape: sampleShape},
 
 	// Patients.
-	{method: "GET", pattern: "/api/patients", Params: paged(legacyProjection, PatientSort), shape: patientShape, nest: "cancerStudy"},
-	{method: "GET", pattern: "/api/studies/{studyId}/patients", Params: paged(legacyProjection, PatientSort), exists: []string{"study"}, shape: patientShape, nest: "cancerStudy"},
+	{method: "GET", pattern: "/api/patients", params: paged(legacyProjection, PatientSort), shape: patientShape, nest: "cancerStudy"},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients", params: paged(legacyProjection, PatientSort), exists: []string{"study"}, shape: patientShape, nest: "cancerStudy"},
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}", exists: []string{"study", "patient"}, fixed: "DETAILED", shape: patientShape, nest: "cancerStudy"},
-	{method: "POST", pattern: "/api/patients/fetch", Params: []Param{projectionParamOf(legacyProjection)}, shape: patientShape, nest: "cancerStudy"},
+	{method: "POST", pattern: "/api/patients/fetch", params: []Param{projectionParamOf(legacyProjection)}, shape: patientShape, nest: "cancerStudy"},
 
 	// Sample lists.
-	{method: "GET", pattern: "/api/sample-lists", Params: paged(legacyProjection, sampleListSort), shape: sampleListShape},
-	{method: "GET", pattern: "/api/studies/{studyId}/sample-lists", Params: paged(legacyProjection, sampleListSort), exists: []string{"study"}, shape: sampleListShape},
+	{method: "GET", pattern: "/api/sample-lists", params: paged(legacyProjection, sampleListSort), shape: sampleListShape},
+	{method: "GET", pattern: "/api/studies/{studyId}/sample-lists", params: paged(legacyProjection, sampleListSort), exists: []string{"study"}, shape: sampleListShape},
 	{method: "GET", pattern: "/api/sample-lists/{sampleListId}", fixed: "DETAILED", notFound: pathValue("sampleListId", MsgSampleListNotFound)},
 	{method: "GET", pattern: "/api/sample-lists/{sampleListId}/sample-ids", exists: []string{"sampleList"}},
-	{method: "POST", pattern: "/api/sample-lists/fetch", Params: []Param{projectionParamOf(legacyProjection)}, body: listBody("sampleListIds"), shape: sampleListShape},
+	{method: "POST", pattern: "/api/sample-lists/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("sampleListIds"), shape: sampleListShape},
 
 	// Clinical attributes.
-	{method: "GET", pattern: "/api/clinical-attributes", Params: paged(legacyProjection, clinicalAttrSort), shape: clinicalAttrShape},
-	{method: "GET", pattern: "/api/studies/{studyId}/clinical-attributes", Params: paged(legacyProjection, clinicalAttrSort), exists: []string{"study"}, shape: clinicalAttrShape},
+	{method: "GET", pattern: "/api/clinical-attributes", params: paged(legacyProjection, clinicalAttrSort), shape: clinicalAttrShape},
+	{method: "GET", pattern: "/api/studies/{studyId}/clinical-attributes", params: paged(legacyProjection, clinicalAttrSort), exists: []string{"study"}, shape: clinicalAttrShape},
 	{method: "GET", pattern: "/api/studies/{studyId}/clinical-attributes/{clinicalAttributeId}", exists: []string{"study"}, fixed: "DETAILED",
 		notFound: func(v map[string]string) string {
 			return msgClinicalAttributeNotFound(v["studyId"], v["clinicalAttributeId"])
 		}},
-	{method: "POST", pattern: "/api/clinical-attributes/fetch", Params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds"), shape: clinicalAttrShape},
+	{method: "POST", pattern: "/api/clinical-attributes/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds"), shape: clinicalAttrShape},
 
 	// Clinical data (projections applied by writeClinical).
-	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/clinical-data", Params: paged(legacyProjection, ClinicalDataSort), exists: []string{"study", "sample"}},
-	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-data", Params: paged(legacyProjection, ClinicalDataSort), exists: []string{"study", "patient"}},
-	{method: "GET", pattern: "/api/studies/{studyId}/clinical-data", Params: append([]Param{clinicalDataType}, paged(legacyProjection, ClinicalDataSort)...), exists: []string{"study"}},
-	{method: "POST", pattern: "/api/studies/{studyId}/clinical-data/fetch", Params: []Param{clinicalDataType, projectionParamOf(legacyProjection)},
+	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/clinical-data", params: paged(legacyProjection, ClinicalDataSort), exists: []string{"study", "sample"}},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-data", params: paged(legacyProjection, ClinicalDataSort), exists: []string{"study", "patient"}},
+	{method: "GET", pattern: "/api/studies/{studyId}/clinical-data", params: append([]Param{clinicalDataType}, paged(legacyProjection, ClinicalDataSort)...), exists: []string{"study"}},
+	{method: "POST", pattern: "/api/studies/{studyId}/clinical-data/fetch", params: []Param{clinicalDataType, projectionParamOf(legacyProjection)},
 		bodyAt: 1, filter: clinicalDataSingleStudyFilterSchema, exists: []string{"study"}},
-	{method: "POST", pattern: "/api/clinical-data/fetch", Params: []Param{clinicalDataType, projectionParamOf(legacyProjection)},
+	{method: "POST", pattern: "/api/clinical-data/fetch", params: []Param{clinicalDataType, projectionParamOf(legacyProjection)},
 		filter: clinicalDataMultiStudyFilterSchema, intercepted: "interceptedClinicalDataMultiStudyFilter"},
 
 	// Clinical events (the study's list has its own page size bound).
-	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", Params: paged(legacyProjection, clinicalEventSort)},
-	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", Params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", params: paged(legacyProjection, clinicalEventSort)},
+	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
 
 	// Resources, copy-number segments, significance lists.
-	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/resource-data", Params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
-	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/resource-data", Params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
-	{method: "GET", pattern: "/api/studies/{studyId}/resource-data", Params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
-	{method: "GET", pattern: "/api/studies/{studyId}/resource-data-all", Params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
-	{method: "GET", pattern: "/api/studies/{studyId}/resource-definitions", Params: paged(legacyProjection, resourceDefinitionSortParam), metaUnsupported: true},
-	{method: "POST", pattern: "/api/resource-definitions/fetch", Params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
+	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/resource-data", params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/resource-data", params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-data", params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-data-all", params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
+	{method: "GET", pattern: "/api/studies/{studyId}/resource-definitions", params: paged(legacyProjection, resourceDefinitionSortParam), metaUnsupported: true},
+	{method: "POST", pattern: "/api/resource-definitions/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/copy-number-segments",
-		Params: append([]Param{{Name: "chromosome", text: true}}, pagedMax(legacyProjection, CopyNumberSegmentSort, 20000)...)},
-	{method: "POST", pattern: "/api/copy-number-segments/fetch", Params: []Param{{Name: "chromosome", text: true}, projectionParamOf(legacyProjection)}},
-	{method: "GET", pattern: "/api/studies/{studyId}/significantly-mutated-genes", Params: paged(legacyProjection, smgSort)},
-	{method: "GET", pattern: "/api/studies/{studyId}/significant-copy-number-regions", Params: paged(legacyProjection, scnrSort)},
+		params: append([]Param{{Name: "chromosome", text: true}}, pagedMax(legacyProjection, CopyNumberSegmentSort, 20000)...)},
+	{method: "POST", pattern: "/api/copy-number-segments/fetch", params: []Param{{Name: "chromosome", text: true}, projectionParamOf(legacyProjection)}},
+	{method: "GET", pattern: "/api/studies/{studyId}/significantly-mutated-genes", params: paged(legacyProjection, smgSort)},
+	{method: "GET", pattern: "/api/studies/{studyId}/significant-copy-number-regions", params: paged(legacyProjection, scnrSort)},
 
 	// Molecular profiles.
-	{method: "GET", pattern: "/api/molecular-profiles", Params: paged(legacyProjection, molecularProfileSort), shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "GET", pattern: "/api/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}", exists: []string{"profile"}, fixed: "DETAILED", shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
-	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", Params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
-	{method: "POST", pattern: "/api/molecular-profiles/fetch", Params: []Param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []Param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"},
-		Params: append([]Param{sampleListIDParam, {Name: "entrezGeneId", required: true}},
+		params: append([]Param{sampleListIDParam, {Name: "entrezGeneId", required: true}},
 			paged(legacyProjection, mutationSort)...)},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations/fetch", exists: []string{"profile"},
-		Params: paged(legacyProjection, mutationSort), filter: mutationFilterSchema},
-	{method: "POST", pattern: "/api/mutations/fetch", Params: paged(legacyProjection, mutationSort),
+		params: paged(legacyProjection, mutationSort), filter: mutationFilterSchema},
+	{method: "POST", pattern: "/api/mutations/fetch", params: paged(legacyProjection, mutationSort),
 		filter: mutationMultipleStudyFilterSchema, intercepted: "interceptedMutationMultipleStudyFilter"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"},
-		Params: []Param{sampleListIDParam, {Name: "entrezGeneId", required: true}, projectionParamOf(legacyProjection)}},
+		params: []Param{sampleListIDParam, {Name: "entrezGeneId", required: true}, projectionParamOf(legacyProjection)}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"},
-		Params: []Param{projectionParamOf(legacyProjection)}, filter: molecularDataFilterSchema},
-	{method: "POST", pattern: "/api/molecular-data/fetch", Params: []Param{projectionParamOf(legacyProjection)},
+		params: []Param{projectionParamOf(legacyProjection)}, filter: molecularDataFilterSchema},
+	{method: "POST", pattern: "/api/molecular-data/fetch", params: []Param{projectionParamOf(legacyProjection)},
 		filter: molecularDataMultipleStudyFilterSchema, intercepted: "interceptedMolecularDataMultipleStudyFilter"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number", exists: []string{"profile"},
-		Params: []Param{sampleListIDParam, discreteCopyNumberEventType, projectionParamOf(legacyProjection)}},
+		params: []Param{sampleListIDParam, discreteCopyNumberEventType, projectionParamOf(legacyProjection)}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number/fetch", exists: []string{"profile"},
-		Params: []Param{discreteCopyNumberEventType, projectionParamOf(legacyProjection)}, bodyAt: 1, filter: discreteCopyNumberFilterSchema},
+		params: []Param{discreteCopyNumberEventType, projectionParamOf(legacyProjection)}, bodyAt: 1, filter: discreteCopyNumberFilterSchema},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number-counts/fetch", exists: []string{"profile"}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/gene-panel-data/fetch", exists: []string{"profile"},
 		filter: genePanelDataFilterSchema},
@@ -542,59 +542,59 @@ var contractRoutes = []contractRoute{
 	{method: "POST", pattern: "/api/structural-variant/fetch", filter: structuralVariantFilterSchema,
 		intercepted: "interceptedStructuralVariantFilter"},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mrna-percentile/fetch", exists: []string{"profile"},
-		Params: []Param{requiredText("sampleId")}},
+		params: []Param{requiredText("sampleId")}},
 	{method: "POST", pattern: "/api/molecular-profiles/co-expressions/fetch",
-		Params: []Param{requiredText("molecularProfileIdA"), requiredText("molecularProfileIdB")}},
-	{method: "POST", pattern: "/api/clinical-data-density-plot/fetch", Params: []Param{requiredText("xAxisAttributeId"),
+		params: []Param{requiredText("molecularProfileIdA"), requiredText("molecularProfileIdB")}},
+	{method: "POST", pattern: "/api/clinical-data-density-plot/fetch", params: []Param{requiredText("xAxisAttributeId"),
 		{Name: "xAxisBinCount"}, requiredText("yAxisAttributeId"), {Name: "yAxisBinCount"}}},
 	{method: "POST", pattern: "/api/clinical-data-violin-plots/fetch",
-		Params: []Param{requiredText("categoricalAttributeId"), requiredText("numericalAttributeId")}},
-	{method: "POST", pattern: "/api/geneset-hierarchy/fetch", Params: []Param{requiredText("geneticProfileId"), {Name: "percentile"}}},
-	{method: "POST", pattern: "/api/genesets/{genesetId}/expression-correlation/fetch", Params: []Param{requiredText("geneticProfileId")}},
+		params: []Param{requiredText("categoricalAttributeId"), requiredText("numericalAttributeId")}},
+	{method: "POST", pattern: "/api/geneset-hierarchy/fetch", params: []Param{requiredText("geneticProfileId"), {Name: "percentile"}}},
+	{method: "POST", pattern: "/api/genesets/{genesetId}/expression-correlation/fetch", params: []Param{requiredText("geneticProfileId")}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutation-spectrums/fetch", exists: []string{"profile"},
 		filter: mutationSpectrumFilterSchema},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/variant-counts/fetch", exists: []string{"profile"}},
 	{method: "GET", pattern: "/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", exists: []string{"profile"},
-		Params: []Param{projectionParamOf(legacyProjection)}},
+		params: []Param{projectionParamOf(legacyProjection)}},
 	{method: "POST", pattern: "/api/generic_assay_data/{molecularProfileId}/fetch", exists: []string{"profile"},
-		Params: []Param{projectionParamOf(legacyProjection)}, filter: genericAssayFilterSchema},
-	{method: "POST", pattern: "/api/generic_assay_data/fetch", Params: []Param{projectionParamOf(legacyProjection)},
+		params: []Param{projectionParamOf(legacyProjection)}, filter: genericAssayFilterSchema},
+	{method: "POST", pattern: "/api/generic_assay_data/fetch", params: []Param{projectionParamOf(legacyProjection)},
 		filter: genericAssayDataMultipleStudyFilterSchema, intercepted: "interceptedGenericAssayDataMultipleStudyFilter", unvalidated: true},
 
 	// Generic assay meta (ColumnStoreGenericAssayController): ID keeps the stable id.
-	{method: "POST", pattern: "/api/generic-assay-meta/fetch", Params: []Param{{Name: "searchTerm", text: true},
+	{method: "POST", pattern: "/api/generic-assay-meta/fetch", params: []Param{{Name: "searchTerm", text: true},
 		{Name: "pageSize", min: 1, max: MaxPageSize, hasMin: true, hasMax: true}, pageNumberParam, projectionParamOf(legacyProjection)},
 		shape: genericAssayMetaShape},
-	{method: "GET", pattern: "/api/generic-assay-meta/{molecularProfileId}", Params: []Param{projectionParamOf(legacyProjection)}, shape: genericAssayMetaShape},
-	{method: "GET", pattern: "/api/generic-assay-meta/generic-assay/{genericAssayStableId}", Params: []Param{projectionParamOf(legacyProjection)},
+	{method: "GET", pattern: "/api/generic-assay-meta/{molecularProfileId}", params: []Param{projectionParamOf(legacyProjection)}, shape: genericAssayMetaShape},
+	{method: "GET", pattern: "/api/generic-assay-meta/generic-assay/{genericAssayStableId}", params: []Param{projectionParamOf(legacyProjection)},
 		shape: genericAssayMetaShape},
 
 	// Gene sets.
-	{method: "GET", pattern: "/api/genesets", Params: []Param{projectionParamOf(legacyProjection),
+	{method: "GET", pattern: "/api/genesets", params: []Param{projectionParamOf(legacyProjection),
 		{Name: "pageSize", min: 1, max: math.MaxInt32, hasMin: true, hasMax: true}, pageNumberParam}},
 
 	// The study view's clinical table (StudyViewController): pageSize 0
 	// lists every sample; sortBy is free text.
-	{method: "POST", pattern: "/api/clinical-data-table/fetch", Params: clinicalTableParams},
+	{method: "POST", pattern: "/api/clinical-data-table/fetch", params: clinicalTableParams},
 
 	// Study view counts with a projection.
-	{method: "POST", pattern: "/api/mutation-data-counts/fetch", Params: []Param{projectionParamOf(legacyProjection)}},
-	{method: "POST", pattern: "/api/treatments/sample-counts/fetch", Params: []Param{
+	{method: "POST", pattern: "/api/mutation-data-counts/fetch", params: []Param{projectionParamOf(legacyProjection)}},
+	{method: "POST", pattern: "/api/treatments/sample-counts/fetch", params: []Param{
 		enumParam("tier", "org.cbioportal.legacy.model.ClinicalEventKeyCode", "Agent", "AgentClass", "AgentTarget"),
 		projectionParamOf(projectionType)}},
 
 	// Genes.
-	{method: "GET", pattern: "/api/genes", Params: paged(legacyProjection, geneSort), shape: geneShape},
-	{method: "POST", pattern: "/api/genes/fetch", Params: []Param{geneIDType, projectionParamOf(legacyProjection)}, body: listBody("geneIds"), shape: geneShape},
+	{method: "GET", pattern: "/api/genes", params: paged(legacyProjection, geneSort), shape: geneShape},
+	{method: "POST", pattern: "/api/genes/fetch", params: []Param{geneIDType, projectionParamOf(legacyProjection)}, body: listBody("geneIds"), shape: geneShape},
 
 	// Gene panels.
-	{method: "GET", pattern: "/api/gene-panels", Params: paged(legacyProjection, genePanelSort), shape: genePanelShape},
+	{method: "GET", pattern: "/api/gene-panels", params: paged(legacyProjection, genePanelSort), shape: genePanelShape},
 	{method: "GET", pattern: "/api/gene-panels/{genePanelId}", fixed: "DETAILED", notFound: pathValue("genePanelId", msgGenePanelNotFound)},
-	{method: "POST", pattern: "/api/gene-panels/fetch", Params: []Param{projectionParamOf(legacyProjection)}, body: listBody("genePanelIds"), shape: genePanelShape},
+	{method: "POST", pattern: "/api/gene-panels/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("genePanelIds"), shape: genePanelShape},
 }
 
-// MatchContract finds the route for a request and its path values.
-func MatchContract(method, path string) (*contractRoute, map[string]string) {
+// matchContract finds the route for a request and its path values.
+func matchContract(method, path string) (*contractRoute, map[string]string) {
 	segs := strings.Split(strings.Trim(path, "/"), "/")
 	for i := range contractRoutes {
 		rt := &contractRoutes[i]

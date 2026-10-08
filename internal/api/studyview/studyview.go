@@ -20,8 +20,8 @@ type filteredSample struct {
 	UniquePatientKey string `json:"uniquePatientKey"`
 }
 
-// FilteredSampleSortable are the sortBy fields of filtered samples.
-var FilteredSampleSortable = map[string]string{"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId"}
+// filteredSampleSortable are the sortBy fields of filtered samples.
+var filteredSampleSortable = map[string]string{"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId"}
 
 // FilteredSamplesFetch serves POST /api/filtered-samples/fetch: the samples
 // passing the study-view filter, by sample id (negateFilters is
@@ -33,7 +33,7 @@ func (s Server) FilteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	rows, err := core.QueryA[studies.IDRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM %s "+
 			"AND concat(study_id, '_', sample_id) IN (%s)%s",
-		f.scope().From(args, core.TSample), s.filterSQL(args, f), core.SQLListOrder(r, FilteredSampleSortable, "sample_id, study_id")), args)
+		f.scope().From(args, core.TSample), s.filterSQL(args, f), core.SQLListOrder(r, filteredSampleSortable, "sample_id, study_id")), args)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -59,7 +59,7 @@ type ClinicalDataCountItem struct {
 	Counts      []ClinicalDataCount `json:"counts"`
 }
 
-func (s Server) ClinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Attributes []struct {
 			AttributeID string `json:"attributeId"`

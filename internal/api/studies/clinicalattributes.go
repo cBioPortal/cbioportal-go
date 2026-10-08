@@ -7,8 +7,8 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteMisc registers the study clinical-attribute endpoints.
-func (s Server) RouteMisc(mux *http.ServeMux) {
+// routeMisc registers the study clinical-attribute endpoints.
+func (s Server) routeMisc(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-attributes", s.studyClinicalAttributes)
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-attributes/{clinicalAttributeId}", s.studyClinicalAttribute)
 }

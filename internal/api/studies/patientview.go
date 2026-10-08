@@ -8,21 +8,21 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// SamplesOfPatient — GET /api/studies/{studyId}/patients/{patientId}/samples
-func (s Server) SamplesOfPatient(w http.ResponseWriter, r *http.Request) {
+// samplesOfPatient — GET /api/studies/{studyId}/patients/{patientId}/samples
+func (s Server) samplesOfPatient(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	s.writeSamples(w, r, core.ByPatient(r.PathValue("studyId"), r.PathValue("patientId")), "1", args)
 }
 
-// PatientClinicalData — GET /api/studies/{studyId}/patients/{patientId}/clinical-data
-func (s Server) PatientClinicalData(w http.ResponseWriter, r *http.Request) {
+// patientClinicalData — GET /api/studies/{studyId}/patients/{patientId}/clinical-data
+func (s Server) patientClinicalData(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	s.writeClinical(w, r, true, []string{r.PathValue("studyId")}, fmt.Sprintf("study_id = %s AND patient_id = %s%s",
 		args.Str(r.PathValue("studyId")), args.Str(r.PathValue("patientId")), attributeIDClause(r, args)), args)
 }
 
-// SampleClinicalData — GET /api/studies/{studyId}/samples/{sampleId}/clinical-data
-func (s Server) SampleClinicalData(w http.ResponseWriter, r *http.Request) {
+// sampleClinicalData — GET /api/studies/{studyId}/samples/{sampleId}/clinical-data
+func (s Server) sampleClinicalData(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	s.writeClinical(w, r, false, []string{r.PathValue("studyId")}, fmt.Sprintf("study_id = %s AND sample_id = %s%s",
 		args.Str(r.PathValue("studyId")), args.Str(r.PathValue("sampleId")), attributeIDClause(r, args)), args)
@@ -37,8 +37,8 @@ func attributeIDClause(r *http.Request, args *core.SQLArgs) string {
 	return ""
 }
 
-// Patient — GET /api/studies/{studyId}/patients/{patientId}
-func (s Server) Patient(w http.ResponseWriter, r *http.Request) {
+// patient — GET /api/studies/{studyId}/patients/{patientId}
+func (s Server) patient(w http.ResponseWriter, r *http.Request) {
 	params := ch.Params{}
 	rows, err := ch.QueryP[IDRow](s.CH, "SELECT study_id AS studyId, patient_id AS patientId FROM "+
 		core.ByPatient(r.PathValue("studyId"), r.PathValue("patientId")).From(core.ParamsBinder(params), core.TPatient)+" LIMIT 1", params)

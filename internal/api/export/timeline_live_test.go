@@ -101,7 +101,7 @@ func serveTimeline(t *testing.T, s Server, path string) []byte {
 	t.Helper()
 	mux := http.NewServeMux()
 	s.RouteSurvival(mux)
-	s.RouteExport(mux)
+	s.Routes(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 	if w.Code != http.StatusOK {

@@ -11,10 +11,10 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// RouteBulkList registers the bulk GET list endpoints and single-resource
+// routeBulkList registers the bulk GET list endpoints and single-resource
 // GETs. Paging query params are applied by pageList.
 // All filtering is pushed into ClickHouse.
-func (s Server) RouteBulkList(mux *http.ServeMux) {
+func (s Server) routeBulkList(mux *http.ServeMux) {
 	// Bulk GET list endpoints (no study scope).
 	mux.HandleFunc("GET /api/samples", s.allSamples)
 	mux.HandleFunc("GET /api/patients", s.allPatients)
@@ -67,9 +67,9 @@ func sampleFullSelectFrom(b core.Binder, sc core.Scope, where string) string {
 		"WHERE " + where
 }
 
-// SampleSortable are the SampleSortBy columns (stableId, sampleType) as
+// sampleSortable are the SampleSortBy columns (stableId, sampleType) as
 // sampleFullSelect names them.
-var SampleSortable = map[string]string{"sampleId": "sampleId", "sampleType": "sampleType"}
+var sampleSortable = map[string]string{"sampleId": "sampleId", "sampleType": "sampleType"}
 
 // writeSampleRows streams the samples sql selects, or counts them for
 // projection=META.
@@ -102,7 +102,7 @@ func (s Server) allSamples(w http.ResponseWriter, r *http.Request) {
 		// unordered.
 		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id, s.study_id", args.Str(kw))
 	}
-	s.writeSampleRows(w, r, sampleFullSelectFrom(args, core.AcrossStudies, strings.Join(conds, " AND "))+core.SQLPageOrder(r, SampleSortable, order), args)
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, core.AcrossStudies, strings.Join(conds, " AND "))+core.SQLPageOrder(r, sampleSortable, order), args)
 }
 
 // sampleInStudy — GET /api/studies/{studyId}/samples/{sampleId}. Single Sample.
@@ -134,7 +134,7 @@ func (s Server) allPatients(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	if !q.Has("keyword") {
 		s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+core.AcrossStudies.Patients(args)+
-			core.SQLPageOrder(r, PatientSortable, s.patientOrder(r)), nil)
+			core.SQLPageOrder(r, patientSortable, s.patientOrder(r)), nil)
 		return
 	}
 	kw := q.Get("keyword")
@@ -370,5 +370,5 @@ func (s Server) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
 // may hold placeholders bound in args. A page is read as sqlListOrder
 // orders it.
 func (s Server) writeSamples(w http.ResponseWriter, r *http.Request, sc core.Scope, where string, args *core.SQLArgs) {
-	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+core.SQLListOrder(r, SampleSortable, sampleDefaultOrder), args)
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+core.SQLListOrder(r, sampleSortable, sampleDefaultOrder), args)
 }

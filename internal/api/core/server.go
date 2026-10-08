@@ -123,10 +123,10 @@ func WriteJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// JSONArray writes a JSON array element by element, byte for byte as
+// jsonArray writes a JSON array element by element, byte for byte as
 // writeJSON writes the whole slice. Nothing is sent before the first element,
 // so an error until then still answers as fail does.
-type JSONArray struct {
+type jsonArray struct {
 	w   http.ResponseWriter
 	r   *http.Request
 	bw  *bufio.Writer
@@ -135,14 +135,14 @@ type JSONArray struct {
 }
 
 // NewJSONArray returns a JSONArray answering r through w.
-func NewJSONArray(w http.ResponseWriter, r *http.Request) *JSONArray {
-	a := &JSONArray{w: w, r: r}
+func NewJSONArray(w http.ResponseWriter, r *http.Request) *jsonArray {
+	a := &jsonArray{w: w, r: r}
 	a.enc = json.NewEncoder(&a.buf)
 	return a
 }
 
 // Add writes v as the array's next element.
-func (a *JSONArray) Add(v any) error {
+func (a *jsonArray) Add(v any) error {
 	a.buf.Reset()
 	if err := a.enc.Encode(v); err != nil {
 		return err
@@ -160,7 +160,7 @@ func (a *JSONArray) Add(v any) error {
 
 // Finish ends the array, or reports err: as fail before the first element,
 // by aborting the response after it.
-func (a *JSONArray) Finish(err error) {
+func (a *jsonArray) Finish(err error) {
 	switch {
 	case err != nil && a.bw == nil:
 		Fail(a.w, a.r, err)

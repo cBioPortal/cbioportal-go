@@ -20,7 +20,7 @@ type AddedPaging struct {
 	// defaultSort is the field a page without sortBy is sorted by, for an
 	// in-memory list whose own order is not stable. Empty keeps the
 	// endpoint's order.
-	DefaultSort string
+	defaultSort string
 	// numeric lists fields that hold numbers as JSON strings: an in-memory
 	// sort compares them as numbers, and values that are not numbers come
 	// last, as a SQL sort over toFloat64OrNull orders them.
@@ -89,7 +89,7 @@ var AddedPagedEndpoints = []AddedPaging{
 	{Method: "POST", Path: "/api/namespace-data/fetch", Sort: namespaceDataSort},
 
 	// Genes, gene sets, generic assay entities.
-	{Method: "POST", Path: "/api/genes/fetch", Sort: geneSort, DefaultSort: "entrezGeneId"},
+	{Method: "POST", Path: "/api/genes/fetch", Sort: geneSort, defaultSort: "entrezGeneId"},
 	{Method: "POST", Path: "/api/genesets/fetch", Sort: genesetSort},
 	{Method: "GET", Path: "/api/generic-assay-meta/{molecularProfileId}", Sort: genericAssayMetaSort},
 	{Method: "GET", Path: "/api/reference-genome-genes/{genomeName}", Sort: referenceGenomeGeneSort},
@@ -109,7 +109,7 @@ var AddedPagedEndpoints = []AddedPaging{
 func (a AddedPaging) Sorted() bool { return len(a.Sort.Values) > 0 }
 
 // Endpoint is the endpoint as pagedEndpoints names it.
-func (a AddedPaging) Endpoint() string { return a.Method + " " + TemplatePath(a.Path) }
+func (a AddedPaging) Endpoint() string { return a.Method + " " + templatePath(a.Path) }
 
 // params are the endpoint's paging parameters, as the contract checks
 // them.
@@ -121,8 +121,8 @@ func (a AddedPaging) params() []Param {
 	return ps
 }
 
-// TemplatePath replaces each {name} segment of path with {}.
-func TemplatePath(path string) string {
+// templatePath replaces each {name} segment of path with {}.
+func templatePath(path string) string {
 	segs := strings.Split(path, "/")
 	for i, s := range segs {
 		if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
@@ -143,21 +143,21 @@ func init() {
 	for i := range AddedPagedEndpoints {
 		a := &AddedPagedEndpoints[i]
 		addedByEndpoint[a.Endpoint()] = a
-		PagedEndpoints = append(PagedEndpoints, a.Endpoint())
+		pagedEndpoints = append(pagedEndpoints, a.Endpoint())
 		if !a.Sorted() {
 			unsortedEndpoints[a.Endpoint()] = true
 		}
 		found := false
 		for j := range contractRoutes {
 			rt := &contractRoutes[j]
-			if rt.method == a.Method && TemplatePath(rt.pattern) == TemplatePath(a.Path) {
-				rt.Params = append(rt.Params, a.params()...)
+			if rt.method == a.Method && templatePath(rt.pattern) == templatePath(a.Path) {
+				rt.params = append(rt.params, a.params()...)
 				found = true
 				break
 			}
 		}
 		if !found {
-			contractRoutes = append(contractRoutes, contractRoute{method: a.Method, pattern: a.Path, Params: a.params()})
+			contractRoutes = append(contractRoutes, contractRoute{method: a.Method, pattern: a.Path, params: a.params()})
 		}
 	}
 }

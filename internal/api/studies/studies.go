@@ -280,12 +280,12 @@ func cancerTypeName(name, id string) string {
 	return "Other"
 }
 
-// Studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
+// studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
 // keyword search over name / id / cancer type and sorting. The ID projection
 // yields an empty list and META an empty list with the total-count header;
 // pages are numbered from 1 (see pageList). Studies come in import order, a
 // keyword search ordered by name, unless sortBy is given.
-func (s Server) Studies(w http.ResponseWriter, r *http.Request) {
+func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
 	args := core.NewArgs()
@@ -342,9 +342,9 @@ func (s Server) Studies(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, s.withResourceCounts(out))
 }
 
-// Study serves GET /api/studies/{studyId} (ColumnStoreStudyController
+// study serves GET /api/studies/{studyId} (ColumnStoreStudyController
 // .getStudy): the DETAILED study with its resource counts.
-func (s Server) Study(w http.ResponseWriter, r *http.Request) {
+func (s Server) study(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("studyId")
 	rows, err := core.CachedQueryP[studyRow](s.State, s.studySelect()+" WHERE c.study_id = {study:String}", ch.Params{"study": id})
 	if err != nil {
@@ -359,9 +359,9 @@ func (s Server) Study(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, s.withResourceCounts([]CancerStudy{st})[0])
 }
 
-// StudiesFetch serves POST /api/studies/fetch (legacy StudyController
+// studiesFetch serves POST /api/studies/fetch (legacy StudyController
 // .fetchStudies) in the ID, SUMMARY or DETAILED projection.
-func (s Server) StudiesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) studiesFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
@@ -389,6 +389,7 @@ func (s Server) StudiesFetch(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Samples ----------
 
+// IDRow is a sample's study, sample and patient id.
 type IDRow struct {
 	StudyID   string `json:"studyId"`
 	SampleID  string `json:"sampleId"`
@@ -406,12 +407,12 @@ type Sample struct {
 	UniquePatientKey         string `json:"uniquePatientKey"`
 }
 
-func (s Server) Samples(w http.ResponseWriter, r *http.Request) {
+func (s Server) samples(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	s.writeSamples(w, r, core.ByStudy(r.PathValue("studyId")), "1", args)
 }
 
-func (s Server) SamplesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) samplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		SampleIdentifiers []core.Identifier `json:"sampleIdentifiers"`
 		SampleListIDs     []string          `json:"sampleListIds"`
@@ -474,13 +475,13 @@ func (s Server) patientOrder(r *http.Request) string {
 	return "patient_id, study_id"
 }
 
-// PatientSortable is PatientSortBy's column (stableId).
-var PatientSortable = map[string]string{"patientId": "patient_id"}
+// patientSortable is PatientSortBy's column (stableId).
+var patientSortable = map[string]string{"patientId": "patient_id"}
 
-func (s Server) Patients(w http.ResponseWriter, r *http.Request) {
+func (s Server) patients(w http.ResponseWriter, r *http.Request) {
 	p := ch.Params{}
 	s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+core.ByStudy(r.PathValue("studyId")).From(core.ParamsBinder(p), core.TPatient)+
-		core.SQLPageOrder(r, PatientSortable, s.patientOrder(r)), p)
+		core.SQLPageOrder(r, patientSortable, s.patientOrder(r)), p)
 }
 
 // writePatientRows streams the patients sql selects, or counts them for
@@ -497,7 +498,7 @@ func (s Server) writePatientRows(w http.ResponseWriter, r *http.Request, sql str
 	out.Finish(err)
 }
 
-func (s Server) PatientsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) patientsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		PatientIdentifiers []core.Identifier `json:"patientIdentifiers"`
 		UniquePatientKeys  []string          `json:"uniquePatientKeys"`
@@ -527,7 +528,7 @@ func (s Server) PatientsFetch(w http.ResponseWriter, r *http.Request) {
 	p := ch.Params{"ids": pairs}
 	rows, err := ch.QueryP[IDRow](s.CH,
 		"SELECT study_id AS studyId, patient_id AS patientId FROM "+core.ByStudies(core.PairStudies(pairs)).From(core.ParamsBinder(p), core.TPatient)+
-			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))}"+core.SQLListOrder(r, PatientSortable, s.patientOrder(r)), p)
+			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))}"+core.SQLListOrder(r, patientSortable, s.patientOrder(r)), p)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -553,7 +554,7 @@ type CancerType struct {
 	Parent         string `json:"parent"`
 }
 
-func (s Server) CancerTypes(w http.ResponseWriter, r *http.Request) {
+func (s Server) cancerTypes(w http.ResponseWriter, r *http.Request) {
 	out, err := s.QueryCancerTypes("", nil)
 	if err != nil {
 		core.Fail(w, r, err)

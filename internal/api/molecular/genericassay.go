@@ -114,7 +114,7 @@ func (s Server) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 	order := "sampleRank, sampleId, studyId, molecularProfileId, entityRank, stableId"
 	query := "SELECT sampleId, stableId, patientId, value, molecularProfileId, studyId FROM (" +
 		strings.Join(parts, " UNION ALL ") + ") ORDER BY " + order + " LIMIT 1 BY molecularProfileId, sampleId, stableId"
-	if sp, expr := core.ClaimListPage(r, GenericAssayDataSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, genericAssayDataSortable); sp != nil {
 		tie := order
 		if sp.SortBy == "value" {
 			// Values that are no number (categories) follow, as text.
@@ -142,10 +142,10 @@ func (s Server) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 	})
 }
 
-// GenericAssayDataSortable are the sortBy fields of generic assay data
+// genericAssayDataSortable are the sortBy fields of generic assay data
 // records over genericAssayDataEach's columns. value sorts as a number;
 // values that are not numbers come after them, as text.
-var GenericAssayDataSortable = map[string]string{
+var genericAssayDataSortable = map[string]string{
 	"stableId": "stableId", "genericAssayStableId": "stableId", "sampleId": "sampleId", "patientId": "patientId",
 	"studyId": "studyId", "molecularProfileId": "molecularProfileId", "value": "toFloat64OrNull(value)",
 }
@@ -427,8 +427,8 @@ func SummaryMetaProperties(props map[string]core.JavaStringMap) map[string]core.
 	return out
 }
 
-// RouteGenericAssay registers the generic-assay and geneset (GSVA) endpoints.
-func (s Server) RouteGenericAssay(mux *http.ServeMux) {
+// routeGenericAssay registers the generic-assay and geneset (GSVA) endpoints.
+func (s Server) routeGenericAssay(mux *http.ServeMux) {
 	// Generic assay data.
 	mux.HandleFunc("POST /api/generic_assay_data/{molecularProfileId}/fetch", s.genericAssayDataInProfileFetch)
 	mux.HandleFunc("POST /api/generic_assay_data/fetch", s.genericAssayDataMultipleFetch)

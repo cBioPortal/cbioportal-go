@@ -30,11 +30,11 @@ func (s Server) ConfigService(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, cfg)
 }
 
-// CustomDriverAnnotationReport reports whether the given mutation profiles carry
+// customDriverAnnotationReport reports whether the given mutation profiles carry
 // custom driver annotations (binary cbp_driver and/or tier classes), so the
 // settings menu exposes the corresponding filter controls. Values come from the
 // mutation, CNA and SV events of genomic_event_derived.
-func (s Server) CustomDriverAnnotationReport(w http.ResponseWriter, r *http.Request) {
+func (s Server) customDriverAnnotationReport(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	type row struct {
@@ -90,7 +90,7 @@ const (
 	gitNotSet           = "not set"
 )
 
-func (s Server) Info(w http.ResponseWriter, r *http.Request) {
+func (s Server) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
 		PortalVersion: portalVersion, DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,

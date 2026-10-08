@@ -125,18 +125,18 @@ func TestSQLPageOrder(t *testing.T) {
 		t.Errorf("no page: %q", got)
 	}
 	for _, c := range []struct {
-		pg   Page
+		pg   page
 		want string
 	}{
-		{Page{SortBy: "value", Size: -1}, " ORDER BY v ASC NULLS LAST, id"},
-		{Page{SortBy: "value", Desc: true, Start: 20, Size: 10}, " ORDER BY v DESC NULLS LAST, id LIMIT 10 OFFSET 20"},
-		{Page{SortBy: "none", Start: 5, Size: 5}, " ORDER BY id LIMIT 5 OFFSET 5"},
-		{Page{SortBy: "other", Size: 5}, " ORDER BY id"},
+		{page{SortBy: "value", Size: -1}, " ORDER BY v ASC NULLS LAST, id"},
+		{page{SortBy: "value", Desc: true, Start: 20, Size: 10}, " ORDER BY v DESC NULLS LAST, id LIMIT 10 OFFSET 20"},
+		{page{SortBy: "none", Start: 5, Size: 5}, " ORDER BY id LIMIT 5 OFFSET 5"},
+		{page{SortBy: "other", Size: 5}, " ORDER BY id"},
 	} {
-		sp := &SQLPage{Page: c.pg}
-		r := r.WithContext(context.WithValue(r.Context(), SQLPageKey{}, sp))
-		if got := SQLPageOrder(r, sortable, "id"); got != c.want || sp.Claimed != (c.pg.SortBy != "other") {
-			t.Errorf("%+v: %q claimed %v", c.pg, got, sp.Claimed)
+		sp := &SQLPage{page: c.pg}
+		r := r.WithContext(context.WithValue(r.Context(), sqlPageKey{}, sp))
+		if got := SQLPageOrder(r, sortable, "id"); got != c.want || sp.claimed != (c.pg.SortBy != "other") {
+			t.Errorf("%+v: %q claimed %v", c.pg, got, sp.claimed)
 		}
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +170,7 @@ func TestSortIgnored(t *testing.T) {
 		seen := "unset"
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = r.URL.Query().Get("sortBy")
-			if sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage); (sp != nil && sp.SortBy != "") != (want != "") {
+			if sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage); (sp != nil && sp.SortBy != "") != (want != "") {
 				t.Errorf("%s: sorted page %v", target, sp)
 			}
 			WriteJSON(w, []int{})

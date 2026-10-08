@@ -25,11 +25,11 @@ var scopeAllowlist = map[string]string{
 	// sample_to_gene_panel_derived is sorted by panel, alteration type and
 	// profile, without the study.
 	"studyview/alterations.go:Server.populateProfiled:sample_to_gene_panel_derived": "reads name the profiles, the WES panel or the alteration type its key holds",
-	"studyview/alterations.go:Server.SVCountsFetch:sample_to_gene_panel_derived":    "reads name the profiles or the WES panel its key holds",
+	"studyview/alterations.go:Server.svCountsFetch:sample_to_gene_panel_derived":    "reads name the profiles or the WES panel its key holds",
 
 	// generic_assay_data_derived has no study column; its key leads with the
 	// profile type and entity.
-	"studyview/genericassaycounts.go:Server.GenericAssayDataCountsFetch:generic_assay_data_derived": "reads name the profile type its key leads with",
+	"studyview/genericassaycounts.go:Server.genericAssayDataCountsFetch:generic_assay_data_derived": "reads name the profile type its key leads with",
 	"studyview/studyviewfilter.go:filterCompiler.genericAssayData:generic_assay_data_derived":       "reads name the profile type and entity its key leads with",
 	"studyview/studyviewfilter.go:filterCompiler.genericAssaySelection:generic_assay_data_derived":  "reads name the profile type its key leads with",
 

@@ -77,7 +77,7 @@ func TestLiveTreatmentTiers(t *testing.T) {
 	c.SetDatabaseAliases(rawDB, refDB)
 	s := New(&core.State{CH: c})
 	mux := http.NewServeMux()
-	s.RouteTreatments(mux)
+	s.routeTreatments(mux)
 	post := func(path, body string) string {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))

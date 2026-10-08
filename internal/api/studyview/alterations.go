@@ -399,7 +399,7 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 	}
 }
 
-func (s Server) MutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
@@ -413,7 +413,7 @@ func (s Server) MutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, out)
 }
 
-func (s Server) CNAGenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
@@ -426,7 +426,7 @@ func (s Server) CNAGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, out)
 }
 
-func (s Server) SVGenesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
@@ -439,10 +439,10 @@ func (s Server) SVGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, out)
 }
 
-// MolecularProfileSampleCountsFetch counts the filtered samples in each
+// molecularProfileSampleCountsFetch counts the filtered samples in each
 // molecular profile, keyed by the profile's stable-id suffix and labelled with
 // its name.
-func (s Server) MolecularProfileSampleCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) molecularProfileSampleCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	type row struct {
@@ -522,11 +522,11 @@ type StructuralVariantCount struct {
 	UniqueEventKey        string    `json:"uniqueEventKey"`
 }
 
-// SVCountsFetch serves POST /api/structuralvariant-counts/fetch: structural
+// svCountsFetch serves POST /api/structuralvariant-counts/fetch: structural
 // variants of the filtered samples counted per (gene1, gene2) pair under the
 // alteration filter's driver and status settings. A pair's profiled count is
 // the samples on panels covering either gene plus the whole-exome samples.
-func (s Server) SVCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()

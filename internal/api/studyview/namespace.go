@@ -17,7 +17,7 @@ import (
 // structural_variant and sample_cna_event tables. sample_cna_event holds only
 // the amplification and deep-deletion events.
 
-func (s Server) RouteNamespace(mux *http.ServeMux) {
+func (s Server) routeNamespace(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/namespace-attributes/fetch", s.namespaceAttributesFetch)
 	mux.HandleFunc("POST /api/namespace-attributes/counts/fetch", s.namespaceAttributeCountsFetch)
 	mux.HandleFunc("POST /api/namespace-data-counts/fetch", s.namespaceDataCountsFetch)
