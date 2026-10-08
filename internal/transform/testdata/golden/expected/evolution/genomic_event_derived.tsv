@@ -1,0 +1,4 @@
+cancer_study_identifier	cna_alteration	cna_cytoband	driver_filter	driver_filter_annotation	driver_tiers_filter	driver_tiers_filter_annotation	entrez_gene_id	gene_panel_stable_id	genetic_profile_stable_id	hugo_gene_symbol	mutation_status	mutation_type	mutation_variant	off_panel	patient_unique_id	sample_unique_id	sv_event_info	variant_type
+String	Nullable(Int8)	String	String	String	String	String	Int32	String	String	String	String	String	String	UInt8	String	String	String	String
+golden_evo	\N						3845	WES	golden_evo_mutations	KRAS	Somatic	Missense_Mutation	G12D	0	golden_evo_GE-P2	golden_evo_GE-P2-01		mutation
+golden_evo	\N		Putative_Driver	hotspot			7157	WES	golden_evo_mutations	TP53	Somatic	Missense_Mutation	R273H	0	golden_evo_GE-P1	golden_evo_GE-P1-01		mutation

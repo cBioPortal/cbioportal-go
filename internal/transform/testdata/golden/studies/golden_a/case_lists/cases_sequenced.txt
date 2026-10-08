@@ -1,0 +1,6 @@
+cancer_study_identifier: golden_a
+stable_id: golden_a_sequenced
+case_list_category: all_cases_with_mutation_data
+case_list_name: Sequenced samples
+case_list_description: Samples profiled for mutations
+case_list_ids: GA-P1-01	GA-P1-02	GA-P2-01	GA-P3-01

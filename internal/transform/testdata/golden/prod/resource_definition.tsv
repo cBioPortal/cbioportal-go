@@ -1,0 +1,4 @@
+resource_id	display_name	description	resource_type	open_by_default	priority	cancer_study_id	custom_metadata
+PATHOLOGY_SLIDE	Pathology Slide	The pathology slide for the sample	SAMPLE	1	1	4	\N
+PATIENT_NOTES	Patient Notes	Notes about the patient	PATIENT	0	2	4	\N
+STUDY_SPONSORS	Study Sponsors	Sponsors of this study	STUDY	1	3	4	\N

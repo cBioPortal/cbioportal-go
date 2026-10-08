@@ -1,0 +1,4 @@
+index	chromosome	region_start	region_end	peak_start	peak_end	enlarged_peak_start	enlarged_peak_end	n_genes_in_region	genes_in_region	n_genes_in_peak	genes_in_peak	n_genes_on_chip	genes_on_chip	top 3	amp	cytoband	q_value
+1	17	37000000	38000000	37800000	37900000	37700000	37950000	3	ERBB2|2064,HER2,MIR21,	1	ERBB2,				1	17q12	1.7328e-96
+2	X	100	200	120	180	100	200	1	[KRAS],NOTAGENE,	0	[KRAS]				1	Xq1	0.030045
+3	3	100	200	120	180	100	200	1	NOTAGENE,	0					1	3p1	0.5

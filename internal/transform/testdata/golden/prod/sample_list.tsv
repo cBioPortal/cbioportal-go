@@ -1,0 +1,13 @@
+list_id	stable_id	category	cancer_study_id	name	description
+1	ascn_test_study_all	all_cases_in_study	1	All Tumors	All tumor samples
+2	ascn_test_study_sequenced	all_cases_with_mutation_data	1	Sequenced Tumors	All sequenced tumors
+3	ascn_test_study_cna	all_cases_with_cna_data	1	Tumors CNA	All tumors with CNA data
+4	ascn_test_study_cnaseq	all_cases_with_mutation_and_cna_data	1	Tumors with sequencing and CNA data	All tumor samples that have CNA and sequencing data
+10	study_es_0_custom	other	4	this is an optional custom case list	this is an optional custom case list
+11	study_es_0_sequenced	other	4	Samples profiled for mutations	This is this case list that contains all samples that are profiled for mutations.
+12	study_es_0_cna	other	4	Samples profiled for mutations	This is this case list that contains all samples that are profiled for mutations.
+13	study_es_0_testprofiled	other	4	Test profiled samples	This case lists to test functionality of profiled/gene panels for mutations, fusions and CNA
+14	study_es_0_cnaseq	other	4	Samples profiled for mutations and CNA	This is this case list that contains all samples that are profiled for mutations and CNA.
+15	study_es_0_all	other	4	All cases in study	All cases in study
+16	lgg_ucsf_2014_test_generic_assay_all	all_cases_in_study	5	All samples	All samples (61 samples)
+17	lgg_ucsf_2014_test_generic_assay_sequenced	all_cases_with_mutation_data	5	Samples with mutation data	Samples with mutation data (61 samples)

@@ -1,0 +1,4 @@
+_part	_part_offset	alteration_type	entrez_gene_id	file_num	hugo_symbol	profile_stable_id	row_num	sample_id	study_id	value
+String	UInt64	String	String	UInt32	String	LowCardinality(String)	UInt64	String	LowCardinality(String)	String
+	0	MRNA_EXPRESSION	2073	0	ERCC5	mrna	0	TCGA-A2-A04P-01	study_es_0	0.423
+	0	MRNA_EXPRESSION	2073	0	ERCC5	mrna_median_Zscores	0	TCGA-A2-A04P-01	study_es_0	0.8081

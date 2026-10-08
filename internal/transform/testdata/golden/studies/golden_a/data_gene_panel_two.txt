@@ -1,0 +1,3 @@
+stable_id: GOLDEN_PANEL2
+description: Golden panel two
+gene_list: TP53	BRCA1	PIK3CA	EML4	ALK

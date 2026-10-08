@@ -1,0 +1,40 @@
+clinical_attribute_id	datatype	description	display_name	patient_attribute	priority	study_id
+String	String	String	String	UInt8	String	String
+AGE	NUMBER	Age at which a condition or disease was first diagnosed.	Diagnosis Age	1	1	lgg_ucsf_2014_test_generic_assay
+ASCN_PLOIDY	STRING	ASCN_PLOIDY	ASCN_PLOIDY	0	1	ascn_test_study
+ASCN_PURITY	STRING	ASCN_PURITY	ASCN_PURITY	0	1	ascn_test_study
+ASCN_VERSION	STRING	ASCN_VERSION	ASCN_VERSION	0	1	ascn_test_study
+ASCN_WGD	STRING	ASCN_WGD	ASCN_WGD	0	1	ascn_test_study
+CANCER_TYPE	STRING	Cancer Type	Cancer Type	0	1	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE_DETAILED	STRING	Cancer Type Detailed	Cancer Type Detailed	0	1	lgg_ucsf_2014_test_generic_assay
+DFS_MONTHS	NUMBER	Disease free in months since treatment	Disease Free (Months)	1	1	study_es_0
+DFS_STATUS	STRING	Disease free status	Disease Free Status	1	1	study_es_0
+FRACTION_GENOME_ALTERED	NUMBER	Fraction Genome Altered	Fraction Genome Altered	0	20	ascn_test_study
+FRACTION_GENOME_ALTERED	NUMBER	Fraction Genome Altered	Fraction Genome Altered	0	20	study_es_0
+GENE_PANEL	STRING	GENE_PANEL	GENE_PANEL	0	1	ascn_test_study
+GRADE	STRING	Numeric value to express the degree of abnormality of cancer cells, a measure of differentiation and aggressiveness.	Neoplasm Histologic Grade	0	1	lgg_ucsf_2014_test_generic_assay
+IDH1_MUTATION	STRING	IDH1 mutation is present	IDH1 Mutation	0	1	lgg_ucsf_2014_test_generic_assay
+MGMT_STATUS	STRING	MGMT Status	MGMT Status	0	1	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	ascn_test_study
+MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	study_es_0
+NON_SILENT_MUT_TP53_ATRX_CIC_FUBP1	STRING	Non-silent mutations in TP53, ATRX, CIC, FUBP1	Non-silent mutations in TP53, ATRX, CIC, FUBP1	0	1	lgg_ucsf_2014_test_generic_assay
+NOTE	STRING	Note.	Note	0	1	lgg_ucsf_2014_test_generic_assay
+ONCOTREE_CODE	STRING	ONCOTREE_CODE	ONCOTREE_CODE	0	1	ascn_test_study
+ONCOTREE_CODE	STRING	Oncotree Code	Oncotree Code	0	1	lgg_ucsf_2014_test_generic_assay
+OS_MONTHS	NUMBER	Overall survival in months since diagnosis	Overall Survival (Months)	1	1	study_es_0
+OS_MONTHS	NUMBER	Overall survival in months since initial diagonosis.	Overall Survival (Months)	1	1	lgg_ucsf_2014_test_generic_assay
+OS_STATUS	STRING	Overall patient survival status.	Overall Survival Status	1	9	lgg_ucsf_2014_test_generic_assay
+OS_STATUS	STRING	Overall survival status	Overall Survival Status	1	1	study_es_0
+SAMPLE_CLASS	STRING	SAMPLE_CLASS	SAMPLE_CLASS	0	1	ascn_test_study
+SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	ascn_test_study
+SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	lgg_ucsf_2014_test_generic_assay
+SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	study_es_0
+SAMPLE_TYPE	STRING	SAMPLE_TYPE	SAMPLE_TYPE	0	1	ascn_test_study
+SAMPLE_TYPE	STRING	The type of sample (i.e., normal, primary, met, recurrence).	Sample Type	0	9	lgg_ucsf_2014_test_generic_assay
+SEX	STRING	SEX	SEX	1	1	ascn_test_study
+SEX	STRING	Sex	Sex	1	1	lgg_ucsf_2014_test_generic_assay
+SOMATIC_STATUS	STRING	Somatic Status	Somatic Status	0	1	lgg_ucsf_2014_test_generic_assay
+STATUS_1P_19Q	STRING	1p/19q Status	1p/19q Status	0	1	lgg_ucsf_2014_test_generic_assay
+SUBTYPE	STRING	Subtype description	Subtype	0	1	study_es_0
+TISSUE_SITE	STRING	TISSUE_SITE	TISSUE_SITE	0	1	ascn_test_study

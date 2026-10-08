@@ -1,0 +1,9 @@
+cancer_study_identifier: golden_b
+genetic_alteration_type: COPY_NUMBER_ALTERATION
+datatype: DISCRETE_LONG
+stable_id: cna
+show_profile_in_analysis_tab: true
+profile_name: Discrete CNA (long)
+profile_description: Discrete CNA, long format
+data_filename: data_cna_long.txt
+namespaces: LongNs

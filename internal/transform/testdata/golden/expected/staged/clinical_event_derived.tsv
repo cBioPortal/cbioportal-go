@@ -1,0 +1,7 @@
+cancer_study_identifier	clinical_event_id	event_type	patient_id	patient_stable_id	start_date	stop_date
+String	Int64	String	Int64	String	Nullable(Int64)	Nullable(Int64)
+golden_a	-4161394118473344138	TREATMENT	112757937	GA-P2	0	100
+golden_a	-5176910024134156672	SPECIMEN	269251418	GA-P1	60	\N
+golden_a	-7391422754348928622	TREATMENT	269251418	GA-P1	50	\N
+golden_a	-7431134218855327677	TREATMENT	269251418	GA-P1	10	40
+golden_a	7642321608538224891	SPECIMEN	269251418	GA-P1	5	\N

@@ -1,0 +1,5 @@
+cancer_study_id	study_id
+Int64	String
+1	ascn_test_study
+4	study_es_0
+5	lgg_ucsf_2014_test_generic_assay

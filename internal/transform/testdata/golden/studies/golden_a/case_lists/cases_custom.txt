@@ -1,0 +1,5 @@
+cancer_study_identifier: golden_a
+stable_id: golden_a_custom
+case_list_name: Custom list
+case_list_description: A patient id, an unknown id and a duplicate
+case_list_ids: GA-P2	GA-P3-01	UNKNOWN-01	GA-P3-01

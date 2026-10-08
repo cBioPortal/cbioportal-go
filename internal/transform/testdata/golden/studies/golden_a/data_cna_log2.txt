@@ -1,0 +1,3 @@
+Hugo_Symbol	Entrez_Gene_Id	GA-P1-01	GA-P2-01	GA-P3-01
+TP53	7157	-0.75	0.1	NA
+ERBB2	2064	1.25	-0.005	0

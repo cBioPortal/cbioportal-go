@@ -1,0 +1,3 @@
+Hugo_Symbol	Entrez_Gene_Id	Chromosome	Start_Position	End_Position	Variant_Classification	Variant_Type	Reference_Allele	Tumor_Seq_Allele2	Tumor_Sample_Barcode	Mutation_Status	HGVSp_Short	t_ref_count	t_alt_count	Cust.score	Cust.label
+P53	7157	17	7577120	7577120	Missense_Mutation	SNP	C	T	GB-P1-01	Somatic	p.R273C	10	3	1.5e3	x
+PTEN	5728	10	89692905	89692905	Splice_Site	SNP	G	A	GB-P2-01	Somatic	p.X41_splice	8	8		

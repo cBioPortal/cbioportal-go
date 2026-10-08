@@ -1,0 +1,5 @@
+add_global_case_list	cancer_type_id	citation	description	groups	import_date	internal_id	name	pmid	public_study	reference_genome	short_name	status	study_id
+UInt8	String	String	String	String	Nullable(DateTime64(6))	UInt64	String	String	UInt8	String	String	Int64	String
+0	brca-es0	Cell 2018	Test study es_0	SU2C-PI3K;PUBLIC;GDAC	2026-10-03 04:23:34.000000	4	Test study es_0	29625048,29596782,29622463,29617662,29625055,29625050	1	hg19		1	study_es_0
+0	difg	Johnson et al. Science 2014	Whole exome sequencing of 23 grade II glioma tumor/normal pairs.	PUBLIC	2026-10-03 04:24:14.000000	5	Low-Grade Gliomas (UCSF, Science 2014)	24336570	1	hg19		1	lgg_ucsf_2014_test_generic_assay
+0	mel		There is ASCN data in here.	PUBLIC	2026-10-03 04:22:59.000000	1	ASCN Study		1	hg19		1	ascn_test_study

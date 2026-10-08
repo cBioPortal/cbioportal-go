@@ -1,0 +1,3 @@
+patient_id	resource_id	sample_id	study_id	url
+String	String	String	String	String
+GA-P1	PATHOLOGY_SLIDE	GA-P1-01	golden_a	http://slide/1

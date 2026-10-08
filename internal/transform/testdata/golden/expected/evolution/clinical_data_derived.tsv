@@ -1,0 +1,9 @@
+attribute_name	attribute_value	cancer_study_identifier	internal_id	patient_unique_id	sample_unique_id	type
+String	String	String	Int32	String	String	String
+LICENSE	CC-BY-4.0	golden_evo	1	golden_evo_GE-P1	golden_evo_GE-P1-01	sample
+LICENSE	CC0	golden_evo	2	golden_evo_GE-P2	golden_evo_GE-P2-01	sample
+MUTATION_COUNT	1	golden_evo	1	golden_evo_GE-P1	golden_evo_GE-P1-01	sample
+MUTATION_COUNT	1	golden_evo	2	golden_evo_GE-P2	golden_evo_GE-P2-01	sample
+SAMPLE_COUNT	1	golden_evo	1	golden_evo_GE-P1		patient
+SAMPLE_COUNT	1	golden_evo	2	golden_evo_GE-P2		patient
+TUMOR_GRADE	G2	golden_evo	1	golden_evo_GE-P1	golden_evo_GE-P1-01	sample

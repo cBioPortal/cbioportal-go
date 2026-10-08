@@ -1,0 +1,4 @@
+entrez_gene_id	gene_index	gistic_roi_id	hugo_gene_symbol	study_id
+Int64	UInt32	UInt64	String	String
+2064	1	16214231786215654262	ERBB2	golden_a
+3845	1	6943518658659801977	KRAS	golden_a

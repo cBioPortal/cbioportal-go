@@ -1,0 +1,7 @@
+#Patient Identifier	Sample Identifier	Tumor Grade	License
+#Patient id	Sample id	Grade	Data license
+#STRING	STRING	STRING	STRING
+#1	1	1	1
+PATIENT_ID	SAMPLE_ID	TUMOR_GRADE	LICENSE
+GE-P1	GE-P1-01	G2	CC-BY-4.0
+GE-P2	GE-P2-01	NA	CC0

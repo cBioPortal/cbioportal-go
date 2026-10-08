@@ -1,0 +1,3 @@
+patient_id	resource_id	study_id	url
+String	String	String	String
+GA-P1	PATIENT_NOTES	golden_a	http://notes/p1

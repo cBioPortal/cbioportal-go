@@ -1,0 +1,4 @@
+Sample_Id	Site1_Entrez_Gene_Id	Site1_Hugo_Symbol	Site1_Chromosome	Site1_Position	Site1_Description	Site2_Entrez_Gene_Id	Site2_Hugo_Symbol	Site2_Chromosome	Site2_Position	Site2_Effect_On_Frame	NCBI_Build	DNA_Support	RNA_Support	Tumor_Read_Count	Tumor_Variant_Count	Event_Info	Class	SV_Length	Connection_Type	Comments	cbp_driver	cbp_driver_annotation	SV_Status	SVNs.col1
+GA-P1-01	NA	EML4	2	42492091	EML4 exon 6	238	ALK	2	29446394	in-frame	GRCh37	no	yes	1000	700	EML4-ALK fusion	DELETION	1000	5to3		Putative_Driver	known fusion	SOMATIC	v1
+GA-P2-01		ERBB2	17	37844000		NA	NA				GRCh37					ERBB2 intragenic				a comment			SOMATIC	
+GA-P3-01	1956	EGFR	7	55200000		1956	EGFR	7	55300000	frameshift	GRCh37	yes	no	10	4	EGFR vIII	DELETION	100000					GERMLINE	v3

@@ -1,0 +1,31 @@
+entity_stable_id	entity_type	properties
+10p_status	GENERIC_ASSAY	{'DESCRIPTION':'Copy number status of 10p','NAME':'10p'}
+10q_status	GENERIC_ASSAY	{'DESCRIPTION':'Copy number status of 10q','NAME':'10q'}
+17-AAG	GENERIC_ASSAY	{'DESCRIPTION':'Desc of 17-AAG','URL':'Url of 17-AAG','NAME':'Name of 17-AAG'}
+AEW541	GENERIC_ASSAY	{'DESCRIPTION':'Desc of AEW541','URL':'Url of AEW541','NAME':'Name of AEW541'}
+HLA-A	GENERIC_ASSAY	{'DESCRIPTION':'Polysolver HLA-A','NAME':'HLA-A'}
+HLA-B	GENERIC_ASSAY	{'DESCRIPTION':'Polysolver HLA-B','NAME':'HLA-B'}
+confidence_1	GENERIC_ASSAY	{'name':'confidence_1','description':'confidence_1','confidenceStatement':'NA'}
+confidence_10	GENERIC_ASSAY	{'name':'confidence_10','description':'confidence_10','confidenceStatement':'NA'}
+mutational_signature_binary_SBS1	GENERIC_ASSAY	{'DESCRIPTION':'Number of mutations corellated with age','URL':'https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS1.tt','NAME':'SBS1 (Age)'}
+mutational_signature_binary_SBS10a	GENERIC_ASSAY	{'DESCRIPTION':'Attributed to polymerase epsilon exonuclease domain mutations','URL':'https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS10a.tt','NAME':'SBS10a (POLE)'}
+mutational_signature_category_DBS1	GENERIC_ASSAY	{'DESCRIPTION':'Exposure to ultraviolet light','URL':'https://cancer.sanger.ac.uk/signatures/dbs/dbs1','NAME':'DBS1 (UV)'}
+mutational_signature_category_DBS10	GENERIC_ASSAY	{'DESCRIPTION':'Defective DNA mismatch repair (MMR)','URL':'https://cancer.sanger.ac.uk/signatures/dbs/dbs10','NAME':'DBS10 (MMR)'}
+mutational_signature_category_SBS1	GENERIC_ASSAY	{'DESCRIPTION':'Number of mutations corellated with age','URL':'https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS1.tt','NAME':'SBS1 (Age)'}
+mutational_signature_category_SBS10a	GENERIC_ASSAY	{'DESCRIPTION':'Attributed to polymerase epsilon exonuclease domain mutations','URL':'https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS10a.tt','NAME':'SBS10a (POLE)'}
+mutational_signature_contribution_DBS1	GENERIC_ASSAY	{'DESCRIPTION':'Exposure to ultraviolet light','URL':'https://cancer.sanger.ac.uk/signatures/dbs/dbs1','NAME':'DBS1 (UV)'}
+mutational_signature_contribution_DBS10	GENERIC_ASSAY	{'DESCRIPTION':'Defective DNA mismatch repair (MMR)','URL':'https://cancer.sanger.ac.uk/signatures/dbs/dbs10','NAME':'DBS10 (MMR)'}
+mutational_signature_contribution_ID1	GENERIC_ASSAY	{'DESCRIPTION':'Slippage during DNA replication of the replicated DNA strand','URL':'https://cancer.sanger.ac.uk/signatures/id/id1','NAME':'ID1 (Slippage)'}
+mutational_signature_contribution_ID10	GENERIC_ASSAY	{'DESCRIPTION':'Unknown','URL':'https://cancer.sanger.ac.uk/signatures/id/id10','NAME':'ID10 (Unknown)'}
+mutational_signature_contribution_SBS1	GENERIC_ASSAY	{'DESCRIPTION':'Number of mutations corellated with age','URL':'https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS1.tt','NAME':'SBS1 (Age)'}
+mutational_signature_contribution_SBS10a	GENERIC_ASSAY	{'DESCRIPTION':'Attributed to polymerase epsilon exonuclease domain mutations','URL':'https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS10a.tt','NAME':'SBS10a (POLE)'}
+mutational_signature_counts_1_Del_C_0	GENERIC_ASSAY	{'NAME':'1:Del:C:0'}
+mutational_signature_counts_1_Del_C_1	GENERIC_ASSAY	{'NAME':'1:Del:C:1'}
+mutational_signature_counts_AC_CA	GENERIC_ASSAY	{'NAME':'AC>CA'}
+mutational_signature_counts_AC_CG	GENERIC_ASSAY	{'NAME':'AC>CG'}
+mutational_signature_counts_A_C_A_A	GENERIC_ASSAY	{'NAME':'A[C>A]A'}
+mutational_signature_counts_A_C_A_C	GENERIC_ASSAY	{'NAME':'A[C>A]C'}
+mutational_signature_pvalue_DBS1	GENERIC_ASSAY	{'DESCRIPTION':'Exposure to ultraviolet light','URL':'https://cancer.sanger.ac.uk/signatures/dbs/dbs1','NAME':'DBS1 (UV)'}
+mutational_signature_pvalue_DBS10	GENERIC_ASSAY	{'DESCRIPTION':'Defective DNA mismatch repair (MMR)','URL':'https://cancer.sanger.ac.uk/signatures/dbs/dbs10','NAME':'DBS10 (MMR)'}
+test_patient_generic_assay_1	GENERIC_ASSAY	{'name':'test_patient_generic_assay_1','description':'test_patient_generic_assay_1'}
+test_patient_generic_assay_2	GENERIC_ASSAY	{'name':'test_patient_generic_assay_2','description':'test_patient_generic_assay_2'}

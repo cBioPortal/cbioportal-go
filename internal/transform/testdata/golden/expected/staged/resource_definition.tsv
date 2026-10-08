@@ -1,0 +1,5 @@
+custom_metadata	description	display_name	open_by_default	priority	resource_id	resource_type	study_id
+Nullable(String)	String	String	UInt8	Int32	String	String	String
+\N		Patient Notes	0	2	PATIENT_NOTES	PATIENT	golden_a
+\N	Sponsors	Study Sponsors	1	1	STUDY_SPONSORS	STUDY	golden_a
+\N	The slide	Pathology Slide	1	1	PATHOLOGY_SLIDE	SAMPLE	golden_a

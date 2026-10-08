@@ -1,0 +1,111 @@
+attr_id	attr_value	internal_id	sample_id	study_id
+String	String	UInt64	String	String
+ASCN_PLOIDY	2	4	FAKE_P001_S4	ascn_test_study
+ASCN_PLOIDY	2	6	FAKE_P001_S7	ascn_test_study
+ASCN_PLOIDY	2.4	1	FAKE_P001_S3	ascn_test_study
+ASCN_PLOIDY	2.8	2	FAKE_P001_S2	ascn_test_study
+ASCN_PLOIDY	2.8	3	FAKE_P001_S5	ascn_test_study
+ASCN_PLOIDY	2.8	5	FAKE_P001_S6	ascn_test_study
+ASCN_PURITY	0.73	5	FAKE_P001_S6	ascn_test_study
+ASCN_PURITY	0.76	2	FAKE_P001_S2	ascn_test_study
+ASCN_PURITY	0.78	1	FAKE_P001_S3	ascn_test_study
+ASCN_PURITY	0.9	3	FAKE_P001_S5	ascn_test_study
+ASCN_VERSION	0.5.14	1	FAKE_P001_S3	ascn_test_study
+ASCN_VERSION	0.5.14	2	FAKE_P001_S2	ascn_test_study
+ASCN_VERSION	0.5.14	3	FAKE_P001_S5	ascn_test_study
+ASCN_VERSION	0.5.14	4	FAKE_P001_S4	ascn_test_study
+ASCN_VERSION	0.5.14	5	FAKE_P001_S6	ascn_test_study
+ASCN_VERSION	0.5.14	6	FAKE_P001_S7	ascn_test_study
+ASCN_WGD	WGD	1	FAKE_P001_S3	ascn_test_study
+ASCN_WGD	WGD	2	FAKE_P001_S2	ascn_test_study
+ASCN_WGD	WGD	3	FAKE_P001_S5	ascn_test_study
+ASCN_WGD	WGD	4	FAKE_P001_S4	ascn_test_study
+ASCN_WGD	no WGD	5	FAKE_P001_S6	ascn_test_study
+ASCN_WGD	no WGD	6	FAKE_P001_S7	ascn_test_study
+CANCER_TYPE	Glioma	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE	Glioma	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE	Glioma	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE	Glioma	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE_DETAILED	Astrocytoma	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE_DETAILED	Astrocytoma	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE_DETAILED	Astrocytoma	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+CANCER_TYPE_DETAILED	Glioblastoma	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+FRACTION_GENOME_ALTERED	0.0	13	TCGA-A2-A04P-01	study_es_0
+FRACTION_GENOME_ALTERED	0.2634	4	FAKE_P001_S4	ascn_test_study
+FRACTION_GENOME_ALTERED	0.7213	1	FAKE_P001_S3	ascn_test_study
+FRACTION_GENOME_ALTERED	0.8079	2	FAKE_P001_S2	ascn_test_study
+FRACTION_GENOME_ALTERED	0.8396	5	FAKE_P001_S6	ascn_test_study
+FRACTION_GENOME_ALTERED	0.8875	3	FAKE_P001_S5	ascn_test_study
+FRACTION_GENOME_ALTERED	0.9618	6	FAKE_P001_S7	ascn_test_study
+GENE_PANEL	IMPACT468	1	FAKE_P001_S3	ascn_test_study
+GENE_PANEL	IMPACT468	2	FAKE_P001_S2	ascn_test_study
+GENE_PANEL	IMPACT468	3	FAKE_P001_S5	ascn_test_study
+GENE_PANEL	IMPACT468	4	FAKE_P001_S4	ascn_test_study
+GENE_PANEL	IMPACT468	5	FAKE_P001_S6	ascn_test_study
+GENE_PANEL	IMPACT468	6	FAKE_P001_S7	ascn_test_study
+GRADE	II	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+GRADE	II	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+GRADE	II	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+GRADE	IV	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+IDH1_MUTATION	R132H	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+IDH1_MUTATION	R132H	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+IDH1_MUTATION	R132H	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+IDH1_MUTATION	R132H	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+MGMT_STATUS	Methylated	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+MGMT_STATUS	Unknown	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+MGMT_STATUS	Unknown	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+MGMT_STATUS	Unmethylated	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	1	13	TCGA-A2-A04P-01	study_es_0
+MUTATION_COUNT	1	855	TEST_SAMPLE_SOMATIC_HOMOZYGOUS	study_es_0
+MUTATION_COUNT	1	856	TEST_SAMPLE_SOMATIC_HETEROZYGOUS	study_es_0
+MUTATION_COUNT	1	857	TEST_SAMPLE_SOMATIC_UNDEFINED	study_es_0
+MUTATION_COUNT	100	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	1221	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	124	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	2	4	FAKE_P001_S4	ascn_test_study
+MUTATION_COUNT	3	588	TCGA-A1-A0SB-02	study_es_0
+MUTATION_COUNT	39	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+MUTATION_COUNT	4	3	FAKE_P001_S5	ascn_test_study
+MUTATION_COUNT	5	2	FAKE_P001_S2	ascn_test_study
+MUTATION_COUNT	6	1	FAKE_P001_S3	ascn_test_study
+MUTATION_COUNT	6	5	FAKE_P001_S6	ascn_test_study
+MUTATION_COUNT	8	587	TCGA-A1-A0SB-01	study_es_0
+NON_SILENT_MUT_TP53_ATRX_CIC_FUBP1	TP53, ATRX	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+NON_SILENT_MUT_TP53_ATRX_CIC_FUBP1	TP53, ATRX	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+NON_SILENT_MUT_TP53_ATRX_CIC_FUBP1	TP53, ATRX	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+NON_SILENT_MUT_TP53_ATRX_CIC_FUBP1	TP53, ATRX	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+ONCOTREE_CODE	AASTR	1	FAKE_P001_S3	ascn_test_study
+ONCOTREE_CODE	AASTR	2	FAKE_P001_S2	ascn_test_study
+ONCOTREE_CODE	AASTR	3	FAKE_P001_S5	ascn_test_study
+ONCOTREE_CODE	AASTR	4	FAKE_P001_S4	ascn_test_study
+ONCOTREE_CODE	AASTR	5	FAKE_P001_S6	ascn_test_study
+ONCOTREE_CODE	AASTR	6	FAKE_P001_S7	ascn_test_study
+ONCOTREE_CODE	ASTR	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+ONCOTREE_CODE	ASTR	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+ONCOTREE_CODE	ASTR	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+ONCOTREE_CODE	GB	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+SAMPLE_CLASS	RapidAutopsy	1	FAKE_P001_S3	ascn_test_study
+SAMPLE_CLASS	RapidAutopsy	2	FAKE_P001_S2	ascn_test_study
+SAMPLE_CLASS	RapidAutopsy	3	FAKE_P001_S5	ascn_test_study
+SAMPLE_CLASS	RapidAutopsy	4	FAKE_P001_S4	ascn_test_study
+SAMPLE_CLASS	RapidAutopsy	5	FAKE_P001_S6	ascn_test_study
+SAMPLE_CLASS	RapidAutopsy	6	FAKE_P001_S7	ascn_test_study
+SAMPLE_TYPE	Local Recurrence	1	FAKE_P001_S3	ascn_test_study
+SAMPLE_TYPE	Local Recurrence	2	FAKE_P001_S2	ascn_test_study
+SAMPLE_TYPE	Local Recurrence	3	FAKE_P001_S5	ascn_test_study
+SAMPLE_TYPE	Local Recurrence	4	FAKE_P001_S4	ascn_test_study
+SAMPLE_TYPE	Local Recurrence	5	FAKE_P001_S6	ascn_test_study
+SAMPLE_TYPE	Local Recurrence	6	FAKE_P001_S7	ascn_test_study
+SAMPLE_TYPE	Primary	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+SAMPLE_TYPE	Primary	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+SAMPLE_TYPE	Recurrent	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+SAMPLE_TYPE	Recurrent	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+SOMATIC_STATUS	Matched	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+SOMATIC_STATUS	Matched	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+SOMATIC_STATUS	Matched	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+SOMATIC_STATUS	Matched	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+STATUS_1P_19Q	19q deletion	859	P01_Rec	lgg_ucsf_2014_test_generic_assay
+STATUS_1P_19Q	Intact	858	P01_Pri	lgg_ucsf_2014_test_generic_assay
+STATUS_1P_19Q	Intact	870	P07_Pri	lgg_ucsf_2014_test_generic_assay
+STATUS_1P_19Q	Intact	871	P07_Rec	lgg_ucsf_2014_test_generic_assay
+SUBTYPE	basal-like	13	TCGA-A2-A04P-01	study_es_0

@@ -1,0 +1,3 @@
+patient_id	resource_id	sample_id	study_id	url
+String	String	String	String	String
+GE-P1	SLIDE	GE-P1-01	golden_evo	http://slide/1

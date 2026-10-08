@@ -1,0 +1,5 @@
+type_of_cancer: brca
+cancer_study_identifier: golden_evo
+name: Golden evolution study
+description: A study whose second version adds columns
+reference_genome: hg19

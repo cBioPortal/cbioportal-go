@@ -1,0 +1,24 @@
+attr_id	attr_value	internal_id	sample_id	study_id
+String	String	UInt64	String	String
+1P19Q_STATUS	Codeleted	5	GB-P1-01	golden_b
+BMI>25	No	6	GB-P2-01	golden_b
+BMI>25	Yes	5	GB-P1-01	golden_b
+CANCER_TYPE	Breast Cancer	1	GA-P1-01	golden_a
+CANCER_TYPE	Breast Cancer	2	GA-P1-02	golden_a
+CANCER_TYPE	Breast Cancer	3	GA-P2-01	golden_a
+CANCER_TYPE	Breast Cancer	4	GA-P3-01	golden_a
+FRACTION_GENOME_ALTERED	0.1552	1	GA-P1-01	golden_a
+FRACTION_GENOME_ALTERED	0.2487	3	GA-P2-01	golden_a
+MUTATION_COUNT	0	4	GA-P3-01	golden_a
+MUTATION_COUNT	1	2	GA-P1-02	golden_a
+MUTATION_COUNT	1	3	GA-P2-01	golden_a
+MUTATION_COUNT	1	5	GB-P1-01	golden_b
+MUTATION_COUNT	1	6	GB-P2-01	golden_b
+MUTATION_COUNT	2	1	GA-P1-01	golden_a
+SAMPLE_TYPE	Metastasis	2	GA-P1-02	golden_a
+SAMPLE_TYPE	Primary	1	GA-P1-01	golden_a
+SAMPLE_TYPE	Primary	3	GA-P2-01	golden_a
+SAMPLE_TYPE	Primary	4	GA-P3-01	golden_a
+TUMOR_PURITY	0.35	2	GA-P1-02	golden_a
+TUMOR_PURITY	0.6	4	GA-P3-01	golden_a
+TUMOR_PURITY	0.8	1	GA-P1-01	golden_a

@@ -1,0 +1,3 @@
+ENTITY_STABLE_ID	name	description	GA-P1	GA-P2
+sig_1	sig_1	Signature one	0.3	0.01
+sig_2	sig_2	Signature two	NA	0.75

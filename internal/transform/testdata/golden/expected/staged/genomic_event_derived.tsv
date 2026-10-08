@@ -1,0 +1,20 @@
+cancer_study_identifier	cna_alteration	cna_cytoband	driver_filter	driver_filter_annotation	driver_tiers_filter	driver_tiers_filter_annotation	entrez_gene_id	gene_panel_stable_id	genetic_profile_stable_id	hugo_gene_symbol	mutation_status	mutation_type	mutation_variant	off_panel	patient_unique_id	sample_unique_id	sv_event_info	variant_type
+String	Nullable(Int8)	String	String	String	String	String	Int32	String	String	String	String	String	String	UInt8	String	String	String	String
+golden_a	-2	17p13.1					7157	GOLDEN_PANEL1	golden_a_gistic	TP53		NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01		cna
+golden_a	-2	17p13.1					7157	GOLDEN_PANEL1	golden_a_gistic	TP53		NA	NA	0	golden_a_GA-P2	golden_a_GA-P2-01		cna
+golden_a	2	17q12					2064	GOLDEN_PANEL1	golden_a_gistic	ERBB2		NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01		cna
+golden_a	2	7p11.2					1956	WES	golden_a_gistic	EGFR		NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-02		cna
+golden_a	\N						1956	WES	golden_a_structural_variants	EGFR	GERMLINE	NA	NA	0	golden_a_GA-P3	golden_a_GA-P3-01	EGFR vIII	structural_variant
+golden_a	\N						2064	WES	golden_a_structural_variants	ERBB2	SOMATIC	NA	NA	0	golden_a_GA-P2	golden_a_GA-P2-01	ERBB2 intragenic	structural_variant
+golden_a	\N						3845	GOLDEN_PANEL1	golden_a_mutations	KRAS	Somatic	Missense_Mutation	G12D	0	golden_a_GA-P1	golden_a_GA-P1-01		mutation
+golden_a	\N						5290	WES	golden_a_mutations	PIK3CA	Germline	Missense_Mutation	H1047R	0	golden_a_GA-P3	golden_a_GA-P3-01		mutation
+golden_a	\N						672	GOLDEN_PANEL2	golden_a_mutations	BRCA1	Somatic	Nonsense_Mutation		0	golden_a_GA-P1	golden_a_GA-P1-02		mutation
+golden_a	\N		Putative_Driver	hotspot	Tier 1	tier note	7157	GOLDEN_PANEL1	golden_a_mutations	TP53	Somatic	Missense_Mutation	R273H	0	golden_a_GA-P1	golden_a_GA-P1-01		mutation
+golden_a	\N		Putative_Driver	known fusion			238	GOLDEN_PANEL2	golden_a_structural_variants	ALK	SOMATIC	NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01	EML4-ALK fusion	structural_variant
+golden_a	\N		Putative_Driver	known fusion			27436	GOLDEN_PANEL2	golden_a_structural_variants	EML4	SOMATIC	NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01	EML4-ALK fusion	structural_variant
+golden_a	\N		Putative_Passenger				1956	WES	golden_a_mutations	EGFR	Somatic	In_Frame_Del	E746_A750del	0	golden_a_GA-P2	golden_a_GA-P2-01		mutation
+golden_b	-2	10q23.31					5728	WES	golden_b_cna	PTEN		NA	NA	0	golden_b_GB-P2	golden_b_GB-P2-01		cna
+golden_b	-2	17p13.1	Putative_Driver	deep deletion	Tier 1	t1	7157	WES	golden_b_cna	TP53		NA	NA	0	golden_b_GB-P1	golden_b_GB-P1-01		cna
+golden_b	2	17q12	Putative_Passenger				2064	WES	golden_b_cna	ERBB2		NA	NA	0	golden_b_GB-P2	golden_b_GB-P2-01		cna
+golden_b	\N						5728	WES	golden_b_mutations	PTEN	Somatic	Splice_Site	X41_splice	0	golden_b_GB-P2	golden_b_GB-P2-01		mutation
+golden_b	\N						7157	WES	golden_b_mutations	TP53	Somatic	Missense_Mutation	R273C	0	golden_b_GB-P1	golden_b_GB-P1-01		mutation

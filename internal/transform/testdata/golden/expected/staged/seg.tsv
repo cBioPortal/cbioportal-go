@@ -1,0 +1,6 @@
+chrom	end	num_probes	sample_id	seg_id	segment_mean	start	study_id
+String	String	String	String	UInt64	String	String	String
+1	1000	10	GA-P1-01	1	0.5	100	golden_a
+17	100	5	GA-P2-01	3	-1.2	1	golden_a
+2	5000	20	GA-P1-01	2	-0.1	100	golden_a
+X	300	6	GA-P2-01	4	0.05	1	golden_a

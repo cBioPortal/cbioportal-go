@@ -1,0 +1,3 @@
+dedicated_color	name	parent	short_name	type_of_cancer_id
+String	String	String	String	String
+HotPink	Golden Breast Carcinoma	breast	BRCA_Golden	brca_golden

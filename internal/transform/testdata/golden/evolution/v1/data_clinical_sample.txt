@@ -1,0 +1,7 @@
+#Patient Identifier	Sample Identifier
+#Patient id	Sample id
+#STRING	STRING
+#1	1
+PATIENT_ID	SAMPLE_ID
+GE-P1	GE-P1-01
+GE-P2	GE-P2-01

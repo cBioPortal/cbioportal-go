@@ -1,0 +1,22 @@
+clinical_event_id	event_attributes	event_type	patient_id	start_date	stop_date	study_id
+UInt64	Array(Tuple(String, String))	String	String	String	String	String
+1	[('EVENT_TYPE_DETAILED','Astro II biopsy')]	SURGERY	P01	0		lgg_ucsf_2014_test_generic_assay
+102	[('SAMPLE_ID','P07_Rec'),('SURGERY','Astro II Recurrence1')]	SPECIMEN	P07	3134		lgg_ucsf_2014_test_generic_assay
+135	[('STATUS','radiographic_progression')]	STATUS	P01	580		lgg_ucsf_2014_test_generic_assay
+136	[('STATUS','radiographic_progression')]	STATUS	P01	1041		lgg_ucsf_2014_test_generic_assay
+137	[('STATUS','radiographic_progression')]	STATUS	P01	1377		lgg_ucsf_2014_test_generic_assay
+145	[('STATUS','radiographic_progression')]	STATUS	P07	2490		lgg_ucsf_2014_test_generic_assay
+16	[('EVENT_TYPE_DETAILED','Astro II Initial')]	SURGERY	P07	0		lgg_ucsf_2014_test_generic_assay
+17	[('EVENT_TYPE_DETAILED','Astro II Recurrence1')]	SURGERY	P07	3134		lgg_ucsf_2014_test_generic_assay
+2	[('EVENT_TYPE_DETAILED','Astro II Initial')]	SURGERY	P01	124		lgg_ucsf_2014_test_generic_assay
+3	[('EVENT_TYPE_DETAILED','GBM Recurrence1')]	SURGERY	P01	1063		lgg_ucsf_2014_test_generic_assay
+4	[('EVENT_TYPE_DETAILED','GBM Recurrence2')]	SURGERY	P01	1391		lgg_ucsf_2014_test_generic_assay
+55	[('AGENT','TMZ'),('SUBTYPE','Chemotherapy'),('TREATMENT_TYPE','Medical Therapy')]	TREATMENT	P01	611	977	lgg_ucsf_2014_test_generic_assay
+56	[('AGENT','TMZ + accutane'),('TREATMENT_TYPE','Medical Therapy')]	TREATMENT	P01	977	1007	lgg_ucsf_2014_test_generic_assay
+57	[('AGENT','TMZ + thalidomide'),('TREATMENT_TYPE','Medical Therapy')]	TREATMENT	P01	1007	1038	lgg_ucsf_2014_test_generic_assay
+58	[('SUBTYPE','XRT'),('TREATMENT_TYPE','Radiation Therapy')]	TREATMENT	P01	1088	1132	lgg_ucsf_2014_test_generic_assay
+59	[('AGENT','CCNU + thalidomide'),('TREATMENT_TYPE','Medical Therapy')]	TREATMENT	P01	1160	1342	lgg_ucsf_2014_test_generic_assay
+65	[('SUBTYPE','XRT'),('TREATMENT_TYPE','Radiation Therapy')]	TREATMENT	P07	47	86	lgg_ucsf_2014_test_generic_assay
+75	[('SAMPLE_ID','P01_Pri'),('SURGERY','Astro II Initial')]	SPECIMEN	P01	124		lgg_ucsf_2014_test_generic_assay
+80	[('SAMPLE_ID','P07_Pri'),('SURGERY','Astro II Initial')]	SPECIMEN	P07	0		lgg_ucsf_2014_test_generic_assay
+98	[('SAMPLE_ID','P01_Rec'),('SURGERY','Glioblastoma')]	SPECIMEN	P01	1063		lgg_ucsf_2014_test_generic_assay

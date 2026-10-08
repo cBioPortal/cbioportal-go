@@ -1,0 +1,8 @@
+clinical_attribute_meta	MergeTree
+clinical_data_derived	MergeTree
+clinical_sample	MergeTree
+genomic_event_derived	MergeTree
+molecular_profile	View
+mutation	MergeTree
+resource_definition	View
+resource_sample	View

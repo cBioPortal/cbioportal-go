@@ -1,0 +1,3 @@
+datatype	description	generic_assay_type	molecular_alteration_type	molecular_profile_id	name	patient_level	pivot_threshold	profile_stable_id	show_profile_in_analysis_tab	sort_order	study_id
+String	String	String	String	String	String	UInt8	Nullable(Float64)	String	UInt8	Nullable(String)	String
+MAF	Evolving mutations		MUTATION_EXTENDED	golden_evo_mutations	Mutations	0	\N	mutations	1	\N	golden_evo

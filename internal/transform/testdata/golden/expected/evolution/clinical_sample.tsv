@@ -1,0 +1,7 @@
+attr_id	attr_value	internal_id	sample_id	study_id
+String	String	UInt64	String	String
+LICENSE	CC-BY-4.0	1	GE-P1-01	golden_evo
+LICENSE	CC0	2	GE-P2-01	golden_evo
+MUTATION_COUNT	1	1	GE-P1-01	golden_evo
+MUTATION_COUNT	1	2	GE-P2-01	golden_evo
+TUMOR_GRADE	G2	1	GE-P1-01	golden_evo

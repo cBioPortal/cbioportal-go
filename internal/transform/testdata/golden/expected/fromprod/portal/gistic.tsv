@@ -1,0 +1,3 @@
+amp	chromosome	cytoband	gistic_roi_id	q_value	q_value_text	study_id	wide_peak_end	wide_peak_start
+UInt8	Int32	String	UInt64	Float64	String	String	Int64	Int64
+1	17	17q12	9	0	0	study_es_0	37870539	37863585

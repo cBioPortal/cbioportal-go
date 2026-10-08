@@ -1,0 +1,7 @@
+#Patient Identifier	Sample Identifier	BMI>25	1p19q status
+#Patient id	Sample id	BMI above 25	1p/19q
+#STRING	STRING	STRING	STRING
+#1	1	1	1
+PATIENT_ID	SAMPLE_ID	BMI>25	1P19Q_STATUS
+GB-P1	GB-P1-01	Yes	Codeleted
+GB-P2	GB-P2-01	No	NA

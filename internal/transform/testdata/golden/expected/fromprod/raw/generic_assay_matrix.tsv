@@ -1,0 +1,124 @@
+_part	_part_offset	description	entity_stable_id	file_num	name	profile_stable_id	row_num	sample_id	study_id	url	value
+String	UInt64	String	String	UInt32	String	String	UInt64	String	String	String	String
+	0		10p_status	0		armlevel_cna	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		Unchanged
+	0		10p_status	0		armlevel_cna	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		Unchanged
+	0		10p_status	0		armlevel_cna	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		Unchanged
+	0		10p_status	0		armlevel_cna	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		Gain
+	0		10q_status	0		armlevel_cna	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		Unchanged
+	0		10q_status	0		armlevel_cna	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		Unchanged
+	0		10q_status	0		armlevel_cna	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		NA
+	0		10q_status	0		armlevel_cna	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		Unchanged
+	0		17-AAG	0		treatment_ec50	0	TCGA-A1-A0SB-01	study_es_0		0.22807844
+	0		17-AAG	0		treatment_ic50	0	TCGA-A1-A0SB-01	study_es_0		0.22807844
+	0		AEW541	0		treatment_ec50	0	TCGA-A1-A0SB-01	study_es_0		> 8
+	0		AEW541	0		treatment_ic50	0	TCGA-A1-A0SB-01	study_es_0		>8
+	0		HLA-A	0		hla	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		A0201/A3101
+	0		HLA-A	0		hla	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		A0201/A3101
+	0		HLA-A	0		hla	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		A0101/A0301
+	0		HLA-A	0		hla	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		A0101/A0301
+	0		HLA-B	0		hla	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		B3502/B3906
+	0		HLA-B	0		hla	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		B3502/B3906
+	0		HLA-B	0		hla	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		B0702/B4402
+	0		HLA-B	0		hla	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		B0702/B4402
+	0		confidence_1	0		mutational_signature	0	TCGA-A1-A0SB-01	study_es_0		0.653
+	0		confidence_10	0		mutational_signature	0	TCGA-A1-A0SB-01	study_es_0		0.0235
+	0		mutational_signature_binary_SBS1	0		mutational_signature_binary_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		true
+	0		mutational_signature_binary_SBS1	0		mutational_signature_binary_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		true
+	0		mutational_signature_binary_SBS1	0		mutational_signature_binary_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		true
+	0		mutational_signature_binary_SBS1	0		mutational_signature_binary_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		true
+	0		mutational_signature_binary_SBS10a	0		mutational_signature_binary_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		false
+	0		mutational_signature_binary_SBS10a	0		mutational_signature_binary_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		false
+	0		mutational_signature_binary_SBS10a	0		mutational_signature_binary_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		false
+	0		mutational_signature_binary_SBS10a	0		mutational_signature_binary_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		false
+	0		mutational_signature_category_DBS1	0		mutational_signature_category_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		highly significant
+	0		mutational_signature_category_DBS1	0		mutational_signature_category_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		significant
+	0		mutational_signature_category_DBS1	0		mutational_signature_category_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		significant
+	0		mutational_signature_category_DBS1	0		mutational_signature_category_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		highly significant
+	0		mutational_signature_category_DBS10	0		mutational_signature_category_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_category_DBS10	0		mutational_signature_category_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		marginally significant
+	0		mutational_signature_category_DBS10	0		mutational_signature_category_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_category_DBS10	0		mutational_signature_category_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_category_SBS1	0		mutational_signature_category_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		highly significant
+	0		mutational_signature_category_SBS1	0		mutational_signature_category_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		significant
+	0		mutational_signature_category_SBS1	0		mutational_signature_category_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		significant
+	0		mutational_signature_category_SBS1	0		mutational_signature_category_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		highly significant
+	0		mutational_signature_category_SBS10a	0		mutational_signature_category_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_category_SBS10a	0		mutational_signature_category_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_category_SBS10a	0		mutational_signature_category_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_category_SBS10a	0		mutational_signature_category_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		not significant
+	0		mutational_signature_contribution_DBS1	0		mutational_signature_contribution_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.161391792
+	0		mutational_signature_contribution_DBS1	0		mutational_signature_contribution_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		7.81e-12
+	0		mutational_signature_contribution_DBS1	0		mutational_signature_contribution_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.06113226
+	0		mutational_signature_contribution_DBS1	0		mutational_signature_contribution_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.084352005
+	0		mutational_signature_contribution_DBS10	0		mutational_signature_contribution_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		4.31e-13
+	0		mutational_signature_contribution_DBS10	0		mutational_signature_contribution_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.001564567
+	0		mutational_signature_contribution_DBS10	0		mutational_signature_contribution_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.032226239
+	0		mutational_signature_contribution_DBS10	0		mutational_signature_contribution_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.013825856
+	0		mutational_signature_contribution_ID1	0		mutational_signature_contribution_ID	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.161391792
+	0		mutational_signature_contribution_ID1	0		mutational_signature_contribution_ID	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		7.81e-12
+	0		mutational_signature_contribution_ID1	0		mutational_signature_contribution_ID	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.06113226
+	0		mutational_signature_contribution_ID1	0		mutational_signature_contribution_ID	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.084352005
+	0		mutational_signature_contribution_ID1	0		mutational_signature_pvalue_ID	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.003
+	0		mutational_signature_contribution_ID1	0		mutational_signature_pvalue_ID	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.013
+	0		mutational_signature_contribution_ID1	0		mutational_signature_pvalue_ID	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.017
+	0		mutational_signature_contribution_ID1	0		mutational_signature_pvalue_ID	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.002
+	0		mutational_signature_contribution_ID10	0		mutational_signature_contribution_ID	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		6.78e-13
+	0		mutational_signature_contribution_ID10	0		mutational_signature_contribution_ID	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		3.73e-10
+	0		mutational_signature_contribution_ID10	0		mutational_signature_contribution_ID	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		9.22e-11
+	0		mutational_signature_contribution_ID10	0		mutational_signature_contribution_ID	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.019794344
+	0		mutational_signature_contribution_ID10	0		mutational_signature_pvalue_ID	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.828
+	0		mutational_signature_contribution_ID10	0		mutational_signature_pvalue_ID	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.067
+	0		mutational_signature_contribution_ID10	0		mutational_signature_pvalue_ID	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.128
+	0		mutational_signature_contribution_ID10	0		mutational_signature_pvalue_ID	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.138
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_contribution_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.161391792
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_contribution_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		7.81e-12
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_contribution_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.06113226
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_contribution_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.084352005
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_pvalue_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.003
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_pvalue_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.013
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_pvalue_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.017
+	0		mutational_signature_contribution_SBS1	0		mutational_signature_pvalue_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.002
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_contribution_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		1.96e-12
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_contribution_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		1.44e-11
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_contribution_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		1.13e-16
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_contribution_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		2.93e-13
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_pvalue_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.626
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_pvalue_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.657
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_pvalue_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.996
+	0		mutational_signature_contribution_SBS10a	0		mutational_signature_pvalue_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.866
+	0		mutational_signature_counts_1_Del_C_0	0		mutational_signature_counts_ID	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		1
+	0		mutational_signature_counts_1_Del_C_0	0		mutational_signature_counts_ID	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_1_Del_C_0	0		mutational_signature_counts_ID	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_1_Del_C_0	0		mutational_signature_counts_ID	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_1_Del_C_1	0		mutational_signature_counts_ID	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		1
+	0		mutational_signature_counts_1_Del_C_1	0		mutational_signature_counts_ID	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_1_Del_C_1	0		mutational_signature_counts_ID	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_1_Del_C_1	0		mutational_signature_counts_ID	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		1
+	0		mutational_signature_counts_AC_CA	0		mutational_signature_counts_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		12
+	0		mutational_signature_counts_AC_CA	0		mutational_signature_counts_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		13
+	0		mutational_signature_counts_AC_CA	0		mutational_signature_counts_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		24
+	0		mutational_signature_counts_AC_CA	0		mutational_signature_counts_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		25
+	0		mutational_signature_counts_AC_CG	0		mutational_signature_counts_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		13
+	0		mutational_signature_counts_AC_CG	0		mutational_signature_counts_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		14
+	0		mutational_signature_counts_AC_CG	0		mutational_signature_counts_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		25
+	0		mutational_signature_counts_AC_CG	0		mutational_signature_counts_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		26
+	0		mutational_signature_counts_A_C_A_A	0		mutational_signature_counts_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		1
+	0		mutational_signature_counts_A_C_A_A	0		mutational_signature_counts_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		12
+	0		mutational_signature_counts_A_C_A_A	0		mutational_signature_counts_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_A_C_A_A	0		mutational_signature_counts_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_A_C_A_C	0		mutational_signature_counts_SBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		2
+	0		mutational_signature_counts_A_C_A_C	0		mutational_signature_counts_SBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		13
+	0		mutational_signature_counts_A_C_A_C	0		mutational_signature_counts_SBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0
+	0		mutational_signature_counts_A_C_A_C	0		mutational_signature_counts_SBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		1
+	0		mutational_signature_pvalue_DBS1	0		mutational_signature_pvalue_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.003
+	0		mutational_signature_pvalue_DBS1	0		mutational_signature_pvalue_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.013
+	0		mutational_signature_pvalue_DBS1	0		mutational_signature_pvalue_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.017
+	0		mutational_signature_pvalue_DBS1	0		mutational_signature_pvalue_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.002
+	0		mutational_signature_pvalue_DBS10	0		mutational_signature_pvalue_DBS	0	P01_Pri	lgg_ucsf_2014_test_generic_assay		0.828
+	0		mutational_signature_pvalue_DBS10	0		mutational_signature_pvalue_DBS	0	P01_Rec	lgg_ucsf_2014_test_generic_assay		0.067
+	0		mutational_signature_pvalue_DBS10	0		mutational_signature_pvalue_DBS	0	P07_Pri	lgg_ucsf_2014_test_generic_assay		0.128
+	0		mutational_signature_pvalue_DBS10	0		mutational_signature_pvalue_DBS	0	P07_Rec	lgg_ucsf_2014_test_generic_assay		0.138
+	0		test_patient_generic_assay_1	0		generic_assay_patient_test	0	TCGA-A1-A0SB-01	study_es_0		0.370266873
+	0		test_patient_generic_assay_1	0		generic_assay_patient_test	0	TCGA-A1-A0SB-02	study_es_0		0.370266873
+	0		test_patient_generic_assay_2	0		generic_assay_patient_test	0	TCGA-A1-A0SB-01	study_es_0		0.002709404
+	0		test_patient_generic_assay_2	0		generic_assay_patient_test	0	TCGA-A1-A0SB-02	study_es_0		0.002709404

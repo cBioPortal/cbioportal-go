@@ -1,0 +1,4 @@
+PATIENT_ID	RESOURCE_ID	URL
+GA-P1	PATIENT_NOTES	http://notes/p1
+GA-P1	PATIENT_NOTES	http://notes/p1
+GA-P2	PATHOLOGY_SLIDE	http://wrong-type

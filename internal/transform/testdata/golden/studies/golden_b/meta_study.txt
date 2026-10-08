@@ -1,0 +1,6 @@
+type_of_cancer: gbm
+cancer_study_identifier: golden_b
+name: Golden study B
+description: Second fixture study: sample file only, long CNA, other namespaces
+add_global_case_list: false
+reference_genome: hg38

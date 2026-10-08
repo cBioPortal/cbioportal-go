@@ -1,0 +1,4 @@
+amp	chromosome	cytoband	gistic_roi_id	q_value	q_value_text	study_id	wide_peak_end	wide_peak_start
+UInt8	Int32	String	UInt64	Float64	String	String	Int64	Int64
+1	17	17q12	16214231786215654262	1.7328e-96	1.7328e-96	golden_a	37900000	37800000
+1	23	Xq1	6943518658659801977	0.030045	0.030045	golden_a	180	120

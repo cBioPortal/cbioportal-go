@@ -1,0 +1,3 @@
+resource_id	study_id	url
+String	String	String
+STUDY_SPONSORS	study_es_0	http://url-to-study-sponsors

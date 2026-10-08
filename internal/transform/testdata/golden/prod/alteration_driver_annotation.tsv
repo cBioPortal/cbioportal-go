@@ -1,0 +1,18 @@
+alteration_event_id	genetic_profile_id	sample_id	driver_filter	driver_filter_annotation	driver_tiers_filter	driver_tiers_filter_annotation
+1	14	13	Putative_Driver	Test driver Foo	Class 4	Class annotation
+2	14	13	Putative_Driver	Test driver	Class 4	Class annotation
+3	14	13	Putative_Passenger	Test driver	Class 3	Class annotation
+4	14	13	Putative_Driver	Test driver	Class 2	Class annotation
+5	14	13	Unknown	Test driver	Class 1	Class annotation
+6	14	13	Putative_Driver	Test driver	Unknown	Class annotation
+10	12	587	Putative_Driver	Test driver	Class 1	Class annotation
+13	12	588	Putative_Passenger	Test passenger	Class 3	Class annotation
+14	12	587	Putative_Driver	Test driver		
+15	12	587	Putative_Passenger	Test passenger	Class 2	Class annotation
+16	12	587	Unknown		Class 4	Class annotation
+17	12	587	Putative_Passenger	Test passenger	Class 1	Class annotation
+18	12	588	Putative_Passenger	Test passenger	Class 3	Class annotation
+19	12	588	Putative_Passenger	Test passenger		
+23	12	855	Putative_Driver	Test driver	Class 1	Class annotation
+24	12	856	Putative_Passenger	Test passenger	Class 1	Class annotation
+25	12	857	Putative_Driver	Test driver	Class 1	Class annotation

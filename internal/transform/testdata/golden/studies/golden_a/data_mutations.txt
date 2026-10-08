@@ -1,0 +1,12 @@
+#version 2.4
+#sequenced_samples: GA-P1-01 GA-P1-02 GA-P2-01 GA-P3-01
+Hugo_Symbol	Entrez_Gene_Id	Center	NCBI_Build	Chromosome	Start_Position	End_Position	Variant_Classification	Variant_Type	Reference_Allele	Tumor_Seq_Allele1	Tumor_Seq_Allele2	Tumor_Sample_Barcode	Mutation_Status	Validation_Status	HGVSp_Short	Amino_Acid_Change	t_ref_count	t_alt_count	n_ref_count	n_alt_count	Protein_position	RefSeq	cbp_driver	cbp_driver_annotation	cbp_driver_tiers	cbp_driver_tiers_annotation	Zygosity.status	Zygosity.code	ASCN.ascn_integer_copy_number	ASCN.total_copy_number	ASCN.clonal
+TP53	7157	golden	GRCh37	17	7577120	7577120	Missense_Mutation	SNP	C	C	T	GA-P1-01	Somatic	Unknown	p.R273H	R273H	40	20	50	0	273/393	NM_000546	Putative_Driver	hotspot	Tier 1	tier note	Homozygous	1	2	4	CLONAL
+KRAS2		golden	GRCh37	12	25398284	25398284	Missense_Mutation	SNP	C	C	T	GA-P1-01	Somatic		p.G12D		30	10			12/189		NA								
+EGFR	1956	golden	GRCh37	chr7	55242465	55242479	In_Frame_Del	DEL	GGAATTAAGAGAAGC	GGAATTAAGAGAAGC	-	GA-P2-01	Somatic	Valid	p.E746_A750del		60	25			746-750/1210		Putative_Passenger				Heterozygous	0.5			
+TP53	7157	golden	GRCh37	17	7579472	7579472	Silent	SNP	G	G	C	GA-P2-01	Somatic		p.P72P		10	5													
+Unknown	0	golden	GRCh37	3	1000	1000	Intron	SNP	A	A	G	GA-P3-01	Somatic				1	1													
+NOTAGENE		golden	GRCh37	3	2000	2000	Missense_Mutation	SNP	A	A	G	GA-P3-01	Somatic		p.X1Y		1	1													
+PIK3CA	5290	golden	GRCh37	3	178952085	178952085	Missense_Mutation	SNP	A	A	G	GA-P3-01	Germline		p.H1047R		12	12			1047/1068										
+AMBIG1		golden	GRCh37	7	3000	3000	Missense_Mutation	SNP	A	A	G	GA-P1-02	Somatic		p.A1B		1	1													
+BRCA1	672	golden	GRCh37	17	41209079	41209079	Nonsense_Mutation	SNP	G	G	A	GA-P1-02	Somatic			Q1756*	20	15											3	3	SUBCLONAL

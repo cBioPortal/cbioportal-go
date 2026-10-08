@@ -1,0 +1,10 @@
+cna_matrix	View
+generic_assay_entity_meta	View
+generic_assay_matrix	View
+generic_assay_profile_entity	View
+genetic_profile	View
+methylation_matrix	View
+mrna_expression_matrix	View
+profile_sample	MergeTree
+protein_level_matrix	View
+timeline	MergeTree

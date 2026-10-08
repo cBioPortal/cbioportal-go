@@ -1,0 +1,4 @@
+cancer_study_id	cancer_study_identifier	type_of_cancer_id	name	description	public	pmid	citation	groups	status	import_date	reference_genome_id
+1	ascn_test_study	mel	ASCN Study	There is ASCN data in here.	1	\N	\N	PUBLIC	1	2026-10-03 04:22:59.000000	1
+4	study_es_0	brca-es0	Test study es_0	Test study es_0	1	29625048,29596782,29622463,29617662,29625055,29625050	Cell 2018	SU2C-PI3K;PUBLIC;GDAC	1	2026-10-03 04:23:34.000000	1
+5	lgg_ucsf_2014_test_generic_assay	difg	Low-Grade Gliomas (UCSF, Science 2014)	Whole exome sequencing of 23 grade II glioma tumor/normal pairs.	1	24336570	Johnson et al. Science 2014	PUBLIC	1	2026-10-03 04:24:14.000000	1

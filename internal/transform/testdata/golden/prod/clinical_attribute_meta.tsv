@@ -1,0 +1,39 @@
+attr_id	display_name	description	datatype	patient_attribute	priority	cancer_study_id
+AGE	Diagnosis Age	Age at which a condition or disease was first diagnosed.	NUMBER	1	1	5
+ASCN_PLOIDY	ASCN_PLOIDY	ASCN_PLOIDY	STRING	0	1	1
+ASCN_PURITY	ASCN_PURITY	ASCN_PURITY	STRING	0	1	1
+ASCN_VERSION	ASCN_VERSION	ASCN_VERSION	STRING	0	1	1
+ASCN_WGD	ASCN_WGD	ASCN_WGD	STRING	0	1	1
+CANCER_TYPE	Cancer Type	Cancer Type	STRING	0	1	5
+CANCER_TYPE_DETAILED	Cancer Type Detailed	Cancer Type Detailed	STRING	0	1	5
+DFS_MONTHS	Disease Free (Months)	Disease free in months since treatment	NUMBER	1	1	4
+DFS_STATUS	Disease Free Status	Disease free status	STRING	1	1	4
+FRACTION_GENOME_ALTERED	Fraction Genome Altered	Fraction Genome Altered	NUMBER	0	20	1
+FRACTION_GENOME_ALTERED	Fraction Genome Altered	Fraction Genome Altered	NUMBER	0	20	4
+GENE_PANEL	GENE_PANEL	GENE_PANEL	STRING	0	1	1
+GRADE	Neoplasm Histologic Grade	Numeric value to express the degree of abnormality of cancer cells, a measure of differentiation and aggressiveness.	STRING	0	1	5
+IDH1_MUTATION	IDH1 Mutation	IDH1 mutation is present	STRING	0	1	5
+MGMT_STATUS	MGMT Status	MGMT Status	STRING	0	1	5
+MUTATION_COUNT	Mutation Count	Mutation Count	NUMBER	0	30	1
+MUTATION_COUNT	Mutation Count	Mutation Count	NUMBER	0	30	4
+MUTATION_COUNT	Mutation Count	Mutation Count	NUMBER	0	30	5
+NON_SILENT_MUT_TP53_ATRX_CIC_FUBP1	Non-silent mutations in TP53, ATRX, CIC, FUBP1	Non-silent mutations in TP53, ATRX, CIC, FUBP1	STRING	0	1	5
+NOTE	Note	Note.	STRING	0	1	5
+ONCOTREE_CODE	ONCOTREE_CODE	ONCOTREE_CODE	STRING	0	1	1
+ONCOTREE_CODE	Oncotree Code	Oncotree Code	STRING	0	1	5
+OS_MONTHS	Overall Survival (Months)	Overall survival in months since diagnosis	NUMBER	1	1	4
+OS_MONTHS	Overall Survival (Months)	Overall survival in months since initial diagonosis.	NUMBER	1	1	5
+OS_STATUS	Overall Survival Status	Overall patient survival status.	STRING	1	9	5
+OS_STATUS	Overall Survival Status	Overall survival status	STRING	1	1	4
+SAMPLE_CLASS	SAMPLE_CLASS	SAMPLE_CLASS	STRING	0	1	1
+SAMPLE_COUNT	Number of Samples Per Patient	Number of Samples Per Patient	STRING	1	1	1
+SAMPLE_COUNT	Number of Samples Per Patient	Number of Samples Per Patient	STRING	1	1	4
+SAMPLE_COUNT	Number of Samples Per Patient	Number of Samples Per Patient	STRING	1	1	5
+SAMPLE_TYPE	SAMPLE_TYPE	SAMPLE_TYPE	STRING	0	1	1
+SAMPLE_TYPE	Sample Type	The type of sample (i.e., normal, primary, met, recurrence).	STRING	0	9	5
+SEX	SEX	SEX	STRING	1	1	1
+SEX	Sex	Sex	STRING	1	1	5
+SOMATIC_STATUS	Somatic Status	Somatic Status	STRING	0	1	5
+STATUS_1P_19Q	1p/19q Status	1p/19q Status	STRING	0	1	5
+SUBTYPE	Subtype	Subtype description	STRING	0	1	4
+TISSUE_SITE	TISSUE_SITE	TISSUE_SITE	STRING	0	1	1

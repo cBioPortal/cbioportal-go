@@ -1,0 +1,6 @@
+clinical_attribute_id	datatype	description	display_name	patient_attribute	priority	study_id
+String	String	String	String	UInt8	String	String
+LICENSE	STRING	Data license	License	0	1	golden_evo
+MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	golden_evo
+SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	golden_evo
+TUMOR_GRADE	STRING	Grade	Tumor Grade	0	1	golden_evo

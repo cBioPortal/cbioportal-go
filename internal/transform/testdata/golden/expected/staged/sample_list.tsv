@@ -1,0 +1,16 @@
+category	description	internal_id	list_id	list_internal_id	name	sample_id	study_id
+String	String	UInt64	String	UInt64	String	String	String
+all_cases_with_cna_data	Samples profiled for CNA	1	golden_a_cna	1	CNA samples	GA-P1-01	golden_a
+all_cases_with_cna_data	Samples profiled for CNA	2	golden_a_cna	1	CNA samples	GA-P1-02	golden_a
+all_cases_with_cna_data	Samples profiled for CNA	3	golden_a_cna	1	CNA samples	GA-P2-01	golden_a
+all_cases_with_cna_data	Samples profiled for CNA	4	golden_a_cna	1	CNA samples	GA-P3-01	golden_a
+all_cases_with_mutation_data	Samples profiled for mutations	1	golden_a_sequenced	3	Sequenced samples	GA-P1-01	golden_a
+all_cases_with_mutation_data	Samples profiled for mutations	2	golden_a_sequenced	3	Sequenced samples	GA-P1-02	golden_a
+all_cases_with_mutation_data	Samples profiled for mutations	3	golden_a_sequenced	3	Sequenced samples	GA-P2-01	golden_a
+all_cases_with_mutation_data	Samples profiled for mutations	4	golden_a_sequenced	3	Sequenced samples	GA-P3-01	golden_a
+other	A patient id, an unknown id and a duplicate	3	golden_a_custom	2	Custom list	GA-P2-01	golden_a
+other	A patient id, an unknown id and a duplicate	4	golden_a_custom	2	Custom list	GA-P3-01	golden_a
+other	All cases in study	1	golden_a_all	4	All cases in study	GA-P1-01	golden_a
+other	All cases in study	2	golden_a_all	4	All cases in study	GA-P1-02	golden_a
+other	All cases in study	3	golden_a_all	4	All cases in study	GA-P2-01	golden_a
+other	All cases in study	4	golden_a_all	4	All cases in study	GA-P3-01	golden_a

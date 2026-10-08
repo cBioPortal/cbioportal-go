@@ -1,0 +1,4 @@
+reference_genome_id	species	name	build_name	genome_size	url	release_date
+1	human	hg19	GRCh37	2897310462	http://hgdownload.cse.ucsc.edu/goldenPath/hg19/bigZips	2009-02-01 00:00:00.000000
+2	human	hg38	GRCh38	3049315783	http://hgdownload.cse.ucsc.edu/goldenPath/hg38/bigZips	2013-12-01 00:00:00.000000
+3	mouse	mm10	GRCm38	2652783500	http://hgdownload.cse.ucsc.edu//goldenPath/mm10/bigZips	2012-01-01 00:00:00.000000

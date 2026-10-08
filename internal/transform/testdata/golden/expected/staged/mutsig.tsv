@@ -1,0 +1,4 @@
+entrez_gene_id	hugo_gene_symbol	num_bases_covered	num_mutations	p_value	p_value_text	q_value	q_value_text	rank	study_id
+Int64	String	Int32	Int32	Float64	String	Float64	String	Int32	String
+3845	KRAS	500	2	0.001	0.001	0.05	0.05	2	golden_a
+7157	TP53	1000	5	1e-10	1e-10	1e-8	1e-8	1	golden_a

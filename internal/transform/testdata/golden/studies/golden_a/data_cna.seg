@@ -1,0 +1,5 @@
+ID	chrom	loc.start	loc.end	num.mark	seg.mean
+GA-P1-01	1	100	1000	10	0.5
+GA-P1-01	2	100	5000	20	-0.1
+GA-P2-01	17	1	100	5	-1.2
+GA-P2-01	X	1	300	6	0.05

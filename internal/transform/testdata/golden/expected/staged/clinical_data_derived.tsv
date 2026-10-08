@@ -1,0 +1,42 @@
+attribute_name	attribute_value	cancer_study_identifier	internal_id	patient_unique_id	sample_unique_id	type
+String	String	String	Int32	String	String	String
+1P19Q_STATUS	Codeleted	golden_b	5	golden_b_GB-P1	golden_b_GB-P1-01	sample
+AGE	55	golden_a	3	golden_a_GA-P3		patient
+AGE	61	golden_a	1	golden_a_GA-P1		patient
+AGE	70	golden_a	4	golden_a_GA-P4		patient
+BMI>25	No	golden_b	6	golden_b_GB-P2	golden_b_GB-P2-01	sample
+BMI>25	Yes	golden_b	5	golden_b_GB-P1	golden_b_GB-P1-01	sample
+CANCER_TYPE	Breast Cancer	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample
+CANCER_TYPE	Breast Cancer	golden_a	2	golden_a_GA-P1	golden_a_GA-P1-02	sample
+CANCER_TYPE	Breast Cancer	golden_a	3	golden_a_GA-P2	golden_a_GA-P2-01	sample
+CANCER_TYPE	Breast Cancer	golden_a	4	golden_a_GA-P3	golden_a_GA-P3-01	sample
+FRACTION_GENOME_ALTERED	0.1552	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample
+FRACTION_GENOME_ALTERED	0.2487	golden_a	3	golden_a_GA-P2	golden_a_GA-P2-01	sample
+MUTATION_COUNT	0	golden_a	4	golden_a_GA-P3	golden_a_GA-P3-01	sample
+MUTATION_COUNT	1	golden_a	2	golden_a_GA-P1	golden_a_GA-P1-02	sample
+MUTATION_COUNT	1	golden_a	3	golden_a_GA-P2	golden_a_GA-P2-01	sample
+MUTATION_COUNT	1	golden_b	5	golden_b_GB-P1	golden_b_GB-P1-01	sample
+MUTATION_COUNT	1	golden_b	6	golden_b_GB-P2	golden_b_GB-P2-01	sample
+MUTATION_COUNT	2	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample
+OS_MONTHS	12.5	golden_a	1	golden_a_GA-P1		patient
+OS_MONTHS	3	golden_a	4	golden_a_GA-P4		patient
+OS_MONTHS	40	golden_a	2	golden_a_GA-P2		patient
+OS_STATUS	0:LIVING	golden_a	2	golden_a_GA-P2		patient
+OS_STATUS	0:LIVING	golden_a	4	golden_a_GA-P4		patient
+OS_STATUS	1:DECEASED	golden_a	1	golden_a_GA-P1		patient
+OS_STATUS	1:DECEASED	golden_a	3	golden_a_GA-P3		patient
+SAMPLE_COUNT	1	golden_a	2	golden_a_GA-P2		patient
+SAMPLE_COUNT	1	golden_a	3	golden_a_GA-P3		patient
+SAMPLE_COUNT	1	golden_b	5	golden_b_GB-P1		patient
+SAMPLE_COUNT	1	golden_b	6	golden_b_GB-P2		patient
+SAMPLE_COUNT	2	golden_a	1	golden_a_GA-P1		patient
+SAMPLE_TYPE	Metastasis	golden_a	2	golden_a_GA-P1	golden_a_GA-P1-02	sample
+SAMPLE_TYPE	Primary	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample
+SAMPLE_TYPE	Primary	golden_a	3	golden_a_GA-P2	golden_a_GA-P2-01	sample
+SAMPLE_TYPE	Primary	golden_a	4	golden_a_GA-P3	golden_a_GA-P3-01	sample
+SEX	Female	golden_a	1	golden_a_GA-P1		patient
+SEX	Female	golden_a	2	golden_a_GA-P2		patient
+SEX	Male	golden_a	3	golden_a_GA-P3		patient
+TUMOR_PURITY	0.35	golden_a	2	golden_a_GA-P1	golden_a_GA-P1-02	sample
+TUMOR_PURITY	0.6	golden_a	4	golden_a_GA-P3	golden_a_GA-P3-01	sample
+TUMOR_PURITY	0.8	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample

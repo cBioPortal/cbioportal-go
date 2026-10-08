@@ -1,0 +1,8 @@
+internal_id	patient_id	study_id
+UInt64	String	String
+1	GA-P1	golden_a
+2	GA-P2	golden_a
+3	GA-P3	golden_a
+4	GA-P4	golden_a
+5	GB-P1	golden_b
+6	GB-P2	golden_b

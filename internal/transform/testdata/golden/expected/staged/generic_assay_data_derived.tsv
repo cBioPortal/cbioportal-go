@@ -1,0 +1,15 @@
+datatype	entity_stable_id	generic_assay_type	genetic_entity_id	patient_level	patient_unique_id	profile_stable_id	profile_type	sample_unique_id	value
+String	String	String	String	UInt8	String	String	String	String	String
+LIMIT-VALUE	Drug-A	TREATMENT_RESPONSE	6056656541548167032	0	golden_a_GA-P1	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P1-01	0.5
+LIMIT-VALUE	Drug-A	TREATMENT_RESPONSE	6056656541548167032	0	golden_a_GA-P1	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P1-02	>8
+LIMIT-VALUE	Drug-A	TREATMENT_RESPONSE	6056656541548167032	0	golden_a_GA-P2	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P2-01	NA
+LIMIT-VALUE	Drug-A	TREATMENT_RESPONSE	6056656541548167032	0	golden_a_GA-P3	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P3-01	1.25
+LIMIT-VALUE	Drug-B	TREATMENT_RESPONSE	15972056093210304527	0	golden_a_GA-P1	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P1-01	<0.01
+LIMIT-VALUE	Drug-B	TREATMENT_RESPONSE	15972056093210304527	0	golden_a_GA-P1	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P1-02	2
+LIMIT-VALUE	Drug-B	TREATMENT_RESPONSE	15972056093210304527	0	golden_a_GA-P2	golden_a_treatment_ic50	treatment_ic50	golden_a_GA-P2-01	3
+LIMIT-VALUE	sig_1	GENERIC_ASSAY_PATIENT_TEST	10577702588667634283	1	golden_a_GA-P1	golden_a_ga_patient	ga_patient	golden_a_GA-P1-01	0.3
+LIMIT-VALUE	sig_1	GENERIC_ASSAY_PATIENT_TEST	10577702588667634283	1	golden_a_GA-P1	golden_a_ga_patient	ga_patient	golden_a_GA-P1-02	0.3
+LIMIT-VALUE	sig_1	GENERIC_ASSAY_PATIENT_TEST	10577702588667634283	1	golden_a_GA-P2	golden_a_ga_patient	ga_patient	golden_a_GA-P2-01	0.01
+LIMIT-VALUE	sig_2	GENERIC_ASSAY_PATIENT_TEST	16953407222165741620	1	golden_a_GA-P1	golden_a_ga_patient	ga_patient	golden_a_GA-P1-01	NA
+LIMIT-VALUE	sig_2	GENERIC_ASSAY_PATIENT_TEST	16953407222165741620	1	golden_a_GA-P1	golden_a_ga_patient	ga_patient	golden_a_GA-P1-02	NA
+LIMIT-VALUE	sig_2	GENERIC_ASSAY_PATIENT_TEST	16953407222165741620	1	golden_a_GA-P2	golden_a_ga_patient	ga_patient	golden_a_GA-P2-01	0.75

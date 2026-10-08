@@ -1,0 +1,9 @@
+internal_id	patient_id	study_id
+Int64	String	String
+1	FAKE_P001	ascn_test_study
+4	TCGA-A2-A04P	study_es_0
+578	TCGA-A1-A0SB	study_es_0
+688	TCGA-D8-A1XZ	study_es_0
+844	TEST_PATIENT_NAMESPACE	study_es_0
+845	P01	lgg_ucsf_2014_test_generic_assay
+850	P07	lgg_ucsf_2014_test_generic_assay

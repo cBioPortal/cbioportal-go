@@ -1,0 +1,11 @@
+description	entrez_gene_id	gene_panel_id	hugo_gene_symbol	study_id
+String	String	String	String	String
+Golden panel one	1956	GOLDEN_PANEL1	EGFR	golden_a
+Golden panel one	2064	GOLDEN_PANEL1	ERBB2	golden_a
+Golden panel one	3845	GOLDEN_PANEL1	KRAS	golden_a
+Golden panel one	7157	GOLDEN_PANEL1	TP53	golden_a
+Golden panel two	238	GOLDEN_PANEL2	ALK	golden_a
+Golden panel two	27436	GOLDEN_PANEL2	EML4	golden_a
+Golden panel two	5290	GOLDEN_PANEL2	PIK3CA	golden_a
+Golden panel two	672	GOLDEN_PANEL2	BRCA1	golden_a
+Golden panel two	7157	GOLDEN_PANEL2	TP53	golden_a

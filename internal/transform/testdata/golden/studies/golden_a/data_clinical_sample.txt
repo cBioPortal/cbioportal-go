@@ -1,0 +1,9 @@
+#Patient Identifier	Sample Identifier	Cancer Type	Sample Type	Tumor Purity
+#Patient id	Sample id	Cancer type	Sample type	Purity
+#STRING	STRING	STRING	STRING	NUMBER
+#1	1	1	1	1
+PATIENT_ID	SAMPLE_ID	CANCER_TYPE	SAMPLE_TYPE	TUMOR_PURITY
+GA-P1	GA-P1-01	Breast Cancer	Primary	0.8
+GA-P1	GA-P1-02	Breast Cancer	Metastasis	0.35
+GA-P2	GA-P2-01	Breast Cancer	Primary	NA
+GA-P3	GA-P3-01	Breast Cancer	Primary	0.6

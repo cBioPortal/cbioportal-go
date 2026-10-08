@@ -1,0 +1,18 @@
+internal_id	stable_id	sample_type	patient_id
+1	FAKE_P001_S3	Primary Solid Tumor	1
+2	FAKE_P001_S2	Primary Solid Tumor	1
+3	FAKE_P001_S5	Primary Solid Tumor	1
+4	FAKE_P001_S4	Primary Solid Tumor	1
+5	FAKE_P001_S6	Primary Solid Tumor	1
+6	FAKE_P001_S7	Primary Solid Tumor	1
+13	TCGA-A2-A04P-01	Primary Solid Tumor	4
+587	TCGA-A1-A0SB-01	Primary Solid Tumor	578
+588	TCGA-A1-A0SB-02	Recurrent Solid Tumor	578
+698	TCGA-D8-A1XZ-01	Primary Solid Tumor	688
+855	TEST_SAMPLE_SOMATIC_HOMOZYGOUS	Primary Solid Tumor	844
+856	TEST_SAMPLE_SOMATIC_HETEROZYGOUS	Primary Solid Tumor	844
+857	TEST_SAMPLE_SOMATIC_UNDEFINED	Primary Solid Tumor	844
+858	P01_Pri	Primary Solid Tumor	845
+859	P01_Rec	Primary Solid Tumor	845
+870	P07_Pri	Primary Solid Tumor	850
+871	P07_Rec	Primary Solid Tumor	850

@@ -1,0 +1,27 @@
+entrez_gene_id	hugo_symbol	mirna	profile_stable_id	resolved_entrez_gene_id	resolved_hugo_gene_symbol	source	study_id
+String	String	UInt8	String	Int64	String	String	String
+	EGFR|1956	0	gistic	1956	EGFR	cna_matrix	golden_a
+	ERBB2	0	gistic	2064	ERBB2	cna_matrix	golden_a
+	ERBB2	0	structural_variants	2064	ERBB2	structural_variant	golden_a
+	KRAS2	0	mutations	3845	KRAS	mutation_extended	golden_a
+	MIR-21	1	gistic	406991	MIR21	cna_matrix	golden_a
+	PTEN	0	cna	5728	PTEN	cna_discrete_long	golden_b
+1956	EGFR	0	cna	1956	EGFR	cna_discrete_long	golden_b
+1956	EGFR	0	mutations	1956	EGFR	mutation_extended	golden_a
+1956	EGFR	0	structural_variants	1956	EGFR	structural_variant	golden_a
+2064		0	cna	2064	ERBB2	cna_discrete_long	golden_b
+2064	ERBB2	0	log2CNA	2064	ERBB2	cna_matrix	golden_a
+238	ALK	0	structural_variants	238	ALK	structural_variant	golden_a
+3845	KRAS	0	mrna	3845	KRAS	mrna_expression_matrix	golden_a
+5290	PIK3CA	0	mutations	5290	PIK3CA	mutation_extended	golden_a
+5728		0	mrna	5728	PTEN	mrna_expression_matrix	golden_a
+5728	PTEN	0	mutations	5728	PTEN	mutation_extended	golden_b
+672	BRCA1	0	methylation_hm27	672	BRCA1	methylation_matrix	golden_a
+672	BRCA1	0	mutations	672	BRCA1	mutation_extended	golden_a
+7157	P53	0	mutations	7157	TP53	mutation_extended	golden_b
+7157	TP53	0	cna	7157	TP53	cna_discrete_long	golden_b
+7157	TP53	0	gistic	7157	TP53	cna_matrix	golden_a
+7157	TP53	0	log2CNA	7157	TP53	cna_matrix	golden_a
+7157	TP53	0	mrna	7157	TP53	mrna_expression_matrix	golden_a
+7157	TP53	0	mutations	7157	TP53	mutation_extended	golden_a
+NA	EML4	0	structural_variants	27436	EML4	structural_variant	golden_a

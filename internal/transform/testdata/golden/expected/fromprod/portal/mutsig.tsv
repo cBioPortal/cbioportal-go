@@ -1,0 +1,2 @@
+entrez_gene_id	hugo_gene_symbol	num_bases_covered	num_mutations	p_value	p_value_text	q_value	q_value_text	rank	study_id
+Int64	String	Int32	Int32	Float64	String	Float64	String	Int32	String

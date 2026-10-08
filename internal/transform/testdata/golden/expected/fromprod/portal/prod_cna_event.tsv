@@ -1,0 +1,12 @@
+alteration	cbp_driver	cbp_driver_annotation	cbp_driver_tiers	cbp_driver_tiers_annotation	entrez_gene_id	hugo_symbol	namespace_columns	profile_stable_id	sample_id	study_id
+String	String	String	String	String	String	String	String	String	String	String
+-2					1956	EGFR		cna	FAKE_P001_S2	ascn_test_study
+-2					1956	EGFR		cna	FAKE_P001_S7	ascn_test_study
+-2					2073	ERCC5		cna	FAKE_P001_S6	ascn_test_study
+-2					2073	ERCC5	{"MyNamespace2":{"blarp":null},"MyNamespace":{"column1":null,"column2":null}}	gistic	TCGA-D8-A1XZ-01	study_es_0
+-2					2078	ERG		cna	FAKE_P001_S2	ascn_test_study
+-2					2115	ETV1		cna	FAKE_P001_S2	ascn_test_study
+-2					2115	ETV1		cna	FAKE_P001_S7	ascn_test_study
+-2					5979	RET		cna	FAKE_P001_S7	ascn_test_study
+-2					675	BRCA2		cna	FAKE_P001_S6	ascn_test_study
+-2					7113	TMPRSS2		cna	FAKE_P001_S2	ascn_test_study

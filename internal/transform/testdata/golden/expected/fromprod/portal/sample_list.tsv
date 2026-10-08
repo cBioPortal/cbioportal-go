@@ -1,0 +1,54 @@
+category	description	internal_id	list_id	list_internal_id	name	sample_id	study_id
+String	String	UInt64	String	UInt64	String	String	String
+all_cases_in_study	All samples (61 samples)	858	lgg_ucsf_2014_test_generic_assay_all	16	All samples	P01_Pri	lgg_ucsf_2014_test_generic_assay
+all_cases_in_study	All samples (61 samples)	859	lgg_ucsf_2014_test_generic_assay_all	16	All samples	P01_Rec	lgg_ucsf_2014_test_generic_assay
+all_cases_in_study	All samples (61 samples)	870	lgg_ucsf_2014_test_generic_assay_all	16	All samples	P07_Pri	lgg_ucsf_2014_test_generic_assay
+all_cases_in_study	All samples (61 samples)	871	lgg_ucsf_2014_test_generic_assay_all	16	All samples	P07_Rec	lgg_ucsf_2014_test_generic_assay
+all_cases_in_study	All tumor samples	1	ascn_test_study_all	1	All Tumors	FAKE_P001_S3	ascn_test_study
+all_cases_in_study	All tumor samples	2	ascn_test_study_all	1	All Tumors	FAKE_P001_S2	ascn_test_study
+all_cases_in_study	All tumor samples	3	ascn_test_study_all	1	All Tumors	FAKE_P001_S5	ascn_test_study
+all_cases_in_study	All tumor samples	4	ascn_test_study_all	1	All Tumors	FAKE_P001_S4	ascn_test_study
+all_cases_in_study	All tumor samples	5	ascn_test_study_all	1	All Tumors	FAKE_P001_S6	ascn_test_study
+all_cases_in_study	All tumor samples	6	ascn_test_study_all	1	All Tumors	FAKE_P001_S7	ascn_test_study
+all_cases_with_cna_data	All tumors with CNA data	1	ascn_test_study_cna	3	Tumors CNA	FAKE_P001_S3	ascn_test_study
+all_cases_with_cna_data	All tumors with CNA data	2	ascn_test_study_cna	3	Tumors CNA	FAKE_P001_S2	ascn_test_study
+all_cases_with_cna_data	All tumors with CNA data	3	ascn_test_study_cna	3	Tumors CNA	FAKE_P001_S5	ascn_test_study
+all_cases_with_cna_data	All tumors with CNA data	4	ascn_test_study_cna	3	Tumors CNA	FAKE_P001_S4	ascn_test_study
+all_cases_with_cna_data	All tumors with CNA data	5	ascn_test_study_cna	3	Tumors CNA	FAKE_P001_S6	ascn_test_study
+all_cases_with_cna_data	All tumors with CNA data	6	ascn_test_study_cna	3	Tumors CNA	FAKE_P001_S7	ascn_test_study
+all_cases_with_mutation_and_cna_data	All tumor samples that have CNA and sequencing data	1	ascn_test_study_cnaseq	4	Tumors with sequencing and CNA data	FAKE_P001_S3	ascn_test_study
+all_cases_with_mutation_and_cna_data	All tumor samples that have CNA and sequencing data	2	ascn_test_study_cnaseq	4	Tumors with sequencing and CNA data	FAKE_P001_S2	ascn_test_study
+all_cases_with_mutation_and_cna_data	All tumor samples that have CNA and sequencing data	3	ascn_test_study_cnaseq	4	Tumors with sequencing and CNA data	FAKE_P001_S5	ascn_test_study
+all_cases_with_mutation_and_cna_data	All tumor samples that have CNA and sequencing data	4	ascn_test_study_cnaseq	4	Tumors with sequencing and CNA data	FAKE_P001_S4	ascn_test_study
+all_cases_with_mutation_and_cna_data	All tumor samples that have CNA and sequencing data	5	ascn_test_study_cnaseq	4	Tumors with sequencing and CNA data	FAKE_P001_S6	ascn_test_study
+all_cases_with_mutation_data	All sequenced tumors	1	ascn_test_study_sequenced	2	Sequenced Tumors	FAKE_P001_S3	ascn_test_study
+all_cases_with_mutation_data	All sequenced tumors	2	ascn_test_study_sequenced	2	Sequenced Tumors	FAKE_P001_S2	ascn_test_study
+all_cases_with_mutation_data	All sequenced tumors	3	ascn_test_study_sequenced	2	Sequenced Tumors	FAKE_P001_S5	ascn_test_study
+all_cases_with_mutation_data	All sequenced tumors	4	ascn_test_study_sequenced	2	Sequenced Tumors	FAKE_P001_S4	ascn_test_study
+all_cases_with_mutation_data	All sequenced tumors	5	ascn_test_study_sequenced	2	Sequenced Tumors	FAKE_P001_S6	ascn_test_study
+all_cases_with_mutation_data	Samples with mutation data (61 samples)	858	lgg_ucsf_2014_test_generic_assay_sequenced	17	Samples with mutation data	P01_Pri	lgg_ucsf_2014_test_generic_assay
+all_cases_with_mutation_data	Samples with mutation data (61 samples)	859	lgg_ucsf_2014_test_generic_assay_sequenced	17	Samples with mutation data	P01_Rec	lgg_ucsf_2014_test_generic_assay
+all_cases_with_mutation_data	Samples with mutation data (61 samples)	870	lgg_ucsf_2014_test_generic_assay_sequenced	17	Samples with mutation data	P07_Pri	lgg_ucsf_2014_test_generic_assay
+all_cases_with_mutation_data	Samples with mutation data (61 samples)	871	lgg_ucsf_2014_test_generic_assay_sequenced	17	Samples with mutation data	P07_Rec	lgg_ucsf_2014_test_generic_assay
+other	All cases in study	13	study_es_0_all	15	All cases in study	TCGA-A2-A04P-01	study_es_0
+other	All cases in study	587	study_es_0_all	15	All cases in study	TCGA-A1-A0SB-01	study_es_0
+other	All cases in study	588	study_es_0_all	15	All cases in study	TCGA-A1-A0SB-02	study_es_0
+other	All cases in study	698	study_es_0_all	15	All cases in study	TCGA-D8-A1XZ-01	study_es_0
+other	All cases in study	855	study_es_0_all	15	All cases in study	TEST_SAMPLE_SOMATIC_HOMOZYGOUS	study_es_0
+other	All cases in study	856	study_es_0_all	15	All cases in study	TEST_SAMPLE_SOMATIC_HETEROZYGOUS	study_es_0
+other	All cases in study	857	study_es_0_all	15	All cases in study	TEST_SAMPLE_SOMATIC_UNDEFINED	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations and CNA.	13	study_es_0_cnaseq	14	Samples profiled for mutations and CNA	TCGA-A2-A04P-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations and CNA.	587	study_es_0_cnaseq	14	Samples profiled for mutations and CNA	TCGA-A1-A0SB-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations and CNA.	698	study_es_0_cnaseq	14	Samples profiled for mutations and CNA	TCGA-D8-A1XZ-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	13	study_es_0_cna	12	Samples profiled for mutations	TCGA-A2-A04P-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	13	study_es_0_sequenced	11	Samples profiled for mutations	TCGA-A2-A04P-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	587	study_es_0_cna	12	Samples profiled for mutations	TCGA-A1-A0SB-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	587	study_es_0_sequenced	11	Samples profiled for mutations	TCGA-A1-A0SB-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	588	study_es_0_sequenced	11	Samples profiled for mutations	TCGA-A1-A0SB-02	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	698	study_es_0_cna	12	Samples profiled for mutations	TCGA-D8-A1XZ-01	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	855	study_es_0_sequenced	11	Samples profiled for mutations	TEST_SAMPLE_SOMATIC_HOMOZYGOUS	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	856	study_es_0_sequenced	11	Samples profiled for mutations	TEST_SAMPLE_SOMATIC_HETEROZYGOUS	study_es_0
+other	This is this case list that contains all samples that are profiled for mutations.	857	study_es_0_sequenced	11	Samples profiled for mutations	TEST_SAMPLE_SOMATIC_UNDEFINED	study_es_0
+other	this is an optional custom case list	13	study_es_0_custom	10	this is an optional custom case list	TCGA-A2-A04P-01	study_es_0
+other	this is an optional custom case list	587	study_es_0_custom	10	this is an optional custom case list	TCGA-A1-A0SB-01	study_es_0
+other	this is an optional custom case list	698	study_es_0_custom	10	this is an optional custom case list	TCGA-D8-A1XZ-01	study_es_0

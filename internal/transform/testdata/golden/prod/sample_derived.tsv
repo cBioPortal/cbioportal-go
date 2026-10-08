@@ -1,0 +1,18 @@
+sample_unique_id	sample_unique_id_base64	sample_stable_id	patient_unique_id	patient_unique_id_base64	patient_stable_id	cancer_study_identifier	internal_id	patient_internal_id	sample_type	sequenced	copy_number_segment_present
+ascn_test_study_FAKE_P001_S2	RkFLRV9QMDAxX1My	FAKE_P001_S2	ascn_test_study_FAKE_P001	RkFLRV9QMDAx	FAKE_P001	ascn_test_study	2	1	Primary Solid Tumor	1	1
+ascn_test_study_FAKE_P001_S3	RkFLRV9QMDAxX1Mz	FAKE_P001_S3	ascn_test_study_FAKE_P001	RkFLRV9QMDAx	FAKE_P001	ascn_test_study	1	1	Primary Solid Tumor	1	1
+ascn_test_study_FAKE_P001_S4	RkFLRV9QMDAxX1M0	FAKE_P001_S4	ascn_test_study_FAKE_P001	RkFLRV9QMDAx	FAKE_P001	ascn_test_study	4	1	Primary Solid Tumor	1	1
+ascn_test_study_FAKE_P001_S5	RkFLRV9QMDAxX1M1	FAKE_P001_S5	ascn_test_study_FAKE_P001	RkFLRV9QMDAx	FAKE_P001	ascn_test_study	3	1	Primary Solid Tumor	1	1
+ascn_test_study_FAKE_P001_S6	RkFLRV9QMDAxX1M2	FAKE_P001_S6	ascn_test_study_FAKE_P001	RkFLRV9QMDAx	FAKE_P001	ascn_test_study	5	1	Primary Solid Tumor	1	1
+ascn_test_study_FAKE_P001_S7	RkFLRV9QMDAxX1M3	FAKE_P001_S7	ascn_test_study_FAKE_P001	RkFLRV9QMDAx	FAKE_P001	ascn_test_study	6	1	Primary Solid Tumor	0	1
+lgg_ucsf_2014_test_generic_assay_P01_Pri	UDAxX1ByaQ==	P01_Pri	lgg_ucsf_2014_test_generic_assay_P01	UDAx	P01	lgg_ucsf_2014_test_generic_assay	858	845	Primary Solid Tumor	1	0
+lgg_ucsf_2014_test_generic_assay_P01_Rec	UDAxX1JlYw==	P01_Rec	lgg_ucsf_2014_test_generic_assay_P01	UDAx	P01	lgg_ucsf_2014_test_generic_assay	859	845	Primary Solid Tumor	1	0
+lgg_ucsf_2014_test_generic_assay_P07_Pri	UDA3X1ByaQ==	P07_Pri	lgg_ucsf_2014_test_generic_assay_P07	UDA3	P07	lgg_ucsf_2014_test_generic_assay	870	850	Primary Solid Tumor	1	0
+lgg_ucsf_2014_test_generic_assay_P07_Rec	UDA3X1JlYw==	P07_Rec	lgg_ucsf_2014_test_generic_assay_P07	UDA3	P07	lgg_ucsf_2014_test_generic_assay	871	850	Primary Solid Tumor	1	0
+study_es_0_TCGA-A1-A0SB-01	VENHQS1BMS1BMFNCLTAx	TCGA-A1-A0SB-01	study_es_0_TCGA-A1-A0SB	VENHQS1BMS1BMFNC	TCGA-A1-A0SB	study_es_0	587	578	Primary Solid Tumor	1	0
+study_es_0_TCGA-A1-A0SB-02	VENHQS1BMS1BMFNCLTAy	TCGA-A1-A0SB-02	study_es_0_TCGA-A1-A0SB	VENHQS1BMS1BMFNC	TCGA-A1-A0SB	study_es_0	588	578	Recurrent Solid Tumor	1	0
+study_es_0_TCGA-A2-A04P-01	VENHQS1BMi1BMDRQLTAx	TCGA-A2-A04P-01	study_es_0_TCGA-A2-A04P	VENHQS1BMi1BMDRQ	TCGA-A2-A04P	study_es_0	13	4	Primary Solid Tumor	1	1
+study_es_0_TCGA-D8-A1XZ-01	VENHQS1EOC1BMVhaLTAx	TCGA-D8-A1XZ-01	study_es_0_TCGA-D8-A1XZ	VENHQS1EOC1BMVha	TCGA-D8-A1XZ	study_es_0	698	688	Primary Solid Tumor	0	0
+study_es_0_TEST_SAMPLE_SOMATIC_HETEROZYGOUS	VEVTVF9TQU1QTEVfU09NQVRJQ19IRVRFUk9aWUdPVVM=	TEST_SAMPLE_SOMATIC_HETEROZYGOUS	study_es_0_TEST_PATIENT_NAMESPACE	VEVTVF9QQVRJRU5UX05BTUVTUEFDRQ==	TEST_PATIENT_NAMESPACE	study_es_0	856	844	Primary Solid Tumor	1	0
+study_es_0_TEST_SAMPLE_SOMATIC_HOMOZYGOUS	VEVTVF9TQU1QTEVfU09NQVRJQ19IT01PWllHT1VT	TEST_SAMPLE_SOMATIC_HOMOZYGOUS	study_es_0_TEST_PATIENT_NAMESPACE	VEVTVF9QQVRJRU5UX05BTUVTUEFDRQ==	TEST_PATIENT_NAMESPACE	study_es_0	855	844	Primary Solid Tumor	1	0
+study_es_0_TEST_SAMPLE_SOMATIC_UNDEFINED	VEVTVF9TQU1QTEVfU09NQVRJQ19VTkRFRklORUQ=	TEST_SAMPLE_SOMATIC_UNDEFINED	study_es_0_TEST_PATIENT_NAMESPACE	VEVTVF9QQVRJRU5UX05BTUVTUEFDRQ==	TEST_PATIENT_NAMESPACE	study_es_0	857	844	Primary Solid Tumor	1	0

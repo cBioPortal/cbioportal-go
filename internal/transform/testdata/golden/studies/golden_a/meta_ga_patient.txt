@@ -1,0 +1,11 @@
+cancer_study_identifier: golden_a
+genetic_alteration_type: GENERIC_ASSAY
+generic_assay_type: GENERIC_ASSAY_PATIENT_TEST
+datatype: LIMIT-VALUE
+stable_id: ga_patient
+profile_name: Patient-level assay
+profile_description: Patient-level generic assay
+data_filename: data_ga_patient.txt
+show_profile_in_analysis_tab: true
+patient_level: true
+generic_entity_meta_properties: name,description

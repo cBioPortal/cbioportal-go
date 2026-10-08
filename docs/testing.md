@@ -12,7 +12,32 @@ Three tiers, fastest first:
    every supported column type exactly as the JSONEachRow path does, and
    `internal/api` ingests, transforms and exports a small study whose
    matrices have a single gene key column (reading genes from
-   `cbioportal_ref`, or `CLICKHOUSE_TEST_REF_DB`).
+   `cbioportal_ref`, or `CLICKHOUSE_TEST_REF_DB`), and `internal/transform`
+   runs its golden tests (below).
+
+### Transform golden tests
+
+`go test -run Golden ./internal/transform` (~10 s, needs
+`CLICKHOUSE_TEST_URL`) builds databases `cbioportal_go_test_tx_<pid>_*`
+(dropped afterwards) and compares every table and view the transform
+builds with a dump in `internal/transform/testdata/golden/expected`:
+
+| Test | Input (`testdata/golden/`) | Dump |
+|---|---|---|
+| `TestLiveGoldenStaged` | `studies/golden_a` (every file type: clinical, MAF, discrete CNA wide and long, log2, mRNA, methylation, segments, SV, gene panels, timeline, generic assay, resources, GISTIC, MutSig, case lists, tags, namespaces), `studies/golden_b`; genes from `reference/seed.sql` (11 genes) | `expected/staged` |
+| `TestLiveGoldenSchemaEvolution` | `evolution/v1`, then re-ingested with `v2`'s files, which add columns (MAF drivers and namespace, clinical and resource columns, `LICENSE`); must equal a fresh ingest of v2 | `expected/evolution` (objects reading those columns) |
+| `TestLiveGoldenFromProd` | `prod/`: Java importer schema and a slice of `java_e2e` (7 patients of 3 studies, ~20 genes) | `expected/fromprod/{portal,raw}` |
+
+A dump is one TSV per object: column names, column types, then the rows,
+sorted; `_objects.tsv` lists each object's engine. After an intended change,
+regenerate and review the diff:
+
+```bash
+CLICKHOUSE_TEST_URL=http://localhost:18123 go test -run Golden ./internal/transform -update
+```
+
+`-extract-prod java_e2e` (with `-run GoldenFromProd`) re-slices `prod/`
+from the oracle database (read only; `test/java_oracle.sh db` builds it).
 2. **API contract tests** — `make contract` (`go test ./test/`, ~5s) against a
    running API (`API=http://host:port`, default `http://localhost:18090`;
    skipped when unreachable). They pin the exact endpoint behaviour the

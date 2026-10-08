@@ -1,0 +1,70 @@
+sample_unique_id	hugo_gene_symbol	entrez_gene_id	gene_panel_stable_id	cancer_study_identifier	genetic_profile_stable_id	variant_type	mutation_variant	mutation_type	mutation_status	driver_filter	driver_filter_annotation	driver_tiers_filter	driver_tiers_filter_annotation	cna_alteration	cna_cytoband	sv_event_info	patient_unique_id	off_panel
+ascn_test_study_FAKE_P001_S2	EGFR	1956	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	7p11.2		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S2	ERG	2078	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	21q22.2		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S2	ETV1	2115	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	7p21.2		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S2	PIK3R1	5295	WES	ascn_test_study	ascn_test_study_mutations	mutation	L570_L573del	In_Frame_Del	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S2	PIK3R1	5295	WES	ascn_test_study	ascn_test_study_mutations	mutation	V136Gfs*4	Frame_Shift_Del	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S2	TMPRSS2	7113	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	21q22.3		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S3	H1-5	3009	WES	ascn_test_study	ascn_test_study_mutations	mutation	K100Qfs*10	Frame_Shift_Ins	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S3	PIK3R1	5295	WES	ascn_test_study	ascn_test_study_mutations	mutation	L570_L573del	In_Frame_Del	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S5	PIK3R1	5295	WES	ascn_test_study	ascn_test_study_mutations	mutation	L570_L573del	In_Frame_Del	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S6	BRCA2	675	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	13q13.1		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S6	ERCC5	2073	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	13q33.1		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S6	H1-5	3009	WES	ascn_test_study	ascn_test_study_mutations	mutation	K100Qfs*10	Frame_Shift_Ins	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S6	PIK3R1	5295	WES	ascn_test_study	ascn_test_study_mutations	mutation	L570_L573del	In_Frame_Del	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S6	TP53	7157	WES	ascn_test_study	ascn_test_study_mutations	mutation	H361D	Missense_Mutation	NA					\N			ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S7	EGFR	1956	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	7p11.2		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S7	ETV1	2115	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	7p21.2		ascn_test_study_FAKE_P001	false
+ascn_test_study_FAKE_P001_S7	RET	5979	WES	ascn_test_study	ascn_test_study_cna	cna	NA	NA	NA					-2	10q11.21		ascn_test_study_FAKE_P001	false
+lgg_ucsf_2014_test_generic_assay_P01_Pri	ATRX	546	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	R840Kfs*9	Frame_Shift_Ins	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Pri	TP53	7157	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	C135R	Missense_Mutation	somatic					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Pri	TP53	7157	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	X125_splice	Splice_Site	somatic					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	ATRX	546	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	R840Kfs*9	Frame_Shift_Ins	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	ERBB2	2064	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	D1019N	Missense_Mutation	somatic					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TP53	7157	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	C135R	Missense_Mutation	somatic					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TP53	7157	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	X125_splice	Splice_Site	somatic					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TTN	7273	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	D18481N	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TTN	7273	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	G33816E	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TTN	7273	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	S14072N	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TTN	7273	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	S26371F	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P01_Rec	TTN	7273	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	T12197I	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P01	false
+lgg_ucsf_2014_test_generic_assay_P07_Pri	ATRX	546	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	G1088A	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Pri	ATRX	546	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	X1374_splice	Splice_Site	somatic					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Pri	ATRX	546	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	Y1087*	Nonsense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Pri	PIEZO1	9780	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	V2112G	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Pri	PTPN3	5774	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	X376_splice	Splice_Site	NA					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Pri	TP53	7157	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	R273C	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Rec	ATRX	546	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	X1374_splice	Splice_Site	somatic					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+lgg_ucsf_2014_test_generic_assay_P07_Rec	TP53	7157	WES	lgg_ucsf_2014_test_generic_assay	lgg_ucsf_2014_test_generic_assay_mutations	mutation	R273C	Missense_Mutation	NA					\N			lgg_ucsf_2014_test_generic_assay_P07	false
+study_es_0_TCGA-A1-A0SB-01	ALK	238	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A1-A0SB	true
+study_es_0_TCGA-A1-A0SB-01	BRCA1	672	TESTPANEL1	study_es_0	study_es_0_mutations	mutation	G1788V	Missense_Mutation	Somatic					\N			study_es_0_TCGA-A1-A0SB	false
+study_es_0_TCGA-A1-A0SB-01	BRCA1	672	TESTPANEL1	study_es_0	study_es_0_mutations	mutation	Q1323*	Nonsense_Mutation	Germline					\N			study_es_0_TCGA-A1-A0SB	false
+study_es_0_TCGA-A1-A0SB-01	BRCA2	675	TESTPANEL1	study_es_0	study_es_0_mutations	mutation	D191G	Nonsense_Mutation	Germline					\N			study_es_0_TCGA-A1-A0SB	false
+study_es_0_TCGA-A1-A0SB-01	EML4	27436	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A1-A0SB	true
+study_es_0_TCGA-A1-A0SB-01	ETV1	2115	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A1-A0SB	true
+study_es_0_TCGA-A1-A0SB-01	TMPRSS2	7113	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A1-A0SB	true
+study_es_0_TCGA-A1-A0SB-01	TP53	7157	TESTPANEL1	study_es_0	study_es_0_mutations	mutation	G199V	Missense_Mutation	Germline					\N			study_es_0_TCGA-A1-A0SB	false
+study_es_0_TCGA-A1-A0SB-01	TP53	7157	TESTPANEL1	study_es_0	study_es_0_mutations	mutation	X331_splice	Splice_Site	Somatic					\N			study_es_0_TCGA-A1-A0SB	false
+study_es_0_TCGA-A1-A0SB-02	PIEZO1	9780	TESTPANEL2	study_es_0	study_es_0_mutations	mutation	Q1441R	Missense_Mutation	Somatic	Putative_Passenger	Test passenger	Class 3	Class annotation	\N			study_es_0_TCGA-A1-A0SB	false
+study_es_0_TCGA-A2-A04P-01	ALK	238	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	ALK	238	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	ALK	238	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver	Class 2	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	BRAF	673	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver	Class 4	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	BRCA2	675	WES	study_es_0	study_es_0_mutations	mutation	D191G	Nonsense_Mutation	Somatic					\N			study_es_0_TCGA-A2-A04P	false
+study_es_0_TCGA-A2-A04P-01	EGFR	1956	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver	Unknown	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	EML4	27436	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver	Class 2	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	ERG	2078	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Unknown	Test driver	Class 1	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	KIAA1549	57670	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver	Class 4	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	NCOA4	8031	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	NCOA4	8031	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver Foo	Class 4	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	NCOA4	8031	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Passenger	Test driver	Class 3	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	PIEZO1	9780	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Driver	Test driver Foo	Class 4	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	PTPN3	5774	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	RET	5979	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Putative_Passenger	Test driver	Class 3	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	TMPRSS2	7113	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC	Unknown	Test driver	Class 1	Class annotation	\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	TTN	7273	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-A2-A04P-01	TTN	7273	TESTPANEL1	study_es_0	study_es_0_structural_variants	structural_variant	NA	NA	SOMATIC					\N		Fusion	study_es_0_TCGA-A2-A04P	true
+study_es_0_TCGA-D8-A1XZ-01	ERCC5	2073	WES	study_es_0	study_es_0_gistic	cna	NA	NA	NA					-2	13q33.1		study_es_0_TCGA-D8-A1XZ	false
+study_es_0_TEST_SAMPLE_SOMATIC_HETEROZYGOUS	BRCA1	672	WES	study_es_0	study_es_0_mutations	mutation	S694S	Missense_Mutation	Somatic	Putative_Passenger	Test passenger	Class 1	Class annotation	\N			study_es_0_TEST_PATIENT_NAMESPACE	false
+study_es_0_TEST_SAMPLE_SOMATIC_HOMOZYGOUS	BRCA1	672	WES	study_es_0	study_es_0_mutations	mutation	S1436S	Missense_Mutation	Somatic	Putative_Driver	Test driver	Class 1	Class annotation	\N			study_es_0_TEST_PATIENT_NAMESPACE	false
+study_es_0_TEST_SAMPLE_SOMATIC_UNDEFINED	BRCA1	672	WES	study_es_0	study_es_0_mutations	mutation	P871Q	Missense_Mutation	Somatic	Putative_Driver	Test driver	Class 1	Class annotation	\N			study_es_0_TEST_PATIENT_NAMESPACE	false

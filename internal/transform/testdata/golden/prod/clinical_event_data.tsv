@@ -1,0 +1,32 @@
+clinical_event_id	key	value
+1	EVENT_TYPE_DETAILED	Astro II biopsy
+2	EVENT_TYPE_DETAILED	Astro II Initial
+3	EVENT_TYPE_DETAILED	GBM Recurrence1
+4	EVENT_TYPE_DETAILED	GBM Recurrence2
+16	EVENT_TYPE_DETAILED	Astro II Initial
+17	EVENT_TYPE_DETAILED	Astro II Recurrence1
+55	AGENT	TMZ
+55	SUBTYPE	Chemotherapy
+55	TREATMENT_TYPE	Medical Therapy
+56	AGENT	TMZ + accutane
+56	TREATMENT_TYPE	Medical Therapy
+57	AGENT	TMZ + thalidomide
+57	TREATMENT_TYPE	Medical Therapy
+58	SUBTYPE	XRT
+58	TREATMENT_TYPE	Radiation Therapy
+59	AGENT	CCNU + thalidomide
+59	TREATMENT_TYPE	Medical Therapy
+65	SUBTYPE	XRT
+65	TREATMENT_TYPE	Radiation Therapy
+75	SAMPLE_ID	P01_Pri
+75	SURGERY	Astro II Initial
+80	SAMPLE_ID	P07_Pri
+80	SURGERY	Astro II Initial
+98	SAMPLE_ID	P01_Rec
+98	SURGERY	Glioblastoma
+102	SAMPLE_ID	P07_Rec
+102	SURGERY	Astro II Recurrence1
+135	STATUS	radiographic_progression
+136	STATUS	radiographic_progression
+137	STATUS	radiographic_progression
+145	STATUS	radiographic_progression

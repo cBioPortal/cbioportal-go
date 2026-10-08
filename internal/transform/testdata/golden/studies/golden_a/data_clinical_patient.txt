@@ -1,0 +1,9 @@
+#Patient Identifier	Overall Survival Status	Overall Survival (Months)	Age	Sex
+#Patient id	OS status	OS months	Age at diagnosis	Sex
+#STRING	STRING	NUMBER	NUMBER	STRING
+#1	1	1	1	1
+PATIENT_ID	OS_STATUS	OS_MONTHS	AGE	SEX
+GA-P1	DECEASED	12.5	61	Female
+GA-P2	0:LIVING	40	NA	Female
+GA-P3	1:DECEASED	[Not Available]	55	Male
+GA-P4	LIVING	3	70	

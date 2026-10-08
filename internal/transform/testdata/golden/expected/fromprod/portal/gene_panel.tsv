@@ -1,0 +1,6 @@
+description	entrez_gene_id	gene_panel_id	hugo_gene_symbol	study_id
+String	String	String	String	String
+Example gene panel meta file for testing purposes.	672	TESTPANEL1	BRCA1	
+Example gene panel meta file for testing purposes.	675	TESTPANEL1	BRCA2	
+Example gene panel meta file for testing purposes.	7157	TESTPANEL1	TP53	
+Example gene panel meta file for testing purposes.	9780	TESTPANEL2	PIEZO1	

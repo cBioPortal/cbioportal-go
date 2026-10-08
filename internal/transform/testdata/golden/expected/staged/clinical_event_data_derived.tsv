@@ -1,0 +1,9 @@
+cancer_study_identifier	event_type	key	patient_unique_id	start_date	stop_date	value
+String	String	String	String	Int32	Int32	String
+golden_a	SPECIMEN	SAMPLE_ID	golden_a_GA-P1	5	0	GA-P1-01
+golden_a	SPECIMEN	SAMPLE_ID	golden_a_GA-P1	60	0	GA-P1-02
+golden_a	TREATMENT	AGENT	golden_a_GA-P1	10	40	Tamoxifen
+golden_a	TREATMENT	AGENT	golden_a_GA-P2	0	100	Trastuzumab
+golden_a	TREATMENT	TREATMENT_TYPE	golden_a_GA-P1	10	40	Medical Therapy
+golden_a	TREATMENT	TREATMENT_TYPE	golden_a_GA-P1	50	0	Radiation Therapy
+golden_a	TREATMENT	TREATMENT_TYPE	golden_a_GA-P2	0	100	Medical Therapy
