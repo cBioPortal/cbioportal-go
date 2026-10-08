@@ -254,3 +254,22 @@ func TestGeneSortByLocation(t *testing.T) {
 		t.Errorf("keyword BRCA by length: %v", kw)
 	}
 }
+
+// TestLegacyStudiesPaging pins /api/legacy/studies' 0-based page numbers
+// (the legacy StudyController's), where /api/studies counts from 1, and that
+// it sorts a keyword search by sortBy (StudyMapper ignores it).
+func TestLegacyStudiesPaging(t *testing.T) {
+	requireAPI(t)
+	all := fieldOf(listOf(t, "GET", "/api/studies?sortBy=studyId", ""), "studyId")
+	if len(all) < 3 {
+		t.Fatalf("%d studies", len(all))
+	}
+	wantEq(t, fieldOf(listOf(t, "GET", "/api/legacy/studies?sortBy=studyId&pageSize=1&pageNumber=0", ""), "studyId"), all[:1])
+	wantEq(t, fieldOf(listOf(t, "GET", "/api/legacy/studies?sortBy=studyId&pageSize=1&pageNumber=1", ""), "studyId"), all[1:2])
+	wantEq(t, fieldOf(listOf(t, "GET", "/api/studies?sortBy=studyId&pageSize=1&pageNumber=1", ""), "studyId"), all[:1])
+
+	names := fieldOf(listOf(t, "GET", "/api/legacy/studies?keyword=study&sortBy=name&direction=DESC", ""), "name")
+	if len(names) < 2 || !sort.SliceIsSorted(names, func(i, j int) bool { return names[i] > names[j] }) {
+		t.Errorf("legacy keyword search not by name DESC: %v", names)
+	}
+}

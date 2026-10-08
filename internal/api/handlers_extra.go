@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,7 +27,7 @@ func (s *State) extraEndpoints(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		if to, ok := apiAliasPath(path); ok {
-			r2 := r.Clone(r.Context())
+			r2 := r.Clone(context.WithValue(r.Context(), aliasKey{}, path))
 			r2.URL.Path = to
 			r2.URL.RawPath = ""
 			next.ServeHTTP(w, r2)
@@ -47,6 +48,15 @@ func (s *State) extraEndpoints(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+type aliasKey struct{}
+
+// aliasOf returns the alias path (/api/legacy/X, /api/not-ready-yet/X) the
+// request came in on, or "" for a request to its /api/ path.
+func aliasOf(r *http.Request) string {
+	p, _ := r.Context().Value(aliasKey{}).(string)
+	return p
 }
 
 // apiAliasPath maps an alias path (/api/legacy/X, /api/not-ready-yet/X) to the

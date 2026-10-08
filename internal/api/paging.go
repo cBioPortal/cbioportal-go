@@ -24,14 +24,17 @@ var selfPagedPaths = map[string]bool{
 
 // oneBasedPaths number their pages from 1: ColumnStoreStudyController
 // returns items pageSize*(pageNumber-1) onwards, treating pageNumber <= 0 (or
-// absent) as the first page.
+// absent) as the first page. Their /api/legacy/ aliases are served by the
+// legacy controllers, which number pages from 0.
 var oneBasedPaths = map[string]bool{
 	"/api/studies": true,
 }
 
 // pagedEndpoints are the Java endpoints that take pageSize / pageNumber /
 // sortBy / direction (their controller methods declare them); every other
-// endpoint ignores those params, as Java does.
+// endpoint ignores those params, as Java does. The /api/legacy/ and
+// /api/not-ready-yet/ aliases reach pageList as the /api/ path that serves
+// them (extraEndpoints).
 var pagedEndpoints = []string{
 	"GET /api/cancer-types",
 	"GET /api/clinical-attributes",
@@ -39,15 +42,10 @@ var pagedEndpoints = []string{
 	"POST /api/generic-assay-meta/fetch",
 	"GET /api/genes",
 	"GET /api/genesets",
-	"GET /api/legacy/samples",
-	"GET /api/legacy/studies",
-	"GET /api/legacy/studies/{}/patients/{}/samples",
-	"GET /api/legacy/studies/{}/samples",
 	"GET /api/molecular-profiles",
 	"GET /api/molecular-profiles/{}/mutations",
 	"POST /api/molecular-profiles/{}/mutations/fetch",
 	"POST /api/mutations/fetch",
-	"POST /api/not-ready-yet/mutations/fetch",
 	"GET /api/patients",
 	"GET /api/sample-lists",
 	"GET /api/samples",
@@ -146,7 +144,7 @@ func pageList(next http.Handler) http.Handler {
 		}
 		size, sizeErr := strconv.Atoi(strings.TrimSpace(sizeParam))
 		number, _ := strconv.Atoi(strings.TrimSpace(numberParam))
-		if oneBasedPaths[r.URL.Path] {
+		if oneBasedPaths[r.URL.Path] && aliasOf(r) == "" {
 			number = max(number-1, 0)
 		}
 		q.Del("pageSize")

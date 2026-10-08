@@ -216,6 +216,27 @@ func TestKeyedPage(t *testing.T) {
 	}
 }
 
+// TestPageListLegacyStudies pins page numbering: /api/studies from 1, its
+// /api/legacy/ alias from 0 as the legacy StudyController.
+func TestPageListLegacyStudies(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, []int{0, 1, 2, 3, 4})
+	})
+	h := (&State{}).extraEndpoints(pageList(handler))
+	for path, want := range map[string]string{
+		"/api/studies?pageSize=2&pageNumber=1":        "[0,1]",
+		"/api/studies?pageSize=2&pageNumber=2":        "[2,3]",
+		"/api/legacy/studies?pageSize=2&pageNumber=0": "[0,1]",
+		"/api/legacy/studies?pageSize=2&pageNumber=1": "[2,3]",
+	} {
+		got := httptest.NewRecorder()
+		h.ServeHTTP(got, httptest.NewRequest("GET", path, nil))
+		if strings.TrimSpace(got.Body.String()) != want {
+			t.Errorf("%s: %s, want %s", path, got.Body.String(), want)
+		}
+	}
+}
+
 // TestResourceDefinitionPriorityNumeric pins that a priority-sorted page of
 // resource definitions keeps SQL's numeric order: the handler claims it, so
 // pageList does not re-sort the JSON strings ("10" < "2").
