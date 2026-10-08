@@ -79,13 +79,14 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 		}
 	} else {
 		// Schema evolution: add columns absent from an older table.
+		var defs []string
 		for _, col := range cols {
 			if !existing[col] {
-				if _, err := c.Execute(fmt.Sprintf(
-					"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS `%s` String", c.Database(), table, col)); err != nil {
-					return err
-				}
+				defs = append(defs, fmt.Sprintf("`%s` String", col))
 			}
+		}
+		if err := addColumns(c, table, defs); err != nil {
+			return err
 		}
 	}
 	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))

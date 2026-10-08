@@ -97,33 +97,45 @@ func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 		_, err := c.Execute(ddl)
 		return err
 	}
-	if err := addOrderColumns(c, table, existing); err != nil {
-		return err
+	var defs []string
+	for i, col := range []string{fileNumColumn, rowNumColumn} {
+		if !existing[col] {
+			defs = append(defs, orderColumnDefs[i])
+		}
 	}
 	for _, col := range all {
 		if !existing[col] {
-			if _, err := c.Execute(fmt.Sprintf(
-				"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS `%s` String",
-				c.Database(), table, col)); err != nil {
-				return err
-			}
+			defs = append(defs, fmt.Sprintf("`%s` String", col))
 		}
 	}
-	return nil
+	return addColumns(c, table, defs)
 }
 
 // addOrderColumns adds file_num and row_num to a staging table created
 // without them; its existing rows read 0 for both.
 func addOrderColumns(c *ch.Client, table string, existing map[string]bool) error {
+	var defs []string
 	for i, col := range []string{fileNumColumn, rowNumColumn} {
 		if !existing[col] {
-			if _, err := c.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS %s",
-				c.Database(), table, orderColumnDefs[i])); err != nil {
-				return err
-			}
+			defs = append(defs, orderColumnDefs[i])
 		}
 	}
-	return nil
+	return addColumns(c, table, defs)
+}
+
+// addColumns adds the given column definitions to a table in one ALTER: on a
+// replicated service every ALTER waits for all replicas, so a file with many
+// new columns costs one round trip instead of one per column.
+func addColumns(c *ch.Client, table string, defs []string) error {
+	if len(defs) == 0 {
+		return nil
+	}
+	adds := make([]string, len(defs))
+	for i, d := range defs {
+		adds[i] = "ADD COLUMN IF NOT EXISTS " + d
+	}
+	_, err := c.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` %s", c.Database(), table, strings.Join(adds, ", ")))
+	return err
 }
 
 // sampleIDColumns names, per staging table of record files, the column whose
