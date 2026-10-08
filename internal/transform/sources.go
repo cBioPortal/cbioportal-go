@@ -49,8 +49,10 @@ var stagingSources = map[string][]sourceColumn{
 	"cna_discrete_long":      strCols("study_id", "profile_stable_id", "sample_id", "hugo_symbol", "entrez_gene_id", "value"),
 	"methylation_matrix":     strCols("study_id", "profile_stable_id", "sample_id", "hugo_symbol", "entrez_gene_id", "value"),
 	"mrna_expression_matrix": strCols("study_id", "profile_stable_id", "sample_id", "hugo_symbol", "entrez_gene_id", "value"),
-	"generic_assay_matrix":   strCols("study_id", "profile_stable_id", "sample_id", "entity_stable_id", "value"),
-	"cna_seg":                strCols("study_id", "id", "chrom", "loc_start", "loc_end", "num_mark", "seg_mean"),
+	"protein_level_matrix": strCols("study_id", "profile_stable_id", "sample_id", "hugo_symbol", "entrez_gene_id",
+		"composite_element_ref", "value"),
+	"generic_assay_matrix": strCols("study_id", "profile_stable_id", "sample_id", "entity_stable_id", "value"),
+	"cna_seg":              strCols("study_id", "id", "chrom", "loc_start", "loc_end", "num_mark", "seg_mean"),
 	"timeline": strCols("study_id", "patient_id", "sample_id", "event_type", "start_date", "stop_date",
 		"surgery", "status", "event_type_detailed", "treatment_type", "subtype", "agent"),
 }

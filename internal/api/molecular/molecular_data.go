@@ -231,7 +231,7 @@ func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecular
 	// Every value row is of the profile's study, so only that study's
 	// samples (a key range) are joined; rows resolved through gene_key_map
 	// carry one of the requested genes, so only those are joined.
-	keyMapped := s.geneKeyMapped(table)
+	keyMapped := s.GeneKeyMapped(table)
 	genes := "cbioportal_ref.gene"
 	if keyMapped && len(f.EntrezGeneIDs) > 0 {
 		genes = "(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (" + core.IntListSQL(f.EntrezGeneIDs) + "))"
@@ -244,7 +244,7 @@ func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecular
 			"LEFT JOIN %s rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL",
 		core.JavaTruncatedValueSQL("m.value"), extra,
-		resolvedEntrezSQL(args, table, keyMapped, s.RawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
+		resolvedEntrezSQL(args, table, keyMapped, s.GeneKeySource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
 		core.ByStudy(meta.StudyID).Samples(args), genes), meta, true
 }
 
@@ -252,13 +252,13 @@ func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecular
 // transform resolves into gene_key_map.
 var geneKeyMapSources = map[string]bool{
 	"cna_matrix": true, "cna_discrete_long": true, "mrna_expression_matrix": true, "methylation_matrix": true,
+	"protein_level_matrix": true,
 }
 
-// geneKeyMapped reports whether gene_key_map resolves the genes of a staging
+// GeneKeyMapped reports whether gene_key_map resolves the genes of a staging
 // table: always for geneKeyMapSources, and for another table when
-// gene_key_map holds keys of it (a production clone maps its protein levels
-// there too, by the symbol its rows are stored under).
-func (s Server) geneKeyMapped(table string) bool {
+// gene_key_map holds keys of it.
+func (s Server) GeneKeyMapped(table string) bool {
 	if geneKeyMapSources[table] {
 		return true
 	}

@@ -918,13 +918,13 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 		cells, err := ch.QueryP[matrixCell](e.s.CH, fmt.Sprintf(
 			"SELECT gk.resolved_entrez_gene_id AS entrez, ifNull(rg.genetic_entity_id, 0) AS entity_id, "+
 				"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, gk.resolved_hugo_gene_symbol) AS hugo, "+
-				"t.sample_id AS sample_id, trimBoth(t.value) AS value, concat(t.hugo_symbol, '\\t', t.entrez_gene_id) AS gene_key "+
-				"FROM (SELECT *%s, %s AS ord FROM cbioportal_raw.%s WHERE study_id = {study:String} AND profile_stable_id = {profile:String}) t "+
-				"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%s' AND study_id = {study:String} AND profile_stable_id = {profile:String}) gk "+
-				"ON gk.hugo_symbol = t.hugo_symbol AND gk.entrez_gene_id = t.entrez_gene_id "+
+				"t.sample_id AS sample_id, trimBoth(t.value) AS value, concat(%[5]s, '\\t', t.entrez_gene_id) AS gene_key "+
+				"FROM (SELECT *%[1]s, %[2]s AS ord FROM cbioportal_raw.%[3]s WHERE study_id = {study:String} AND profile_stable_id = {profile:String}) t "+
+				"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%[4]s' AND study_id = {study:String} AND profile_stable_id = {profile:String}) gk "+
+				"ON gk.hugo_symbol = %[5]s AND gk.entrez_gene_id = t.entrez_gene_id "+
 				"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = gk.resolved_entrez_gene_id "+
 				"ORDER BY t.ord",
-			missingGeneKeyColumns(e.s.RawColumns(table)), e.s.RawFileOrder(table, ""), table, table),
+			missingGeneKeyColumns(e.s.RawColumns(table)), e.s.RawFileOrder(table, ""), table, table, e.s.GeneKeySymbol(table, "t.")),
 			ch.Params{"study": e.studyID, "profile": p.StableID})
 		if err != nil {
 			return err

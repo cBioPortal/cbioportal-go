@@ -7,6 +7,8 @@ DISCRETE_LONG	Discrete CNA, long format		COPY_NUMBER_ALTERATION	golden_b_cna	Dis
 LIMIT-VALUE	IC50 of compounds	TREATMENT_RESPONSE	GENERIC_ASSAY	golden_a_treatment_ic50	IC50 values	0	0.1	treatment_ic50	1	ASC	golden_a
 LIMIT-VALUE	Patient-level generic assay	GENERIC_ASSAY_PATIENT_TEST	GENERIC_ASSAY	golden_a_ga_patient	Patient-level assay	1	\N	ga_patient	1	\N	golden_a
 LOG2-VALUE	Log2 CNA		COPY_NUMBER_ALTERATION	golden_a_log2CNA	Log2 copy-number values	0	\N	log2CNA	0	\N	golden_a
+LOG2-VALUE	Protein levels by RPPA		PROTEIN_LEVEL	golden_a_rppa	Protein expression (RPPA)	0	\N	rppa	0	\N	golden_a
+LOG2-VALUE	Protein levels by mass spectrometry		PROTEIN_LEVEL	golden_b_protein_quantification	Protein quantification	0	\N	protein_quantification	0	\N	golden_b
 MAF	Golden B mutations		MUTATION_EXTENDED	golden_b_mutations	Mutations	0	\N	mutations	1	\N	golden_b
 MAF	Golden mutations		MUTATION_EXTENDED	golden_a_mutations	Mutations	0	\N	mutations	1	\N	golden_a
 SV	Fusions		STRUCTURAL_VARIANT	golden_a_structural_variants	Structural variants	0	\N	structural_variants	1	\N	golden_a

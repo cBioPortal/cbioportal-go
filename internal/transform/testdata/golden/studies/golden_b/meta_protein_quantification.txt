@@ -1,0 +1,8 @@
+cancer_study_identifier: golden_b
+genetic_alteration_type: PROTEIN_LEVEL
+datatype: LOG2-VALUE
+stable_id: protein_quantification
+show_profile_in_analysis_tab: false
+profile_name: Protein quantification
+profile_description: Protein levels by mass spectrometry
+data_filename: data_protein_quantification.txt

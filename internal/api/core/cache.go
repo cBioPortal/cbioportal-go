@@ -209,3 +209,29 @@ func (s *State) RawSource(table string, cols ...string) string {
 	}
 	return fmt.Sprintf("(SELECT *, %s FROM cbioportal_raw.%s)", strings.Join(add, ", "), table)
 }
+
+// GeneKeySource is RawSource for a per-gene staging table, with
+// hugo_symbol holding each row's gene key as gene_key_map records it: an
+// RPPA line's Composite.Element.REF value, else its Hugo symbol.
+func (s *State) GeneKeySource(table string, cols ...string) string {
+	src := s.RawSource(table, cols...)
+	if !slices.Contains(s.RawColumns(table), "composite_element_ref") {
+		return src
+	}
+	return fmt.Sprintf("(SELECT * REPLACE (%s AS hugo_symbol) FROM %s)", s.GeneKeySymbol(table, ""), src)
+}
+
+// GeneKeySymbol is the expression of a row's gene key symbol (see
+// GeneKeySource) over a raw staging table's columns, prefixed with prefix
+// (e.g. "t."). A column the table lacks reads as empty.
+func (s *State) GeneKeySymbol(table, prefix string) string {
+	cols := s.RawColumns(table)
+	hugo := "''"
+	if slices.Contains(cols, "hugo_symbol") {
+		hugo = prefix + "hugo_symbol"
+	}
+	if !slices.Contains(cols, "composite_element_ref") {
+		return hugo
+	}
+	return fmt.Sprintf("if(%[1]scomposite_element_ref != '', %[1]scomposite_element_ref, %[2]s)", prefix, hugo)
+}

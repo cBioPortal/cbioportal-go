@@ -31,6 +31,9 @@ const (
 	// genePanel is GenePanelUtil.extractGenes: a numeric entry is an Entrez
 	// id, otherwise the Hugo symbol, otherwise the first gene of the alias.
 	genePanel
+	// geneRPPA is one gene symbol of an RPPA line (ImportTabDelimData
+	// parseRPPAGenes): the non-ambiguous gene of the symbol; "NA" is no gene.
+	geneRPPA
 )
 
 // disambiguatedSymbols is cbioportal-core's gene_symbol_disambiguation.txt:
@@ -89,6 +92,8 @@ func resolveGeneSQL(refDB string, mode geneMode, keys string) string {
 		cands = fmt.Sprintf(
 			"if(match(k.sym, '^[+-]?[0-9]+$'), if(%s, [gs._ge], %s), if(%s, [gh._he], if(notEmpty(ga._ae), [ga._ae[1]], %s)))",
 			sFound, none, hFound, none)
+	case geneRPPA:
+		cands = fmt.Sprintf("if(k.sym = '' OR upper(k.sym) = 'NA', %s, %s)", none, nonAmbiguous)
 	}
 	mirJoin := ""
 	if mode == geneMatrix {
@@ -114,6 +119,7 @@ type geneKeySource struct {
 	mode   geneMode
 	symCol string
 	entCol string
+	where  string // keeps only these rows of the table, if set
 }
 
 // buildGeneKeyMap materializes `gene_key_map`: for every distinct gene key
@@ -150,15 +156,19 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		if cols["profile_stable_id"] {
 			prof = "profile_stable_id"
 		}
+		where := ""
+		if src.where != "" {
+			where = " WHERE " + src.where
+		}
 		keys := fmt.Sprintf(
-			"SELECT DISTINCT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent FROM `%s`.`%s`",
-			prof, col(src.symCol), col(src.entCol), rawDB, src.table)
+			"SELECT DISTINCT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent FROM `%s`.`%s`%s",
+			prof, col(src.symCol), col(src.entCol), rawDB, src.table, where)
 		firstRow := "toUInt64(0)"
 		if src.mode == geneMatrix && cols["row_num"] {
 			keys = fmt.Sprintf(
-				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_num) AS first_row FROM `%s`.`%s` "+
+				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_num) AS first_row FROM `%s`.`%s`%s "+
 					"GROUP BY study_id, profile_stable_id, sym, ent",
-				prof, col(src.symCol), col(src.entCol), rawDB, src.table)
+				prof, col(src.symCol), col(src.entCol), rawDB, src.table, where)
 			firstRow = "first_row"
 		}
 		sel := fmt.Sprintf(
@@ -177,11 +187,26 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		parts = append(parts, sel)
 	}
 	for _, t := range []string{"cna_matrix", "mrna_expression_matrix", "methylation_matrix"} {
-		add(geneKeySource{t, geneMatrix, "hugo_symbol", "entrez_gene_id"})
+		add(geneKeySource{table: t, mode: geneMatrix, symCol: "hugo_symbol", entCol: "entrez_gene_id"})
 	}
-	add(geneKeySource{"cna_discrete_long", geneCnaLong, "hugo_symbol", "entrez_gene_id"})
-	add(geneKeySource{"mutation_extended", geneMutation, "hugo_symbol", "entrez_gene_id"})
-	add(geneKeySource{"mutation_uncalled", geneMutation, "hugo_symbol", "entrez_gene_id"})
+	// Protein files keyed by gene (Hugo_Symbol / Entrez_Gene_Id) follow the
+	// matrix rules; RPPA files (Composite.Element.REF) their own.
+	protein, _ := c.TableColumns("protein_level_matrix")
+	if protein["composite_element_ref"] {
+		add(geneKeySource{table: "protein_level_matrix", mode: geneMatrix, symCol: "hugo_symbol", entCol: "entrez_gene_id",
+			where: "composite_element_ref = ''"})
+		if hasRef {
+			if err := addPhosphoproteins(c, rawDB, refDB); err != nil {
+				return err
+			}
+		}
+		parts = append(parts, rppaGeneKeysSQL(rawDB, refDB, protein["entrez_gene_id"], protein["row_num"], hasRef))
+	} else {
+		add(geneKeySource{table: "protein_level_matrix", mode: geneMatrix, symCol: "hugo_symbol", entCol: "entrez_gene_id"})
+	}
+	add(geneKeySource{table: "cna_discrete_long", mode: geneCnaLong, symCol: "hugo_symbol", entCol: "entrez_gene_id"})
+	add(geneKeySource{table: "mutation_extended", mode: geneMutation, symCol: "hugo_symbol", entCol: "entrez_gene_id"})
+	add(geneKeySource{table: "mutation_uncalled", mode: geneMutation, symCol: "hugo_symbol", entCol: "entrez_gene_id"})
 	if cols, _ := c.TableColumns("structural_variant"); cols["study_id"] {
 		svKeys := []string{}
 		for _, site := range []string{"site1", "site2"} {

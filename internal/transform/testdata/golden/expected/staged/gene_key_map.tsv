@@ -1,11 +1,23 @@
 entrez_gene_id	hugo_symbol	mirna	profile_stable_id	resolved_entrez_gene_id	resolved_hugo_gene_symbol	source	study_id
 String	String	UInt8	String	Int64	String	String	String
+	BRCA2|BRCA2_pS1234	0	rppa	-1	BRCA2_PS1234	protein_level_matrix	golden_a
+	EGFR ERBB2|EGFR-ERBB2	0	rppa	1956	EGFR	protein_level_matrix	golden_a
+	EGFR ERBB2|EGFR-ERBB2	0	rppa	2064	ERBB2	protein_level_matrix	golden_a
 	EGFR|1956	0	gistic	1956	EGFR	cna_matrix	golden_a
+	EGFR|EGFR_pY1068	0	rppa	-2	EGFR_PY1068	protein_level_matrix	golden_a
+	EML4 ALK|Eml4_pT10_alk	0	rppa	-5	EML4_PT10	protein_level_matrix	golden_a
+	EML4 ALK|Eml4_pT10_alk	0	rppa	-6	ALK_PT10	protein_level_matrix	golden_a
 	ERBB2	0	gistic	2064	ERBB2	cna_matrix	golden_a
 	ERBB2	0	structural_variants	2064	ERBB2	structural_variant	golden_a
+	ERBB2 KRAS|HER2_pY1248_Y1250	0	rppa	-3	ERBB2_PY1248_Y1250	protein_level_matrix	golden_a
+	ERBB2 KRAS|HER2_pY1248_Y1250	0	rppa	-4	KRAS_PY1248_Y1250	protein_level_matrix	golden_a
+	HER2	0	protein_quantification	2064	ERBB2	protein_level_matrix	golden_b
 	KRAS2	0	mutations	3845	KRAS	mutation_extended	golden_a
 	MIR-21	1	gistic	406991	MIR21	cna_matrix	golden_a
+	MIR21 BRCA1|mir_line	1	rppa	406991	MIR21	protein_level_matrix	golden_a
 	PTEN	0	cna	5728	PTEN	cna_discrete_long	golden_b
+	PTEN NOTAGENE NA|PTEN	0	rppa	5728	PTEN	protein_level_matrix	golden_a
+	p53|p53_alias	0	rppa	7157	TP53	protein_level_matrix	golden_a
 1956	EGFR	0	cna	1956	EGFR	cna_discrete_long	golden_b
 1956	EGFR	0	mutations	1956	EGFR	mutation_extended	golden_a
 1956	EGFR	0	structural_variants	1956	EGFR	structural_variant	golden_a
@@ -16,6 +28,7 @@ String	String	UInt8	String	Int64	String	String	String
 5290	PIK3CA	0	mutations	5290	PIK3CA	mutation_extended	golden_a
 5728		0	mrna	5728	PTEN	mrna_expression_matrix	golden_a
 5728	PTEN	0	mutations	5728	PTEN	mutation_extended	golden_b
+5728	PTEN	0	protein_quantification	5728	PTEN	protein_level_matrix	golden_b
 672	BRCA1	0	methylation_hm27	672	BRCA1	methylation_matrix	golden_a
 672	BRCA1	0	mutations	672	BRCA1	mutation_extended	golden_a
 7157	P53	0	mutations	7157	TP53	mutation_extended	golden_b
@@ -24,4 +37,5 @@ String	String	UInt8	String	Int64	String	String	String
 7157	TP53	0	log2CNA	7157	TP53	cna_matrix	golden_a
 7157	TP53	0	mrna	7157	TP53	mrna_expression_matrix	golden_a
 7157	TP53	0	mutations	7157	TP53	mutation_extended	golden_a
+7157	TP53	0	protein_quantification	7157	TP53	protein_level_matrix	golden_b
 NA	EML4	0	structural_variants	27436	EML4	structural_variant	golden_a

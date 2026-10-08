@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -149,6 +150,31 @@ func (s Server) computeContinuous(groups []casesGroup, keyCol string, withGene b
 	for gi, g := range groups {
 		triples, table := s.resolveGroupTriples(g, metaCache)
 		if table == "" || len(triples) == 0 {
+			continue
+		}
+		if withGene && s.GeneKeyMapped(table) {
+			// Values are those of the genes the importer stored each line
+			// under (gene_key_map); lines it skipped are left out.
+			ent := "''"
+			if slices.Contains(s.RawColumns(table), "entrez_gene_id") {
+				ent = "entrez_gene_id"
+			}
+			var profiles [][2]string
+			for _, tr := range triples {
+				if p := [2]string{tr[0], tr[1]}; !slices.Contains(profiles, p) {
+					profiles = append(profiles, p)
+				}
+			}
+			parts = append(parts, fmt.Sprintf(
+				"SELECT gk.resolved_hugo_gene_symbol AS symbol, toNullable(gk.resolved_entrez_gene_id) AS entrez, toUInt32(%d) AS grp, "+
+					"if(position(concat(t.study_id, '_', t.profile_stable_id), 'rna_seq') > 0, log2(greatest(t.x, 0) + 1), t.x) AS v, t.pos_ AS pos_ "+
+					"FROM (SELECT study_id, profile_stable_id, %s AS key_sym, %s AS key_ent, %s AS pos_, "+
+					"toFloat64OrNull("+core.JavaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
+					"WHERE (study_id, profile_stable_id, sample_id) IN %s) t "+
+					"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%s' AND (study_id, profile_stable_id) IN %s) gk ON gk.study_id = t.study_id "+
+					"AND gk.profile_stable_id = t.profile_stable_id AND gk.hugo_symbol = t.key_sym AND gk.entrez_gene_id = t.key_ent "+
+					"WHERE isFinite(t.x)",
+				gi, s.GeneKeySymbol(table, ""), ent, s.RawFileOrder(table, ""), table, args.Triples(triples), table, args.Pairs(profiles)))
 			continue
 		}
 		parts = append(parts, fmt.Sprintf(

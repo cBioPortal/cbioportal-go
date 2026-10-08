@@ -238,6 +238,12 @@ func TestLiveGoldenStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	compareGolden(t, "staged", dump(t, base, db))
+	// The transform adds the RPPA phosphoproteins to the reference genes,
+	// once: a second run finds them there.
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	compareGolden(t, "staged_ref", dump(t, base, refDB, "gene", "gene_alias"))
 }
 
 // TestLiveGoldenSchemaEvolution re-ingests a study whose second version
