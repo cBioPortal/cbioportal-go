@@ -7,6 +7,7 @@ package clickhouse
 import (
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,10 +25,48 @@ type Client struct {
 	// aliases rewrites references to the default staging and reference
 	// databases (cbioportal_raw., 'cbioportal_raw', ...) in SQL text.
 	aliases *strings.Replacer
+	// settings are ClickHouse settings every query of this client runs with
+	// (WithSettings).
+	settings map[string]string
+	// drv is the clickhouse-go connection pool, shared by the clients
+	// WithSettings derives.
+	drv *driverPool
+}
 
-	drvOnce sync.Once
-	drv     driver.Conn
-	drvErr  error
+// driverPool is a clickhouse-go connection pool, opened on first use.
+type driverPool struct {
+	once sync.Once
+	conn driver.Conn
+	err  error
+}
+
+// WithSettings returns a client over the same connections whose queries
+// also run with these ClickHouse settings (a query's own settings win).
+func (c *Client) WithSettings(settings map[string]string) *Client {
+	d := *c
+	d.settings = maps.Clone(c.settings)
+	if d.settings == nil {
+		d.settings = map[string]string{}
+	}
+	maps.Copy(d.settings, settings)
+	return &d
+}
+
+// Settings returns the settings WithSettings added to the client's queries.
+func (c *Client) Settings() map[string]string { return maps.Clone(c.settings) }
+
+// withClientSettings adds the client's settings that a request's URL
+// settings do not set.
+func (c *Client) withClientSettings(q url.Values) url.Values {
+	if q == nil {
+		q = url.Values{}
+	}
+	for k, v := range c.settings {
+		if q.Get(k) == "" {
+			q.Set(k, v)
+		}
+	}
+	return q
 }
 
 // SetDatabaseAliases points SQL that names the default staging/reference
@@ -69,6 +108,7 @@ func New(baseURL, database string) *Client {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		database: database,
 		http:     &http.Client{Timeout: time.Hour, Transport: rt},
+		drv:      &driverPool{},
 	}
 }
 
@@ -137,7 +177,7 @@ func (c *Client) InsertStream(insertSQL string, body io.Reader) error {
 }
 
 func (c *Client) post(query url.Values, body io.Reader) (string, error) {
-	u := c.baseURL + "/?" + withSessionSettings(query).Encode()
+	u := c.baseURL + "/?" + withSessionSettings(c.withClientSettings(query)).Encode()
 	req, err := http.NewRequest(http.MethodPost, u, body)
 	if err != nil {
 		return "", err

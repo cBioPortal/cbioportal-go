@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -34,10 +35,10 @@ var nativeReads = os.Getenv("CLICKHOUSE_DECODE") != "json"
 // driverConn returns the client's clickhouse-go connection pool, opened on
 // first use.
 func (c *Client) driverConn() (driver.Conn, error) {
-	c.drvOnce.Do(func() {
-		c.drv, c.drvErr = c.openDriver()
+	c.drv.once.Do(func() {
+		c.drv.conn, c.drv.err = c.openDriver()
 	})
-	return c.drv, c.drvErr
+	return c.drv.conn, c.drv.err
 }
 
 func (c *Client) openDriver() (driver.Conn, error) {
@@ -221,10 +222,24 @@ func (c *Client) queryRows(ctx context.Context, sql string, p Params, settings c
 	if !ok {
 		return nil, errLargeRequest
 	}
-	if settings != nil {
-		opts = append(opts, clickhouse.WithSettings(settings))
+	if all := c.driverSettings(settings); len(all) > 0 {
+		opts = append(opts, clickhouse.WithSettings(all))
 	}
 	return conn.Query(clickhouse.Context(ctx, opts...), q)
+}
+
+// driverSettings merges a query's settings with the client's (the query's
+// win).
+func (c *Client) driverSettings(settings clickhouse.Settings) clickhouse.Settings {
+	if len(c.settings) == 0 {
+		return settings
+	}
+	all := clickhouse.Settings{}
+	for k, v := range c.settings {
+		all[k] = v
+	}
+	maps.Copy(all, settings)
+	return all
 }
 
 // streamSettings apply to streamed reads (QueryEachP): the driver holds one

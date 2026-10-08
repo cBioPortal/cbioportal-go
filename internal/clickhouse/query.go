@@ -41,6 +41,9 @@ func (c *Client) eachJSONLine(sql string, p Params, fn func([]byte) error) error
 	q := url.Values{
 		"database": {c.database},
 		"output_format_json_quote_64bit_integers": {"0"},
+		// A query failing after its first rows breaks the transfer rather
+		// than ending it with an {"exception": ...} row.
+		"http_write_exception_in_output_format": {"0"},
 	}
 	req, err := c.newRequest(context.Background(), q, c.rewrite(sql)+" FORMAT JSONEachRow", p)
 	if err != nil {
@@ -55,6 +58,9 @@ func (c *Client) eachJSONLine(sql string, p Params, fn func([]byte) error) error
 	sc.Buffer(make([]byte, 1<<20), 1<<24)
 	for sc.Scan() {
 		if line := sc.Bytes(); len(bytes.TrimSpace(line)) > 0 {
+			if isExceptionLine(line) {
+				return streamException(sc)
+			}
 			if err := fn(line); err != nil {
 				return err
 			}
@@ -73,8 +79,12 @@ func Query[T any](c *Client, sql string) ([]T, error) {
 // through the driver's columnar format; results it cannot reproduce exactly,
 // and any error, go through JSONEachRow.
 func QueryP[T any](c *Client, sql string, p Params) ([]T, error) {
-	if out, ok := queryNative[T](c, sql, p); ok {
+	out, ok, err := queryNativeErr[T](c, sql, p)
+	if ok {
 		return out, nil
+	}
+	if LimitExceeded(err) != "" {
+		return nil, err // the JSON path would stop at the same limit
 	}
 	return queryJSON[T](c, sql, p)
 }
@@ -90,7 +100,7 @@ func QueryEachP[T any](c *Client, sql string, p Params, fn func(*T) error) error
 		return fn(v)
 	}
 	err, ok := eachNative(c, sql, p, streamSettings, counted)
-	if ok || called {
+	if ok || called || LimitExceeded(err) != "" {
 		return err
 	}
 	return eachJSON(c, sql, p, fn)
@@ -159,16 +169,28 @@ var logFallbacks = os.Getenv("CLICKHOUSE_DECODE") == "log"
 // queryNative decodes the rows of a struct type T from the driver. ok is
 // false when the JSON path must answer instead.
 func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
+	out, ok, _ = queryNativeErr[T](c, sql, p)
+	return out, ok
+}
+
+// queryNativeErr is queryNative also returning the driver's error.
+func queryNativeErr[T any](c *Client, sql string, p Params) (out []T, ok bool, err error) {
 	out = []T{}
-	err, ok := eachNative(c, sql, p, nil, func(v *T) error {
+	err, ok = eachNative(c, sql, p, nil, func(v *T) error {
 		out = append(out, *v)
 		return nil
 	})
 	if !ok || err != nil {
-		return nil, false
+		return nil, false, err
 	}
-	return out, true
+	return out, true, nil
 }
+
+// hiddenDeadline is a context that ends at its deadline without reporting
+// it.
+type hiddenDeadline struct{ context.Context }
+
+func (hiddenDeadline) Deadline() (time.Time, bool) { return time.Time{}, false }
 
 // errStream marks a failure of the driver's stream itself, as opposed to an
 // error returned by the row callback.
@@ -189,6 +211,11 @@ func eachNative[T any](c *Client, sql string, p Params, settings clickhouse.Sett
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 	defer cancel()
+	if _, ok := c.settings["max_execution_time"]; ok {
+		// The driver turns a context's deadline into max_execution_time;
+		// the client's own limit must reach the server instead.
+		ctx = hiddenDeadline{ctx}
+	}
 	rows, err := c.queryRows(ctx, sql, p, settings)
 	if err != nil {
 		reason := "error"

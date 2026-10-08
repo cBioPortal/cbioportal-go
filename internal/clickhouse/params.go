@@ -269,7 +269,7 @@ func substituteTable(sql, name string, t extTable) string {
 // sets ride in the URL; larger ones make the body multipart/form-data, with
 // arrays too long for a form field sent as external tables.
 func (c *Client) newRequest(ctx context.Context, q url.Values, sql string, p Params) (*http.Request, error) {
-	q = withSessionSettings(q)
+	q = withSessionSettings(c.withClientSettings(q))
 	if len(p) == 0 {
 		return http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/?"+q.Encode(), strings.NewReader(sql))
 	}
