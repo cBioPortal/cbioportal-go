@@ -11,7 +11,7 @@ import (
 
 var studyMetaFields = []string{
 	"type_of_cancer", "name", "short_name", "description", "groups",
-	"pmid", "citation", "reference_genome", "add_global_case_list",
+	"pmid", "citation", "reference_genome", "add_global_case_list", "license",
 }
 
 func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
@@ -33,6 +33,16 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY study_id",
 			c.Database(), table, strings.Join(defs, ", "))); err != nil {
 			return err
+		}
+	}
+	// Staging tables created before a field was read gain it, empty for the
+	// studies already staged.
+	for _, f := range studyMetaFields {
+		if len(existing) > 0 && !existing[f] {
+			if _, err := c.Execute(fmt.Sprintf(
+				"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS `%s` String", c.Database(), table, f)); err != nil {
+				return err
+			}
 		}
 	}
 	// import_time orders the studies as cbioportal-core numbers them: by

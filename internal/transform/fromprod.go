@@ -32,6 +32,16 @@ func ApplyFromProd(base *ch.Client, prodDB, rawDB, targetDB string) ([]ViewCount
 		}
 	}
 	b := &prodBuilder{c: base, p: "`" + prodDB + "`", t: "`" + targetDB + "`", r: "`" + rawDB + "`"}
+	text, err := base.Execute(fmt.Sprintf(
+		"SELECT name FROM system.columns WHERE database = '%s' AND table = 'cancer_study' FORMAT TabSeparated",
+		ch.SQLLit(prodDB)))
+	if err != nil {
+		return nil, err
+	}
+	b.studyCols = map[string]bool{}
+	for _, name := range strings.Fields(text) {
+		b.studyCols[name] = true
+	}
 	for _, step := range b.steps() {
 		if err := b.build(step); err != nil {
 			return nil, err
@@ -70,6 +80,18 @@ type prodBuilder struct {
 	c       *ch.Client
 	p, t, r string // quoted production, target and raw database names
 	built   []prodObject
+	// studyCols are the columns of production's cancer_study; the optional
+	// ones (license) read as empty when absent.
+	studyCols map[string]bool
+}
+
+// studyLicense is the cancer_study license (SPDX id), empty when unset or
+// when the production schema predates the column.
+func (b *prodBuilder) studyLicense() string {
+	if b.studyCols["license"] {
+		return "ifNull(c.license, '') AS license"
+	}
+	return "'' AS license"
 }
 
 func (o prodObject) full() string { return o.db + ".`" + o.name + "`" }
@@ -176,7 +198,7 @@ func (b *prodBuilder) steps() []prodObject {
 		b.table("cancer_study", "study_id",
 			"SELECT cs.study_id AS study_id, c.name AS name, '' AS short_name, c.description AS description, "+
 				"c.type_of_cancer_id AS cancer_type_id, ifNull(c.groups, '') AS groups, ifNull(c.pmid, '') AS pmid, "+
-				"ifNull(c.citation, '') AS citation, ifNull(rg.name, '') AS reference_genome, toUInt8(0) AS add_global_case_list, "+
+				"ifNull(c.citation, '') AS citation, "+b.studyLicense()+", ifNull(rg.name, '') AS reference_genome, toUInt8(0) AS add_global_case_list, "+
 				"c.import_date AS import_date, toUInt8(c.public = 1) AS public_study, toInt64(ifNull(c.status, 1)) AS status, "+
 				"toUInt64(c.cancer_study_id) AS internal_id FROM {p}.cancer_study c INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = c.cancer_study_id "+
 				"LEFT JOIN {p}.reference_genome rg ON rg.reference_genome_id = c.reference_genome_id"),
