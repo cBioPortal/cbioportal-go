@@ -403,7 +403,15 @@ func (s *State) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, s.buildGenePanelData(reqs))
+	s.writeGenePanelData(w, r, reqs)
+}
+
+// writeGenePanelData streams genePanelDataEach's records.
+func (s *State) writeGenePanelData(w http.ResponseWriter, r *http.Request, reqs []gpReq) {
+	out := newJSONArray(w, r)
+	out.finish(s.genePanelDataEach(reqs, func(d GenePanelData) error {
+		return out.add(d)
+	}))
 }
 
 func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request) {
@@ -446,7 +454,7 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 	for i, sid := range samples {
 		reqs[i] = gpReq{profileID: mpid, sampleID: sid}
 	}
-	writeJSON(w, s.buildGenePanelData(reqs))
+	s.writeGenePanelData(w, r, reqs)
 }
 
 func (s *State) studySampleIDs(study string) []string {
@@ -462,15 +470,15 @@ func (s *State) studySampleIDs(study string) []string {
 	return out
 }
 
-// buildGenePanelData resolves each (profile, sample) request against
-// sample_profile: a sample is profiled when it belongs to the profile, with the
-// panel it was profiled on (none for whole-exome/genome). Mutation profiles also
-// count members of the study's _sequenced sample list as profiled. Samples not
-// in the profile's study are skipped.
-func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
-	out := []GenePanelData{}
+// genePanelDataEach resolves each (profile, sample) request against
+// sample_profile and calls fn with its record, in request order: a sample is
+// profiled when it belongs to the profile, with the panel it was profiled on
+// (none for whole-exome/genome). Mutation profiles also count members of the
+// study's _sequenced sample list as profiled. Samples not in the profile's
+// study are skipped.
+func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) error {
 	if len(reqs) == 0 {
-		return out
+		return nil
 	}
 	profSet := map[string]bool{}
 	for _, q := range reqs {
@@ -495,33 +503,35 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 	}
 	studies := sortedKeys(studySet)
 	if len(studies) == 0 {
-		return out
+		return nil
 	}
 	patientOf := map[string]string{}
 	sp := ch.Params{}
-	rows, _ := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+byStudies(studies).from(paramsBinder(sp), tSample), sp)
-	for _, r := range rows {
-		patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
-	}
+	ch.QueryEachP(s.CH,
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+byStudies(studies).from(paramsBinder(sp), tSample), sp,
+		func(r *idRow) error {
+			patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
+			return nil
+		})
 	type memberRow struct {
 		Profile  string  `json:"profile"`
 		SampleID string  `json:"sampleId"`
 		Panel    *string `json:"panel"`
 	}
-	members, _ := ch.QueryP[memberRow](s.CH,
-		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
-			"WHERE study_id IN {studies:Array(String)} AND molecular_profile_id IN {ids:Array(String)}",
-		ch.Params{"studies": studies, "ids": profIDs})
 	type membership struct{ panel string }
 	member := map[string]membership{}
-	for _, m := range members {
-		panel := ""
-		if m.Panel != nil {
-			panel = *m.Panel
-		}
-		member[jkey(m.Profile, m.SampleID)] = membership{panel}
-	}
+	ch.QueryEachP(s.CH,
+		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
+			"WHERE study_id IN {studies:Array(String)} AND molecular_profile_id IN {ids:Array(String)}",
+		ch.Params{"studies": studies, "ids": profIDs},
+		func(m *memberRow) error {
+			panel := ""
+			if m.Panel != nil {
+				panel = *m.Panel
+			}
+			member[jkey(m.Profile, m.SampleID)] = membership{panel}
+			return nil
+		})
 	sequenced := map[string]bool{}
 	sequencedLists := make([]string, len(studies))
 	for i, st := range studies {
@@ -546,7 +556,7 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 		if !profiled && isMutation[q.profileID] {
 			profiled = sequenced[jkey(p.StudyID, q.sampleID)]
 		}
-		out = append(out, GenePanelData{
+		err := fn(GenePanelData{
 			GenePanelID:        m.panel,
 			MolecularProfileID: q.profileID,
 			PatientID:          patient,
@@ -556,8 +566,11 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 			UniquePatientKey:   uniqueKey(p.StudyID, patient),
 			UniqueSampleKey:    uniqueKey(p.StudyID, q.sampleID),
 		})
+		if err != nil {
+			return err
+		}
 	}
-	return out
+	return nil
 }
 
 // ---------- Multi-study numeric molecular data ----------

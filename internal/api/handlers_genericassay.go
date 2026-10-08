@@ -284,12 +284,68 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	if len(conds) > 0 {
 		where = strings.Join(conds, " AND ")
 	}
-	props, err := s.genericAssayMetaProperties(where, args)
-	if err != nil {
-		fail(w, r, err)
-		return
+	out := newJSONArray(w, r)
+	out.finish(s.genericAssayMetaEach(where, args, func(m GenericAssayMeta) error {
+		return out.add(m)
+	}))
+}
+
+// genericAssayMetaEach calls fn with each record of
+// genericAssayMetaList(genericAssayMetaProperties(where, args)), in that
+// order, building one record at a time: the requested profiles can have
+// hundreds of thousands of entities.
+func (s *State) genericAssayMetaEach(where string, args *sqlArgs, fn func(GenericAssayMeta) error) error {
+	type entity struct {
+		id         string
+		keys, vals []string
 	}
-	writeJSON(w, genericAssayMetaList(props))
+	var all []entity
+	if len(s.rawColumns("generic_assay_entity_meta")) > 0 {
+		type propRow struct {
+			StableID string   `json:"stableId"`
+			Keys     []string `json:"keys"`
+			Values   []string `json:"vals"`
+		}
+		sql := fmt.Sprintf(
+			"SELECT entity_stable_id AS stableId, mapKeys(properties) AS keys, mapValues(properties) AS vals "+
+				"FROM cbioportal_raw.generic_assay_entity_meta "+
+				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where)
+		err := ch.QueryEachP(s.CH, sql, args.params(sql), func(r *propRow) error {
+			all = append(all, entity{r.StableID, r.Keys, r.Values})
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	} else {
+		sql := fmt.Sprintf(
+			"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
+				"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where)
+		err := ch.QueryEachP(s.CH, sql, args.params(sql), func(r *genericAssayMetaRow) error {
+			all = append(all, entity{r.StableID, []string{"NAME", "DESCRIPTION", "URL"}, []string{r.Name, r.Description, r.URL}})
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	// Of an entity's rows the last one counts, as in
+	// genericAssayMetaProperties' map.
+	sort.SliceStable(all, func(i, j int) bool { return entityLess(all[i].id, all[j].id) })
+	for i, e := range all {
+		if i+1 < len(all) && all[i+1].id == e.id {
+			continue
+		}
+		var m javaStringMap
+		for k, key := range e.keys {
+			m.set(key, e.vals[k])
+		}
+		if err := fn(GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: e.id, GenericEntityMetaProperties: m}); err != nil {
+			return err
+		}
+		all[i] = entity{}
+	}
+	return nil
 }
 
 // genericAssayMetaList orders entity metadata as GenericAssayMapper does:
