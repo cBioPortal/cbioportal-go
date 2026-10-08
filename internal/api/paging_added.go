@@ -86,6 +86,22 @@ var addedPagedEndpoints = []addedPaging{
 	{method: "POST", path: "/api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch", sort: genesetMolecularDataSort,
 		numeric: []string{"value"}},
 	{method: "POST", path: "/api/namespace-data/fetch", sort: namespaceDataSort},
+
+	// Genes, gene sets, generic assay entities.
+	{method: "POST", path: "/api/genes/fetch", sort: geneSort, defaultSort: "entrezGeneId"},
+	{method: "POST", path: "/api/genesets/fetch", sort: genesetSort},
+	{method: "GET", path: "/api/generic-assay-meta/{molecularProfileId}", sort: genericAssayMetaSort},
+	{method: "GET", path: "/api/reference-genome-genes/{genomeName}", sort: referenceGenomeGeneSort},
+	{method: "POST", path: "/api/reference-genome-genes/{genomeName}/fetch", sort: referenceGenomeGeneSort},
+
+	// Study view and group comparison lists.
+	{method: "POST", path: "/api/treatments/sample", sort: sampleTreatmentSort},
+	{method: "POST", path: "/api/treatments/patient", sort: patientTreatmentSort},
+	{method: "POST", path: "/api/molecular-profiles/co-expressions/fetch", sort: coExpressionSort,
+		numeric: []string{"geneticEntityId"}},
+	{method: "POST", path: "/api/expression-enrichments/fetch", sort: genomicEnrichmentSort},
+	{method: "POST", path: "/api/alteration-enrichments/fetch", sort: alterationEnrichmentSort},
+	{method: "POST", path: "/api/generic-assay-enrichments/fetch", sort: gaEnrichmentSort},
 }
 
 // sorted reports whether the endpoint takes sortBy and direction.

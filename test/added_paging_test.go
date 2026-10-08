@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +79,28 @@ var addedLists = []addedList{
 	{"POST", "/api/genetic-profiles/study_es_0_gsva_scores/geneset-genetic-data/fetch",
 		`{"genesetIds":["GO_ANATOMICAL_STRUCTURE_FORMATION_INVOLVED_IN_MORPHOGENESIS","GO_ACYLGLYCEROL_HOMEOSTASIS"],"sampleListId":"study_es_0_all"}`,
 		[]string{"genesetId", "sampleId", "value"}, []string{"value"}},
+
+	// Genes, gene sets, generic assay entities.
+	{"POST", "/api/genes/fetch?geneIdType=HUGO_GENE_SYMBOL", `["TP53","BRCA1","ERCC5","KRAS","EGFR","PTEN"]`,
+		[]string{"entrezGeneId", "hugoGeneSymbol"}, nil},
+	{"GET", "/api/generic-assay-meta/lgg_ucsf_2014_test_generic_assay_mutational_signature_counts_SBS", "",
+		[]string{"stableId"}, nil},
+	{"POST", "/api/reference-genome-genes/hg19/fetch", `["7157","672","675","3845","1956","5728"]`,
+		[]string{"entrezGeneId", "hugoGeneSymbol", "chromosome", "start"}, nil},
+
+	// Study view and group comparison lists.
+	// treatments/sample lists each row's samples in no set order, so its
+	// pages are checked by the rows' own fields only (TestAddedPagingRows).
+	{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds":["lgg_ucsf_2014_test_generic_assay"]}`,
+		[]string{"treatment", "count"}, nil},
+	{"POST", "/api/molecular-profiles/co-expressions/fetch?molecularProfileIdA=study_es_0_mrna&molecularProfileIdB=study_es_0_mrna&threshold=0",
+		`{"entrezGeneId":90993,"sampleListId":"study_es_0_all"}`, []string{"geneticEntityId", "spearmansCorrelation", "pValue"},
+		[]string{"geneticEntityId"}},
+	{"POST", "/api/alteration-enrichments/fetch", `{"molecularProfileCasesGroupFilter":[` +
+		`{"name":"a","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-A2-A04P-01","molecularProfileId":"study_es_0_mutations"},` +
+		`{"caseId":"TCGA-A1-A0SB-01","molecularProfileId":"study_es_0_mutations"}]},` +
+		`{"name":"b","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-A1-A0SK-01","molecularProfileId":"study_es_0_mutations"}]}]}`,
+		[]string{"hugoGeneSymbol", "pValue"}, nil},
 }
 
 // rawList requests a list and returns its items as raw JSON.
@@ -233,4 +256,68 @@ func cmpString(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// TestAddedPagingParams pins the Java-style 400s of the added paging
+// parameters, and that endpoints without sortBy leave it unchecked.
+func TestAddedPagingParams(t *testing.T) {
+	requireAPI(t)
+	const mismatch = "Request parameter type mismatch: "
+	for _, c := range []struct{ method, path, body, query, msg string }{
+		{"POST", "/api/clinical-data/fetch", `{"identifiers":[{"entityId":"P01","studyId":"lgg_ucsf_2014_test_generic_assay"}]}`,
+			"sortBy=bogus", mismatch + "java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter.sort.ClinicalDataSortBy.bogus"},
+		{"POST", "/api/molecular-data/fetch", `{"entrezGeneIds":[116983],"molecularProfileIds":["study_es_0_gistic"]}`,
+			"sortBy=hugoGeneSymbol", mismatch + "java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter.sort.MolecularDataSortBy.hugoGeneSymbol"},
+		{"POST", "/api/samples/fetch", `{"sampleListIds":["study_es_0_all"]}`,
+			"direction=UP", mismatch + "java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter.Direction.UP"},
+		{"POST", "/api/structural-variant/fetch", `{"molecularProfileIds":["study_es_0_structural_variants"]}`,
+			"pageSize=0", "pageSize must be greater than or equal to 1"},
+		{"POST", "/api/genes/fetch", `["TP53"]`, "pageSize=10000001", "pageSize must be less than or equal to 10000000"},
+		{"GET", "/api/reference-genome-genes/hg19", "", "pageNumber=-1", "pageNumber must be greater than or equal to 0"},
+		{"GET", "/api/sample-lists/study_es_0_all/sample-ids", "", "pageSize=x", mismatch + `java.lang.NumberFormatException: For input string: "x"`},
+	} {
+		wantError(t, c.method, c.path+"?"+c.query, c.body, 400, c.msg)
+	}
+	// sample-ids pages only: its items are ids, with no field to sort by.
+	ids := rawList(t, "GET", "/api/sample-lists/study_es_0_all/sample-ids?sortBy=bogus&pageSize=3&pageNumber=1", "")
+	all := rawList(t, "GET", "/api/sample-lists/study_es_0_all/sample-ids", "")
+	if !sameItems(ids, all[3:6]) {
+		t.Errorf("sample-ids page 1: %s", ids)
+	}
+}
+
+// TestAddedPagingMeta pins that projection=META counts the whole list
+// whatever the paging parameters say.
+func TestAddedPagingMeta(t *testing.T) {
+	requireAPI(t)
+	path := "/api/molecular-profiles/study_es_0_gistic/molecular-data/fetch"
+	body := `{"entrezGeneIds":[116983],"sampleListId":"study_es_0_all"}`
+	all := rawList(t, "POST", path, body)
+	resp, _ := rawDo(t, "POST", path+"?projection=META&pageSize=2&pageNumber=1&sortBy=value", body)
+	wantEq(t, resp.Header.Get("total-count"), itoa(len(all)))
+}
+
+// TestAddedPagingRows pins treatments/sample pages by the rows' treatment
+// and time: the samples within a row come in no set order.
+func TestAddedPagingRows(t *testing.T) {
+	requireAPI(t)
+	path, body := "/api/treatments/sample?tier=Agent", `{"studyIds":["lgg_ucsf_2014_test_generic_assay"]}`
+	rows := func(query string) []string {
+		var out []string
+		for _, it := range listOf(t, "POST", path+query, body) {
+			out = append(out, fmt.Sprint(it["treatment"], "/", it["time"], "/", it["count"]))
+		}
+		return out
+	}
+	all := rows("")
+	if len(all) < 4 {
+		t.Fatalf("%d rows", len(all))
+	}
+	wantEq(t, append(rows("&pageSize=2&pageNumber=0"), rows("&pageSize=2&pageNumber=1")...), all[:4])
+	desc := rows("&sortBy=treatment&direction=DESC")
+	wantEq(t, rows("&sortBy=treatment&direction=DESC&pageSize=2&pageNumber=1"), desc[2:4])
+	treatment := func(row string) string { s, _, _ := strings.Cut(row, "/"); return s }
+	if !sort.SliceIsSorted(desc, func(i, j int) bool { return treatment(desc[i]) > treatment(desc[j]) }) {
+		t.Errorf("not by treatment DESC: %v", desc)
+	}
 }
