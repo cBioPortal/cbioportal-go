@@ -1,4 +1,4 @@
-package api
+package comparison
 
 import (
 	"fmt"
@@ -68,7 +68,7 @@ func (in *gaEnrichmentInput) groupValues(e string, gi int) []string {
 // gaEnrichmentParse validates the request the way the Java controller and
 // service do and resolves it into per-group value counts. It writes the error
 // response and returns nil when the request fails.
-func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, datatype string) *gaEnrichmentInput {
+func (s Server) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, datatype string) *gaEnrichmentInput {
 	var groups []casesGroup
 	core.ReadBody(r, &groups)
 	patient := false
@@ -145,7 +145,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 // gaOneCasePerPatient keeps, per group, the first case of every patient, as
 // filterMolecularProfileCaseSets does for patient-level profiles. Case ids
 // that are no sample of the study share one (null) patient.
-func (s *State) gaOneCasePerPatient(studyID string, cases [][]string) [][]string {
+func (s Server) gaOneCasePerPatient(studyID string, cases [][]string) [][]string {
 	var all []string
 	for _, c := range cases {
 		all = append(all, c...)
@@ -177,7 +177,7 @@ func (s *State) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 // gaCaseMatrixKeys maps each group's cases to the profiled samples they
 // stand for and returns, per group and in case order, the matrix column
 // (sample id, or patient id for a patient-level profile) of each such sample.
-func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, patient, patientLevel bool) ([][]string, error) {
+func (s Server) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, patient, patientLevel bool) ([][]string, error) {
 	var all []string
 	for _, c := range cases {
 		all = append(all, c...)
@@ -223,7 +223,7 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 // gaValueSequences returns the profile's entities in storage order and, per
 // entity and group, the (Java-truncated) values at the group's matrix keys,
 // with the empty string for a cell without a stored value.
-func (s *State) gaValueSequences(meta core.ProfileMeta, keys [][]string) ([]string, gaGroupValues, error) {
+func (s Server) gaValueSequences(meta core.ProfileMeta, keys [][]string) ([]string, gaGroupValues, error) {
 	args := core.NewArgs()
 	from := core.ByStudy(meta.StudyID).From(args, core.RawMatrix("generic_assay_matrix")) + " AND profile_stable_id = " + args.Str(meta.StableID)
 	type entityRow struct {
@@ -278,7 +278,7 @@ func (s *State) gaValueSequences(meta core.ProfileMeta, keys [][]string) ([]stri
 
 // gaMetaProperties returns the SUMMARY meta properties of the profile's
 // entities.
-func (s *State) gaMetaProperties(meta core.ProfileMeta) map[string]core.JavaStringMap {
+func (s Server) gaMetaProperties(meta core.ProfileMeta) map[string]core.JavaStringMap {
 	args := core.NewArgs()
 	props, _ := s.GenericAssayMetaProperties(fmt.Sprintf(
 		"study_id = %s AND profile_stable_id = %s", args.Str(meta.StudyID), args.Str(meta.StableID)), args)
@@ -292,7 +292,7 @@ func metaOrEmpty(props map[string]core.JavaStringMap, stableID string) core.Java
 // genericAssayCategoricalEnrichmentsFetch is
 // /generic-assay-categorical-enrichments/fetch: per entity, a chi-square test
 // of independence between group and category.
-func (s *State) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	in := s.gaEnrichmentParse(w, r, "CATEGORICAL")
 	if in == nil {
 		return
@@ -390,7 +390,7 @@ func (s *State) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r
 // values true/yes count as 1 and false/no as 0; per entity, groups with at
 // least two non-empty values are compared with Welch's t-test (two groups) or
 // a one-way ANOVA.
-func (s *State) genericAssayBinaryEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genericAssayBinaryEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	in := s.gaEnrichmentParse(w, r, "BINARY")
 	if in == nil {
 		return

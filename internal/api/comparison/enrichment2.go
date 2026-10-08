@@ -1,4 +1,4 @@
-package api
+package comparison
 
 import (
 	"fmt"
@@ -90,7 +90,7 @@ type contResult struct {
 // resolveGroupTriples turns a group's case identifiers into
 // (study_id, profile_stable_id, sample_id) triples plus the staging table the
 // referenced profiles live in. metaCache memoises molecular-profile lookups.
-func (s *State) resolveGroupTriples(g casesGroup, metaCache map[string]core.ProfileMeta) ([][3]string, string) {
+func (s Server) resolveGroupTriples(g casesGroup, metaCache map[string]core.ProfileMeta) ([][3]string, string) {
 	triples := make([][3]string, 0, len(g.MolecularProfileCaseIdentifiers))
 	table := ""
 	for _, c := range g.MolecularProfileCaseIdentifiers {
@@ -138,7 +138,7 @@ type contStatRow struct {
 // varSampStable, which agrees with commons-math's two-pass variance where the
 // one-pass varSamp loses precision (equal values give exactly 0). keyCol is the matrix column that identifies a
 // row (entity_stable_id for generic assay); withGene keys rows on hugo/entrez.
-func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene bool) ([]contResult, error) {
+func (s Server) computeContinuous(groups []casesGroup, keyCol string, withGene bool) ([]contResult, error) {
 	key := keyCol + " AS symbol, CAST(NULL AS Nullable(Int64)) AS entrez"
 	if withGene {
 		key = "hugo_symbol AS symbol, toInt64OrNull(entrez_gene_id) AS entrez"
@@ -250,7 +250,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 
 // expressionEnrichmentsFetch computes per-gene expression enrichment across the
 // posted groups: per-group mean/stddev and a Kruskal-Wallis p-value.
-func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	core.ReadBody(r, &groups)
 	if id, ok := s.enrichmentProfileValid(groups, expressionAlterationTypes); !ok {
@@ -283,7 +283,7 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 
 // genericAssayEnrichmentsFetch computes per-entity continuous enrichment over the
 // generic-assay matrix (keyed by entity_stable_id).
-func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	core.ReadBody(r, &groups)
 	if id, ok := s.enrichmentProfileValid(groups, map[string]bool{"GENERIC_ASSAY": true}); !ok {
@@ -331,7 +331,7 @@ var expressionAlterationTypes = map[string]bool{
 // enrichmentProfileValid checks the groups' molecular profile as Java's
 // validateMolecularProfile does: an unknown profile or one of another
 // alteration type is reported (as not found) with its id.
-func (s *State) enrichmentProfileValid(groups []casesGroup, types map[string]bool) (string, bool) {
+func (s Server) enrichmentProfileValid(groups []casesGroup, types map[string]bool) (string, bool) {
 	for _, g := range groups {
 		for _, c := range g.MolecularProfileCaseIdentifiers {
 			m, ok := s.ProfileMeta(c.MolecularProfileID)
@@ -346,7 +346,7 @@ func (s *State) enrichmentProfileValid(groups []casesGroup, types map[string]boo
 
 // groupProfilePairs lists the (study, profile stable id) of every molecular
 // profile the groups reference.
-func (s *State) groupProfilePairs(groups []casesGroup) [][2]string {
+func (s Server) groupProfilePairs(groups []casesGroup) [][2]string {
 	seen := map[string]bool{}
 	var pairs [][2]string
 	for _, g := range groups {
@@ -366,7 +366,7 @@ func (s *State) groupProfilePairs(groups []casesGroup) [][2]string {
 // patientCasesToSamples rewrites groups whose case ids are patient ids
 // (enrichmentType=PATIENT) to the samples of those patients, as the Java
 // backend compares every sample of a patient.
-func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
+func (s Server) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	metaCache := map[string]core.ProfileMeta{}
 	var pairs [][2]string
 	for _, g := range groups {
@@ -403,7 +403,7 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	return out
 }
 
-func (s *State) routeEnrichment2(mux *http.ServeMux) {
+func (s Server) RouteEnrichment2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/expression-enrichments/fetch", s.expressionEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-enrichments/fetch", s.genericAssayEnrichmentsFetch)
 	mux.HandleFunc("POST /api/generic-assay-binary-enrichments/fetch", s.genericAssayBinaryEnrichmentsFetch)

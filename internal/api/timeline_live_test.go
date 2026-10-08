@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/comparison"
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/ingest"
@@ -99,7 +100,7 @@ func importTimelineStudy(t *testing.T, base, refDB, suffix, dir string) *State {
 func serveTimeline(t *testing.T, s *State, path string) []byte {
 	t.Helper()
 	mux := http.NewServeMux()
-	s.routeSurvival(mux)
+	s.RouteSurvival(mux)
 	s.routeExport(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
@@ -113,7 +114,7 @@ func serveTimeline(t *testing.T, s *State, path string) []byte {
 // lines, one per attribute (an absent stop date as 0).
 func eventDataLines(t *testing.T, body []byte) []string {
 	t.Helper()
-	var events []ClinicalEvent
+	var events []comparison.ClinicalEvent
 	if err := json.Unmarshal(body, &events); err != nil {
 		t.Fatalf("%v: %s", err, body)
 	}
@@ -265,7 +266,7 @@ func TestLiveTimelineFromProd(t *testing.T) {
 	c.SetDatabaseAliases(rawDB, "")
 	s := newState(&core.State{CH: c})
 
-	var events []ClinicalEvent
+	var events []comparison.ClinicalEvent
 	body := serveTimeline(t, s, "/api/studies/tl_prod/patients/P1/clinical-events")
 	if err := json.Unmarshal(body, &events); err != nil {
 		t.Fatalf("%v: %s", err, body)

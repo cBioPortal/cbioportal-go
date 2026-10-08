@@ -1,4 +1,4 @@
-package api
+package comparison
 
 import (
 	"math"

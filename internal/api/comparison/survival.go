@@ -1,4 +1,4 @@
-package api
+package comparison
 
 import (
 	"fmt"
@@ -14,8 +14,8 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
 
-// routeSurvival registers survival-data and clinical-event (timeline) endpoints.
-func (s *State) routeSurvival(mux *http.ServeMux) {
+// RouteSurvival registers survival-data and clinical-event (timeline) endpoints.
+func (s Server) RouteSurvival(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/survival-data/fetch", s.survivalDataFetch)
 	mux.HandleFunc("POST /api/clinical-events-meta/fetch", s.clinicalEventsMetaFetch)
 	mux.HandleFunc("GET /api/studies/{studyId}/clinical-events", s.studyClinicalEvents)
@@ -106,7 +106,7 @@ func (t timelineSpan) at(position string) int64 {
 // no requests) into one span per kind: the earliest start and the latest
 // start/stop day. Only patients with a start span are returned, keyed by
 // studyId+"\x00"+patientId; order lists them by study and patient id.
-func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs []clinicalEventRequest) (
+func (s Server) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs []clinicalEventRequest) (
 	starts, ends, censors map[string]timelineSpan, order []string, err error) {
 	starts, ends, censors = map[string]timelineSpan{}, map[string]timelineSpan{}, map[string]timelineSpan{}
 	if len(pairs) == 0 {
@@ -174,7 +174,7 @@ func javaDouble(v float64) string {
 // with a start event, <prefix>_MONTHS is the time from the start event to the
 // end event (status 1:EVENT) or, without one, to a later censoring event
 // (status 0:CENSORED); patients with neither are skipped.
-func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AttributeIDPrefix              string                          `json:"attributeIdPrefix"`
 		PatientIdentifiers             []core.Identifier               `json:"patientIdentifiers"`
@@ -266,9 +266,9 @@ type clinicalEventID struct {
 	EventType        string `json:"eventType"`
 }
 
-// timelineRow is one event of cbioportal_raw.timeline with its non-empty
+// TimelineRow is one event of cbioportal_raw.timeline with its non-empty
 // extra columns as (KEY, value) attributes.
-type timelineRow struct {
+type TimelineRow struct {
 	StudyID   string      `json:"studyId"`
 	PatientID string      `json:"patientId"`
 	EventType string      `json:"eventType"`
@@ -277,7 +277,7 @@ type timelineRow struct {
 	Attrs     [][2]string `json:"attrs"`
 }
 
-func (row timelineRow) toEvent() ClinicalEvent {
+func (row TimelineRow) toEvent() ClinicalEvent {
 	attrs := make([]ClinicalEventData, len(row.Attrs))
 	for i, kv := range row.Attrs {
 		attrs[i] = ClinicalEventData{Key: kv[0], Value: kv[1]}
@@ -293,7 +293,7 @@ func (row timelineRow) toEvent() ClinicalEvent {
 	}
 }
 
-// timelineSelect selects timeline events with their event data as
+// TimelineSelect selects timeline events with their event data as
 // (key, value) attributes in file column order. A staged timeline turns
 // every non-core column into an attribute keyed by the file's header as
 // written (recorded in source_header, else the upper-cased column name), as
@@ -304,7 +304,7 @@ func (row timelineRow) toEvent() ClinicalEvent {
 // is the ORDER BY of ClinicalEventMapper's clinical_event_id where the
 // timeline carries it (production's, or the importer's numbering: timeline
 // files in import order, rows in file order), else empty.
-func (s *State) timelineSelect() (sql, order string) {
+func (s Server) TimelineSelect() (sql, order string) {
 	cols := s.RawColumns("timeline")
 	if slices.Contains(cols, "event_attributes") {
 		if slices.Contains(cols, "clinical_event_id") {
@@ -380,7 +380,7 @@ type ClinicalEventMeta struct {
 // clinicalEventsMetaFetch serves POST /api/clinical-events-meta/fetch: per
 // event type of the requested patients (optionally limited to the
 // clinicalEventRequests types / attribute keys), its distinct attributes.
-func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PatientIdentifiers    []core.Identifier      `json:"patientIdentifiers"`
 		ClinicalEventRequests []clinicalEventRequest `json:"clinicalEventRequests"`
@@ -418,13 +418,13 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 // studyClinicalEvents serves GET /api/studies/{studyId}/clinical-events. Returns
 // all timeline events for the study as ClinicalEvent rows. Empty (typed) when the
 // study has no timeline data.
-func (s *State) studyClinicalEvents(w http.ResponseWriter, r *http.Request) {
+func (s Server) studyClinicalEvents(w http.ResponseWriter, r *http.Request) {
 	s.writeClinicalEvents(w, r, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")})
 }
 
 // patientClinicalEvents serves the patient-view timeline:
 // GET /api/studies/{studyId}/patients/{patientId}/clinical-events.
-func (s *State) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
+func (s Server) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
 	s.writeClinicalEvents(w, r, "study_id = {study:String} AND patient_id = {patient:String}",
 		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
 }
@@ -438,8 +438,8 @@ var clinicalEventSortable = map[string]string{
 // writeClinicalEvents streams the timeline events matching where, whose
 // placeholders take their values from p; a sorted page is read as
 // sqlPageOrder orders it.
-func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, where string, p ch.Params) {
-	sel, def := s.timelineSelect()
+func (s Server) writeClinicalEvents(w http.ResponseWriter, r *http.Request, where string, p ch.Params) {
+	sel, def := s.TimelineSelect()
 	if def == "" {
 		def = "patientId, startDate, eventType"
 	}
@@ -455,7 +455,7 @@ func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, wher
 	staged := !slices.Contains(s.RawColumns("timeline"), "event_attributes")
 	idOnly := core.ProjectionOf(r) == "ID"
 	out := core.NewJSONArray(w, r)
-	err := ch.QueryEachP(s.CH, query, p, func(row *timelineRow) error {
+	err := ch.QueryEachP(s.CH, query, p, func(row *TimelineRow) error {
 		if idOnly {
 			return out.Add(clinicalEventID{StudyID: row.StudyID, PatientID: row.PatientID,
 				UniquePatientKey: core.UniqueKey(row.StudyID, row.PatientID), EventType: row.EventType})

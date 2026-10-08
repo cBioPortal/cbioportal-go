@@ -1,4 +1,4 @@
-package api
+package comparison
 
 import (
 	"fmt"
@@ -69,7 +69,7 @@ type AlterationEnrichment struct {
 // altered when it has a matching event in those profiles under the alteration
 // filter. Two groups are scored with a two-tailed Fisher exact test, more with
 // chi-square.
-func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Groups               []casesGroup           `json:"molecularProfileCasesGroupFilter"`
 		AlterationEventTypes *core.AlterationFilter `json:"alterationEventTypes"`
@@ -221,7 +221,7 @@ func enrichmentPValue(counts []CountSummary) float64 {
 }
 
 // profileStudies maps each molecular profile referenced by the groups to its study.
-func (s *State) profileStudies(groups []casesGroup) map[string]string {
+func (s Server) profileStudies(groups []casesGroup) map[string]string {
 	set := map[string]bool{}
 	for _, g := range groups {
 		for _, c := range g.MolecularProfileCaseIdentifiers {
@@ -235,7 +235,7 @@ func (s *State) profileStudies(groups []casesGroup) map[string]string {
 	return out
 }
 
-func (s *State) routeEnrichment(mux *http.ServeMux) {
+func (s Server) RouteEnrichment(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/alteration-enrichments/fetch", s.alterationEnrichmentsFetch)
 }
 
@@ -243,7 +243,7 @@ func (s *State) routeEnrichment(mux *http.ServeMux) {
 // panel of profiles covering it: entities are grouped by their panel
 // combination and each combination's genes are expanded once. entities and
 // genes are array placeholders bound in args.
-func (s *State) profiledPerGene(args *core.SQLArgs, unit string, profiles core.Scope, studies []string, entities, genes string) (map[string]int, error) {
+func (s Server) profiledPerGene(args *core.SQLArgs, unit string, profiles core.Scope, studies []string, entities, genes string) (map[string]int, error) {
 	type combo struct {
 		Panels []string `json:"panels"`
 		N      int      `json:"n"`
@@ -283,7 +283,7 @@ func (s *State) profiledPerGene(args *core.SQLArgs, unit string, profiles core.S
 
 // panelGenes returns each panel's genes among genes (an array placeholder
 // bound in args); WES covers every gene.
-func (s *State) panelGenes(args *core.SQLArgs, panels []string, genes string) (map[string][]string, error) {
+func (s Server) panelGenes(args *core.SQLArgs, panels []string, genes string) (map[string][]string, error) {
 	out := map[string][]string{}
 	if len(panels) == 0 {
 		return out, nil

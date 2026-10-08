@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/comparison"
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
@@ -566,13 +567,13 @@ func (e *studyExport) clinicalTimeline() error {
 	if err := e.loadCases(); err != nil {
 		return err
 	}
-	sel, order := e.s.timelineSelect()
+	sel, order := e.s.TimelineSelect()
 	if order == "" && slices.Contains(cols, "source_file") {
 		order = "source_file, " + e.s.RawFileOrder("timeline", "")
 	} else if order == "" {
 		order = "patientId, startDate, eventType"
 	}
-	rows, err := ch.QueryP[timelineRow](e.s.CH, fmt.Sprintf("%s WHERE study_id = {study:String} ORDER BY %s", sel, order),
+	rows, err := ch.QueryP[comparison.TimelineRow](e.s.CH, fmt.Sprintf("%s WHERE study_id = {study:String} ORDER BY %s", sel, order),
 		ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
