@@ -547,18 +547,14 @@ func (e *studyExport) clinicalSampleAttributes() error {
 // (ClinicalTimelineDataTypeExporter.DEFAULT_VALUES).
 var timelineDefaults = map[string]string{"STYLE_COLOR": "#1f77b4", "STYLE_SHAPE": "circle"}
 
-var timelineFixedColumns = map[string]bool{
-	"study_id": true, "source_file": true, "alteration_type": true, "datatype": true, "profile_stable_id": true,
-	"patient_id": true, "start_date": true, "stop_date": true, "event_type": true,
-}
-
 var fileNameUnsafe = regexp.MustCompile(`[ \\/:*?"<>|]`)
 
 // clinicalTimeline writes one timeline file per event type
-// (ClinicalTimelineDataTypeExporter): events in import order (files in
-// name order, then line order) of the study's known patients; the extra
-// columns are the event type's data keys in sorted order, each event's own
-// non-empty values (staged column names, upper-cased).
+// (ClinicalTimelineDataTypeExporter): events in import order of the
+// study's known patients; the extra columns are the event type's data keys
+// in sorted order, each event's own values. The keys and values are the
+// clinical-events attributes (timelineSelect), so a staged file's headers
+// come back as written.
 func (e *studyExport) clinicalTimeline() error {
 	cols := e.s.rawColumns("timeline")
 	if len(cols) == 0 {
@@ -567,20 +563,14 @@ func (e *studyExport) clinicalTimeline() error {
 	if err := e.loadCases(); err != nil {
 		return err
 	}
-	var keys []string
-	sel := []string{"patient_id", "start_date", "event_type"}
-	for _, c := range cols {
-		if c == "stop_date" {
-			sel = append(sel, c)
-		}
-		if !timelineFixedColumns[c] && !transform.OrderColumns[c] {
-			keys = append(keys, c)
-			sel = append(sel, "`"+c+"`")
-		}
+	sel, order := e.s.timelineSelect()
+	if order == "" && slices.Contains(cols, "source_file") {
+		order = "source_file, " + e.s.rawFileOrder("timeline", "")
+	} else if order == "" {
+		order = "patientId, startDate, eventType"
 	}
-	rows, err := ch.QueryP[map[string]string](e.s.CH, fmt.Sprintf(
-		"SELECT %s FROM cbioportal_raw.timeline WHERE study_id = {study:String} ORDER BY source_file, %s",
-		strings.Join(sel, ", "), e.s.rawFileOrder("timeline", "")), ch.Params{"study": e.studyID})
+	rows, err := ch.QueryP[timelineRow](e.s.CH, fmt.Sprintf("%s WHERE study_id = {study:String} ORDER BY %s", sel, order),
+		ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}
@@ -595,23 +585,15 @@ func (e *studyExport) clinicalTimeline() error {
 	var types []string
 	byType := map[string][]event{}
 	for _, r := range rows {
-		if !known[r["patient_id"]] {
+		if !known[r.PatientID] || r.StartDate == nil {
 			continue
 		}
-		start, err := strconv.ParseInt(strings.TrimSpace(r["start_date"]), 10, 64)
-		if err != nil {
-			continue
+		ev := event{patient: r.PatientID, start: strconv.FormatInt(*r.StartDate, 10), eventType: r.EventType, data: map[string]string{}}
+		if r.StopDate != nil {
+			ev.stop = strconv.FormatInt(*r.StopDate, 10)
 		}
-		ev := event{patient: r["patient_id"], start: strconv.FormatInt(start, 10), eventType: r["event_type"], data: map[string]string{}}
-		if v := strings.TrimSpace(r["stop_date"]); v != "" {
-			if stop, err := strconv.ParseInt(v, 10, 64); err == nil {
-				ev.stop = strconv.FormatInt(stop, 10)
-			}
-		}
-		for _, k := range keys {
-			if v := r[k]; v != "" {
-				ev.data[strings.ToUpper(k)] = v
-			}
+		for _, kv := range r.Attrs {
+			ev.data[kv[0]] = kv[1]
 		}
 		if _, ok := byType[ev.eventType]; !ok {
 			types = append(types, ev.eventType)

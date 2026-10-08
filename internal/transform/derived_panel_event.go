@@ -58,11 +58,11 @@ func clinicalEventDerivedSQL(rawDB, refDB string) string {
 		rawDB)
 }
 
-// timelineCoreColumns are the staged timeline columns that are not event
+// TimelineCoreColumns are the staged timeline columns that are not event
 // data: the provenance columns and the event's own fields, which
 // ImportTimelineData reads from the header's leading PATIENT_ID,
 // START_DATE, [STOP_DATE,] EVENT_TYPE.
-var timelineCoreColumns = map[string]bool{
+var TimelineCoreColumns = map[string]bool{
 	"study_id": true, "source_file": true, "alteration_type": true, "datatype": true, "profile_stable_id": true,
 	"patient_id": true, "start_date": true, "stop_date": true, "event_type": true,
 }
@@ -82,7 +82,7 @@ func clinicalEventDataDerivedSQL(c *client, rawDB string) string {
 	cols := stringColumns(c, rawDB, "timeline")
 	var kv []string
 	for _, col := range cols {
-		if !timelineCoreColumns[col] && !OrderColumns[col] {
+		if !TimelineCoreColumns[col] && !OrderColumns[col] {
 			kv = append(kv, fmt.Sprintf("('%s', t.`%s`)", col, col))
 		}
 	}

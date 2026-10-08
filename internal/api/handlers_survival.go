@@ -291,20 +291,17 @@ func (row timelineRow) toEvent() ClinicalEvent {
 	}
 }
 
-// timelineFixedCols are the timeline columns that are not event attributes.
-var timelineFixedCols = map[string]bool{
-	"study_id": true, "source_file": true, "alteration_type": true, "datatype": true, "profile_stable_id": true,
-	"patient_id": true, "start_date": true, "stop_date": true, "event_type": true,
-}
-
-// timelineSelect selects timeline events, turning every other staged column
-// into an attribute keyed by its upper-cased header; a timeline built from a
-// production clone carries the attributes as (KEY, value) pairs in its
-// event_attributes column instead. Without staged timeline data it selects
-// no events. order is the ORDER BY of ClinicalEventMapper's
-// clinical_event_id where the timeline carries it (production's, or the
-// importer's numbering: timeline files in import order, rows in file order),
-// else empty.
+// timelineSelect selects timeline events with their event data as
+// (key, value) attributes in file column order. A staged timeline turns
+// every non-core column into an attribute keyed by the file's header as
+// written (recorded in source_header, else the upper-cased column name), as
+// clinical_event_data_derived keys it; repeated headers stay repeated
+// (timelineEventData keeps the last). A timeline built from a production
+// clone carries the stored (key, value) pairs in its event_attributes
+// column instead. Without staged timeline data it selects no events. order
+// is the ORDER BY of ClinicalEventMapper's clinical_event_id where the
+// timeline carries it (production's, or the importer's numbering: timeline
+// files in import order, rows in file order), else empty.
 func (s *State) timelineSelect() (sql, order string) {
 	cols := s.rawColumns("timeline")
 	if slices.Contains(cols, "event_attributes") {
@@ -315,18 +312,35 @@ func (s *State) timelineSelect() (sql, order string) {
 			"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " +
 			"event_attributes AS attrs FROM cbioportal_raw.timeline", order
 	}
+	from := s.rawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
+	joinable := from == "cbioportal_raw.timeline" && slices.Contains(cols, "source_file")
+	headers := joinable && slices.Contains(s.rawColumns("source_header"), "header")
 	var kv []string
-	for _, c := range cols {
-		if !timelineFixedCols[c] && !transform.OrderColumns[c] {
-			kv = append(kv, fmt.Sprintf("('%s', toString(`%s`))", sqlLit(strings.ToUpper(c)), c))
+	for i, c := range cols {
+		if transform.TimelineCoreColumns[c] || transform.OrderColumns[c] {
+			continue
 		}
+		key, pos := fmt.Sprintf("'%s'", sqlLit(strings.ToUpper(c))), fmt.Sprintf("toUInt32(%d)", i)
+		if headers {
+			lit := fmt.Sprintf("'%s'", sqlLit(c))
+			key = fmt.Sprintf("if(mapContains(h_header, %[1]s), h_header[%[1]s], %[2]s)", lit, key)
+			pos = fmt.Sprintf("if(mapContains(h_position, %[1]s), h_position[%[1]s], %[2]s)", lit, pos)
+		}
+		kv = append(kv, fmt.Sprintf("(%s, toString(`%s`), %s)", key, c, pos))
 	}
 	attrs := "[]"
 	if len(kv) > 0 {
-		attrs = fmt.Sprintf("arrayFilter(x -> x.2 != '', [%s])", strings.Join(kv, ", "))
+		attrs = fmt.Sprintf("arrayMap(x -> (x.1, x.2), arraySort(x -> x.3, arrayFilter(x -> x.2 != '', [%s])))",
+			strings.Join(kv, ", "))
 	}
-	from := s.rawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
-	if from == "cbioportal_raw.timeline" && slices.Contains(cols, "source_file") && len(s.rawColumns("import_order")) > 0 {
+	if headers {
+		from += " LEFT JOIN (SELECT study_id AS h_study, source_file AS h_file, " +
+			"CAST((groupArray(column_name), groupArray(header)), 'Map(String, String)') AS h_header, " +
+			"CAST((groupArray(column_name), groupArray(position)), 'Map(String, UInt32)') AS h_position " +
+			"FROM cbioportal_raw.source_header WHERE table_name = 'timeline' GROUP BY study_id, source_file) h " +
+			"ON h.h_study = timeline.study_id AND h.h_file = timeline.source_file"
+	}
+	if joinable && len(s.rawColumns("import_order")) > 0 {
 		from += " LEFT JOIN (SELECT study_id AS o_study, name AS o_file, seq AS o_seq FROM cbioportal_raw.import_order " +
 			"WHERE kind = 'data') o ON o.o_study = timeline.study_id AND o.o_file = timeline.source_file"
 		order = "o_seq, " + s.rawFileOrder("timeline", "timeline.")
@@ -334,6 +348,23 @@ func (s *State) timelineSelect() (sql, order string) {
 	return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
 		"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " + attrs +
 		" AS attrs FROM " + from, order
+}
+
+// timelineEventData is the event data ImportTimelineData stores for a
+// staged event's attributes in file column order: of a repeated header the
+// last non-empty cell, kept at the header's first place.
+func timelineEventData(attrs [][2]string) [][2]string {
+	at := make(map[string]int, len(attrs))
+	out := make([][2]string, 0, len(attrs))
+	for _, kv := range attrs {
+		if i, ok := at[kv[0]]; ok {
+			out[i][1] = kv[1]
+			continue
+		}
+		at[kv[0]] = len(out)
+		out = append(out, kv)
+	}
+	return out
 }
 
 // ClinicalEventMeta is an event type with the distinct (lower-cased)
@@ -428,7 +459,7 @@ func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, wher
 				UniquePatientKey: uniqueKey(row.StudyID, row.PatientID), EventType: row.EventType})
 		}
 		if staged {
-			row.Attrs = javaHashMapAttrs(row.Attrs)
+			row.Attrs = javaHashMapAttrs(timelineEventData(row.Attrs))
 		}
 		return out.add(row.toEvent())
 	})
