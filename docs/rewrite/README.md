@@ -6,6 +6,8 @@ matches Java, where go fixes Java's bugs, and how the two compare in speed
 and cost. Once go has replaced Java, these pages are a record of how the
 switch was made.
 
+The tools themselves are in the [rewrite/](../../rewrite/) folder.
+
 | Page | What it covers |
 |---|---|
 | [Method](method.md) | How the rewrite was built and checked against Java. |
