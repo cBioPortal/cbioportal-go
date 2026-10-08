@@ -25,7 +25,7 @@ Where Java is plainly wrong, go fixes it instead of copying it:
 
 Everything else (fields, field order, shapes, statistics, error statuses
 for invalid requests) still matches Java. Every fix is listed in
-`docs/java-quirks.md`, with a test that pins it.
+`docs/rewrite/java-quirks.md`, with a test that pins it.
 
 ## Architecture
 

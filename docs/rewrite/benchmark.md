@@ -3,7 +3,7 @@
 This page compares cbioportal-go with cBioPortal's Java backend and Java
 importer. It answers four questions: is go as fast, does it give the same
 answers, what does it cost to run, and how fast does it load a study. How the
-rewrite and the comparison were done is in [Rewrite method](rewrite-method.md).
+rewrite and the comparison were done is in [Rewrite method](method.md).
 
 Both backends read their data from ClickHouse, a database built for fast
 counting and filtering over very large tables. A few terms used below:
@@ -182,8 +182,8 @@ fast because Redis answers them.
 
 The `paritydiff` tool sends the same logged production requests to
 api.cbioportal.org and to go and compares the answers (see
-[Testing](testing.md)). The "logged" set ran against go on a fresh copy of
-production's data. The [nightly job](testing.md#nightly-parity-job) runs
+[Parity with Java](parity.md)). The "logged" set ran against go on a fresh copy of
+production's data. The [nightly job](parity.md#nightly-parity-job) runs
 against go.cbioportal.org.
 
 | Request set, 2026-10-06 | Requests | Identical | Known differences | Unexplained |

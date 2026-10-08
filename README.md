@@ -106,21 +106,29 @@ week. See [Testing](docs/testing.md) for details.
 | Login | OAuth2/OpenID Connect login (`authenticate=oauth2`, for example Keycloak). Optional sign-in on an open portal (`authenticate=optional_oauth2`, for example Google, as on www). Access to studies based on the user's roles. Data access tokens for API clients (`dat.method=oauth2`). Login sessions stored in Redis (`spring.session.store-type=redis`). All of these work as in the Java portal; see [Configuration](docs/configuration.md#login-and-study-authorization). | SAML login, `authorization=true` (users listed in the database), and login providers that do not use OpenID (GitHub, Facebook). |
 | Saved sessions | Saved pages, virtual studies and custom data are kept in cBioPortal's session service (`session.service.url`). That service can be shared with existing portals and between copies of the API. A simpler built-in store also works for a single server. See [Configuration](docs/configuration.md#sessions). | When you read one virtual study or custom data set by its id, go returns every stored field. Java leaves out the owner, users, version and timestamps, and adds the filter's `uniqueStudyIds`. |
 | Importer | Tested on a handful of studies. | Testing against all of datahub, and against the checks in cbioportal-core's validator. |
-| API | 176 of the Java backend's 190 endpoints work (see [API coverage](docs/api-coverage.md)). On real production traffic, every answer matches www or has a written reason why not (see [Benchmark](docs/benchmark.md)). | Not served: the SAML login page, MatchMiner, the URL shortener, old proxy endpoints the website does not use, an MSK-internal id lookup, and `getexternalpage.json` (left out on purpose, because it would fetch any URL for anyone). The main remaining difference is the order of rows that tie when sorted. Java returns those in the order its importer inserted them. |
+| API | 176 of the Java backend's 190 endpoints work (see [API coverage](docs/rewrite/api-coverage.md)). On real production traffic, every answer matches www or has a written reason why not (see [Benchmark](docs/rewrite/benchmark.md)). | Not served: the SAML login page, MatchMiner, the URL shortener, old proxy endpoints the website does not use, an MSK-internal id lookup, and `getexternalpage.json` (left out on purpose, because it would fetch any URL for anyone). The main remaining difference is the order of rows that tie when sorted. Java returns those in the order its importer inserted them. |
 | Speed and memory | Large answers (clinical data, mutations, molecular and generic-assay data, copy number, structural variants, clinical events) are sent one row at a time. So a request for a whole 50,000-sample study stays under 100 MB of memory. | Some answers are still built fully in memory: pages sorted with `sortBy`, and the lists of samples, sample lists and profiles. Reading a whole profile of a very large study takes several seconds. Examples are expression enrichments and co-expression on TCGA PanCancer. |
 
 ## Documentation
 
+How go works and how to run it ([index](docs/README.md)):
+
 | Page | What it covers |
 |---|---|
-| [Configuration](docs/configuration.md) | Command-line flags, environment variables, and portal properties. You can reuse an existing `portal.properties`. |
-| [Testing](docs/testing.md) | The kinds of tests, the test databases, the e2e setup, and CI. |
 | [Architecture](docs/architecture.md) | How data moves through the system, how the code is organized, and which libraries it uses. |
-| [API coverage](docs/api-coverage.md) | Every Java endpoint, whether go serves it, and which tests cover it. |
-| [Java quirks](docs/java-quirks.md) | Bugs and oddities in the Java portal, and whether go copies them, skips them, or cannot match them. |
-| [Benchmark](docs/benchmark.md) | go.cbioportal.org compared with www.cbioportal.org: page speed, resource use, and cost. |
-| [Rewrite method](docs/rewrite-method.md) | How the rewrite was built and checked against the Java portal. |
-| [Deployment](docs/deployment.md) | The container image, and the production mirror behind go.cbioportal.org. |
+| [Configuration](docs/configuration.md) | Command-line flags, environment variables, and portal properties. You can reuse an existing `portal.properties`. |
+| [Deployment](docs/deployment.md) | The container image, Kubernetes, the production mirror behind go.cbioportal.org, hub.cbioportal.org and pull request previews. |
+| [Testing](docs/testing.md) | The kinds of tests, the test databases, the e2e setup, and CI. |
+
+The move from Java to go ([index](docs/rewrite/README.md)):
+
+| Page | What it covers |
+|---|---|
+| [Method](docs/rewrite/method.md) | How the rewrite was built and checked against the Java portal. |
+| [Parity with Java](docs/rewrite/parity.md) | The tools that compare go's answers with Java's, including the nightly job. |
+| [Java quirks](docs/rewrite/java-quirks.md) | Bugs and oddities in the Java portal, and whether go copies them, fixes them, or cannot match them. |
+| [API coverage](docs/rewrite/api-coverage.md) | Every Java endpoint, whether go serves it, and which tests cover it. |
+| [Benchmark](docs/rewrite/benchmark.md) | go compared with Java: page speed, resource use, import speed, and cost. |
 
 ## License
 

@@ -92,7 +92,7 @@ four steps:
    right after the mirror database is rebuilt. When it finds a new
    difference that has no explanation yet, it opens or updates a GitHub
    issue with the label `parity`. ("Parity" means go and Java give the same
-   answer.) See [Testing](testing.md).
+   answer.) See [Parity with Java](parity.md).
 
 ## Running next to production
 

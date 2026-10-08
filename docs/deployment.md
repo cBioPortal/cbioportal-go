@@ -207,7 +207,7 @@ profile's pivot threshold, sort order and patient level.
 
 On the mirror, any difference from www.cbioportal.org comes from the API
 code, not from the data. `cmd/paritydiff` measures them (see
-[Testing](testing.md#api-parity-with-wwwcbioportalorg)).
+[Parity with Java](rewrite/parity.md#api-parity-with-wwwcbioportalorg)).
 
 | Where | What happens |
 |---|---|

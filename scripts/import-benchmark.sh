@@ -2,7 +2,7 @@
 # Times one study import with the Java importer (cbioportal-core in the
 # cbioportal/cbioportal image) or go's, each into its own empty ClickHouse
 # database with reference data and gene panels already loaded
-# (docs/benchmark.md, "Import"):
+# (docs/rewrite/benchmark.md, "Import"):
 #
 #   scripts/import-benchmark.sh fetch <dir> public/<study>...   # datahub master
 #   scripts/import-benchmark.sh java <study-dir> <panels-dir> <tag>

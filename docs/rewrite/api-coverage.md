@@ -269,14 +269,14 @@ in [Java quirks](java-quirks.md).
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/api/data-access-token` |  |  | implemented | yes | With `dat.method=oauth2`, it sends the user to the login provider to get a token (see [Data access tokens](configuration.md#data-access-tokens)). Otherwise it returns a placeholder. |
+| GET | `/api/data-access-token` |  |  | implemented | yes | With `dat.method=oauth2`, it sends the user to the login provider to get a token (see [Data access tokens](../configuration.md#data-access-tokens)). Otherwise it returns a placeholder. |
 | GET | `/api/data-access-token/oauth2` |  | code | implemented | yes | With `dat.method=oauth2`, it downloads the token as a file. |
 | POST | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it returns `{}`. |
 | GET | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it returns `[]`. |
 | GET | `/api/data-access-tokens/{token}` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it returns `{}`. |
 | DELETE | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it does nothing. |
 | DELETE | `/api/data-access-tokens/{token}` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it does nothing. |
-| POST | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider (see [Login](configuration.md#login-and-study-authorization)). |
+| POST | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider (see [Login](../configuration.md#login-and-study-authorization)). |
 | GET | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider. With `?logout_failure`, it explains why a login was refused. |
 | GET | `/restful_login` |  |  | missing |  | The SAML and password login page. go does not support SAML. |
 
@@ -291,7 +291,7 @@ in [Java quirks](java-quirks.md).
 | GET | `/api/cacheStatistics` |  |  | implemented | yes | Answers 404, as Java does when no cache is set up. |
 | GET | `/export/study/{studyId}.zip` |  |  | implemented | yes | Needs `feature.study.export`. Protein-level and generic assay profiles and virtual studies are not exported. |
 | GET | `/api/getexternalpage.json` |  | sourceURL | missing |  | Lets anyone make the server fetch any URL, which is a security hole. Left out on purpose. |
-| ANY | `/` |  |  | implemented | yes | Serves the frontend (see `FRONTEND_DIR` and `FRONTEND_URL` in [Configuration](configuration.md#cbioportal-api)). |
+| ANY | `/` |  |  | implemented | yes | Serves the frontend (see `FRONTEND_DIR` and `FRONTEND_URL` in [Configuration](../configuration.md#cbioportal-api)). |
 | ANY | `/index` |  |  | implemented |  | Serves the frontend. |
 | ANY | `/index.html` |  |  | implemented |  | Serves the frontend. |
 | ANY | `/study/summary` |  |  | implemented |  | Serves the frontend, also for POST. |

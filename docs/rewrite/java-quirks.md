@@ -52,7 +52,7 @@ marker a failed study export writes, which would need an export that fails.
     when replaying requests that production logged. "corpus" names a
     request in `test/parity/corpus.txt`, a hand-written list of requests
     the frontend makes. "fixtures" is the run against the Java backend
-    itself (see [Testing](testing.md#java-oracle)).
+    itself (see [Parity with Java](parity.md#java-oracle)).
 
 A few more terms used below:
 
