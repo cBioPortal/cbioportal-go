@@ -33,17 +33,36 @@ type Geneset struct {
 
 func msgGenesetNotFound(id string) string { return "Gene set not found: " + id }
 
-// hasGenesetRef reports whether the reference database has gene set tables.
+// hasGenesetRef reports whether the reference database has gene set tables:
+// those load-genesets writes, or a production clone's (whose version is in
+// the info table instead of geneset_info).
 func (s *State) hasGenesetRef() bool {
+	n, _ := s.genesetRefTables()
+	return n == 4
+}
+
+// genesetRefTables counts the reference database's gene set tables other
+// than the version's, and reports whether it has geneset_info.
+func (s *State) genesetRefTables() (n int, versionTable bool) {
 	if s.CH == nil {
-		return false
+		return 0, false
 	}
 	type row struct {
-		N uint64 `json:"n"`
+		Name string `json:"name"`
 	}
-	rows, err := cachedQuery[row](s, "SELECT count() AS n FROM system.tables "+
+	rows, err := cachedQuery[row](s, "SELECT name FROM system.tables "+
 		"WHERE database = 'cbioportal_ref' AND name IN ('geneset', 'geneset_gene', 'geneset_hierarchy_node', 'geneset_hierarchy_leaf', 'geneset_info')")
-	return err == nil && len(rows) > 0 && rows[0].N == 5
+	if err != nil {
+		return 0, false
+	}
+	for _, r := range rows {
+		if r.Name == "geneset_info" {
+			versionTable = true
+		} else {
+			n++
+		}
+	}
+	return n, versionTable
 }
 
 type genesetRefRow struct {
@@ -62,7 +81,7 @@ func (r genesetRefRow) dto() Geneset {
 // matching where, whose placeholders take their values from p.
 func (s *State) refGenesets(where string, p ch.Params, order string) ([]genesetRefRow, error) {
 	return cachedQueryP[genesetRefRow](s, fmt.Sprintf(
-		"SELECT id, external_id AS genesetId, name, description, ref_link AS refLink FROM cbioportal_ref.geneset WHERE %s ORDER BY %s",
+		"SELECT id, external_id AS genesetId, name, description, ifNull(ref_link, '') AS refLink FROM cbioportal_ref.geneset WHERE %s ORDER BY %s",
 		where, order), p)
 }
 
@@ -160,7 +179,7 @@ func (s *State) genesetVersion(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		V string `json:"v"`
 	}
-	if s.hasGenesetRef() {
+	if _, versionTable := s.genesetRefTables(); versionTable {
 		rows, err := cachedQuery[row](s, "SELECT geneset_version AS v FROM cbioportal_ref.geneset_info LIMIT 1")
 		if err != nil {
 			fail(w, r, err)
@@ -459,7 +478,7 @@ func (s *State) genesetHierarchy(scores, pvalues []genesetScore, percentile int,
 		NodeName string `json:"nodeName"`
 		ParentID int64  `json:"parentId"`
 	}
-	nodes, err := cachedQuery[nodeRow](s, "SELECT node_id AS nodeId, node_name AS nodeName, parent_id AS parentId "+
+	nodes, err := cachedQuery[nodeRow](s, "SELECT node_id AS nodeId, node_name AS nodeName, ifNull(parent_id, 0) AS parentId "+
 		"FROM cbioportal_ref.geneset_hierarchy_node")
 	if err != nil {
 		return nil, err
