@@ -58,7 +58,7 @@ func TestLongMatrixSamples(t *testing.T) {
 
 // Without feature.study.export the path is not an export endpoint.
 func TestExportDisabled(t *testing.T) {
-	s := &State{State: &core.State{}}
+	s := newState(&core.State{})
 	mux := http.NewServeMux()
 	s.routes(mux)
 	w := httptest.NewRecorder()

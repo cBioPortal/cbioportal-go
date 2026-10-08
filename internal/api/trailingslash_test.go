@@ -13,7 +13,7 @@ import (
 // not serve is a 405, and a POST to a legacy endpoint whose filter the
 // interceptor parses fails as its controller does without the filter.
 func TestTrailingSlashRouter(t *testing.T) {
-	h := NewRouter(&State{State: &core.State{}})
+	h := NewRouter(newState(&core.State{}))
 	for _, c := range []struct {
 		method, path, body string
 		status             int

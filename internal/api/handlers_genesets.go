@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -705,12 +706,12 @@ func (s *State) genesetHierarchyFromScores(w http.ResponseWriter, r *http.Reques
 
 // genesetGenes lists the member genes of a gene set (entrez id, symbol) by
 // entrez id; found is false for an unknown gene set.
-func (s *State) genesetGenes(genesetID string) (genes []geneRow, found bool, err error) {
+func (s *State) genesetGenes(genesetID string) (genes []studies.GeneRow, found bool, err error) {
 	sets, err := s.refGenesets("external_id = {id:String}", ch.Params{"id": genesetID}, "id")
 	if err != nil || len(sets) == 0 {
 		return nil, false, err
 	}
-	genes, err = ch.Query[geneRow](s.CH, fmt.Sprintf(
+	genes, err = ch.Query[studies.GeneRow](s.CH, fmt.Sprintf(
 		"SELECT g.entrez_gene_id AS entrezGeneId, g.hugo_gene_symbol AS hugoGeneSymbol, g.type AS type "+
 			"FROM cbioportal_ref.geneset_gene gg JOIN cbioportal_ref.gene g ON g.entrez_gene_id = gg.entrez_gene_id "+
 			"WHERE gg.geneset_id = %d ORDER BY g.entrez_gene_id", sets[0].ID))

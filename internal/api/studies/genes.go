@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"encoding/json"
@@ -11,23 +11,23 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// geneRow is the legacy Gene model as GeneMapper selects it: the genetic
+// GeneRow is the legacy Gene model as GeneMapper selects it: the genetic
 // entity id is never written. The ID projection drops type (javaContract).
-type geneRow struct {
+type GeneRow struct {
 	EntrezGeneID   int64  `json:"entrezGeneId"`
 	HugoGeneSymbol string `json:"hugoGeneSymbol"`
 	Type           string `json:"type"`
 }
 
-// genesFetch resolves gene identifiers against the reference. Body is a JSON
+// GenesFetch resolves gene identifiers against the reference. Body is a JSON
 // array of entrez ids (numbers) or Hugo symbols (strings); `geneIdType` query
 // param (ENTREZ_GENE_ID / HUGO_GENE_SYMBOL) hints which, but we detect per
 // item. Unknown identifiers are skipped.
-func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) GenesFetch(w http.ResponseWriter, r *http.Request) {
 	var raw []json.RawMessage
 	core.ReadBody(r, &raw)
 	if len(raw) == 0 {
-		core.WriteJSON(w, []geneRow{})
+		core.WriteJSON(w, []GeneRow{})
 		return
 	}
 	var entrez, symbols []string
@@ -52,7 +52,7 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 		conds = append(conds, "upper(hugo_gene_symbol) IN {symbols:Array(String)}")
 		p["symbols"] = up
 	}
-	rows, err := ch.QueryP[geneRow](s.CH, fmt.Sprintf(
+	rows, err := ch.QueryP[GeneRow](s.CH, fmt.Sprintf(
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type "+
 			"FROM cbioportal_ref.gene WHERE %s",
 		strings.Join(conds, " OR ")), p)
@@ -63,15 +63,15 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, rows)
 }
 
-// gene by id (entrez or hugo).
-func (s *State) gene(w http.ResponseWriter, r *http.Request) {
+// Gene by id (entrez or hugo).
+func (s Server) Gene(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cond := "upper(hugo_gene_symbol) = {symbol:String}"
 	p := ch.Params{"symbol": strings.ToUpper(id)}
 	if _, err := strconv.ParseInt(id, 10, 64); err == nil {
 		cond = "entrez_gene_id = " + id
 	}
-	rows, err := ch.QueryP[geneRow](s.CH,
+	rows, err := ch.QueryP[GeneRow](s.CH,
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type FROM cbioportal_ref.gene WHERE "+cond+" LIMIT 1", p)
 	if err != nil {
 		core.Fail(w, r, err)

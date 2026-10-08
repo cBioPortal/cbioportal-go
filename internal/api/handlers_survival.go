@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
@@ -182,7 +183,7 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 		CensoredEventRequestIdentifier *clinicalEventRequestIdentifier `json:"censoredEventRequestIdentifier"`
 	}
 	core.ReadBody(r, &req)
-	out := []ClinicalData{}
+	out := []studies.ClinicalData{}
 	if req.AttributeIDPrefix == "" || len(req.PatientIdentifiers) == 0 || req.StartEventRequestIdentifier == nil {
 		core.WriteJSON(w, out)
 		return
@@ -226,7 +227,7 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 			{req.AttributeIDPrefix + "_MONTHS", javaDouble(float64(endDate-startDate) / 30.4)},
 			{req.AttributeIDPrefix + "_STATUS", status},
 		} {
-			out = append(out, ClinicalData{
+			out = append(out, studies.ClinicalData{
 				ClinicalAttributeID: d[0], Value: d[1], PatientID: ev.PatientID, StudyID: ev.StudyID,
 				UniquePatientKey: core.UniqueKey(ev.StudyID, ev.PatientID), PatientAttribute: true,
 			})

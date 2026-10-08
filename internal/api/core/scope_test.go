@@ -18,9 +18,9 @@ import (
 var scopeAllowlist = map[string]string{
 	// Indexes and listings over every study.
 	"core/availability.go:State.unavailableStudyIdentifiers:sample_list": "cached index of the unavailable studies' lists, keyed by a study subquery",
-	"handlers_core.go:studyCountJoins:sample_list":                       "per-study counts of the study listing, aggregated over every study (cached)",
-	"handlers_core.go:studyCountJoins:clinical_event_data_derived":       "per-study counts of the study listing, aggregated over every study (cached)",
-	"handlers_core.go:studyCountJoins:genomic_event_derived":             "per-study counts of the study listing, aggregated over every study (cached)",
+	"studies/studies.go:studyCountJoins:sample_list":                     "per-study counts of the study listing, aggregated over every study (cached)",
+	"studies/studies.go:studyCountJoins:clinical_event_data_derived":     "per-study counts of the study listing, aggregated over every study (cached)",
+	"studies/studies.go:studyCountJoins:genomic_event_derived":           "per-study counts of the study listing, aggregated over every study (cached)",
 
 	// sample_to_gene_panel_derived is sorted by panel, alteration type and
 	// profile, without the study.

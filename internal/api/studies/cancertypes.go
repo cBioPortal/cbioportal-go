@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"net/http"
@@ -7,9 +7,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeCancerTypes registers the single cancer type lookup; the list endpoint
+// RouteCancerTypes registers the single cancer type lookup; the list endpoint
 // is registered in routes.go.
-func (s *State) routeCancerTypes(mux *http.ServeMux) {
+func (s Server) RouteCancerTypes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/cancer-types/{cancerTypeId}", s.cancerType)
 }
 
@@ -37,11 +37,11 @@ type typeOfCancerRow struct {
 	Parent         string `json:"parent"`
 }
 
-// queryCancerTypes returns the cancer types matching where (may be empty),
+// QueryCancerTypes returns the cancer types matching where (may be empty),
 // falling back to the reference set when the study cancer-type view is absent
 // or predates the short_name column. p holds the values of where's
 // placeholders.
-func (s *State) queryCancerTypes(where string, p ch.Params) ([]CancerType, error) {
+func (s Server) QueryCancerTypes(where string, p ch.Params) ([]CancerType, error) {
 	tail := where + " ORDER BY type_of_cancer_id"
 	rows, err := ch.QueryP[typeOfCancerRow](s.CH, "SELECT * FROM ("+cancerTypesSQL+")"+tail, p)
 	if err != nil {
@@ -58,9 +58,9 @@ func (s *State) queryCancerTypes(where string, p ch.Params) ([]CancerType, error
 }
 
 // cancerType — GET /api/cancer-types/{cancerTypeId}.
-func (s *State) cancerType(w http.ResponseWriter, r *http.Request) {
+func (s Server) cancerType(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cancerTypeId")
-	rows, err := s.queryCancerTypes(" WHERE type_of_cancer_id = {id:String}", ch.Params{"id": id})
+	rows, err := s.QueryCancerTypes(" WHERE type_of_cancer_id = {id:String}", ch.Params{"id": id})
 	if err != nil {
 		core.Fail(w, r, err)
 		return

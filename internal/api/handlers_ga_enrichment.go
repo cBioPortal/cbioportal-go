@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -164,7 +165,7 @@ func (s *State) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 	patientOf := map[string]string{}
 	if len(all) > 0 {
 		p := ch.Params{}
-		rows, _ := ch.QueryP[idRow](s.CH,
+		rows, _ := ch.QueryP[studies.IDRow](s.CH,
 			"SELECT sample_id AS sampleId, patient_id AS patientId FROM "+core.BySamples(studyID, all).From(core.ParamsBinder(p), core.TSample), p)
 		for _, r := range rows {
 			patientOf[r.SampleID] = "p:" + r.PatientID
@@ -197,10 +198,10 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 	if patient {
 		idCol = "patient_id"
 	}
-	samplesOf := map[string][]idRow{}
+	samplesOf := map[string][]studies.IDRow{}
 	if len(all) > 0 {
 		p := ch.Params{"study": studyID, "ids": all, "profile": profileID}
-		rows, err := ch.QueryP[idRow](s.CH, fmt.Sprintf(
+		rows, err := ch.QueryP[studies.IDRow](s.CH, fmt.Sprintf(
 			"SELECT sample_id AS sampleId, patient_id AS patientId FROM %s "+
 				"AND %s IN {ids:Array(String)} "+
 				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE study_id = {study:String} AND molecular_profile_id = {profile:String}) "+

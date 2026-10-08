@@ -72,7 +72,7 @@ func (s *State) treatmentsDisplaySample(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	p := ch.Params{}
-	ok, err := s.existsIn(
+	ok, err := s.ExistsIn(
 		"SELECT count() AS n FROM "+core.ByStudies(treated).From(core.ParamsBinder(p), core.TClinicalEventDataDerived)+
 			" AND lower(key) = 'sample_id' AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN')", p)
 	if err != nil {

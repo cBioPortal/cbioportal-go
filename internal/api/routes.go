@@ -12,7 +12,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /config_service", s.configService)
 	mux.HandleFunc("GET /api/info", s.info)
 	routeAPIDocs(mux, s)
-	mux.HandleFunc("GET /api/cancer-types", s.cancerTypes)
+	mux.HandleFunc("GET /api/cancer-types", s.CancerTypes)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	// Catch-all: 404 for unknown /api/ paths, the portal UI for the rest.
 	mux.HandleFunc("/", s.CatchAll)
@@ -21,24 +21,24 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.routeSession(mux)
 
 	// Studies
-	mux.HandleFunc("GET /api/studies", s.studies)
-	mux.HandleFunc("POST /api/studies/fetch", s.studiesFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}", s.study)
+	mux.HandleFunc("GET /api/studies", s.Studies)
+	mux.HandleFunc("POST /api/studies/fetch", s.StudiesFetch)
+	mux.HandleFunc("GET /api/studies/{studyId}", s.Study)
 
 	// Samples / patients
-	mux.HandleFunc("GET /api/studies/{studyId}/samples", s.samples)
-	mux.HandleFunc("POST /api/samples/fetch", s.samplesFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients", s.patients)
-	mux.HandleFunc("POST /api/patients/fetch", s.patientsFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}", s.patient)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/samples", s.samplesOfPatient)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-data", s.patientClinicalData)
-	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/clinical-data", s.sampleClinicalData)
+	mux.HandleFunc("GET /api/studies/{studyId}/samples", s.Samples)
+	mux.HandleFunc("POST /api/samples/fetch", s.SamplesFetch)
+	mux.HandleFunc("GET /api/studies/{studyId}/patients", s.Patients)
+	mux.HandleFunc("POST /api/patients/fetch", s.PatientsFetch)
+	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}", s.Patient)
+	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/samples", s.SamplesOfPatient)
+	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-data", s.PatientClinicalData)
+	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/clinical-data", s.SampleClinicalData)
 
 	// Clinical
-	mux.HandleFunc("GET /api/studies/{studyId}/clinical-data", s.clinicalData)
-	mux.HandleFunc("POST /api/studies/{studyId}/clinical-data/fetch", s.clinicalDataStudyFetch)
-	mux.HandleFunc("POST /api/clinical-attributes/fetch", s.clinicalAttributesFetch)
+	mux.HandleFunc("GET /api/studies/{studyId}/clinical-data", s.ClinicalData)
+	mux.HandleFunc("POST /api/studies/{studyId}/clinical-data/fetch", s.ClinicalDataStudyFetch)
+	mux.HandleFunc("POST /api/clinical-attributes/fetch", s.ClinicalAttributesFetch)
 	mux.HandleFunc("POST /api/clinical-attributes/counts/fetch", s.clinicalAttributeCountsFetch)
 
 	// Molecular profiles
@@ -56,13 +56,13 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/molecular-data/fetch", s.molecularDataFetch)
 
 	// Sample lists (case sets)
-	mux.HandleFunc("GET /api/studies/{studyId}/sample-lists", s.studySampleLists)
-	mux.HandleFunc("GET /api/sample-lists/{id}", s.sampleList)
-	mux.HandleFunc("POST /api/sample-lists/fetch", s.sampleListsFetch)
+	mux.HandleFunc("GET /api/studies/{studyId}/sample-lists", s.StudySampleLists)
+	mux.HandleFunc("GET /api/sample-lists/{id}", s.SampleList)
+	mux.HandleFunc("POST /api/sample-lists/fetch", s.SampleListsFetch)
 
 	// Genes
-	mux.HandleFunc("POST /api/genes/fetch", s.genesFetch)
-	mux.HandleFunc("GET /api/genes/{id}", s.gene)
+	mux.HandleFunc("POST /api/genes/fetch", s.GenesFetch)
+	mux.HandleFunc("GET /api/genes/{id}", s.Gene)
 
 	// Gene panels
 	mux.HandleFunc("GET /api/gene-panels", s.genePanels)
@@ -77,7 +77,15 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/structuralvariant-genes/fetch", s.svGenesFetch)
 	mux.HandleFunc("POST /api/molecular-profile-sample-counts/fetch", s.molecularProfileSampleCountsFetch)
 
-	mux.HandleFunc("POST /api/clinical-data/fetch", s.clinicalDataFetch)
+	mux.HandleFunc("POST /api/clinical-data/fetch", s.ClinicalDataFetch)
+
+	// Gene sets and copy-number segments.
+	mux.HandleFunc("GET /api/genesets", s.genesetsList)
+	mux.HandleFunc("GET /api/genesets/version", s.genesetVersion)
+	mux.HandleFunc("POST /api/geneset-hierarchy/fetch", s.genesetHierarchyFetch)
+	mux.HandleFunc("POST /api/genesets/{genesetId}/expression-correlation/fetch", s.genesetExpressionCorrelationFetch)
+	mux.HandleFunc("POST /api/copy-number-segments/fetch", s.copyNumberSegmentsFetch)
+	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/copy-number-segments", s.sampleCopyNumberSegments)
 
 	// Endpoint groups implemented in separate handler files.
 	s.routeGenericAssay(mux)
@@ -85,20 +93,20 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.routeSvData(mux)
 	s.routeEnrichment(mux)
 	s.routeEnrichment2(mux)
-	s.routeMisc(mux)
+	s.RouteMisc(mux)
 	s.routeCoexpression(mux)
 	s.routeSurvival(mux)
 	s.routeStudyView3(mux)
 	s.routeGenericAssay2(mux)
 	s.routeMolecular2(mux)
-	s.routeReference(mux)
-	s.routeBulkList(mux)
-	s.routeResources(mux)
+	s.RouteReference(mux)
+	s.RouteBulkList(mux)
+	s.RouteResources(mux)
 	s.routeSignificance(mux)
-	s.routeStudyTags(mux)
+	s.RouteStudyTags(mux)
 	s.routeNamespace(mux)
 	s.routeStatus(mux)
-	s.routeCancerTypes(mux)
+	s.RouteCancerTypes(mux)
 	mux.HandleFunc("POST /api/custom-driver-annotation-report/fetch", s.customDriverAnnotationReport)
 	s.routeTreatments(mux)
 	s.routeCompat(mux)

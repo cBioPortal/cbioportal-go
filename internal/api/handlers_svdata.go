@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -502,15 +503,15 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	for _, p := range profs {
 		studySet[p.StudyID] = true
 	}
-	studies := core.SortedKeys(studySet)
-	if len(studies) == 0 {
+	studyIDs := core.SortedKeys(studySet)
+	if len(studyIDs) == 0 {
 		return nil
 	}
 	patientOf := map[string]string{}
 	sp := ch.Params{}
 	ch.QueryEachP(s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(studies).From(core.ParamsBinder(sp), core.TSample), sp,
-		func(r *idRow) error {
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(studyIDs).From(core.ParamsBinder(sp), core.TSample), sp,
+		func(r *studies.IDRow) error {
 			patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
 			return nil
 		})
@@ -524,7 +525,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	ch.QueryEachP(s.CH,
 		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
 			"WHERE study_id IN {studies:Array(String)} AND molecular_profile_id IN {ids:Array(String)}",
-		ch.Params{"studies": studies, "ids": profIDs},
+		ch.Params{"studies": studyIDs, "ids": profIDs},
 		func(m *memberRow) error {
 			panel := ""
 			if m.Panel != nil {
@@ -534,12 +535,12 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 			return nil
 		})
 	sequenced := map[string]bool{}
-	sequencedLists := make([]string, len(studies))
-	for i, st := range studies {
+	sequencedLists := make([]string, len(studyIDs))
+	for i, st := range studyIDs {
 		sequencedLists[i] = st + "_sequenced"
 	}
 	seqP := ch.Params{}
-	seqRows, _ := ch.QueryP[idRow](s.CH,
+	seqRows, _ := ch.QueryP[studies.IDRow](s.CH,
 		"SELECT study_id AS studyId, sample_id AS sampleId FROM "+s.BySampleLists(sequencedLists...).From(core.ParamsBinder(seqP), core.TSampleList), seqP)
 	for _, r := range seqRows {
 		sequenced[jkey(r.StudyID, r.SampleID)] = true

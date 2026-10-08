@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 )
 
 // filteredSample is a sample as ColumnarStoreStudyViewController's
@@ -29,7 +30,7 @@ func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
-	rows, err := core.QueryA[idRow](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[studies.IDRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM %s "+
 			"AND concat(study_id, '_', sample_id) IN (%s)%s",
 		f.scope().From(args, core.TSample), s.filterSQL(args, f), core.SQLListOrder(r, filteredSampleSortable, "sample_id, study_id")), args)

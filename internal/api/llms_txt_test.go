@@ -13,7 +13,7 @@ import (
 func TestRobotsLlmsTxtPointer(t *testing.T) {
 	const pointer = "# Guidance for AI agents and bulk data access: http://portal.example/llms.txt\n\n"
 	for _, location := range []string{"", "file:/cbioportal/llms.txt"} {
-		s := &State{State: &core.State{Props: map[string]string{"sitemaps": "true", core.LLMsTxtProperty: location}}}
+		s := newState(&core.State{Props: map[string]string{"sitemaps": "true", core.LLMsTxtProperty: location}})
 		rec := httptest.NewRecorder()
 		s.robots(rec, httptest.NewRequest(http.MethodGet, "http://portal.example/robots.txt", nil))
 		body := rec.Body.String()

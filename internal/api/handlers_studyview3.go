@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -34,10 +35,10 @@ func naFilter(col string) string {
 // Kruskal-Wallis/Wilcoxon test for numeric attributes or a chi-squared test for
 // categorical ones (legacy ClinicalDataEnrichment; no q-value).
 type ClinicalDataEnrichment struct {
-	ClinicalAttribute ClinicalAttribute `json:"clinicalAttribute"`
-	Score             float64           `json:"score"`
-	Method            string            `json:"method"`
-	PValue            float64           `json:"pValue"`
+	ClinicalAttribute studies.ClinicalAttribute `json:"clinicalAttribute"`
+	Score             float64                   `json:"score"`
+	Method            string                    `json:"method"`
+	PValue            float64                   `json:"pValue"`
 }
 
 // enrichmentLevel is how an attribute's values are read for the groups, as
@@ -112,7 +113,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		testName = "Wilcoxon Test"
 	}
 
-	attrRows, err := core.QueryA[clinAttrRow](s.CH, fmt.Sprintf(
+	attrRows, err := core.QueryA[studies.ClinAttrRow](s.CH, fmt.Sprintf(
 		"%sSELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta "+
 			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples) ORDER BY study_id, clinical_attribute_id",
@@ -122,7 +123,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	// Unique attributes by id + patient flag, and each id's level.
-	attrs := map[string]ClinicalAttribute{}
+	attrs := map[string]studies.ClinicalAttribute{}
 	var keys []string
 	flags := map[string]map[bool]bool{}
 	for _, a := range attrRows {
@@ -131,7 +132,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if _, ok := attrs[key]; !ok {
 			keys = append(keys, key)
 		}
-		attrs[key] = ClinicalAttribute{
+		attrs[key] = studies.ClinicalAttribute{
 			ClinicalAttributeID: a.ClinicalAttributeID, DisplayName: a.DisplayName, Description: a.Description,
 			Datatype: a.Datatype, PatientAttribute: patient, Priority: a.Priority, StudyID: a.StudyID,
 		}
@@ -149,7 +150,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		}
 		return levelSample
 	}
-	var numeric, categorical []ClinicalAttribute
+	var numeric, categorical []studies.ClinicalAttribute
 	for _, key := range core.JavaHashMapOrder(keys) {
 		switch a := attrs[key]; a.Datatype {
 		case "NUMBER":
@@ -158,7 +159,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			categorical = append(categorical, a)
 		}
 	}
-	idsByLevel := func(list []ClinicalAttribute) map[enrichmentLevel][]string {
+	idsByLevel := func(list []studies.ClinicalAttribute) map[enrichmentLevel][]string {
 		m := map[enrichmentLevel][]string{}
 		seen := map[string]bool{}
 		for _, a := range list {
@@ -436,7 +437,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 			inner, keyCol, view, args.Str(sortBy), keyCol, keyCol, keyCol, sortExpr, dir, pageSize, offset)
 	}
 
-	pageRows, err := core.QueryA[idRow](s.CH, pageSQL, args)
+	pageRows, err := core.QueryA[studies.IDRow](s.CH, pageSQL, args)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -449,7 +450,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	samplePairs := make([][2]string, 0, len(pageRows))
 	patientSet := map[string]bool{}
 	var patientPairs [][2]string
-	patientToSamples := map[string][]idRow{}
+	patientToSamples := map[string][]studies.IDRow{}
 	byKey := map[string][]tableClinicalData{}
 	for _, pr := range pageRows {
 		samplePairs = append(samplePairs, [2]string{pr.StudyID, pr.SampleID})
@@ -462,7 +463,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sample-level clinical data for the page.
-	sampleData, _ := ch.QueryP[clinicalRow](s.CH,
+	sampleData, _ := ch.QueryP[studies.ClinicalRow](s.CH,
 		"SELECT study_id AS studyId, sample_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
 			"FROM clinical_sample WHERE (study_id, sample_id) IN {ids:Array(Tuple(String, String))} ORDER BY attr_id",
 		ch.Params{"ids": samplePairs})
@@ -481,7 +482,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	// Patient-level clinical data, mapped onto each of the patient's page samples.
 	if len(patientPairs) > 0 {
-		patientData, _ := ch.QueryP[clinicalRow](s.CH,
+		patientData, _ := ch.QueryP[studies.ClinicalRow](s.CH,
 			"SELECT study_id AS studyId, patient_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
 				"FROM clinical_patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY attr_id",
 			ch.Params{"ids": patientPairs})

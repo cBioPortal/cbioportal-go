@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 )
 
 // TestAddedPagingWired pins that every endpoint with added paging is paged
@@ -60,9 +61,9 @@ func TestAddedSortables(t *testing.T) {
 		{core.FilteredSampleSort, filteredSampleSortable},
 		{core.StructuralVariantSortParam, structuralVariantSortable},
 		{core.CopyNumberSegmentSort, segmentSortable},
-		{core.ClinicalDataSort, clinicalDataSortable},
-		{core.SampleSort, sampleSortable},
-		{core.PatientSort, patientSortable},
+		{core.ClinicalDataSort, studies.ClinicalDataSortable},
+		{core.SampleSort, studies.SampleSortable},
+		{core.PatientSort, studies.PatientSortable},
 	} {
 		for _, v := range c.sort.Values {
 			if _, ok := c.sortable[v]; !ok {

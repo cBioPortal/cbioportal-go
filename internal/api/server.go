@@ -9,13 +9,14 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
-// State is the API's state: the handlers' core.State plus the login.
+// State is the API's state: the handlers' servers plus the login.
 type State struct {
-	*core.State
+	studies.Server
 	// login is the OAuth2 login (authenticate=oauth2 or optional_oauth2) and
 	// access its study authorization; nil login serves every study
 	// anonymously.
@@ -27,8 +28,11 @@ type State struct {
 
 // NewState returns the API state over ClickHouse client c; ConfigureAuth and
 // ConfigureSessions apply the portal properties.
-func NewState(c *ch.Client) *State {
-	return &State{State: core.NewState(c)}
+func NewState(c *ch.Client) *State { return newState(core.NewState(c)) }
+
+// newState returns the API state over cs, without a login.
+func newState(cs *core.State) *State {
+	return &State{Server: studies.Server{State: cs}}
 }
 
 // MetricsHandler serves the Prometheus metrics.
@@ -96,7 +100,7 @@ func NewRouter(s *State) http.Handler {
 	if s.login != nil {
 		authCfg.DefaultUser = "" // users log in
 	}
-	h := auth(authCfg, s.StudyAvailability(core.ExtraEndpoints(s.studiesMeta, core.UninterceptedFetch(core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
+	h := auth(authCfg, s.StudyAvailability(core.ExtraEndpoints(s.StudiesMeta, core.UninterceptedFetch(core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
 	if s.login != nil {
 		if s.login.cfg.MethodAuthorization {
 			h = s.studyAccess(s.access, h)

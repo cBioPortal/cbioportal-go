@@ -12,7 +12,7 @@ import (
 // TestStudyViewBodyErrors checks the answers production's Java gives to
 // study-view bodies without the fields its controllers dereference.
 func TestStudyViewBodyErrors(t *testing.T) {
-	h := NewRouter(&State{State: &core.State{}})
+	h := NewRouter(newState(&core.State{}))
 	for _, c := range []struct {
 		path, body string
 		status     int

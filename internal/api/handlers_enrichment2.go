@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -380,7 +381,7 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	samplesOf := map[string][]string{}
 	if len(pairs) > 0 {
 		p := ch.Params{"ids": pairs}
-		rows, _ := ch.QueryP[idRow](s.CH,
+		rows, _ := ch.QueryP[studies.IDRow](s.CH,
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(core.PairStudies(pairs)).From(core.ParamsBinder(p), core.TSample)+
 				" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id", p)
 		for _, r := range rows {

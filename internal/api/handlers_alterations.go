@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -277,12 +278,12 @@ func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 	type study struct {
 		ID string `json:"id"`
 	}
-	studies, err := core.QueryA[study](s.CH,
+	filtered, err := core.QueryA[study](s.CH,
 		"SELECT DISTINCT cancer_study_identifier AS id FROM "+s.filterFrom(args, f)+" LIMIT 2", args)
-	if err != nil || len(studies) != 1 {
+	if err != nil || len(filtered) != 1 {
 		return
 	}
-	p := ch.Params{"study": studies[0].ID}
+	p := ch.Params{"study": filtered[0].ID}
 	type significance struct {
 		Hugo  string  `json:"hugo"`
 		Amp   uint8   `json:"amp"`
@@ -292,7 +293,7 @@ func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 	key := func(hugo string, alteration int64) string { return hugo + "\x00" + strconv.FormatInt(alteration, 10) }
 	best := map[string]float64{}
 	if alterationType == "COPY_NUMBER_ALTERATION" {
-		rows, err := queryView[significance](s.CH,
+		rows, err := studies.QueryView[significance](s.CH,
 			"SELECT gg.hugo_gene_symbol AS hugo, r.amp AS amp, r.q_value AS q, r.q_value_text AS qText "+
 				"FROM gistic r INNER JOIN gistic_to_gene gg ON gg.study_id = r.study_id AND gg.gistic_roi_id = r.gistic_roi_id "+
 				"WHERE r.study_id = {study:String}", p)
@@ -311,7 +312,7 @@ func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 			}
 		}
 	} else {
-		rows, err := queryView[significance](s.CH,
+		rows, err := studies.QueryView[significance](s.CH,
 			"SELECT hugo_gene_symbol AS hugo, q_value AS q, q_value_text AS qText FROM mutsig WHERE study_id = {study:String}", p)
 		if err != nil {
 			return

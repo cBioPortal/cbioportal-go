@@ -16,6 +16,7 @@ import (
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/sessionstore"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -479,7 +480,7 @@ func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 
 // filterSamples resolves a studyViewFilter to its samples via the
 // /api/filtered-samples/fetch handler.
-func (s *State) filterSamples(filter any) ([]Sample, error) {
+func (s *State) filterSamples(filter any) ([]studies.Sample, error) {
 	raw, err := json.Marshal(filter)
 	if err != nil {
 		return nil, err
@@ -491,7 +492,7 @@ func (s *State) filterSamples(filter any) ([]Sample, error) {
 	if rec.Code != http.StatusOK {
 		return nil, fmt.Errorf("filtered-samples: %d %s", rec.Code, strings.TrimSpace(rec.Body.String()))
 	}
-	var samples []Sample
+	var samples []studies.Sample
 	if err := json.Unmarshal(rec.Body.Bytes(), &samples); err != nil {
 		return nil, err
 	}
@@ -516,7 +517,7 @@ func (s *State) populateDynamic(vs *sessionstore.Session) {
 	vs.Data["studies"] = groupSamplesByStudy(samples)
 }
 
-func groupSamplesByStudy(samples []Sample) []any {
+func groupSamplesByStudy(samples []studies.Sample) []any {
 	byStudy := map[string][]any{}
 	order := []string{}
 	for _, sm := range samples {

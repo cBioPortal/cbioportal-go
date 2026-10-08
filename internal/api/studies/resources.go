@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"fmt"
@@ -10,10 +10,10 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeResources registers the resource-definition and resource-data
+// RouteResources registers the resource-definition and resource-data
 // endpoints (ResourceDefinitionController / ResourceDataController), served
 // from the resource_definition and resource_{study,patient,sample} views.
-func (s *State) routeResources(mux *http.ServeMux) {
+func (s Server) RouteResources(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/resource-definitions", s.resourceDefinitionsInStudy)
 	mux.HandleFunc("GET /api/studies/{studyId}/resource-definitions/{resourceId}", s.resourceDefinitionInStudy)
 	mux.HandleFunc("POST /api/resource-definitions/fetch", s.resourceDefinitionsFetch)
@@ -74,19 +74,19 @@ func (r resourceDefinitionRow) model(projection string) ResourceDefinition {
 	return d
 }
 
-// projectionParam returns the upper-cased `projection` query param (default
+// ProjectionParam returns the upper-cased `projection` query param (default
 // SUMMARY).
-func projectionParam(r *http.Request) string {
+func ProjectionParam(r *http.Request) string {
 	if p := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("projection"))); p != "" {
 		return p
 	}
 	return "SUMMARY"
 }
 
-// pagingClause builds `ORDER BY … LIMIT … OFFSET …` from the pageSize /
+// PagingClause builds `ORDER BY … LIMIT … OFFSET …` from the pageSize /
 // pageNumber / sortBy / direction query params. sortCols maps the API sortBy
 // names to SQL expressions; an unknown or absent sortBy uses defaultOrder.
-func pagingClause(r *http.Request, sortCols map[string]string, defaultOrder string) string {
+func PagingClause(r *http.Request, sortCols map[string]string, defaultOrder string) string {
 	q := r.URL.Query()
 	pageSize := 10000000
 	if v, err := strconv.Atoi(q.Get("pageSize")); err == nil && v > 0 {
@@ -107,10 +107,10 @@ func pagingClause(r *http.Request, sortCols map[string]string, defaultOrder stri
 	return fmt.Sprintf(" ORDER BY %s LIMIT %d OFFSET %d", order, pageSize, pageNumber*pageSize)
 }
 
-// queryView runs a query against one of the study side-data views, treating a
+// QueryView runs a query against one of the study side-data views, treating a
 // view that does not exist yet (a target DB transformed before these views
 // were added) as empty. p holds the values of sql's placeholders.
-func queryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
+func QueryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
 	rows, err := ch.QueryP[T](c, sql, p)
 	if err != nil && strings.Contains(err.Error(), "UNKNOWN_TABLE") {
 		return []T{}, nil
@@ -118,9 +118,9 @@ func queryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
 	return rows, err
 }
 
-// existsIn reports whether a SELECT count() query, with placeholder values p,
+// ExistsIn reports whether a SELECT count() query, with placeholder values p,
 // returns a non-zero count.
-func (s *State) existsIn(sql string, p ch.Params) (bool, error) {
+func (s Server) ExistsIn(sql string, p ch.Params) (bool, error) {
 	rows, err := core.CachedQueryP[struct {
 		N uint64 `json:"n"`
 	}](s.State, sql, p)
@@ -130,9 +130,9 @@ func (s *State) existsIn(sql string, p ch.Params) (bool, error) {
 	return len(rows) > 0 && rows[0].N > 0, nil
 }
 
-// requireStudy writes a 404 and returns false when the study does not exist.
-func (s *State) requireStudy(w http.ResponseWriter, r *http.Request, studyID string) bool {
-	ok, err := s.existsIn("SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": studyID})
+// RequireStudy writes a 404 and returns false when the study does not exist.
+func (s Server) RequireStudy(w http.ResponseWriter, r *http.Request, studyID string) bool {
+	ok, err := s.ExistsIn("SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": studyID})
 	if err != nil {
 		core.Fail(w, r, err)
 		return false
@@ -152,8 +152,8 @@ var resourceDefinitionSort = map[string]string{
 
 // writeResourceDefinitions writes the definitions matching where, whose
 // placeholders take their values from p.
-func (s *State) writeResourceDefinitions(w http.ResponseWriter, r *http.Request, where string, p ch.Params, tail, projection string) {
-	rows, err := queryView[resourceDefinitionRow](s.CH,
+func (s Server) writeResourceDefinitions(w http.ResponseWriter, r *http.Request, where string, p ch.Params, tail, projection string) {
+	rows, err := QueryView[resourceDefinitionRow](s.CH,
 		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE "+where+tail, p)
 	if err != nil {
 		core.Fail(w, r, err)
@@ -167,23 +167,23 @@ func (s *State) writeResourceDefinitions(w http.ResponseWriter, r *http.Request,
 }
 
 // resourceDefinitionsInStudy — GET /api/studies/{studyId}/resource-definitions.
-func (s *State) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Request) {
 	studyID := r.PathValue("studyId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
 	s.writeResourceDefinitions(w, r, "study_id = {study:String}", ch.Params{"study": studyID},
-		core.SQLPageOrder(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
+		core.SQLPageOrder(r, resourceDefinitionSort, "resource_id ASC"), ProjectionParam(r))
 }
 
 // resourceDefinitionInStudy — GET /api/studies/{studyId}/resource-definitions/{resourceId}
 // (DETAILED projection; 404 when the study or definition is unknown).
-func (s *State) resourceDefinitionInStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) resourceDefinitionInStudy(w http.ResponseWriter, r *http.Request) {
 	studyID, resourceID := r.PathValue("studyId"), r.PathValue("resourceId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
-	rows, err := queryView[resourceDefinitionRow](s.CH,
+	rows, err := QueryView[resourceDefinitionRow](s.CH,
 		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE study_id = {study:String} AND resource_id = {resource:String} LIMIT 1",
 		ch.Params{"study": studyID, "resource": resourceID})
 	if err != nil {
@@ -198,7 +198,7 @@ func (s *State) resourceDefinitionInStudy(w http.ResponseWriter, r *http.Request
 }
 
 // resourceDefinitionsFetch — POST /api/resource-definitions/fetch (body: study ids).
-func (s *State) resourceDefinitionsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) resourceDefinitionsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
@@ -206,7 +206,7 @@ func (s *State) resourceDefinitionsFetch(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.writeResourceDefinitions(w, r, "study_id IN {ids:Array(String)}", ch.Params{"ids": ids},
-		" ORDER BY resource_id ASC, study_id ASC", projectionParam(r))
+		" ORDER BY resource_id ASC, study_id ASC", ProjectionParam(r))
 }
 
 // ---------- Resource data ----------
@@ -240,8 +240,8 @@ var (
 // ResourceDataMapper's default order. id (optional) restricts to one
 // patient/sample; resourceID (optional) to one resource. The rows keep
 // their url in every projection, for writeResourcePage to sort by.
-func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyID, id string) ([]ResourceData, error) {
-	projection := projectionParam(r)
+func (s Server) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyID, id string) ([]ResourceData, error) {
+	projection := ProjectionParam(r)
 	where := []string{"d.study_id = {study:String}"}
 	p := ch.Params{"study": studyID}
 	if id != "" {
@@ -269,7 +269,7 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 			"FROM %s d LEFT JOIN resource_definition rd ON d.study_id = rd.study_id AND d.resource_id = rd.resource_id%s "+
 			"WHERE %s ORDER BY d.resource_id ASC, %s",
 		lvl.idCols, lvl.view, join, strings.Join(where, " AND "), tie)
-	rows, err := queryView[resourceDataRow](s.CH, sql, p)
+	rows, err := QueryView[resourceDataRow](s.CH, sql, p)
 	if err != nil {
 		return nil, err
 	}
@@ -298,9 +298,9 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 	return out, nil
 }
 
-func (s *State) writeResourceData(w http.ResponseWriter, r *http.Request, levels ...resourceDataLevel) {
+func (s Server) writeResourceData(w http.ResponseWriter, r *http.Request, levels ...resourceDataLevel) {
 	studyID := r.PathValue("studyId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
 	out := []ResourceData{}
@@ -320,7 +320,7 @@ func (s *State) writeResourceData(w http.ResponseWriter, r *http.Request, levels
 // reads its levels apart, and DETAILED drops rows without a definition after
 // reading. ResourceDataSortBy's ResourceId sorts by the resourceId field.
 func writeResourcePage(w http.ResponseWriter, r *http.Request, rows []ResourceData) {
-	id := projectionParam(r) == "ID"
+	id := ProjectionParam(r) == "ID"
 	keyed := core.ClaimKeyedPage(r)
 	if keyed == nil {
 		if id {
@@ -345,24 +345,24 @@ func writeResourcePage(w http.ResponseWriter, r *http.Request, rows []ResourceDa
 }
 
 // studyResourceData — GET /api/studies/{studyId}/resource-data (study-level resources).
-func (s *State) studyResourceData(w http.ResponseWriter, r *http.Request) {
+func (s Server) studyResourceData(w http.ResponseWriter, r *http.Request) {
 	s.writeResourceData(w, r, studyResources)
 }
 
 // allResourceDataInStudy — GET /api/studies/{studyId}/resource-data-all: the
 // study-, patient- and sample-level resources concatenated in that order.
-func (s *State) allResourceDataInStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) allResourceDataInStudy(w http.ResponseWriter, r *http.Request) {
 	s.writeResourceData(w, r, studyResources, patientResources, sampleResources)
 }
 
 // patientResourceData — GET /api/studies/{studyId}/patients/{patientId}/resource-data.
-func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
+func (s Server) patientResourceData(w http.ResponseWriter, r *http.Request) {
 	studyID, patientID := r.PathValue("studyId"), r.PathValue("patientId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
 	p := ch.Params{}
-	ok, err := s.existsIn("SELECT count() AS n FROM "+core.ByPatient(studyID, patientID).From(core.ParamsBinder(p), core.TPatient), p)
+	ok, err := s.ExistsIn("SELECT count() AS n FROM "+core.ByPatient(studyID, patientID).From(core.ParamsBinder(p), core.TPatient), p)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -380,13 +380,13 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 }
 
 // sampleResourceData — GET /api/studies/{studyId}/samples/{sampleId}/resource-data.
-func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
+func (s Server) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 	studyID, sampleID := r.PathValue("studyId"), r.PathValue("sampleId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
 	p := ch.Params{}
-	ok, err := s.existsIn("SELECT count() AS n FROM "+core.BySample(studyID, sampleID).From(core.ParamsBinder(p), core.TSample), p)
+	ok, err := s.ExistsIn("SELECT count() AS n FROM "+core.BySample(studyID, sampleID).From(core.ParamsBinder(p), core.TSample), p)
 	if err != nil {
 		core.Fail(w, r, err)
 		return

@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-type clinicalRow struct {
+type ClinicalRow struct {
 	StudyID             string `json:"studyId"`
 	ID                  string `json:"id"`
 	PatientID           string `json:"patientId"`
@@ -34,7 +34,7 @@ func isPatient(r *http.Request) bool {
 }
 
 // toClinicalData maps a clinical row to its record.
-func toClinicalData(r *clinicalRow, patient bool) ClinicalData {
+func toClinicalData(r *ClinicalRow, patient bool) ClinicalData {
 	d := ClinicalData{
 		ClinicalAttributeID: r.ClinicalAttributeID, Value: r.Value, StudyID: r.StudyID, PatientAttribute: patient,
 	}
@@ -61,7 +61,7 @@ func clinicalSQL(r *http.Request, b core.Binder, patient, importOrder bool, wher
 	if importOrder {
 		def = "c.internal_id, studyId, id, clinicalAttributeId"
 	}
-	order := core.SQLListOrder(r, clinicalDataSortable, def)
+	order := core.SQLListOrder(r, ClinicalDataSortable, def)
 	if patient {
 		return "SELECT c.study_id AS studyId, c.patient_id AS id, c.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 			"c.attr_value AS value FROM clinical_patient c WHERE " + where + order
@@ -71,9 +71,9 @@ func clinicalSQL(r *http.Request, b core.Binder, patient, importOrder bool, wher
 		"LEFT JOIN " + core.ByStudies(studies).Samples(b) + " s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
 }
 
-// clinicalDataSortable are the ClinicalDataSortBy columns (attrId,
+// ClinicalDataSortable are the ClinicalDataSortBy columns (attrId,
 // attrValue) as clinicalSQL names them.
-var clinicalDataSortable = map[string]string{"clinicalAttributeId": "clinicalAttributeId", "value": "value"}
+var ClinicalDataSortable = map[string]string{"clinicalAttributeId": "clinicalAttributeId", "value": "value"}
 
 // clinicalDataOut is a legacy ClinicalData record as Jackson writes it
 // (NON_NULL, see ClinicalDataMapper.selectSample / selectPatient): ID carries
@@ -95,8 +95,8 @@ type clinicalDataOut struct {
 // SUMMARY, DETAILED with the attribute metadata of studies, or META as a
 // count header). where holds the rows to studies and may hold placeholders
 // bound in args.
-func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, studies []string, where string, args *core.SQLArgs) {
-	projection := projectionParam(r)
+func (s Server) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, studies []string, where string, args *core.SQLArgs) {
+	projection := ProjectionParam(r)
 	if projection == "META" {
 		type c struct {
 			N uint64 `json:"n"`
@@ -120,7 +120,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 	}
 	out := core.NewJSONArray(w, r)
 	sql := clinicalSQL(r, args, patient, s.ImportOrdered(), where, studies)
-	err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(row *clinicalRow) error {
+	err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(row *ClinicalRow) error {
 		d := toClinicalData(row, patient)
 		o := clinicalDataOut{
 			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, SampleID: d.SampleID,
@@ -138,7 +138,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 	out.Finish(err)
 }
 
-func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalData(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	where := "study_id = " + args.Str(r.PathValue("studyId"))
 	if a := r.URL.Query().Get("attributeId"); a != "" {
@@ -147,7 +147,7 @@ func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
 	s.writeClinical(w, r, isPatient(r), []string{r.PathValue("studyId")}, where, args)
 }
 
-func (s *State) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		IDs          []string `json:"ids"`
 		AttributeIDs []string `json:"attributeIds"`
@@ -169,10 +169,10 @@ func (s *State) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
 	s.writeClinical(w, r, patient, []string{r.PathValue("studyId")}, where, args)
 }
 
-// clinicalDataFetch serves POST /api/clinical-data/fetch: clinical data for
+// ClinicalDataFetch serves POST /api/clinical-data/fetch: clinical data for
 // (studyId, entityId) identifiers across studies, optionally limited to
 // attributeIds.
-func (s *State) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Identifiers []struct {
 			StudyID  string `json:"studyId"`
@@ -205,9 +205,9 @@ func (s *State) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 // clinicalAttributes indexes the studies' attribute metadata by study and id.
-func (s *State) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribute {
+func (s Server) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribute {
 	out := map[string]ClinicalAttribute{}
-	rows, _ := ch.QueryP[clinAttrRow](s.CH,
+	rows, _ := ch.QueryP[ClinAttrRow](s.CH,
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
 			"ORDER BY clinical_attribute_id, study_id",
@@ -218,7 +218,7 @@ func (s *State) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribu
 	return out
 }
 
-type clinAttrRow struct {
+type ClinAttrRow struct {
 	StudyID             string `json:"studyId"`
 	ClinicalAttributeID string `json:"clinicalAttributeId"`
 	DisplayName         string `json:"displayName"`
@@ -238,16 +238,16 @@ type ClinicalAttribute struct {
 	StudyID             string `json:"studyId"`
 }
 
-// clinicalAttributesFetch serves POST /api/clinical-attributes/fetch, ordered
+// ClinicalAttributesFetch serves POST /api/clinical-attributes/fetch, ordered
 // as ClinicalAttributeMapper does: by attribute id, then internal study id.
-func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) ClinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
 	if len(studyIDs) == 0 {
 		core.WriteJSON(w, []ClinicalAttribute{})
 		return
 	}
-	rows, err := ch.QueryP[clinAttrRow](s.CH,
+	rows, err := ch.QueryP[ClinAttrRow](s.CH,
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
 			"ORDER BY clinical_attribute_id, "+s.StudyOrder("study_id"),
@@ -263,7 +263,7 @@ func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) 
 	core.WriteJSON(w, out)
 }
 
-func (r clinAttrRow) toAttribute() ClinicalAttribute {
+func (r ClinAttrRow) toAttribute() ClinicalAttribute {
 	dt := r.Datatype
 	if dt == "" {
 		dt = "STRING"

@@ -43,7 +43,7 @@ func datPortal(t *testing.T, p *fakeProvider, extra map[string]string) *httptest
 	for k, v := range extra {
 		props[k] = v
 	}
-	s := &State{State: &core.State{Props: props, PropsReplaceDefaults: true}}
+	s := newState(&core.State{Props: props, PropsReplaceDefaults: true})
 	if err := s.ConfigureAuth(); err != nil {
 		t.Fatalf("ConfigureAuth: %v", err)
 	}
@@ -379,9 +379,9 @@ func TestLoadDATConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "dat.oauth2.jwkUrl") || strings.Contains(err.Error(), "clientId") {
 		t.Errorf("missing keys: %v", err)
 	}
-	s := &State{State: &core.State{Props: map[string]string{"dat.method": "oauth2", "dat.oauth2.clientId": "c", "dat.oauth2.issuer": "i",
+	s := newState(&core.State{Props: map[string]string{"dat.method": "oauth2", "dat.oauth2.clientId": "c", "dat.oauth2.issuer": "i",
 		"dat.oauth2.accessTokenUri": "t", "dat.oauth2.userAuthorizationUri": "a", "dat.oauth2.jwkUrl": "j",
-		"dat.oauth2.redirectUri": "r"}, PropsReplaceDefaults: true}}
+		"dat.oauth2.redirectUri": "r"}, PropsReplaceDefaults: true})
 	if err := s.ConfigureAuth(); err == nil || !strings.Contains(err.Error(), "authenticate=oauth2") {
 		t.Errorf("dat.method=oauth2 without login: %v", err)
 	}

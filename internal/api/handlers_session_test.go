@@ -12,6 +12,7 @@ import (
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/sessionstore"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 )
 
 // sessionTestEnv serves only the session routes; user "" means anonymous.
@@ -22,7 +23,7 @@ type sessionTestEnv struct {
 }
 
 func newSessionTestEnv(t *testing.T, storePath string) *sessionTestEnv {
-	s := &State{State: &core.State{Sessions: sessionstore.NewMemoryStore(storePath)}}
+	s := newState(&core.State{Sessions: sessionstore.NewMemoryStore(storePath)})
 	mux := http.NewServeMux()
 	s.routeSession(mux)
 	return &sessionTestEnv{t: t, s: s, mux: mux}
@@ -95,7 +96,7 @@ func (e *sessionTestEnv) list(path, user string, body any) []sessionstore.Sessio
 }
 
 func TestSessionRoutesRegisterWithoutConflict(t *testing.T) {
-	NewRouter(&State{State: &core.State{Sessions: sessionstore.NewMemoryStore("")}})
+	NewRouter(newState(&core.State{Sessions: sessionstore.NewMemoryStore("")}))
 }
 
 func TestMainSessionRoundTrip(t *testing.T) {
@@ -327,7 +328,7 @@ func TestSessionStorePersistence(t *testing.T) {
 }
 
 func TestGroupSamplesByStudy(t *testing.T) {
-	got := groupSamplesByStudy([]Sample{{StudyID: "b", SampleID: "1"}, {StudyID: "a", SampleID: "2"}, {StudyID: "b", SampleID: "3"}})
+	got := groupSamplesByStudy([]studies.Sample{{StudyID: "b", SampleID: "1"}, {StudyID: "a", SampleID: "2"}, {StudyID: "b", SampleID: "3"}})
 	raw, _ := json.Marshal(got)
 	if want := `[{"id":"a","samples":["2"]},{"id":"b","samples":["1","3"]}]`; string(raw) != want {
 		t.Errorf("got %s want %s", raw, want)

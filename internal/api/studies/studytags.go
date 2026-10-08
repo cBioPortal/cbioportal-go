@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"encoding/json"
@@ -8,9 +8,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeStudyTags registers the study-tags endpoints (StudyController), served
+// RouteStudyTags registers the study-tags endpoints (StudyController), served
 // from the cancer_study_tags view (the study's tags_file YAML stored as JSON).
-func (s *State) routeStudyTags(mux *http.ServeMux) {
+func (s Server) RouteStudyTags(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/studies/{studyId}/tags", s.studyTagsGet)
 	mux.HandleFunc("POST /api/studies/tags/fetch", s.studyTagsFetch)
 }
@@ -31,8 +31,8 @@ type studyTagsRow struct {
 
 // studyTagsGet — GET /api/studies/{studyId}/tags: the tags as a JSON object,
 // or {} when the study has none.
-func (s *State) studyTagsGet(w http.ResponseWriter, r *http.Request) {
-	rows, err := queryView[studyTagsRow](s.CH,
+func (s Server) studyTagsGet(w http.ResponseWriter, r *http.Request) {
+	rows, err := QueryView[studyTagsRow](s.CH,
 		"SELECT study_id AS studyId, tags FROM cancer_study_tags WHERE study_id = {study:String} LIMIT 1",
 		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
@@ -48,7 +48,7 @@ func (s *State) studyTagsGet(w http.ResponseWriter, r *http.Request) {
 
 // studyTagsFetch — POST /api/studies/tags/fetch (body: study ids; an empty
 // list returns every study's tags). Studies without tags are absent.
-func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	where := ""
@@ -57,7 +57,7 @@ func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 		where = " WHERE study_id IN {ids:Array(String)}"
 		p["ids"] = ids
 	}
-	rows, err := queryView[studyTagsRow](s.CH,
+	rows, err := QueryView[studyTagsRow](s.CH,
 		"SELECT study_id AS studyId, tags FROM cancer_study_tags"+where+" ORDER BY study_id", p)
 	if err != nil {
 		core.Fail(w, r, err)

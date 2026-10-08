@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"net/http"
@@ -7,11 +7,11 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// studiesMeta serves GET /api/studies/meta (ColumnStoreStudyController
+// StudiesMeta serves GET /api/studies/meta (ColumnStoreStudyController
 // .getAllStudiesMeta): an empty body with the number of studies matching
 // keyword / sortBy / direction in the total-count and X-Total-Count headers.
 // An unknown sortBy or direction is a 400, as Spring converts them.
-func (s *State) studiesMeta(w http.ResponseWriter, r *http.Request) {
+func (s Server) StudiesMeta(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	if msg := core.CheckParams(core.StudiesMetaParams, q); msg != "" {
 		core.WriteError(w, http.StatusBadRequest, msg)
@@ -28,7 +28,7 @@ func (s *State) studiesMeta(w http.ResponseWriter, r *http.Request) {
 	r2.URL.RawPath = ""
 	r2.URL.RawQuery = meta.Encode()
 	rec := core.NewBufferedResponse()
-	s.studies(rec, r2)
+	s.Studies(rec, r2)
 	if rec.Status != http.StatusOK {
 		w.WriteHeader(rec.Status)
 		w.Write(rec.Body.Bytes())

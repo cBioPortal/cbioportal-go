@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -69,7 +70,7 @@ func importerFloat(text string, parsed float64) float64 {
 
 // writeTotalCount answers a META projection: the total-count header, no body.
 func (s *State) writeTotalCount(w http.ResponseWriter, r *http.Request, sql string, p ch.Params) {
-	rows, err := queryView[struct {
+	rows, err := studies.QueryView[struct {
 		N uint64 `json:"n"`
 	}](s.CH, sql, p)
 	if err != nil {
@@ -92,12 +93,12 @@ var gisticSort = map[string]string{
 // significantCopyNumberRegions — GET /api/studies/{studyId}/significant-copy-number-regions.
 func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Request) {
 	studyID := r.PathValue("studyId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
 	where := "study_id = {study:String}"
 	p := ch.Params{"study": studyID}
-	projection := projectionParam(r)
+	projection := studies.ProjectionParam(r)
 	if projection == "META" {
 		s.writeTotalCount(w, r, "SELECT count() AS n FROM gistic WHERE "+where, p)
 		return
@@ -112,9 +113,9 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 		QValueText    string  `json:"q_value_text"`
 		Amp           uint8   `json:"amp"`
 	}
-	regions, err := queryView[regionRow](s.CH,
+	regions, err := studies.QueryView[regionRow](s.CH,
 		"SELECT gistic_roi_id, chromosome, cytoband, wide_peak_start, wide_peak_end, q_value, q_value_text, amp FROM gistic WHERE "+where+
-			pagingClause(r, gisticSort, "amp DESC, chromosome ASC, wide_peak_start ASC, gistic_roi_id ASC"), p)
+			studies.PagingClause(r, gisticSort, "amp DESC, chromosome ASC, wide_peak_start ASC, gistic_roi_id ASC"), p)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -127,7 +128,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 		}
 		// getGenesOfRegions has no ORDER BY: a region's genes come in the
 		// order of gistic_to_gene's sort key, by entrez id.
-		rows, err := queryView[geneRow](s.CH,
+		rows, err := studies.QueryView[geneRow](s.CH,
 			"SELECT gistic_roi_id, entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol FROM gistic_to_gene WHERE "+
 				where+" ORDER BY gistic_roi_id, entrez_gene_id", p)
 		if err != nil {
@@ -162,12 +163,12 @@ var mutSigSort = map[string]string{
 // significantlyMutatedGenes — GET /api/studies/{studyId}/significantly-mutated-genes.
 func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request) {
 	studyID := r.PathValue("studyId")
-	if !s.requireStudy(w, r, studyID) {
+	if !s.RequireStudy(w, r, studyID) {
 		return
 	}
 	where := "study_id = {study:String}"
 	p := ch.Params{"study": studyID}
-	if projectionParam(r) == "META" {
+	if studies.ProjectionParam(r) == "META" {
 		s.writeTotalCount(w, r, "SELECT count() AS n FROM mutsig WHERE "+where, p)
 		return
 	}
@@ -176,11 +177,11 @@ func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request
 		PValueText string `json:"pValueText"`
 		QValueText string `json:"qValueText"`
 	}
-	rows, err := queryView[mutSigRow](s.CH,
+	rows, err := studies.QueryView[mutSigRow](s.CH,
 		"SELECT study_id AS studyId, entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, `rank` AS rank, "+
 			"num_mutations AS numberOfMutations, p_value AS pValue, q_value AS qValue, "+
 			"p_value_text AS pValueText, q_value_text AS qValueText FROM mutsig WHERE "+where+
-			pagingClause(r, mutSigSort, "entrez_gene_id ASC"), p)
+			studies.PagingClause(r, mutSigSort, "entrez_gene_id ASC"), p)
 	if err != nil {
 		core.Fail(w, r, err)
 		return

@@ -1,4 +1,4 @@
-package api
+package studies
 
 import (
 	"net/http"
@@ -32,7 +32,7 @@ type SampleList struct {
 // grouped by study and list), each list's samples in SampleListMapper's
 // order: by internal id (the storage order of sample_list_list) where the
 // database carries them.
-func (s *State) sampleListSelect(b core.Binder, sc core.Scope) string {
+func (s Server) sampleListSelect(b core.Binder, sc core.Scope) string {
 	ids := "groupArray(sample_id)"
 	if s.ImportOrdered() {
 		ids = "arrayMap(x -> x.2, arraySort(groupArray((internal_id, sample_id))))"
@@ -54,7 +54,7 @@ func toSampleList(r sampleListRow) SampleList {
 // carries them.
 // The lists stream as they are read; a sorted page is read as sqlPageOrder
 // orders it.
-func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, sc core.Scope, byInternalID bool) {
+func (s Server) sampleListsQuery(w http.ResponseWriter, r *http.Request, sc core.Scope, byInternalID bool) {
 	p := ch.Params{}
 	sql := s.sampleListSelect(core.ParamsBinder(p), sc)
 	order := "list_id"
@@ -76,12 +76,12 @@ var sampleListSortable = map[string]string{
 	"sampleListId": "list_id", "category": "category", "studyId": "study_id", "name": "name", "description": "description",
 }
 
-func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
+func (s Server) StudySampleLists(w http.ResponseWriter, r *http.Request) {
 	s.sampleListsQuery(w, r, core.ByStudy(r.PathValue("studyId")), false)
 }
 
-// sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
-func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
+// SampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
+func (s Server) SampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p := ch.Params{}
 	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect(core.ParamsBinder(p), s.BySampleList(id))+
@@ -97,7 +97,7 @@ func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, toSampleList(rows[0]))
 }
 
-func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) SampleListsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 {

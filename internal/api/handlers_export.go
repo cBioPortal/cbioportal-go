@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/databin"
 	"github.com/cbioportal/cbioportal-go/internal/transform"
@@ -352,11 +353,11 @@ func javaGroups(groups string) string {
 // cancerType writes the study's cancer type and its ancestors
 // (CancerTypeDataTypeExporter): no header row.
 func (e *studyExport) cancerType() error {
-	types, err := e.s.queryCancerTypes("", nil)
+	types, err := e.s.QueryCancerTypes("", nil)
 	if err != nil {
 		return err
 	}
-	byID := make(map[string]CancerType, len(types))
+	byID := make(map[string]studies.CancerType, len(types))
 	for _, t := range types {
 		byID[t.CancerTypeID] = t
 	}
