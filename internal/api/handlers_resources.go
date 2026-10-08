@@ -172,7 +172,7 @@ func (s *State) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.writeResourceDefinitions(w, r, "study_id = {study:String}", ch.Params{"study": studyID},
-		pagingClause(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
+		sqlPageOrder(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
 }
 
 // resourceDefinitionInStudy — GET /api/studies/{studyId}/resource-definitions/{resourceId}
