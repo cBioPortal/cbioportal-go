@@ -10,10 +10,11 @@ import (
 //   - MUTATION_COUNT: distinct non-germline variants (chr, start, end, ref,
 //     tumor allele, as the importer stores them)
 //     of the stored (gene-resolved, filtered) mutations per sample of each
-//     mutation profile, 0 for profiled samples without any
+//     mutation profile, 0 for samples the MAF profiles without any
 //     (DaoMutation.createMutationCountClinicalData). Samples profiled only
-//     through the `*_sequenced` case list get none: the importer computes the
-//     count before the derived-table build adds them to sample_profile.
+//     through a gene panel matrix or the `*_sequenced` case list get none:
+//     the importer computes the count before those add them to
+//     sample_profile.
 //   - FRACTION_GENOME_ALTERED: share of segmented length with |segment mean| >=
 //     0.2, rounded to 4 decimals (DaoCopyNumberSegment), as Java's
 //     Double.toString writes it ("1.0", "0.8079", "2.0E-4").
@@ -24,6 +25,17 @@ import (
 func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations, hasSegments bool) error {
 	var computed []string
 	if hasMutations {
+		// The importer counts when it loads the MAF, so only the samples the
+		// MAF itself profiles get a count: those with a stored record and
+		// those its #sequenced_samples header lists, not those a gene panel
+		// matrix adds later.
+		profiled := fmt.Sprintf(
+			"SELECT r.study_id, r.tumor_sample_barcode, r.profile_stable_id FROM `%s`.mutation_extended r%s WHERE %s",
+			rawDB, geneKeyJoin(targetDB, "mutation_extended", "r", "hugo_symbol", "entrez_gene_id"),
+			mutationFilterSQL("r", "gk.resolved_entrez_gene_id", targetDB))
+		if ok, _ := c.TableExists("profile_sample"); ok {
+			profiled += fmt.Sprintf(" UNION ALL SELECT study_id, sample_id, profile_stable_id FROM `%s`.profile_sample WHERE kind = 'sequenced_samples'", rawDB)
+		}
 		computed = append(computed, fmt.Sprintf(
 			"SELECT sp.study_id AS study_id, sp.sample_id AS sample_id, 'MUTATION_COUNT' AS attr_id, "+
 				"toString(uniqExactIf(("+normalizedChrSQL("m.chromosome")+", "+mafPositionSQL("m.start_position")+", "+
@@ -31,9 +43,10 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 				"FROM `%[2]s`.sample_profile sp "+
 				"LEFT JOIN (SELECT m.* FROM `%[1]s`.mutation_extended m%[4]s WHERE %[3]s AND upper(m.mutation_status) != 'GERMLINE') m "+
 				"ON m.study_id = sp.study_id AND m.tumor_sample_barcode = sp.sample_id AND m.profile_stable_id = sp.profile_stable_id "+
-				"WHERE sp.alteration_type = 'MUTATION_EXTENDED' AND sp.case_list_only = 0 GROUP BY sp.study_id, sp.sample_id",
+				"WHERE sp.alteration_type = 'MUTATION_EXTENDED' AND (sp.study_id, sp.sample_id, sp.profile_stable_id) IN (%[5]s) "+
+				"GROUP BY sp.study_id, sp.sample_id",
 			rawDB, targetDB, mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
-			geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id")))
+			geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id"), profiled))
 	}
 	if hasSegments {
 		computed = append(computed, fmt.Sprintf(
