@@ -201,6 +201,11 @@ func ingestRecord(c *ch.Client, studyID string, fileNum int, f *parser.DataFile)
 		return FileStat{}, err
 	}
 	cols := parser.SanitizeColumns(h.Columns)
+	if headerTables[f.StageSlug] {
+		if err := recordHeader(c, studyID, f.StageSlug, fileName(f.DataPath), cols, h.Raw); err != nil {
+			return FileStat{}, err
+		}
+	}
 	var emitted uint64
 	body, err := parser.OpenBody(f.DataPath, true, &emitted)
 	if err != nil {

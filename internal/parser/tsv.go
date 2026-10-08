@@ -10,9 +10,11 @@ import (
 	"sync/atomic"
 )
 
-// Header is a data file's column header: original names in file order.
+// Header is a data file's column header: original names in file order,
+// trimmed (Columns) and exactly as written (Raw).
 type Header struct {
 	Columns []string
+	Raw     []string
 }
 
 // ReadHeader reads the first non-`#` line of a TSV file as its column header.
@@ -32,11 +34,12 @@ func ReadHeader(path string) (*Header, error) {
 			continue
 		}
 		line = strings.TrimRight(line, "\r\n")
-		cols := strings.Split(line, "\t")
-		for i := range cols {
-			cols[i] = strings.TrimSpace(cols[i])
+		raw := strings.Split(line, "\t")
+		cols := make([]string, len(raw))
+		for i := range raw {
+			cols[i] = strings.TrimSpace(raw[i])
 		}
-		return &Header{Columns: cols}, nil
+		return &Header{Columns: cols, Raw: raw}, nil
 	}
 }
 

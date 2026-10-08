@@ -1,6 +1,10 @@
 package transform
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
 
 // sampleToGenePanelDerivedSQL reproduces prod's sample_to_gene_panel_derived
 // (sample_unique_id, alteration_type, gene_panel_id, cancer_study_identifier,
@@ -54,32 +58,79 @@ func clinicalEventDerivedSQL(rawDB, refDB string) string {
 		rawDB)
 }
 
+// timelineCoreColumns are the staged timeline columns that are not event
+// data: the provenance columns and the event's own fields, which
+// ImportTimelineData reads from the header's leading PATIENT_ID,
+// START_DATE, [STOP_DATE,] EVENT_TYPE.
+var timelineCoreColumns = map[string]bool{
+	"study_id": true, "source_file": true, "alteration_type": true, "datatype": true, "profile_stable_id": true,
+	"patient_id": true, "start_date": true, "stop_date": true, "event_type": true,
+}
+
 // clinicalEventDataDerivedSQL reproduces prod's clinical_event_data_derived: the
 // per-event key/value attributes. Prod columns: patient_unique_id, key, value,
-// start_date, stop_date, event_type, cancer_study_identifier. The timeline
-// staging's non-standard detail columns are the file's attribute headers
-// (lowercased), so we unpivot them back to UPPER(header)=key with non-empty
-// values.
-func clinicalEventDataDerivedSQL(rawDB, refDB string) string {
+// start_date, stop_date, event_type, cancer_study_identifier.
+//
+// ImportTimelineData stores every column after the event's core fields as
+// event data, SAMPLE_ID included: key = the header as the file writes it,
+// value = the cell, skipping empty cells (NA is kept); of repeated headers
+// the last non-empty cell wins. Every String column of the staged timeline
+// that is not core is unpivoted; its key is the file's header recorded in
+// source_header, else the upper-cased staged name (files staged before
+// headers were recorded).
+func clinicalEventDataDerivedSQL(c *client, rawDB string) string {
+	cols := stringColumns(c, rawDB, "timeline")
+	var kv []string
+	for _, col := range cols {
+		if !timelineCoreColumns[col] && !OrderColumns[col] {
+			kv = append(kv, fmt.Sprintf("('%s', t.`%s`)", col, col))
+		}
+	}
+	if len(kv) == 0 || !slices.Contains(cols, "source_file") {
+		return "SELECT '' AS patient_unique_id, '' AS key, '' AS value, toInt32(0) AS start_date, " +
+			"toInt32(0) AS stop_date, '' AS event_type, '' AS cancer_study_identifier WHERE 0"
+	}
+	tl, _ := c.TableColumns("timeline")
+	rowNum := "toUInt64(0)"
+	if tl["row_num"] {
+		rowNum = "t.row_num"
+	}
+	events := fmt.Sprintf(
+		"SELECT concat(t.study_id, '_', t.patient_id) AS patient_unique_id, kv.1 AS column_name, kv.2 AS value, "+
+			"toInt32OrZero(t.start_date) AS start_date, toInt32OrZero(t.stop_date) AS stop_date, "+
+			"t.event_type AS event_type, t.study_id AS cancer_study_identifier, "+
+			"t.source_file AS source_file, %s AS row_num "+
+			"FROM `%s`.timeline t ARRAY JOIN [%s] AS kv WHERE kv.2 != ''",
+		rowNum, rawDB, strings.Join(kv, ", "))
+	out := "SELECT patient_unique_id, key, value, start_date, stop_date, event_type, cancer_study_identifier FROM "
+	if hc, _ := c.TableColumns("source_header"); !hc["header"] {
+		return out + "(SELECT *, upper(column_name) AS key FROM (" + events + "))"
+	}
+	// Rows are told apart by (source_file, row_num); without row_num the
+	// repeated-header rule is not applied.
+	dedup := ""
+	if tl["row_num"] {
+		dedup = " ORDER BY position DESC LIMIT 1 BY cancer_study_identifier, source_file, row_num, key"
+	}
 	return fmt.Sprintf(
-		"SELECT "+
-			"concat(t.study_id, '_', t.patient_id) AS patient_unique_id, "+
-			"kv.1 AS key, "+
-			"kv.2 AS value, "+
-			"toInt32OrZero(t.start_date) AS start_date, "+
-			"toInt32OrZero(t.stop_date) AS stop_date, "+
-			"t.event_type AS event_type, "+
-			"t.study_id AS cancer_study_identifier "+
-			"FROM `%s`.timeline t "+
-			"ARRAY JOIN ["+
-			"('SURGERY', t.surgery), "+
-			"('STATUS', t.status), "+
-			"('EVENT_TYPE_DETAILED', t.event_type_detailed), "+
-			"('TREATMENT_TYPE', t.treatment_type), "+
-			"('SUBTYPE', t.subtype), "+
-			"('AGENT', t.agent), "+
-			"('SAMPLE_ID', t.sample_id)"+
-			"] AS kv "+
-			"WHERE kv.2 != ''",
-		rawDB)
+		"%s(SELECT e.*, if(h.column_name = '', upper(e.column_name), h.header) AS key, h.position AS position "+
+			"FROM (%s) e LEFT JOIN (SELECT study_id, source_file, column_name, header, position FROM `%s`.source_header "+
+			"WHERE table_name = 'timeline') h "+
+			"ON h.study_id = e.cancer_study_identifier AND h.source_file = e.source_file AND h.column_name = e.column_name%s)",
+		out, events, rawDB, dedup)
+}
+
+// stringColumns lists a raw table's String columns in table order (none
+// when the table is absent).
+func stringColumns(c *client, rawDB, table string) []string {
+	text, _ := c.Client.Execute(fmt.Sprintf(
+		"SELECT name FROM system.columns WHERE database = '%s' AND table = '%s' AND type = 'String' "+
+			"ORDER BY position FORMAT TabSeparated", rawDB, table))
+	var out []string
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }

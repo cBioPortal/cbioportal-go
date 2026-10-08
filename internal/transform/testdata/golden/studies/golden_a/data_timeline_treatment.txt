@@ -1,4 +1,4 @@
-PATIENT_ID	START_DATE	STOP_DATE	EVENT_TYPE	TREATMENT_TYPE	AGENT
-GA-P1	10	40	TREATMENT	Medical Therapy	Tamoxifen
-GA-P1	50		TREATMENT	Radiation Therapy	
-GA-P2	0	100	TREATMENT	Medical Therapy	Trastuzumab
+PATIENT_ID	START_DATE	STOP_DATE	EVENT_TYPE	TREATMENT_TYPE	AGENT	AGENT_CLASS	Line of Therapy	Line of Therapy
+GA-P1	10	40	TREATMENT	Medical Therapy	Tamoxifen	Hormone Therapy	1	first-line
+GA-P1	50		TREATMENT	Radiation Therapy			NA
+GA-P2	0	100	TREATMENT	Medical Therapy	Trastuzumab	HER2 Targeted	1

@@ -65,6 +65,23 @@ func TestMatrixUnpivotSkipsDuplicateRows(t *testing.T) {
 	}
 }
 
+// The header keeps each name as written next to its trimmed form:
+// ImportTimelineData keys event data by the header as written.
+func TestReadHeaderRaw(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "h.txt")
+	os.WriteFile(path, []byte("PATIENT_ID\tStart_Date\t ICD DESCRIPTION \r\nP1\t1\tx\n"), 0o644)
+	h, err := ReadHeader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"PATIENT_ID", "Start_Date", " ICD DESCRIPTION "}; !reflect.DeepEqual(h.Raw, want) {
+		t.Errorf("raw %q want %q", h.Raw, want)
+	}
+	if want := []string{"PATIENT_ID", "Start_Date", "ICD DESCRIPTION"}; !reflect.DeepEqual(h.Columns, want) {
+		t.Errorf("columns %q want %q", h.Columns, want)
+	}
+}
+
 func TestMatrixUnpivot(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "m.txt")

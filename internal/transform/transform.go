@@ -228,7 +228,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"generic_assay_data_derived", genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
 			hasColumn(c, rawDB, "genetic_profile", "patient_level") && hasColumn(c, rawDB, "genetic_profile", "generic_assay_type"))},
 		{"clinical_event_derived", clinicalEventDerivedSQL(rawDB, refDB)},
-		{"clinical_event_data_derived", clinicalEventDataDerivedSQL(rawDB, refDB)},
+		{"clinical_event_data_derived", clinicalEventDataDerivedSQL(c, rawDB)},
 	} {
 		if err := materialize(d.name, d.sql); err != nil {
 			return nil, err

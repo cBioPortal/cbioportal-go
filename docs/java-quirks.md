@@ -6,7 +6,7 @@ oddity, and what go does with it. go matches Java exactly, so most of it is
 and Java's nondeterminism go **can't match**. Once go is the reference, this
 list is the plan of things to fix in both.
 
-**Summary.** 65 entries: 38 copied, 17 deviate, 9 can't match (Java's
+**Summary.** 66 entries: 39 copied, 17 deviate, 9 can't match (Java's
 nondeterminism) and one that does not apply. Every copied entry has a
 pinning test except the shared `mutation_event` NCBI build (a property of
 production's data); the export's failure marker, partly copied, has none
@@ -127,6 +127,7 @@ either (it needs a failing export).
 | `MUTATION_COUNT` skips samples profiled only through the `_sequenced` case list | cbioportal-core (`sample_profile`) | copied | TestOracleMutationCountSkipsCaseListOnlySamples |
 | A MAF chromosome X is stored (and served) as 23 | DaoGeneOptimized.normalizeChr | copied | TestOracleMutationChromosomeNormalized |
 | SV text fields left empty are `"NA"`, integer fields -1 | StructuralVariantUtil | copied | TestContractStructuralVariantImportDefaults |
+| Timeline event data are keyed by the header exactly as written (`Treatment_TYPE`, `ICD DESCRIPTION`); of a repeated header the last non-empty cell wins | ImportTimelineData (`HashMap` per event) | copied (files staged before go recorded headers fall back to the upper-cased column name) | golden `staged/clinical_event_data_derived` |
 
 ## Nondeterminism
 
