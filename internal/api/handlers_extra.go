@@ -76,8 +76,13 @@ func apiAliasPath(path string) (string, bool) {
 // studiesMeta serves GET /api/studies/meta (ColumnStoreStudyController
 // .getAllStudiesMeta): an empty body with the number of studies matching
 // keyword / sortBy / direction in the total-count and X-Total-Count headers.
+// An unknown sortBy or direction is a 400, as Spring converts them.
 func (s *State) studiesMeta(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if msg := checkParams(studiesMetaParams, q); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
 	meta := url.Values{"projection": {"META"}}
 	for _, k := range []string{"keyword", "sortBy", "direction"} {
 		if v, ok := q[k]; ok {

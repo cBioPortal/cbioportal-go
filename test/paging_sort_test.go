@@ -296,3 +296,34 @@ func TestGenericAssayMetaPaging(t *testing.T) {
 		wantEq(t, resp.StatusCode, 400)
 	}
 }
+
+// The clinical table's paging bounds and direction (StudyViewController).
+func TestContractClinicalTableParams(t *testing.T) {
+	requireAPI(t)
+	body := mustJSON(t, es0(nil))
+	for q, msg := range map[string]string{
+		"pageSize=-1":      "pageSize must be greater than or equal to 0",
+		"pageSize=1000001": "pageSize must be less than or equal to 1000000",
+		"pageNumber=-1":    "pageNumber must be greater than or equal to 0",
+		"direction=UP": "Request parameter type mismatch: java.lang.IllegalArgumentException: " +
+			"No enum constant org.cbioportal.legacy.web.parameter.Direction.UP",
+		"pageSize=x": "Request parameter type mismatch: java.lang.NumberFormatException: For input string: \"x\"",
+	} {
+		wantError(t, "POST", "/api/clinical-data-table/fetch?"+q, body, 400, msg)
+	}
+	resp, _ := rawDo(t, "POST", "/api/clinical-data-table/fetch?pageSize=0&sortBy=anything", body)
+	wantEq(t, resp.StatusCode, 200)
+}
+
+// GET /api/studies/meta converts sortBy and direction as
+// ColumnStoreStudyController does.
+func TestContractStudiesMetaParams(t *testing.T) {
+	requireAPI(t)
+	for q, enum := range map[string]string{
+		"sortBy=bogus":   "sort.StudySortBy.bogus",
+		"direction=DOWN": "Direction.DOWN",
+	} {
+		wantError(t, "GET", "/api/studies/meta?"+q, "", 400,
+			"Request parameter type mismatch: java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter."+enum)
+	}
+}

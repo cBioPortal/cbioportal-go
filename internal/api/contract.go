@@ -430,6 +430,12 @@ var (
 		"HOMDEL_AND_AMP", "HOMDEL", "AMP", "GAIN", "HETLOSS", "DIPLOID", "ALL")
 	clinicalDataType = enumParam("clinicalDataType", "org.cbioportal.legacy.web.parameter.ClinicalDataType", "SAMPLE", "PATIENT")
 	geneIDType       = enumParam("geneIdType", "org.cbioportal.legacy.web.parameter.GeneIdType", "ENTREZ_GENE_ID", "HUGO_GENE_SYMBOL")
+	// clinicalTableParams are StudyViewController.fetchClinicalDataClinicalTable's
+	// (CLINICAL_TAB_MAX_PAGE_SIZE, NO_PAGING_PAGE_SIZE).
+	clinicalTableParams = []param{{name: "pageSize", min: 0, max: 1000000, hasMin: true, hasMax: true}, pageNumberParam,
+		{name: "searchTerm", text: true}, {name: "sortBy", text: true}, directionParam}
+	// studiesMetaParams are ColumnStoreStudyController.getAllStudiesMeta's.
+	studiesMetaParams = []param{{name: "keyword", text: true}, studySort, directionParam}
 )
 
 func pathValue(key string, msg func(string) string) func(map[string]string) string {
@@ -564,6 +570,10 @@ var contractRoutes = []contractRoute{
 	// Gene sets.
 	{method: "GET", pattern: "/api/genesets", params: []param{projectionParamOf(legacyProjection),
 		{name: "pageSize", min: 1, max: math.MaxInt32, hasMin: true, hasMax: true}, pageNumberParam}},
+
+	// The study view's clinical table (StudyViewController): pageSize 0
+	// lists every sample; sortBy is free text.
+	{method: "POST", pattern: "/api/clinical-data-table/fetch", params: clinicalTableParams},
 
 	// Study view counts with a projection.
 	{method: "POST", pattern: "/api/mutation-data-counts/fetch", params: []param{projectionParamOf(legacyProjection)}},
