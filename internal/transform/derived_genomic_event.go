@@ -17,7 +17,7 @@ import "fmt"
 //   - cna_cytoband is the gene's cytoband on the study's reference genome
 //     (hg19 unless the study names another) when the reference DB has
 //     reference_genome_gene, else empty.
-func genomicEventDerivedSQL(rawDB, refDB, targetDB string, hasGenomeGenes bool) string {
+func genomicEventDerivedSQL(c *client, rawDB, refDB, targetDB string, hasGenomeGenes bool) string {
 	// A custom-driver value is kept as given unless empty or NA, which the
 	// importer does not store (alteration_driver_annotation).
 	drv := func(col string) string {
@@ -29,6 +29,8 @@ func genomicEventDerivedSQL(rawDB, refDB, targetDB string, hasGenomeGenes bool) 
 	// MutationFilter) of MUTATION_EXTENDED and MUTATION_UNCALLED profiles,
 	// as in the `mutation` view.
 	mutationOf := func(table string) string {
+		// mutation_variant is the protein change the importer stores.
+		has, _ := c.TableColumns(table)
 		return fmt.Sprintf(`SELECT
   concat(m.study_id, '_', m.tumor_sample_barcode) AS sample_unique_id,
   gk.resolved_hugo_gene_symbol AS hugo_gene_symbol,
@@ -37,7 +39,7 @@ func genomicEventDerivedSQL(rawDB, refDB, targetDB string, hasGenomeGenes bool) 
   m.study_id AS cancer_study_identifier,
   concat(m.study_id, '_', m.profile_stable_id) AS genetic_profile_stable_id,
   'mutation' AS variant_type,
-  if(startsWith(m.hgvsp_short, 'p.'), substring(m.hgvsp_short, 3), m.hgvsp_short) AS mutation_variant,
+  %[8]s AS mutation_variant,
   m.variant_classification AS mutation_type,
   m.mutation_status AS mutation_status,
   %[2]s AS driver_filter,
@@ -55,7 +57,7 @@ LEFT JOIN %[4]s.sample_profile sp ON m.study_id = sp.study_id AND m.tumor_sample
 WHERE %[5]s`,
 			rawDB, drv("m.cbp_driver"), drv("m.cbp_driver_tiers"), target,
 			mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
-			geneKeyJoin(targetDB, table, "m", "hugo_symbol", "entrez_gene_id"), table)
+			geneKeyJoin(targetDB, table, "m", "hugo_symbol", "entrez_gene_id"), table, proteinChangeSQL(has))
 	}
 	mutation := mutationOf("mutation_extended") + "\nUNION ALL\n" + mutationOf("mutation_uncalled")
 

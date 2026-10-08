@@ -228,7 +228,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"sample_to_gene_panel_derived", sampleToGenePanelDerivedSQL(targetDB)},
 		{"sample_derived", sampleDerivedSQL(rawDB, refDB, targetDB)},
 		{"clinical_data_derived", clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
-		{"genomic_event_derived", genomicEventDerivedSQL(rawDB, refDB, targetDB, hasGenomeGenes)},
+		{"genomic_event_derived", genomicEventDerivedSQL(c, rawDB, refDB, targetDB, hasGenomeGenes)},
 		{"genetic_alteration_derived", geneticAlterationDerivedSQL(rawDB, targetDB)},
 		{"generic_assay_data_derived", genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
 			hasColumn(c, rawDB, "genetic_profile", "patient_level") && hasColumn(c, rawDB, "genetic_profile", "generic_assay_type"))},

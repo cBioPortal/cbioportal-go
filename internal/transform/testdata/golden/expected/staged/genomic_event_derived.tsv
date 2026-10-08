@@ -8,7 +8,7 @@ golden_a	\N						1956	WES	golden_a_structural_variants	EGFR	GERMLINE	NA	NA	0	gol
 golden_a	\N						2064	WES	golden_a_structural_variants	ERBB2	SOMATIC	NA	NA	0	golden_a_GA-P2	golden_a_GA-P2-01	ERBB2 intragenic	structural_variant
 golden_a	\N						3845	GOLDEN_PANEL1	golden_a_mutations	KRAS	Somatic	Missense_Mutation	G12D	0	golden_a_GA-P1	golden_a_GA-P1-01		mutation
 golden_a	\N						5290	WES	golden_a_mutations	PIK3CA	Germline	Missense_Mutation	H1047R	0	golden_a_GA-P3	golden_a_GA-P3-01		mutation
-golden_a	\N						672	GOLDEN_PANEL2	golden_a_mutations	BRCA1	Somatic	Nonsense_Mutation		0	golden_a_GA-P1	golden_a_GA-P1-02		mutation
+golden_a	\N						672	GOLDEN_PANEL2	golden_a_mutations	BRCA1	Somatic	Nonsense_Mutation	Q1756*	0	golden_a_GA-P1	golden_a_GA-P1-02		mutation
 golden_a	\N		Putative_Driver	hotspot	Tier 1	tier note	7157	GOLDEN_PANEL1	golden_a_mutations	TP53	Somatic	Missense_Mutation	R273H	0	golden_a_GA-P1	golden_a_GA-P1-01		mutation
 golden_a	\N		Putative_Driver	known fusion			238	GOLDEN_PANEL2	golden_a_structural_variants	ALK	SOMATIC	NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01	EML4-ALK fusion	structural_variant
 golden_a	\N		Putative_Driver	known fusion			27436	GOLDEN_PANEL2	golden_a_structural_variants	EML4	SOMATIC	NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01	EML4-ALK fusion	structural_variant
@@ -18,9 +18,9 @@ golden_b	-2	17p13.1	Putative_Driver	deep deletion	Tier 1	t1	7157	WES	golden_b_cn
 golden_b	2	17q12	Putative_Passenger				2064	WES	golden_b_cna	ERBB2		NA	NA	0	golden_b_GB-P2	golden_b_GB-P2-01		cna
 golden_b	\N						5728	WES	golden_b_mutations	PTEN	Somatic	Splice_Site	X41_splice	0	golden_b_GB-P2	golden_b_GB-P2-01		mutation
 golden_b	\N						7157	WES	golden_b_mutations	TP53	Somatic	Missense_Mutation	R273C	0	golden_b_GB-P1	golden_b_GB-P1-01		mutation
-golden_c	\N						1956	WES	golden_c_mutations	EGFR	Somatic	5\'Flank		0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
-golden_c	\N						2064	WES	golden_c_mutations	ERBB2	Somatic	IGR		0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
+golden_c	\N						1956	WES	golden_c_mutations	EGFR	Somatic	5\'Flank	Promoter	0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
+golden_c	\N						2064	WES	golden_c_mutations	ERBB2	Somatic	IGR	MUTATED	0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
 golden_c	\N						238	WES	golden_c_mutations	ALK	Somatic	Missense_Mutation	F1174L	0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
 golden_c	\N						238	WES	golden_c_mutations_uncalled	ALK	UNCALLED	Missense_Mutation	F1174L	0	golden_c_GC-P1	golden_c_GC-P1-01		mutation
 golden_c	\N						5728	WES	golden_c_mutations	PTEN	Somatic	Silent	R130R	0	golden_c_GC-P1	golden_c_GC-P1-01		mutation
-golden_c	\N						672	WES	golden_c_mutations	BRCA1	Somatic	intron		0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
+golden_c	\N						672	WES	golden_c_mutations	BRCA1	Somatic	intron	MUTATED	0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
