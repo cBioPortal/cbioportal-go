@@ -14,6 +14,8 @@ SAMPLE_COUNT	1	2	GA-P2	golden_a
 SAMPLE_COUNT	1	3	GA-P3	golden_a
 SAMPLE_COUNT	1	5	GB-P1	golden_b
 SAMPLE_COUNT	1	6	GB-P2	golden_b
+SAMPLE_COUNT	1	7	GC-P1	golden_c
+SAMPLE_COUNT	1	8	GC-P2	golden_c
 SAMPLE_COUNT	2	1	GA-P1	golden_a
 SEX	Female	1	GA-P1	golden_a
 SEX	Female	2	GA-P2	golden_a

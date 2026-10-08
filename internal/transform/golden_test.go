@@ -231,7 +231,7 @@ func TestLiveGoldenStaged(t *testing.T) {
 	refDB := goldenReference(t, base, "staged_ref")
 	rawDB := goldenDatabase(t, base, "staged_raw")
 	db := goldenDatabase(t, base, "staged")
-	for _, study := range []string{"golden_a", "golden_b"} {
+	for _, study := range []string{"golden_a", "golden_b", "golden_c"} {
 		ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", study))
 	}
 	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {

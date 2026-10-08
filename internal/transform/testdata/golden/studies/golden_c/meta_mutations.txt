@@ -1,0 +1,9 @@
+cancer_study_identifier: golden_c
+genetic_alteration_type: MUTATION_EXTENDED
+datatype: MAF
+stable_id: mutations
+show_profile_in_analysis_tab: true
+profile_name: Mutations
+profile_description: Golden C mutations
+data_filename: data_mutations.txt
+variant_classification_filter: Nonsense_Mutation, Intron,

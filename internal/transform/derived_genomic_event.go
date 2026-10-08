@@ -52,7 +52,7 @@ LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM %[1]s.clinical_s
 LEFT JOIN %[4]s.sample_profile sp ON m.study_id = sp.study_id AND m.tumor_sample_barcode = sp.sample_id AND m.profile_stable_id = sp.profile_stable_id
 WHERE %[5]s`,
 		rawDB, drv("m.cbp_driver"), drv("m.cbp_driver_tiers"), target,
-		mutationFilterSQL("m", "gk.resolved_entrez_gene_id"),
+		mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
 		geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id"))
 
 	// Discrete CNA rows (cna_event): AMP and HOMDEL of the `cna` view.

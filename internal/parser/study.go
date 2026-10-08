@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,6 +62,11 @@ type DataFile struct {
 	PatientLevel       string
 	PivotThreshold     string
 	SortOrder          string
+	// VariantClassificationFilter is the MAF meta file's
+	// variant_classification_filter (the Variant_Classification values the
+	// importer leaves out) as a JSON array, or empty when the file has no
+	// such key and the default filter applies.
+	VariantClassificationFilter string
 	// EntityMetaProperties are the meta file's generic_entity_meta_properties:
 	// the generic assay property columns, named as listed.
 	EntityMetaProperties []string
@@ -203,24 +209,25 @@ func Scan(dir string) (*Study, error) {
 		}
 		layout, slug := classify(at, dt)
 		s.Files = append(s.Files, DataFile{
-			MetaPath:             mp,
-			DataPath:             dataPath,
-			AlterationType:       at,
-			Datatype:             dt,
-			StableID:             meta.Get("stable_id"),
-			ProfileName:          meta.Get("profile_name"),
-			ProfileDescription:   meta.Get("profile_description"),
-			ShowInAnalysis:       meta.Get("show_profile_in_analysis_tab"),
-			GenericAssayType:     meta.Get("generic_assay_type"),
-			Namespaces:           meta.Get("namespaces"),
-			GenePanel:            meta.Get("gene_panel"),
-			PatientLevel:         meta.Get("patient_level"),
-			PivotThreshold:       meta.Get("pivot_threshold_value"),
-			SortOrder:            meta.Get("value_sort_order"),
-			EntityMetaProperties: splitList(meta.Get("generic_entity_meta_properties")),
-			Layout:               layout,
-			StageSlug:            slug,
-			ImportSeq:            seq[filepath.Base(mp)],
+			MetaPath:                    mp,
+			DataPath:                    dataPath,
+			AlterationType:              at,
+			Datatype:                    dt,
+			StableID:                    meta.Get("stable_id"),
+			ProfileName:                 meta.Get("profile_name"),
+			ProfileDescription:          meta.Get("profile_description"),
+			ShowInAnalysis:              meta.Get("show_profile_in_analysis_tab"),
+			GenericAssayType:            meta.Get("generic_assay_type"),
+			Namespaces:                  meta.Get("namespaces"),
+			GenePanel:                   meta.Get("gene_panel"),
+			PatientLevel:                meta.Get("patient_level"),
+			PivotThreshold:              meta.Get("pivot_threshold_value"),
+			SortOrder:                   meta.Get("value_sort_order"),
+			VariantClassificationFilter: variantClassificationFilter(meta),
+			EntityMetaProperties:        splitList(meta.Get("generic_entity_meta_properties")),
+			Layout:                      layout,
+			StageSlug:                   slug,
+			ImportSeq:                   seq[filepath.Base(mp)],
 		})
 	}
 	if s.StudyID == "" {
@@ -255,4 +262,27 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// variantClassificationFilter reads a meta file's
+// variant_classification_filter as GeneticProfileReader does: the value
+// split on commas (Java's String.split, which drops trailing empty parts),
+// each part trimmed. The result is a JSON array, or empty without the key.
+func variantClassificationFilter(meta *MetaFile) string {
+	v, ok := meta.Fields["variant_classification_filter"]
+	if !ok {
+		return ""
+	}
+	parts := strings.Split(v, ",")
+	for len(parts) > 1 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	if v != "" && len(parts) == 1 && parts[0] == "" {
+		parts = nil
+	}
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	b, _ := json.Marshal(append([]string{}, parts...))
+	return string(b)
 }

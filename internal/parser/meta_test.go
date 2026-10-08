@@ -2,6 +2,21 @@ package parser
 
 import "testing"
 
+func TestVariantClassificationFilter(t *testing.T) {
+	for meta, want := range map[string]string{
+		"stable_id: mutations":                                 "",
+		"variant_classification_filter:":                       `[""]`,
+		"variant_classification_filter: Silent, Intron,":       `["Silent","Intron"]`,
+		"variant_classification_filter: ,":                     `[]`,
+		"variant_classification_filter: , Silent":              `["","Silent"]`,
+		"variant_classification_filter: Nonsense_Mutation , ,": `["Nonsense_Mutation",""]`,
+	} {
+		if got := variantClassificationFilter(ParseMeta(meta)); got != want {
+			t.Errorf("%q: got %s, want %s", meta, got, want)
+		}
+	}
+}
+
 func TestIsMetaFile(t *testing.T) {
 	for name, want := range map[string]bool{
 		"meta_study.txt": true, "ascn_test_study_meta_cna_hg19_seg.txt": true, "META_CNA.txt": true,

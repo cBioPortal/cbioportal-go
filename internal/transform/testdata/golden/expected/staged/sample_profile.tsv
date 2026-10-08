@@ -27,6 +27,8 @@ MUTATION_EXTENDED	0	MAF	\N	golden_a_mutations	mutations	GA-P2-01	golden_a
 MUTATION_EXTENDED	0	MAF	\N	golden_a_mutations	mutations	GA-P3-01	golden_a
 MUTATION_EXTENDED	0	MAF	\N	golden_b_mutations	mutations	GB-P1-01	golden_b
 MUTATION_EXTENDED	0	MAF	\N	golden_b_mutations	mutations	GB-P2-01	golden_b
+MUTATION_EXTENDED	0	MAF	\N	golden_c_mutations	mutations	GC-P1-01	golden_c
+MUTATION_EXTENDED	0	MAF	\N	golden_c_mutations	mutations	GC-P2-01	golden_c
 PROTEIN_LEVEL	0	LOG2-VALUE	\N	golden_a_rppa	rppa	GA-P1-01	golden_a
 PROTEIN_LEVEL	0	LOG2-VALUE	\N	golden_a_rppa	rppa	GA-P1-02	golden_a
 PROTEIN_LEVEL	0	LOG2-VALUE	\N	golden_a_rppa	rppa	GA-P2-01	golden_a

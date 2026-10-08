@@ -7,10 +7,12 @@ CANCER_TYPE	STRING	Cancer type	Cancer Type	0	1	golden_a
 FRACTION_GENOME_ALTERED	NUMBER	Fraction Genome Altered	Fraction Genome Altered	0	20	golden_a
 MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	golden_a
 MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	golden_b
+MUTATION_COUNT	NUMBER	Mutation Count	Mutation Count	0	30	golden_c
 OS_MONTHS	NUMBER	OS months	Overall Survival (Months)	1	1	golden_a
 OS_STATUS	STRING	OS status	Overall Survival Status	1	1	golden_a
 SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	golden_a
 SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	golden_b
+SAMPLE_COUNT	STRING	Number of Samples Per Patient	Number of Samples Per Patient	1	1	golden_c
 SAMPLE_TYPE	STRING	Sample type	Sample Type	0	1	golden_a
 SEX	STRING	Sex	Sex	1	1	golden_a
 TUMOR_PURITY	NUMBER	Purity	Tumor Purity	0	1	golden_a

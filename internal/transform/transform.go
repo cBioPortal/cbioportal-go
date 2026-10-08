@@ -72,6 +72,11 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	if err := buildGeneKeyMap(c, rawDB, targetDB, refDB, hasRef); err != nil {
 		return nil, err
 	}
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE OR REPLACE TABLE `%s`.variant_classification_filter ENGINE = MergeTree ORDER BY (study_id, profile_stable_id) AS %s",
+		targetDB, variantClassificationFilterSQL(c, rawDB))); err != nil {
+		return nil, fmt.Errorf("creating table variant_classification_filter: %w", err)
+	}
 
 	var created []string
 	engineOf := func(name string) string {
@@ -438,7 +443,7 @@ func mutationSQL(c *client, rawDB, targetDB string) string {
 			"FROM `%s`.mutation_extended m%s "+
 			"LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM `"+rawDB+"`.clinical_sample) sp "+
 			"ON sp.study_id = m.study_id AND sp.sample_id = m.tumor_sample_barcode "+
-			"WHERE "+mutationFilterSQL("m", "gk.resolved_entrez_gene_id"),
+			"WHERE "+mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
 		entrez, rawDB, join)
 }
 

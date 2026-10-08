@@ -32,3 +32,4 @@ sample_to_gene_panel_derived	MergeTree
 seg	MergeTree
 structural_variant	MergeTree
 type_of_cancer	View
+variant_classification_filter	MergeTree

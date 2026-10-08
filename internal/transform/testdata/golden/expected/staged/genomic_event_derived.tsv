@@ -18,3 +18,8 @@ golden_b	-2	17p13.1	Putative_Driver	deep deletion	Tier 1	t1	7157	WES	golden_b_cn
 golden_b	2	17q12	Putative_Passenger				2064	WES	golden_b_cna	ERBB2		NA	NA	0	golden_b_GB-P2	golden_b_GB-P2-01		cna
 golden_b	\N						5728	WES	golden_b_mutations	PTEN	Somatic	Splice_Site	X41_splice	0	golden_b_GB-P2	golden_b_GB-P2-01		mutation
 golden_b	\N						7157	WES	golden_b_mutations	TP53	Somatic	Missense_Mutation	R273C	0	golden_b_GB-P1	golden_b_GB-P1-01		mutation
+golden_c	\N						1956	WES	golden_c_mutations	EGFR	Somatic	5\'Flank		0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
+golden_c	\N						2064	WES	golden_c_mutations	ERBB2	Somatic	IGR		0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
+golden_c	\N						238	WES	golden_c_mutations	ALK	Somatic	Missense_Mutation	F1174L	0	golden_c_GC-P2	golden_c_GC-P2-01		mutation
+golden_c	\N						5728	WES	golden_c_mutations	PTEN	Somatic	Silent	R130R	0	golden_c_GC-P1	golden_c_GC-P1-01		mutation
+golden_c	\N						672	WES	golden_c_mutations	BRCA1	Somatic	intron		0	golden_c_GC-P2	golden_c_GC-P2-01		mutation

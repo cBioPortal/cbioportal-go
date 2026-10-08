@@ -1,0 +1,4 @@
+profile_stable_id	study_id	variant_classification
+String	String	String
+mutations	golden_c	Intron
+mutations	golden_c	Nonsense_Mutation

@@ -30,7 +30,7 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 				"LEFT JOIN (SELECT m.* FROM `%[1]s`.mutation_extended m%[4]s WHERE %[3]s AND upper(m.mutation_status) != 'GERMLINE') m "+
 				"ON m.study_id = sp.study_id AND m.tumor_sample_barcode = sp.sample_id AND m.profile_stable_id = sp.profile_stable_id "+
 				"WHERE sp.alteration_type = 'MUTATION_EXTENDED' AND sp.case_list_only = 0 GROUP BY sp.study_id, sp.sample_id",
-			rawDB, targetDB, mutationFilterSQL("m", "gk.resolved_entrez_gene_id"),
+			rawDB, targetDB, mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
 			geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id")))
 	}
 	if hasSegments {

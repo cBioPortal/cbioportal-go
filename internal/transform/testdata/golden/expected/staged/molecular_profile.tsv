@@ -10,5 +10,6 @@ LOG2-VALUE	Log2 CNA		COPY_NUMBER_ALTERATION	golden_a_log2CNA	Log2 copy-number va
 LOG2-VALUE	Protein levels by RPPA		PROTEIN_LEVEL	golden_a_rppa	Protein expression (RPPA)	0	\N	rppa	0	\N	golden_a
 LOG2-VALUE	Protein levels by mass spectrometry		PROTEIN_LEVEL	golden_b_protein_quantification	Protein quantification	0	\N	protein_quantification	0	\N	golden_b
 MAF	Golden B mutations		MUTATION_EXTENDED	golden_b_mutations	Mutations	0	\N	mutations	1	\N	golden_b
+MAF	Golden C mutations		MUTATION_EXTENDED	golden_c_mutations	Mutations	0	\N	mutations	1	\N	golden_c
 MAF	Golden mutations		MUTATION_EXTENDED	golden_a_mutations	Mutations	0	\N	mutations	1	\N	golden_a
 SV	Fusions		STRUCTURAL_VARIANT	golden_a_structural_variants	Structural variants	0	\N	structural_variants	1	\N	golden_a

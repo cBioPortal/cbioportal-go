@@ -6,18 +6,51 @@ import (
 	"strings"
 )
 
-// mutationFilterSQL is cBioPortal's default MutationFilter (no
-// filtered_mutations override) as a WHERE condition over a MAF staging alias;
-// entrez is the resolved Entrez id expression (5'Flank variants are kept only
-// for the promoter whitelist, TERT = 7015). Records whose chromosome
-// DaoGeneOptimized.normalizeChr does not recognize are skipped too.
-func mutationFilterSQL(a, entrez string) string {
+// mutationFilterSQL is cBioPortal's MutationFilter, as
+// ImportExtendedMutationData applies it, as a WHERE condition over a MAF
+// staging alias; entrez is the resolved Entrez id expression and targetDB
+// holds the variant_classification_filter table. Records whose chromosome
+// DaoGeneOptimized.normalizeChr does not recognize, RNA records and
+// records with a None, LOH or Wildtype mutation status or a Redacted
+// validation status are skipped. A profile whose meta file sets
+// variant_classification_filter skips exactly the listed
+// Variant_Classification values; otherwise the default filter skips
+// Silent, Intron, 3'UTR, 3'Flank, 5'UTR and IGR, and 5'Flank except in the
+// promoter whitelist (TERT = 7015). The default filter and the statuses
+// match by case-insensitive prefix, as MutationFilter.safeStringTest does.
+func mutationFilterSQL(a, entrez, targetDB string) string {
+	prefix := func(col string, values ...string) string {
+		var or []string
+		for _, v := range values {
+			or = append(or, fmt.Sprintf("startsWith(lower(%s.%s), '%s')", a, col, strings.ReplaceAll(v, "'", "''")))
+		}
+		return "(" + strings.Join(or, " OR ") + ")"
+	}
+	profile := fmt.Sprintf("(%[1]s.study_id, %[1]s.profile_stable_id)", a)
+	filters := fmt.Sprintf("`%s`.variant_classification_filter", targetDB)
 	return normalizedChrSQL(a+".chromosome") + " != '' AND " + fmt.Sprintf(
-		"NOT startsWith(lower(%[1]s.mutation_status), 'none') AND NOT startsWith(lower(%[1]s.mutation_status), 'loh') "+
-			"AND NOT startsWith(lower(%[1]s.mutation_status), 'wildtype') AND NOT startsWith(lower(%[1]s.validation_status), 'redacted') "+
-			"AND lower(%[1]s.variant_classification) NOT IN ('silent', 'intron', '3''utr', '5''utr', '3''flank', 'igr', 'rna') "+
-			"AND ( lower(%[1]s.variant_classification) != '5''flank' OR %[2]s = 7015 )",
-		a, entrez)
+		"NOT %[2]s AND NOT %[3]s AND lower(%[1]s.variant_classification) != 'rna' "+
+			"AND if(%[4]s IN (SELECT study_id, profile_stable_id FROM %[5]s), "+
+			"(%[1]s.study_id, %[1]s.profile_stable_id, %[1]s.variant_classification) NOT IN "+
+			"(SELECT study_id, profile_stable_id, variant_classification FROM %[5]s), "+
+			"NOT %[6]s AND (NOT %[7]s OR %[8]s = 7015))",
+		a, prefix("mutation_status", "none", "loh", "wildtype"), prefix("validation_status", "redacted"),
+		profile, filters, prefix("variant_classification", "silent", "intron", "3'utr", "3'flank", "5'utr", "igr"),
+		prefix("variant_classification", "5'flank"), entrez)
+}
+
+// variantClassificationFilterSQL selects the variant_classification_filter
+// table: per MAF profile whose meta file sets the key, one row per
+// Variant_Classification value it filters out (a row with an empty value
+// when the list is empty).
+func variantClassificationFilterSQL(c *client, rawDB string) string {
+	if !hasColumn(c, rawDB, "genetic_profile", "variant_classification_filter") {
+		return "SELECT '' AS study_id, '' AS profile_stable_id, '' AS variant_classification WHERE 0"
+	}
+	return fmt.Sprintf(
+		"SELECT study_id, profile_stable_id, arrayJoin(if(empty(f), [''], f)) AS variant_classification "+
+			"FROM (SELECT study_id, profile_stable_id, JSONExtract(variant_classification_filter, 'Array(String)') AS f "+
+			"FROM `%s`.genetic_profile WHERE variant_classification_filter != '')", rawDB)
 }
 
 // normalizedChrSQL is DaoGeneOptimized.normalizeChr over the upper-cased
@@ -139,7 +172,7 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 				"SELECT DISTINCT r.study_id AS study_id, r.tumor_sample_barcode AS sample_id, r.profile_stable_id AS profile_stable_id, "+
 					"'' AS panel, toUInt8(1) AS prio FROM `%s`.%s r%s WHERE %s",
 				rawDB, t, geneKeyJoin(targetDB, t, "r", "hugo_symbol", "entrez_gene_id"),
-				mutationFilterSQL("r", "gk.resolved_entrez_gene_id")))
+				mutationFilterSQL("r", "gk.resolved_entrez_gene_id", targetDB)))
 			continue
 		}
 		record(t, "tumor_sample_barcode", "")

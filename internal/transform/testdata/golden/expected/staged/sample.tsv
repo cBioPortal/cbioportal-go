@@ -6,3 +6,5 @@ UInt64	String	String	String
 4	GA-P3	GA-P3-01	golden_a
 5	GB-P1	GB-P1-01	golden_b
 6	GB-P2	GB-P2-01	golden_b
+7	GC-P1	GC-P1-01	golden_c
+8	GC-P2	GC-P2-01	golden_c

@@ -1,4 +1,5 @@
 add_global_case_list	cancer_type_id	citation	description	groups	internal_id	name	pmid	reference_genome	short_name	status	study_id
 UInt8	String	String	String	String	UInt64	String	String	String	String	Int64	String
 0	gbm		Second fixture study: sample file only, long CNA, other namespaces		2	Golden study B		hg38		1	golden_b
+1	brca		Third fixture study: a MAF with its own variant classification filter		3	Golden study C		hg19		1	golden_c
 1	brca_golden	Test et al. 2026	Fixture study with one file of each type	PUBLIC;GOLDEN	1	Golden study A	123,456	hg19	Golden A	1	golden_a

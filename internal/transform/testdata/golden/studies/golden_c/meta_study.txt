@@ -1,0 +1,6 @@
+type_of_cancer: brca
+cancer_study_identifier: golden_c
+name: Golden study C
+description: Third fixture study: a MAF with its own variant classification filter
+add_global_case_list: true
+reference_genome: hg19
