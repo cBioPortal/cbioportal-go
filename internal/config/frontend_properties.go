@@ -137,6 +137,7 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"skin.citation_rule_text", "skin_citation_rule_text", nil},
 	{"skin.geneset_hierarchy.default_p_value", "skin_geneset_hierarchy_default_p_value", nil},
 	{"skin.geneset_hierarchy.default_gsva_score", "skin_geneset_hierarchy_default_gsva_score", nil},
+	{"generic_assay_display_text", "generic_assay_display_text", nil},
 	{"app.version", "app_version", nil},
 	{"sentryjs.frontend_project_endpoint", "frontendSentryEndpoint", nil},
 	// Properties that require additional processing in Java.
@@ -191,7 +192,8 @@ var specialFrontendNames = map[string]bool{
 	"oncoprint_clinical_tracks_config_json":            true, // readFile
 	"download_custom_buttons_json":                     true, // readFile
 	"oncoprintOncoKbHotspotsDefault":                   true, // enableOncoKBandHotspotsParamValue
-	"oncoKbTokenDefined":                               true, // non-empty check -> bool string
+	"oncoKbTokenDefined":                               true, // non-empty check (ONCOKB_TOKEN or oncokb.token) -> bool string
+	"skin_hide_download_controls":                      true, // true/false -> hide/show
 	"sessionServiceEnabled":                            true, // non-empty check -> bool string
 	"frontendUrl":                                      true, // URL normalization
 	"mskWholeSlideViewerToken":                         true, // set at runtime, not from props
@@ -368,6 +370,29 @@ func normalizeFrontendURL(val string) string {
 	return val
 }
 
+// OncoKBToken is the OncoKB API token: the ONCOKB_TOKEN environment
+// variable, else the oncokb.token property (Spring Boot binds the variable to
+// the property, and the environment wins).
+func OncoKBToken(props map[string]string) string {
+	if t := strings.TrimSpace(os.Getenv("ONCOKB_TOKEN")); t != "" {
+		return t
+	}
+	return strings.TrimSpace(props["oncokb.token"])
+}
+
+// skinHideDownloadControlsValue maps skin.hide_download_controls as Java's
+// getSkinHideDownloadControlsValue does: true is "hide", false is "show",
+// anything else (e.g. "data") as given.
+func skinHideDownloadControlsValue(val string) string {
+	switch strings.ToLower(val) {
+	case "true":
+		return "hide"
+	case "false":
+		return "show"
+	}
+	return val
+}
+
 // BuildFrontendConfig builds the map[string]interface{} that the
 // /config_service endpoint returns, matching the Java backend behavior.
 // appProps is the parsed application.properties map. baseURL is the
@@ -406,8 +431,16 @@ func BuildFrontendConfig(appProps map[string]string, baseURL string) map[string]
 			result[prop.FrontendName] = enableOncoKBandHotspotsParamValue(val)
 			continue
 
-		case "oncoKbTokenDefined", "sessionServiceEnabled":
+		case "oncoKbTokenDefined":
+			result[prop.FrontendName] = OncoKBToken(appProps) != ""
+			continue
+
+		case "sessionServiceEnabled":
 			result[prop.FrontendName] = val != ""
+			continue
+
+		case "skin_hide_download_controls":
+			result[prop.FrontendName] = skinHideDownloadControlsValue(val)
 			continue
 
 		case "frontendUrl":

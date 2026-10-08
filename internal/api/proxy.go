@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
 // The frontend reaches OncoKB through an obfuscated proxy: the path, query
@@ -74,7 +75,7 @@ func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 			query.Add(decodeB64(k), decodeB64(v))
 		}
 	}
-	resp, err := oncokbExchange(r, path, query.Encode(), body, os.Getenv("ONCOKB_TOKEN"))
+	resp, err := oncokbExchange(r, path, query.Encode(), body, config.OncoKBToken(config.EffectiveProperties(s.Props, s.PropsReplaceDefaults)))
 	if err != nil {
 		core.Fail(w, r, err)
 		return
