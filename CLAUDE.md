@@ -13,6 +13,20 @@ exactly (fields, ordering, statistics, error contract), checking their source
 rather than guessing. Production (www.cbioportal.org) is a useful second
 reference for shapes; the source wins when they disagree.
 
+Where Java is plainly wrong, go fixes it instead of copying it:
+
+- Java answers a 500 or an error for a valid request: go answers the data.
+- Java answers wrong data (other studies' rows, wrong counts): go answers
+  the right data.
+- Java ignores a paging or sorting parameter it accepts (`pageSize`,
+  `pageNumber`, `sortBy`, `direction`): go honours it.
+- Row order matters only when the request asks for a sort. Without
+  `sortBy`, any stable order is fine; Java's unsorted order is not copied.
+
+Everything else (fields, field order, shapes, statistics, error statuses
+for invalid requests) still matches Java. Every fix is listed in
+`docs/java-quirks.md`, with a test that pins it.
+
 ## Architecture
 
 - `cmd/cbioportal-import` — ELT importer: `ingest` streams study files into a
