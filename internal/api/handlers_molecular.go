@@ -455,7 +455,7 @@ func (s *State) sampleListClause(a *sqlArgs, col, listID string) string {
 	if listID == "" {
 		return ""
 	}
-	return fmt.Sprintf(" AND %s IN %s", col, s.sampleListMembersSQL(a, listID))
+	return fmt.Sprintf(" AND %s IN %s", col, s.bySampleList(listID).listMembers(a))
 }
 
 type mutationFilter struct {

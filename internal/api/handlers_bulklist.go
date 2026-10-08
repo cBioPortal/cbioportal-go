@@ -256,7 +256,7 @@ func (s *State) keywordGenes(page []geneRow, keyword string, pageSize int) ([]ge
 
 // allSampleLists — GET /api/sample-lists. Returns []SampleList across studies.
 func (s *State) allSampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, r, "", nil, false)
+	s.sampleListsQuery(w, r, acrossStudies, false)
 }
 
 // sampleListSampleIDs — GET /api/sample-lists/{sampleListId}/sample-ids.
@@ -271,7 +271,7 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 	}
 	p := ch.Params{}
 	rows, err := ch.QueryP[row](s.CH,
-		"SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, r.PathValue("sampleListId"))+" ORDER BY "+order, p)
+		"SELECT sample_id AS sampleId FROM "+s.bySampleList(r.PathValue("sampleListId")).from(paramsBinder(p), tSampleList)+" ORDER BY "+order, p)
 	if err != nil {
 		fail(w, r, err)
 		return

@@ -295,10 +295,9 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	var studyCond string
 	switch {
 	case f.SampleListID != "":
-		listCond := s.listStudyCondA(args, "study_id", f.SampleListID)
-		studyCond = listCond
-		sampleScope = listCond + "(study_id, sample_id) IN (SELECT study_id, sample_id FROM sample_list WHERE " +
-			listCond + "list_id = " + args.str(f.SampleListID) + ")"
+		sc := s.bySampleList(f.SampleListID)
+		studyCond = sc.key(args, tSample, "")
+		sampleScope = studyCond + "(study_id, sample_id) IN (SELECT study_id, sample_id FROM " + sc.from(args, tSampleList) + ")"
 	case len(f.SampleIdentifiers) > 0:
 		scopeFilter.SampleIdentifiers = f.SampleIdentifiers
 	case len(f.StudyViewFilter.SampleIdentifiers) > 0 || len(f.StudyViewFilter.StudyIDs) > 0:

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -28,16 +27,17 @@ type SampleList struct {
 	SampleIDs    []string `json:"sampleIds"`
 }
 
-// sampleListSelect selects the lists of sample_list (to be grouped by study
-// and list), each list's samples in SampleListMapper's order: by internal id
-// (the storage order of sample_list_list) where the database carries them.
-func (s *State) sampleListSelect() string {
+// sampleListSelect selects the lists of sample_list in the scope (to be
+// grouped by study and list), each list's samples in SampleListMapper's
+// order: by internal id (the storage order of sample_list_list) where the
+// database carries them.
+func (s *State) sampleListSelect(b binder, sc scope) string {
 	ids := "groupArray(sample_id)"
 	if s.importOrdered() {
 		ids = "arrayMap(x -> x.2, arraySort(groupArray((internal_id, sample_id))))"
 	}
 	return "SELECT list_id AS sampleListId, any(category) AS category, any(name) AS name, " +
-		"any(description) AS description, study_id AS studyId, " + ids + " AS sampleIds FROM sample_list"
+		"any(description) AS description, study_id AS studyId, " + ids + " AS sampleIds FROM " + sc.from(b, tSampleList)
 }
 
 func toSampleList(r sampleListRow) SampleList {
@@ -47,17 +47,15 @@ func toSampleList(r sampleListRow) SampleList {
 	}
 }
 
-// sampleListsQuery writes the sample lists matching where, whose placeholders
-// take their values from p, by stable id or, with byInternalID, in the order
-// of their internal ids (SampleListMapper.getSampleLists has no ORDER BY)
-// where the database carries them.
+// sampleListsQuery writes the sample lists in the scope, by stable id or,
+// with byInternalID, in the order of their internal ids
+// (SampleListMapper.getSampleLists has no ORDER BY) where the database
+// carries them.
 // The lists stream as they are read; a sorted page is read as sqlPageOrder
 // orders it.
-func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, where string, p ch.Params, byInternalID bool) {
-	sql := s.sampleListSelect()
-	if where != "" {
-		sql += " WHERE " + where
-	}
+func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, sc scope, byInternalID bool) {
+	p := ch.Params{}
+	sql := s.sampleListSelect(paramsBinder(p), sc)
 	order := "list_id"
 	if byInternalID && s.modelHasColumn("sample_list", "list_internal_id") {
 		order = "any(list_internal_id), list_id"
@@ -78,14 +76,14 @@ var sampleListSortable = map[string]string{
 }
 
 func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, r, "study_id = {study:String}", ch.Params{"study": r.PathValue("studyId")}, false)
+	s.sampleListsQuery(w, r, byStudy(r.PathValue("studyId")), false)
 }
 
 // sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
 func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p := ch.Params{}
-	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect()+" WHERE "+s.sampleListCondP(p, id)+
+	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect(paramsBinder(p), s.bySampleList(id))+
 		" GROUP BY study_id, list_id", p)
 	if err != nil {
 		fail(w, r, err)
@@ -105,51 +103,5 @@ func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []SampleList{})
 		return
 	}
-	p := ch.Params{"ids": ids}
-	s.sampleListsQuery(w, r, s.listStudyCondP(p, "study_id", ids...)+"list_id IN {ids:Array(String)}", p, true)
-}
-
-// sampleListMembersSQL is a subquery of the sample ids in a sample list,
-// read through sample_list's (study_id, list_id, sample_id) key.
-func (s *State) sampleListMembersSQL(args *sqlArgs, listID string) string {
-	return fmt.Sprintf("(SELECT sample_id FROM sample_list WHERE %slist_id = %s)",
-		s.listStudyCondA(args, "study_id", listID), args.str(listID))
-}
-
-// sampleListMembersP is sampleListMembersSQL with the list bound in p as
-// {list:String}.
-func (s *State) sampleListMembersP(p ch.Params, listID string) string {
-	return "(SELECT sample_id FROM sample_list WHERE " + s.sampleListCondP(p, listID) + ")"
-}
-
-// sampleListCondP selects a list's sample_list rows by key, the list bound in
-// p as {list:String}.
-func (s *State) sampleListCondP(p ch.Params, listID string) string {
-	p["list"] = listID
-	return s.listStudyCondP(p, "study_id", listID) + "list_id = {list:String}"
-}
-
-// listStudyCondA is "<col> IN <the lists' studies> AND ", the key prefix of
-// a sample_list read of these lists, with the studies bound in args; empty
-// when the list index cannot be read.
-func (s *State) listStudyCondA(args *sqlArgs, col string, listIDs ...string) string {
-	studies, ok := s.sampleListsStudies(listIDs)
-	if !ok {
-		return ""
-	}
-	return col + " IN " + args.strs(studies) + " AND "
-}
-
-// listStudyCondP is listStudyCondA with the studies bound in p as
-// {listStudies:Array(String)}.
-func (s *State) listStudyCondP(p ch.Params, col string, listIDs ...string) string {
-	studies, ok := s.sampleListsStudies(listIDs)
-	if !ok {
-		return ""
-	}
-	if studies == nil {
-		studies = []string{}
-	}
-	p["listStudies"] = studies
-	return col + " IN {listStudies:Array(String)} AND "
+	s.sampleListsQuery(w, r, s.bySampleLists(ids...), true)
 }

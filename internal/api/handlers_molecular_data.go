@@ -235,11 +235,11 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
 		return "", meta, false
 	}
-	where := fmt.Sprintf("study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID))
+	where := byStudy(meta.StudyID).cond(args, rawMatrix(table), "") + " AND profile_stable_id = " + args.str(meta.StableID)
 	if len(f.SampleIDs) > 0 {
 		where += " AND sample_id IN " + args.strs(f.SampleIDs)
 	} else if f.SampleListID != "" {
-		where += " AND sample_id IN " + s.sampleListMembersSQL(args, f.SampleListID)
+		where += " AND sample_id IN " + s.bySampleList(f.SampleListID).listMembers(args)
 	}
 	// Every value row is of the profile's study, so only that study's
 	// samples (a key range) are joined; rows resolved through gene_key_map
@@ -252,12 +252,12 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
 			"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, rg.type AS geneType, "+
 			"%s AS value%s FROM (%s) m "+
-			"LEFT JOIN (SELECT * FROM sample WHERE study_id = %s) s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
+			"LEFT JOIN %s s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
 			"LEFT JOIN %s rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL",
 		javaTruncatedValueSQL("m.value"), extra,
 		resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
-		args.str(meta.StudyID), genes), meta, true
+		byStudy(meta.StudyID).samples(args), genes), meta, true
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the

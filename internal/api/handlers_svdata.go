@@ -144,23 +144,25 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	var f svFilter
 	readBody(r, &f)
 
-	var scope string
+	var where string
+	var studies []string
 	args := newArgs()
 	switch {
 	case len(f.SampleMolecularIdentifiers) > 0:
 		pairs := make([][2]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {
 			pairs[i] = [2]string{svStudy(id.MolecularProfileID), id.SampleID}
+			studies = append(studies, pairs[i][0])
 		}
-		scope = "(sv.study_id, sv.sample_id) IN " + args.pairs(pairs)
+		where = "(sv.study_id, sv.sample_id) IN " + args.pairs(pairs)
 	case len(f.MolecularProfileIDs) > 0:
-		studies := make([]string, len(f.MolecularProfileIDs))
+		studies = make([]string, len(f.MolecularProfileIDs))
 		for i, p := range f.MolecularProfileIDs {
 			studies[i] = svStudy(p)
 		}
-		scope = "sv.study_id IN " + args.strs(studies)
+		where = "sv.study_id IN " + args.strs(studies)
 		if f.SampleListID != "" {
-			scope += " AND sv.sample_id IN " + s.sampleListMembersSQL(args, f.SampleListID)
+			where += " AND sv.sample_id IN " + s.bySampleList(f.SampleListID).listMembers(args)
 		}
 	default:
 		writeJSON(w, []StructuralVariant{})
@@ -178,17 +180,17 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		geneOrs = append(geneOrs, "("+joinPreds(q.Gene1.clause("sv.e1"), q.Gene2.clause("sv.e2"))+")")
 	}
 	if len(geneOrs) > 0 {
-		scope += " AND (" + strings.Join(geneOrs, " OR ") + ")"
+		where += " AND (" + strings.Join(geneOrs, " OR ") + ")"
 	}
 
 	cols := svSelectColumns(s.svViewColumns())
 	query := fmt.Sprintf(
 		"SELECT %s FROM (%s) sv "+
-			"LEFT JOIN sample sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
+			"LEFT JOIN %s sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 			"WHERE %s ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId",
-		strings.Join(cols, ", "), svSiteEntrezSQL, scope)
+		strings.Join(cols, ", "), svSiteEntrezSQL, byStudies(studies).samples(args), where)
 	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, query, args.params(query), func(r *map[string]any) error {
 		return out.add(toStructuralVariant(*r))
@@ -393,7 +395,7 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 			SampleID string `json:"sampleId"`
 		}
 		p := ch.Params{}
-		rows, _ := ch.QueryP[sr](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, f.SampleListID), p)
+		rows, _ := ch.QueryP[sr](s.CH, "SELECT sample_id AS sampleId FROM "+s.bySampleList(f.SampleListID).from(paramsBinder(p), tSampleList), p)
 		for _, x := range rows {
 			samples = append(samples, x.SampleID)
 		}
@@ -414,8 +416,8 @@ func (s *State) studySampleIDs(study string) []string {
 	type sr struct {
 		SampleID string `json:"sampleId"`
 	}
-	rows, _ := cachedQueryP[sr](s,
-		"SELECT sample_id AS sampleId FROM sample WHERE study_id = {study:String} ORDER BY sample_id", ch.Params{"study": study})
+	p := ch.Params{}
+	rows, _ := cachedQueryP[sr](s, "SELECT sample_id AS sampleId FROM "+byStudy(study).from(paramsBinder(p), tSample)+" ORDER BY sample_id", p)
 	out := make([]string, len(rows))
 	for i, r := range rows {
 		out[i] = r.SampleID
@@ -459,9 +461,9 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 		return out
 	}
 	patientOf := map[string]string{}
+	sp := ch.Params{}
 	rows, _ := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM sample WHERE study_id IN {ids:Array(String)}",
-		ch.Params{"ids": studies})
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+byStudies(studies).from(paramsBinder(sp), tSample), sp)
 	for _, r := range rows {
 		patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
 	}
@@ -488,10 +490,9 @@ func (s *State) buildGenePanelData(reqs []gpReq) []GenePanelData {
 	for i, st := range studies {
 		sequencedLists[i] = st + "_sequenced"
 	}
-	seqP := ch.Params{"ids": sequencedLists}
+	seqP := ch.Params{}
 	seqRows, _ := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId FROM sample_list WHERE "+
-			s.listStudyCondP(seqP, "study_id", sequencedLists...)+"list_id IN {ids:Array(String)}", seqP)
+		"SELECT study_id AS studyId, sample_id AS sampleId FROM "+s.bySampleLists(sequencedLists...).from(paramsBinder(seqP), tSampleList), seqP)
 	for _, r := range seqRows {
 		sequenced[jkey(r.StudyID, r.SampleID)] = true
 	}

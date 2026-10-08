@@ -299,10 +299,10 @@ func (s *State) sampleListIDs(listID string) ([]string, bool) {
 		SampleID string `json:"sampleId"`
 	}
 	p := ch.Params{}
-	cond := s.sampleListCondP(p, listID)
-	rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+cond+" ORDER BY sample_id", p)
+	from := s.bySampleList(listID).from(paramsBinder(p), tSampleList)
+	rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM "+from+" ORDER BY sample_id", p)
 	if err != nil || len(rows) == 0 {
-		if err == nil && !s.rowExists("SELECT 1 FROM sample_list WHERE "+cond+" LIMIT 1", p) {
+		if err == nil && !s.rowExists("SELECT 1 FROM "+from+" LIMIT 1", p) {
 			return nil, false
 		}
 	}

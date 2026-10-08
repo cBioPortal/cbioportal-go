@@ -128,7 +128,7 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 			SampleID string `json:"sampleId"`
 		}
 		p := ch.Params{}
-		rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM sample_list WHERE "+s.sampleListCondP(p, *f.SampleListID), p)
+		rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM "+s.bySampleList(*f.SampleListID).from(paramsBinder(p), tSampleList), p)
 		if err != nil {
 			fail(w, r, err)
 			return
