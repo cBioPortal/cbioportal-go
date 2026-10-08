@@ -27,8 +27,11 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
 - **Speed:** go is as fast as Java for a typical request (31 vs 34 ms) and
   much faster on slow ones (p95 296 vs 746 ms, p99 1.4 vs 6.0 s). Its p99 is
   lower on every busy route.
-- **Database load:** per request, go uses 0.75 times Java's ClickHouse CPU and
-  reads 0.71 times the data. go has no response cache.
+- **Database load:** over three days, go used 1.47 times Java's ClickHouse
+  CPU per request on www's traffic and 0.92 times on api's. Java answers many
+  repeat requests from its Redis cache, and go has no response cache yet.
+  Most of go's extra cost came from one slow query, which is now fixed
+  ([details](#clickhouse-load-per-request)).
 - **Errors:** go returns "bad request" (HTTP 400) as often as Java on each
   route. go had no server errors (5xx); Java had 60. Two cases still differ:
   paths ending in `;` (Java 400, go 404) and some
@@ -199,14 +202,26 @@ ClickHouse logs every query along with a tag that says which server sent it.
 The totals for each server were divided by its number of requests. Java's
 `SELECT 1` connection checks are left out.
 
-| Window | Queries Java / go | Bytes read Java / go | Query time Java / go | ClickHouse CPU Java / go |
-|---|---|---|---|---|
-| 2026-10-06 | 0.65 / 1.66 | 54.7 / 39.1 MB | 83 / 93 ms | 131 / 99 ms (0.75×) |
+| Window | Traffic | ClickHouse CPU per request, Java / go |
+|---|---|---|
+| 2026-10-06, 10 hours | www and api together | 131 / 99 ms (0.75×) |
+| 2026-10-06 to 10-08, 3 days | www | 1.47× |
+| 2026-10-06 to 10-08, 3 days | api | 0.92× |
 
-Until 11:40 both cost the same. In the afternoon Java received more heavy
-study-view and segment queries. A 10% sample catches those less evenly, so go
-saw fewer of them. go sends more queries because about 0.6 per request check
-whether its metadata cache is still fresh.
+The 3-day numbers are the better guide: a 10% sample of a 10-hour window
+catches the rare heavy requests unevenly. Two things made go cost more on
+www's traffic:
+
+- **No response cache.** Java's Redis cache answers 65–75% of its lookups
+  without asking ClickHouse. go asks ClickHouse every time.
+- **One slow query.** Counting a pan-cancer molecular-data request
+  (`projection=META`) read 9.8 GiB and took 32 s of CPU, because the protein
+  part of the query could not use the table's index. It now reads 127 MiB
+  and takes 3.5 s of CPU. It was go's most expensive query.
+
+go also sends more queries per request than Java (1.66 vs 0.65 on
+2026-10-06), because about 0.6 per request check whether its metadata cache
+is still fresh.
 
 One example: the query for a single gene's molecular data reads 3.7 MB on go
 (57 ms CPU) and 21 MB on Java (48 ms CPU).
@@ -289,7 +304,7 @@ load-tested at full rate.
 Two copies of every portal would fit on two r7g.large nodes, about $160 a
 month. That saves about $1,100 a month ($13,000 a year) on the servers, or
 about $1,300 a month ($15,000 a year) counting the Redis caches. This does not
-include ClickHouse Cloud, where go uses 0.75 to 1.0 times Java's CPU per
+include ClickHouse Cloud, where go used 0.92 to 1.47 times Java's CPU per
 request. go has also not been load-tested at www's full request rate.
 
 Most of these portals need features go does not have yet:
