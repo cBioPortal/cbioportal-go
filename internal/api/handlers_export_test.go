@@ -1,6 +1,9 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +18,39 @@ func TestJavaGroups(t *testing.T) {
 	} {
 		if got := javaGroups(in); got != want {
 			t.Errorf("javaGroups(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// meta_study.txt carries the license after pmid when the study has one, and
+// leaves the key out otherwise (CancerStudyMetadataExporterTests).
+func TestCancerStudyMetadataLicense(t *testing.T) {
+	for license, want := range map[string]string{
+		"CC-BY-NC-ND-4.0": "cancer_study_identifier: s1\ntype_of_cancer: brca\nname: S1\ndescription: d\n" +
+			"citation: Cell 2018\npmid: 1\nlicense: CC-BY-NC-ND-4.0\ngroups: PUBLIC\nreference_genome: hg19\n",
+		"": "cancer_study_identifier: s1\ntype_of_cancer: brca\nname: S1\ndescription: d\n" +
+			"citation: Cell 2018\npmid: 1\ngroups: PUBLIC\nreference_genome: hg19\n",
+	} {
+		var buf bytes.Buffer
+		e := &studyExport{zw: zip.NewWriter(&buf), study: &exportStudyMeta{
+			StudyID: "s1", TypeOfCancer: "BRCA", Name: "S1", Description: "d", Citation: "Cell 2018",
+			Pmid: "1", License: license, Groups: "public",
+		}}
+		if err := e.cancerStudyMetadata(); err != nil {
+			t.Fatal(err)
+		}
+		e.zw.Close()
+		zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := zr.File[0].Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := io.ReadAll(f)
+		if string(got) != want {
+			t.Errorf("license %q: meta_study.txt\n%s\nwant\n%s", license, got, want)
 		}
 	}
 }
