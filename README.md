@@ -116,6 +116,8 @@ weekly.
   policy.
 - [API coverage](docs/api-coverage.md) — every Java endpoint, its status and
   contract-test coverage.
+- [Java quirks](docs/java-quirks.md) — Java bugs and oddities go copies,
+  leaves out or cannot match, with their pinning tests.
 - [Benchmark](docs/benchmark.md) — go.cbioportal.org vs www.cbioportal.org:
   page speed, resource use, cost estimate.
 - [Rewrite method](docs/rewrite-method.md) — how the rewrite was built and

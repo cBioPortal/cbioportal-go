@@ -25,4 +25,11 @@ func TestOracleGeneKeywordSearch(t *testing.T) {
 	get(t, "/api/genes?keyword=TP&pageSize=5", &genes)
 	wantEq(t, len(genes), 5)
 	wantEq(t, genes[0].HugoGeneSymbol, "TP53")
+
+	// The page is re-sorted by symbol whatever sortBy and direction say.
+	var desc []struct {
+		HugoGeneSymbol string `json:"hugoGeneSymbol"`
+	}
+	get(t, "/api/genes?keyword=TP&sortBy=hugoGeneSymbol&direction=DESC&pageSize=5", &desc)
+	wantEq(t, desc, genes)
 }

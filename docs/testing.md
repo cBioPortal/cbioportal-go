@@ -250,8 +250,9 @@ patient-level profile answer 500, and `/clinical-data-table/fetch` answers
 paritydiff ignores key order; the field order of each projection (Jackson's:
 a model's fields in declaration order, superclass first, properties renamed
 by a mixin or `@JsonProperty` last) is pinned by the `TestOracleProjection*`
-contract tests. Java oddities left as they are: generic assay data answers
-500 for `projection=ID`; `/sample-lists/fetch`, `/gene-panels/fetch`,
+contract tests. [Java quirks](java-quirks.md) lists every Java oddity go
+copies, leaves out or cannot match. Left as they are: generic assay data
+answers 500 for `projection=ID`; `/sample-lists/fetch`, `/gene-panels/fetch`,
 `/resource-definitions/fetch`, the generic assay meta endpoints,
 `/mutation-data-counts/fetch` and `/treatments/sample-counts/fetch` ignore
 META (they answer a body, no total-count); `/genes` answers 500 for

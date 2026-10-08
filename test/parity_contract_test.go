@@ -52,6 +52,19 @@ func TestContractFilteredSamplesShape(t *testing.T) {
 	}
 }
 
+// ColumnarStoreStudyViewController.fetchFilteredSamples declares
+// negateFilters but never reads it: the filter applies as given.
+func TestContractFilteredSamplesNegateFiltersIgnored(t *testing.T) {
+	requireAPI(t)
+	f := es0(map[string]any{"clinicalDataFilters": []map[string]any{
+		{"attributeId": "SUBTYPE", "values": []map[string]any{{"value": "Claudin low"}}}}})
+	var plain, negated []map[string]any
+	post(t, "/api/filtered-samples/fetch", f, &plain)
+	post(t, "/api/filtered-samples/fetch?negateFilters=true", f, &negated)
+	wantEq(t, ids(plain, "sampleId"), []string{"TCGA-AR-A1AO-01", "TCGA-E2-A108-01"})
+	wantEq(t, ids(negated, "sampleId"), ids(plain, "sampleId"))
+}
+
 // clinicalTable fetches a clinical-data-table page.
 func clinicalTable(t *testing.T, query string) map[string][]map[string]any {
 	t.Helper()
