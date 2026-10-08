@@ -1,4 +1,4 @@
-package api
+package export
 
 import (
 	"net/http"
@@ -58,9 +58,9 @@ func TestLongMatrixSamples(t *testing.T) {
 
 // Without feature.study.export the path is not an export endpoint.
 func TestExportDisabled(t *testing.T) {
-	s := newState(&core.State{})
+	s := New(&core.State{})
 	mux := http.NewServeMux()
-	s.routes(mux)
+	s.RouteExport(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/export/study/study_es_0.zip", nil))
 	if w.Header().Get("Content-Type") == "application/zip" || w.Header().Get("Content-Disposition") != "" {

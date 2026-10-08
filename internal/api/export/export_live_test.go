@@ -1,4 +1,4 @@
-package api
+package export
 
 import (
 	"archive/zip"
@@ -100,9 +100,9 @@ func TestLiveExportGeneKeyColumns(t *testing.T) {
 
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, refDB)
-	s := newState(&core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}})
+	s := New(&core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}})
 	mux := http.NewServeMux()
-	s.routeExport(mux)
+	s.RouteExport(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/export/study/export_gene_keys.zip", nil))
 	body := w.Body.Bytes()

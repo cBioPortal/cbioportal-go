@@ -1,4 +1,4 @@
-package api
+package export
 
 import (
 	"archive/zip"
@@ -79,7 +79,7 @@ func liveTimelineDatabases(t *testing.T, base, suffix string) (db, rawDB string)
 
 // importTimelineStudy ingests and transforms the study in dir and returns
 // an export-enabled State over it.
-func importTimelineStudy(t *testing.T, base, refDB, suffix, dir string) *State {
+func importTimelineStudy(t *testing.T, base, refDB, suffix, dir string) Server {
 	t.Helper()
 	db, rawDB := liveTimelineDatabases(t, base, suffix)
 	study, err := parser.Scan(dir)
@@ -94,14 +94,14 @@ func importTimelineStudy(t *testing.T, base, refDB, suffix, dir string) *State {
 	}
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, refDB)
-	return newState(&core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}})
+	return New(&core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}})
 }
 
-func serveTimeline(t *testing.T, s *State, path string) []byte {
+func serveTimeline(t *testing.T, s Server, path string) []byte {
 	t.Helper()
 	mux := http.NewServeMux()
 	s.RouteSurvival(mux)
-	s.routeExport(mux)
+	s.RouteExport(mux)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 	if w.Code != http.StatusOK {
@@ -135,7 +135,7 @@ func eventDataLines(t *testing.T, body []byte) []string {
 
 // derivedEventDataLines renders a study's clinical_event_data_derived rows
 // as eventDataLines does.
-func derivedEventDataLines(t *testing.T, s *State, studyID string) []string {
+func derivedEventDataLines(t *testing.T, s Server, studyID string) []string {
 	t.Helper()
 	type row struct {
 		Line string `json:"line"`
@@ -264,7 +264,7 @@ func TestLiveTimelineFromProd(t *testing.T) {
 	}
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, "")
-	s := newState(&core.State{CH: c})
+	s := New(&core.State{CH: c})
 
 	var events []comparison.ClinicalEvent
 	body := serveTimeline(t, s, "/api/studies/tl_prod/patients/P1/clinical-events")

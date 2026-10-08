@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/export"
 	"github.com/cbioportal/cbioportal-go/internal/api/session"
 )
 
@@ -119,7 +120,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.RouteTreatments(mux)
 	s.RouteCompat(mux)
 	s.routeProxy(mux)
-	s.routeExport(mux)
+	export.New(s.State).RouteExport(mux)
 	s.routeDATs(mux)
 }
 

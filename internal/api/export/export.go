@@ -1,4 +1,4 @@
-package api
+package export
 
 import (
 	"archive/zip"
@@ -38,13 +38,13 @@ import (
 // genetic entities (phosphoprotein genes, generic assay entities and their
 // meta properties) are not modeled here — and virtual studies.
 
-func (s *State) routeExport(mux *http.ServeMux) {
+func (s Server) RouteExport(mux *http.ServeMux) {
 	mux.HandleFunc("GET /export/study/{file}", s.exportStudy)
 }
 
 // exportStudy serves the zip (ExportController.downloadStudyData): 404 with
 // no body for a study that does not exist.
-func (s *State) exportStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) exportStudy(w http.ResponseWriter, r *http.Request) {
 	studyID, ok := strings.CutSuffix(r.PathValue("file"), ".zip")
 	if s.Props["feature.study.export"] != "true" || !ok || studyID == "" {
 		s.CatchAll(w, r)
@@ -103,7 +103,7 @@ var studyExporters = []func(*studyExport) error{
 }
 
 type studyExport struct {
-	s       *State
+	s       Server
 	studyID string
 	study   *exportStudyMeta
 	zw      *zip.Writer
@@ -219,7 +219,7 @@ type exportStudyMeta struct {
 	ReferenceGenome string `json:"reference_genome"`
 }
 
-func (s *State) exportStudyMetadata(studyID string) (*exportStudyMeta, error) {
+func (s Server) exportStudyMetadata(studyID string) (*exportStudyMeta, error) {
 	rows, err := ch.QueryP[exportStudyMeta](s.CH,
 		"SELECT study_id, cancer_type_id, name, description, citation, pmid, groups, reference_genome "+
 			"FROM cancer_study WHERE study_id = {study:String} LIMIT 1", ch.Params{"study": studyID})
