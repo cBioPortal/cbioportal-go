@@ -1,4 +1,4 @@
-package api
+package apidocs
 
 import (
 	"bytes"
@@ -29,13 +29,13 @@ import (
 // API (scripts/refresh-api-docs.sh refreshes them). Every description is
 // served with the paging parameters go adds laid over it (overlayAPIDoc).
 //
-//go:embed apidocs
+//go:embed *.json *.yaml swagger-ui
 var apiDocsFS embed.FS
 
 // snapshotOrigin is the server URL the v3 snapshots were taken with.
 const snapshotOrigin = "https://api.cbioportal.org"
 
-func routeAPIDocs(mux *http.ServeMux, s *State) {
+func (s Server) RouteAPIDocs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v2/api-docs", s.legacyAPIDocs)
 	for route, file := range map[string]string{
 		"/api/v3/api-docs":               "v3.json",
@@ -58,7 +58,7 @@ func routeAPIDocs(mux *http.ServeMux, s *State) {
 	mux.HandleFunc("GET /api/swagger-ui", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, core.BaseURL(r)+"/api/swagger-ui/index.html", http.StatusFound)
 	})
-	ui, _ := fs.Sub(apiDocsFS, "apidocs/swagger-ui")
+	ui, _ := fs.Sub(apiDocsFS, "swagger-ui")
 	mux.HandleFunc("GET /api/swagger-ui/{file}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("file")
 		b, err := fs.ReadFile(ui, name)
@@ -78,7 +78,7 @@ func routeAPIDocs(mux *http.ServeMux, s *State) {
 // openAPIDoc serves a v3 description with its server URL set to the
 // requesting origin, as springdoc's "Generated server url".
 func openAPIDoc(file string) http.HandlerFunc {
-	b, err := apiDocsFS.ReadFile("apidocs/" + file)
+	b, err := apiDocsFS.ReadFile(file)
 	if err == nil {
 		b, err = overlayAPIDoc(file, b)
 	}
@@ -134,9 +134,9 @@ var legacyDocs struct {
 
 // legacyAPIDocs serves the legacy API description with its host set to the
 // host the client asked for.
-func (s *State) legacyAPIDocs(w http.ResponseWriter, r *http.Request) {
+func (s Server) legacyAPIDocs(w http.ResponseWriter, r *http.Request) {
 	legacyDocs.once.Do(func() {
-		doc, err := apiDocsFS.ReadFile("apidocs/legacy-api.json")
+		doc, err := apiDocsFS.ReadFile("legacy-api.json")
 		if err == nil {
 			doc, err = overlayAPIDoc("legacy-api.json", doc)
 		}

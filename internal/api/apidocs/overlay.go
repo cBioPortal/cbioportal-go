@@ -1,4 +1,4 @@
-package api
+package apidocs
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-package api
+package apidocs
 
 import (
 	"encoding/json"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestLegacyAPIDocs(t *testing.T) {
-	s := newState(&core.State{})
+	s := New(&core.State{})
 	r := httptest.NewRequest(http.MethodGet, "/api/v2/api-docs", nil)
 	r.Host = "api.example.org"
 	w := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestSplitTopLevelValue(t *testing.T) {
 
 func TestOpenAPIDocs(t *testing.T) {
 	mux := http.NewServeMux()
-	routeAPIDocs(mux, newState(&core.State{}))
+	New(&core.State{}).RouteAPIDocs(mux)
 	get := func(path string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Host = "go.example.org"

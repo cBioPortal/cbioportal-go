@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/apidocs"
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/export"
 	"github.com/cbioportal/cbioportal-go/internal/api/portal"
@@ -14,7 +15,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	// Bootstrap / config
 	mux.HandleFunc("GET /config_service", portal.New(s.State).ConfigService)
 	mux.HandleFunc("GET /api/info", portal.New(s.State).Info)
-	routeAPIDocs(mux, s)
+	apidocs.New(s.State).RouteAPIDocs(mux)
 	mux.HandleFunc("GET /api/cancer-types", s.CancerTypes)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	// Catch-all: 404 for unknown /api/ paths, the portal UI for the rest.

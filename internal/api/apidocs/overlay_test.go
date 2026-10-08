@@ -1,4 +1,4 @@
-package api
+package apidocs
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ func TestAPIDocsOverlay(t *testing.T) {
 		Paths map[string]map[string]op `json:"paths"`
 	}
 	for _, name := range []string{"v3.json", "v3-public.json", "v3-internal.json", "legacy-api.json"} {
-		raw, err := apiDocsFS.ReadFile("apidocs/" + name)
+		raw, err := apiDocsFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,11 +106,11 @@ func TestAPIDocsOverlay(t *testing.T) {
 // parameters the JSON ones get, as lines in springdoc's layout.
 func TestAPIDocsOverlayYAML(t *testing.T) {
 	for _, name := range []string{"v3.yaml", "v3-public.yaml", "v3-internal.yaml"} {
-		raw, err := apiDocsFS.ReadFile("apidocs/" + name)
+		raw, err := apiDocsFS.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		jraw, _ := apiDocsFS.ReadFile("apidocs/" + strings.TrimSuffix(name, ".yaml") + ".json")
+		jraw, _ := apiDocsFS.ReadFile(strings.TrimSuffix(name, ".yaml") + ".json")
 		served, _ := overlayAPIDoc(name, raw)
 		jserved, _ := overlayAPIDoc("v3.json", jraw)
 		count := func(b []byte, s string) int { return strings.Count(string(b), s) }
