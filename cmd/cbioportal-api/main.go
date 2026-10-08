@@ -10,12 +10,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/cbioportal/cbioportal-go/internal/api"
 	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
@@ -80,7 +84,24 @@ func main() {
 			log.Print(http.ListenAndServe(m, mux))
 		}()
 	}
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	// SIGTERM (a rollout, a scale-down) lets in-flight requests finish and
+	// exits 0, within Kubernetes' default 30 s grace period.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	srv := &http.Server{Addr: addr, Handler: handler}
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-ctx.Done()
+		log.Print("shutting down: draining in-flight requests")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}()
+	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}
+	<-drained
 }
