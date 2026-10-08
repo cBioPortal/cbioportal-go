@@ -4,12 +4,17 @@
 # database with reference data and gene panels already loaded
 # (docs/benchmark.md, "Import"):
 #
+#   scripts/import-benchmark.sh fetch <dir> public/<study>...   # datahub master
 #   scripts/import-benchmark.sh java <study-dir> <panels-dir> <tag>
 #   scripts/import-benchmark.sh go   <study-dir> <panels-dir> <tag>
 #   scripts/import-benchmark.sh counts <db>
 #   scripts/import-benchmark.sh clean                 # drop every bench_* database
 #
-# Keep study and panel directories outside /tmp: snap Docker cannot see it.
+# `fetch` checks out datahub's master (DATAHUB_REF) sparsely into
+# <dir>/datahub, with every LFS file from datahub's own store (its
+# .lfsconfig; DATAHUB_LFS_URL in ops/cbioportal.org/datahub-lib.sh) and no
+# other source, and writes <dir>/panels-<study> with the gene panels each
+# study uses. Keep <dir> outside /tmp: snap Docker cannot see it.
 #
 # Java: validateData.py, then cbioportalImporter.py (one JVM per data file)
 # in a container capped at 8 GiB, -Xmx6g; then populate_derived_tables.sql
@@ -18,7 +23,7 @@
 # largest process: for Java, the biggest JVM). Results append to
 # bin/import-benchmark/results.tsv.
 # Env: SEED (go: datahub's seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz,
-# the MySQL dump of the seed in Java's image), IMAGE
+# in `fetch`'s checkout; the MySQL dump of the seed in Java's image), IMAGE
 # (cbioportal/cbioportal:v7.1.2), CLICKHOUSE_URL (http://localhost:18123),
 # CLICKHOUSE_CONTAINER (ch-dge), JAVA_XMX (6g).
 set -euo pipefail
@@ -59,6 +64,32 @@ counts() {
 }
 
 case "${1:-}" in
+fetch)
+  WORKDIR="$(mkdir -p "$2" && cd "$2" && pwd)" REPO="$(cd "$2" && pwd)/datahub"
+  shift 2
+  # shellcheck source=../ops/cbioportal.org/datahub-lib.sh
+  . "$ROOT/ops/cbioportal.org/datahub-lib.sh"
+  HEAD_LFS_URL=$DATAHUB_LFS_URL
+  datahub_fetch "${DATAHUB_REF:-master}" < <(printf '%s\n' "$@")
+  datahub_checkout
+  log "datahub $FETCHED"
+  lfs_pull reference_data/gene_panels
+  lfs_pull seedDB
+  for s in "$@"; do
+    lfs_pull "$s"
+    panels="$WORKDIR/panels-$(basename "$s")"
+    rm -rf "$panels"
+    mkdir -p "$panels"
+    { sed -n 's/^gene_panel:[[:space:]]*//p' "$REPO/$s"/meta_*.txt
+      for m in "$REPO/$s"/data_gene_panel_matrix*.txt; do
+        if [ -f "$m" ]; then tail -n +2 "$m" | cut -f2- | tr '\t' '\n'; fi
+      done
+    } | tr -d '\r' | grep -v -x -e '' -e NA | sort -u | while read -r id; do
+      cp "$(grep -l -E "^stable_id:[[:space:]]*$id[[:space:]]*\$" "$REPO"/reference_data/gene_panels/*.txt | head -1)" "$panels/"
+    done
+    log "$s: $(ls "$panels" | wc -l) gene panels"
+  done
+  ;;
 java)
   STUDY="$(cd "$2" && pwd)" PANELS="$(cd "$3" && pwd)" DB=bench_java_$4
   scripts
@@ -125,7 +156,7 @@ clean)
   chq "DROP USER IF EXISTS import_bench"
   ;;
 *)
-  sed -n '2,10p' "$0"
+  sed -n '2,11p' "$0"
   exit 1
   ;;
 esac

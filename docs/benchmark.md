@@ -212,26 +212,30 @@ api, about $500/month of the total.
 ## Import
 
 Method: `scripts/import-benchmark.sh`, 2026-10-08, one local ClickHouse 25.3;
-each run into empty databases with genes, cancer types and gene panels
-preloaded; Java is cbioportal-core from `cbioportal/cbioportal:v7.1.2`
-(`cbioportalImporter.py`, `-Xmx6g`, container capped at 8 GiB) then
-`populate_derived_tables.sql`, go is `ingest` then `transform` (4 GiB cap);
-peak RSS is GNU time's, the largest process. Two runs each, both shown.
+the studies as on datahub master (18763f8), LFS files from datahub's own
+store (`fetch`); each run into empty databases with genes, cancer types and
+gene panels preloaded; Java is cbioportal-core from
+`cbioportal/cbioportal:v7.1.2` (`cbioportalImporter.py`, `-Xmx6g`, container
+capped at 8 GiB) then `populate_derived_tables.sql`, go is `ingest` then
+`transform` (4 GiB cap); peak RSS is GNU time's, the largest process. Two
+runs each, both shown.
 
 | Study (rows, MB) | Importer | Import time | Derived/transform time | Peak RSS |
 |---|---|---|---|---|
-| msk_chord_2024 (21.5M, 346) | Java | 109 / 110 s | 26 / 26 s | 2.9 GB |
-| | go | 18 / 18 s | 34 / 35 s | 37 MB |
-| msk_impact_50k_2026 (48.7M, 487) | Java | 248 / 250 s | 41 / 41 s | 3.9 / 4.0 GB |
-| | go | 33 / 33 s | 46 / 49 s | 214 MB |
+| msk_chord_2024 (21.7M, 346) | Java | 125 / 123 s | 28 / 26 s | 3.2 / 2.8 GB |
+| | go | 17 / 21 s | 34 / 44 s | 35 / 37 MB |
+| msk_impact_50k_2026 (49.2M, 589) | Java | 281 / 256 s | 45 / 54 s | 3.9 / 3.7 GB |
+| | go | 39 / 39 s | 58 / 50 s | 213 MB |
 
 go's importer streams each file into ClickHouse in batches, as is, and builds
 the model and the study-view `*_derived` tables as SQL inside ClickHouse, so
 its own memory stays small; Java parses every record in the JVM, one JVM per
-file. Java's validator, which go does not have, adds 53 s (0.6 GB) and 118 s
-(1.2 GB) and is not counted. Both produced the same samples, patients,
-clinical, mutation, structural-variant, alteration and generic-assay rows;
-Java's `clinical_data_derived` also keeps a row for each empty value. On
+file. Java's validator, which go does not have, adds 56–71 s (0.6 GB) and
+132–141 s (1.2 GB) and is not counted. Both produced the same samples,
+patients, clinical, mutation, structural-variant, alteration and
+generic-assay rows; Java's `clinical_data_derived` also keeps a row for each
+empty value, and Java skips segments whose start is not below their end (4
+on chord, 10 on 50k), which go keeps. On
 ClickHouse Cloud's replicated tables go now adds a file's new staging columns
 in one `ALTER` per table instead of one per column (07a5caa).
 
