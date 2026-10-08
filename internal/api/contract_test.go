@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -43,11 +44,31 @@ func TestCheckParams(t *testing.T) {
 		"pageNumber=-1":          "pageNumber must be greater than or equal to 0",
 		"pageSize=abc":           `Request parameter type mismatch: java.lang.NumberFormatException: For input string: "abc"`,
 		"pageSize=-1&sortBy=bad": "Request parameter type mismatch: java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter.sort.SampleSortBy.bad",
+		// Repeated values: the first is bound; a non-number reports all.
+		"pageSize=1&pageSize=x":        "",
+		"pageSize=x&pageSize=1":        `Request parameter type mismatch: java.lang.NumberFormatException: For input string: "x,1"`,
+		"projection=ID&projection=BAD": "",
+		"projection=BAD&projection=ID": "Request parameter type mismatch: java.lang.IllegalArgumentException: No enum constant org.cbioportal.shared.enums.ProjectionType.BAD",
 	}
 	for query, want := range cases {
 		q, _ := url.ParseQuery(query)
 		if got := checkParams(params, q); got != want {
 			t.Errorf("%q: got %q, want %q", query, got, want)
+		}
+	}
+}
+
+func TestSingleEntrezGeneID(t *testing.T) {
+	for query, want := range map[string][]int64{
+		"entrezGeneId=7157&entrezGeneId=5925": {7157},
+		"entrezGeneId=5925&entrezGeneId=x":    {5925},
+		"entrezGeneId=%207157":                {7157},
+		"entrezGeneId=":                       nil,
+		"":                                    nil,
+	} {
+		q, _ := url.ParseQuery(query)
+		if got := singleEntrezGeneID(q); !slices.Equal(got, want) {
+			t.Errorf("%q: %v, want %v", query, got, want)
 		}
 	}
 }

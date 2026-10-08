@@ -148,13 +148,7 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, []NumericGeneMolecularData{})
 		return
 	}
-	f := molecularDataFilter{SampleListID: r.URL.Query().Get("sampleListId")}
-	for _, e := range r.URL.Query()["entrezGeneId"] {
-		var id int64
-		if _, err := fmt.Sscan(e, &id); err == nil {
-			f.EntrezGeneIDs = append(f.EntrezGeneIDs, id)
-		}
-	}
+	f := molecularDataFilter{SampleListID: r.URL.Query().Get("sampleListId"), EntrezGeneIDs: singleEntrezGeneID(r.URL.Query())}
 	s.streamMolecularData(w, r, r.PathValue("id"), f)
 }
 

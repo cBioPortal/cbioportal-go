@@ -243,6 +243,11 @@ func checkParamsAround(params []param, q map[string][]string, at int, body func(
 		}
 		n, err := strconv.Atoi(v)
 		if err != nil {
+			// Spring binds the first of repeated values; when it is not a
+			// number, it reports them all, comma-joined.
+			if len(vs) > 1 {
+				v = strings.Join(vs, ",")
+			}
 			return msgIntMismatch(v)
 		}
 		bounds = append(bounds, bound{p, n})

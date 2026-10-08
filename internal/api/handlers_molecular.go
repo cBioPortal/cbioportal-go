@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -423,18 +424,23 @@ func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
 	where += s.sampleListClause(args, "sample_id", q.Get("sampleListId"))
-	var entrez []int64
-	for _, e := range q["entrezGeneId"] {
-		if id, err := strconv.ParseInt(e, 10, 64); err == nil {
-			entrez = append(entrez, id)
-		}
-	}
+	entrez := singleEntrezGeneID(q)
 	where += geneFilter(entrez)
 	limit := 0
 	if q.Get("sampleListId") == "" && len(entrez) == 0 {
 		limit = 100000
 	}
 	s.mutationsWhere(w, r, where, args, entrez, limit)
+}
+
+// singleEntrezGeneID is the entrezGeneId query parameter of the GET
+// endpoints that take one gene (Integer entrezGeneId): Spring binds the first
+// of repeated values.
+func singleEntrezGeneID(q url.Values) []int64 {
+	if id, err := strconv.ParseInt(strings.TrimSpace(q.Get("entrezGeneId")), 10, 64); err == nil {
+		return []int64{id}
+	}
+	return nil
 }
 
 // profileMutationsClause selects a mutation profile's rows (a study can hold
