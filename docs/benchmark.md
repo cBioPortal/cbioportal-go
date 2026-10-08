@@ -1,32 +1,54 @@
 # Benchmark: cbioportal-go vs the Java backend
 
-How the comparison and the rewrite were done: [Rewrite method](rewrite-method.md).
+This page compares cbioportal-go with cBioPortal's Java backend and Java
+importer. It answers four questions: is go as fast, does it give the same
+answers, what does it cost to run, and how fast does it load a study. How the
+rewrite and the comparison were done is in [Rewrite method](rewrite-method.md).
+
+Both backends read their data from ClickHouse, a database built for fast
+counting and filtering over very large tables. A few terms used below:
+
+- **p50, p95, p99**: the response time that 50%, 95% or 99% of requests beat.
+  p50 is the typical request (the median). p99 shows the slow tail.
+- **Pod**: one running copy of a server in Kubernetes, the system that runs
+  cBioPortal's servers.
+- **Mirror**: Traefik, the router in front of www.cbioportal.org, sends a copy
+  of some real requests to go. Java answers the user. go's answers are thrown
+  away, but its speed and load are measured.
+- **Parity**: whether go's response is identical to Java's for the same
+  request.
 
 ## Summary
 
-On the same live API requests (2026-10-06 05:00–15:20 UTC, www's non-browser
-traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-production-traffic)):
+These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
+10% of www's non-browser API requests were mirrored to go (see
+[Mirrored production traffic](#mirrored-production-traffic)).
 
-- **Latency:** go matches Java at the median (all `/api/`: 31 vs 34 ms) and
-  has the lower tail (p95 296 vs 746 ms, p99 1.4 vs 6.0 s); its p99 is lower
-  on every busy route.
-- **ClickHouse:** per request go uses 0.75× Java's ClickHouse CPU and 0.71×
-  the bytes read, without a response cache.
-- **Errors:** per-route 400 rates match Java's; go had no 5xx (Java 60).
-  Open: Java's 400 for paths ending in `;` (go: 404) and for some
+- **Speed:** go is as fast as Java for a typical request (31 vs 34 ms) and
+  much faster on slow ones (p95 296 vs 746 ms, p99 1.4 vs 6.0 s). Its p99 is
+  lower on every busy route.
+- **Database load:** per request, go uses 0.75 times Java's ClickHouse CPU and
+  reads 0.71 times the data. go has no response cache.
+- **Errors:** go returns "bad request" (HTTP 400) as often as Java on each
+  route. go had no server errors (5xx); Java had 60. Two cases still differ:
+  paths ending in `;` (Java 400, go 404) and some
   `POST /api/studies/{id}/clinical-data/fetch` bodies.
-- **Stability:** no go restarts or OOMKills; go pods peaked at 131 MiB of
-  their 2 GiB. Java's pool restarted 7 times on failed liveness probes.
-- **Pods:** go uses 48 vs 1,838 MiB per pod on average and a third of Java's
-  CPU per request (0.11 vs 0.34 s).
-- **Cost:** the 20 Java backend pods across both AWS accounts take ≈ $1,280/month
-  of nodes (≈ $1,500 with their Redis caches); go would need ≈ $160 ([estimate](#cost-estimate)). www and api,
-  which go can replace today, are ≈ $500 of that.
-- **Import:** go loads a study 2.6–3.6× faster than Java's importer (50k
-  MSK-IMPACT: 80 vs 289 s with derived tables) at 0.2 vs 3.9 GB peak RSS
-  ([Import](#import)).
-- **Parity:** 613 of 618 logged requests identical, 0 unexplained; the
-  nightly job's first run had 65 unexplained of 5,009, being fixed.
+- **Stability:** go never restarted or ran out of memory. Its pods peaked at
+  131 MiB of the 2 GiB they are allowed. Java's pods restarted 7 times
+  because they stopped answering health checks.
+- **Resources:** a go pod uses 48 MiB of memory on average, a Java pod
+  1,838 MiB. go uses a third of Java's CPU per request (0.11 vs 0.34 s).
+- **Cost:** the 20 Java backend pods cost about $1,280 a month in servers, or
+  about $1,500 with their Redis caches. go would need about $160
+  ([details](#cost-estimate)). www and api, the portals go can replace today,
+  account for about $500 of that.
+- **Import:** go loads a study 2.6 to 3.6 times faster than Java's importer.
+  The 50,000-sample MSK-IMPACT study takes 80 s instead of 289 s, with 0.2 GB
+  of memory instead of 3.9 GB ([Import](#import)).
+- **Same answers:** 613 of 618 logged production requests gave identical
+  responses, and the other 5 differ for known reasons. The nightly check's
+  first run found 65 unexplained differences out of 5,009 requests. These are
+  tracked in cBioPortal/cbioportal-go#1.
 
 ## Contents
 
@@ -48,27 +70,27 @@ traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-p
 |---|---|---|
 | Deployment | `cbioportal-backend-public-api-green`, 2 pods, `v7.1.2-web-shenandoah` | `cbioportal-go-api`, 2 pods, `cbioportal-go:latest` |
 | Memory request / limit | 4 / 7 GiB | 512 MiB / 2 GiB |
-| Response cache | Redis, 60 min TTL | none (in-process metadata cache) |
-| Database | production DB | same content, same ClickHouse service: `dev_cbioportal_public_go_green`, from 14:10 `dev_cbioportal_public_go_blue` (rebuilt with current code) |
-| Requests | www's non-browser catch-all, plus api.cbioportal.org (2%) | 10% of the catch-all; responses discarded |
+| Response cache | Redis, kept 60 min | none (only study metadata is cached in memory) |
+| Database | production database | the same data on the same ClickHouse service (`dev_cbioportal_public_go_green`, from 14:10 `dev_cbioportal_public_go_blue`, rebuilt with current code) |
+| Requests | www's non-browser requests, plus 2% of api.cbioportal.org | 10% of www's non-browser requests; responses thrown away |
 
-Traefik's `cbioportal-api-mirror-green` serves www's non-browser catch-all from
-the Java pool and copies 10% to go. Browser traffic is not mirrored; at ≈ 3
-requests/s on Java this compares cost per request, not behaviour under load.
+Browser traffic is not mirrored. Java handled about 3 requests a second, so
+this compares the cost of each request, not how the servers behave under heavy
+load.
 
-| Window (UTC) | go image | Java requests | go requests |
-|---|---|---|---|
-| **2026-10-06 05:00–15:20** | `c41452c`…`b17328c`: all fixes live | 114,938 | 11,924 (10.6%) |
+| Window (UTC) | Java requests | go requests |
+|---|---|---|
+| **2026-10-06 05:00–15:20** | 114,938 | 11,924 (10.6%) |
 
-The window ends at the weekly blue/green swap (15:20), which moved the
-catch-all to fresh `…-api-blue` pods. The mirror DB switch at 14:10 did not
-show in the numbers, so the window is not split.
+The window ends at the weekly switch between the blue and green Java pods,
+which moved traffic to new pods. Switching go's database at 14:10 made no
+visible difference, so the window is not split.
 
 ## Latency by route
 
-Method: Java from Traefik's access log (`@OriginDuration`, requests that
-reached the pool), go from its own (`duration_ms`); Datadog log
-percentiles, all statuses; ms.
+Java's times come from Traefik's access log and only count requests that
+reached Java. go's times come from its own log. The percentiles were computed
+in Datadog, a monitoring service, over all response codes. Times are in ms.
 
 | Route | n Java / go | p50 Java / go | p95 Java / go | p99 Java / go |
 |---|---|---|---|---|
@@ -86,10 +108,10 @@ percentiles, all statuses; ms.
 | POST …/discrete-copy-number/fetch | 2,290 / 237 | 88 / 87 | 2,154 / 659 | 7,011 / 2,187 |
 | **All /api/** | 105,695 / 11,209 | **34 / 31** | **746 / 296** | **5,974 / 1,437** |
 
-Java keeps the lower median on small repeated requests that Redis answers
-(mutations and molecular-data GETs, profile lists); go has the lower median
-on clinical data, samples and the fetch routes, and the lower p99 on every
-busy route.
+Java has the faster median on small requests that repeat often, because its
+Redis cache answers them. Examples are the mutations and molecular-data GETs
+and the profile lists. go has the faster median on clinical data, samples and
+the fetch routes. go has the faster p99 on every busy route.
 
 ## Errors by status
 
@@ -97,47 +119,51 @@ busy route.
 |---|---|---|---|---|
 | 2026-10-06 | 90.7 / 91.1% | 3.5 / 2.9% | 4.8 / 5.4% | 60 (502, 500) / 0 |
 
-Per route the 400 rates match (molecular-data GET 1.3 / 1.6%, mutations
-GET 19.3 / 20.0%, mutations fetch 4.8 / 4.6%). The overall gap is paths
-ending in `;` (`/api/genes/lookup/ACSL1;`, 722 requests), which Java's
-firewall rejects with 400 and go answers 404, and `POST
-/api/studies/{id}/clinical-data/fetch`, where Java rejected 55 of 202 and go
-answered all 22 mirrored.
+On each route the share of 400 errors is about the same. For example, the
+molecular-data GET is 1.3% on Java and 1.6% on go, and the mutations GET is
+19.3% and 20.0%. The overall numbers differ for two reasons:
+
+- Paths ending in `;`, such as `/api/genes/lookup/ACSL1;` (722 requests).
+  Java's firewall rejects them with 400. go answers 404.
+- `POST /api/studies/{id}/clinical-data/fetch`. Java rejected 55 of 202. go
+  answered all 22 that were mirrored to it.
 
 ## Pods: CPU, memory, restarts
 
-Method: Datadog `kubernetes.cpu.usage.total` (sum over pods),
-`kubernetes.memory.usage`, `kubernetes_state.container.restarts`; go's
-requests exclude probes.
+The numbers come from Datadog's Kubernetes metrics. go's request count leaves
+out health checks.
 
 | Window | CPU-s per request Java / go | Memory per pod, avg Java / go | Max pod Java / go | Restarts Java / go |
 |---|---|---|---|---|
 | 2026-10-06 | 0.34 / 0.11 | 1,838 / 48 MiB | 6,810 / 131 MiB | 7 / 0 |
 
-Java's restarts were kills after failed liveness probes, not OOM. go's CPU
-includes four rollouts in the window.
+Java's restarts happened because its pods stopped answering Kubernetes'
+health checks, not because they ran out of memory. go's CPU includes four
+deployments of new versions during the window.
 
 ## ClickHouse load per request
 
-Method: `system.query_log` by `log_comment` (`cbioportal-api`,
-`cbioportal-go-api`) divided by each side's requests; Java's `SELECT 1`
-connection checks excluded.
+ClickHouse logs every query along with a tag that says which server sent it.
+The totals for each server were divided by its number of requests. Java's
+`SELECT 1` connection checks are left out.
 
 | Window | Queries Java / go | Bytes read Java / go | Query time Java / go | ClickHouse CPU Java / go |
 |---|---|---|---|---|
 | 2026-10-06 | 0.65 / 1.66 | 54.7 / 39.1 MB | 83 / 93 ms | 131 / 99 ms (0.75×) |
 
-Up to 11:40 the two cost the same (CPU 0.96×, bytes 1.0×); Java's
-afternoon had more heavy study-view and segment queries, which a 10% sample
-catches less evenly. The single-gene molecular-data query now reads 3.7 MB
-on go (57 ms CPU, 742 queries) against 21 MB on Java (48 ms, 7,682); go's
-count includes its metadata-cache freshness check (≈ 0.6 per request).
+Until 11:40 both cost the same. In the afternoon Java received more heavy
+study-view and segment queries. A 10% sample catches those less evenly, so go
+saw fewer of them. go sends more queries because about 0.6 per request check
+whether its metadata cache is still fresh.
+
+One example: the query for a single gene's molecular data reads 3.7 MB on go
+(57 ms CPU) and 21 MB on Java (48 ms CPU).
 
 ## Headline requests
 
-Method: one client outside the cluster, 2026-10-06 ≈ 17:24 UTC, go on
-`f08983a`; each request three times in a row, 1 s apart. Total ms, first /
-mean of the repeats:
+One client outside the cluster sent each request three times, one second
+apart, on 2026-10-06 around 17:24 UTC. The table shows total time in ms for
+the first request, then the average of the two repeats.
 
 | Request | www | go |
 |---|---|---|
@@ -148,31 +174,34 @@ mean of the repeats:
 | `GET /api/studies/msk_impact_2017/clinical-data` | 3,524 / 1,966 | 734 / 708 |
 | `POST …/discrete-copy-number/fetch`, 6 genes, msk_impact_2017 | 294 / 214 | 530 / 310 |
 
-go is faster on the three larger first responses, level on the
-molecular-data GET and slower on the two small ones; www's repeats come from
-Redis.
+go is faster on the three largest first responses. It is about the same on
+the molecular-data GET and slower on the two small requests. www's repeats are
+fast because Redis answers them.
 
 ## Parity
 
-Method: `cmd/paritydiff` replays logged production requests against
-api.cbioportal.org and go (see [Testing](testing.md)); the logged corpus
-(`test/parity/loggedgen`) against the rebuilt mirror DB, the
-[nightly job](testing.md#nightly-parity-job) against go.cbioportal.org.
+The `paritydiff` tool sends the same logged production requests to
+api.cbioportal.org and to go and compares the answers (see
+[Testing](testing.md)). The "logged" set ran against go on a fresh copy of
+production's data. The [nightly job](testing.md#nightly-parity-job) runs
+against go.cbioportal.org.
 
-| Corpus, 2026-10-06 | Requests | Identical | Known differences | Unexplained |
+| Request set, 2026-10-06 | Requests | Identical | Known differences | Unexplained |
 |---|---|---|---|---|
 | Logged | 618 | 613 | 5 | 0 |
 | Nightly, first run | 5,009 | 4,918 | 26 | 65 |
 
-Known differences are www bugs, deployment fields, ids in www's session
-store and tied-row order; the nightly run's unexplained ones are tracked in
-cBioPortal/cbioportal-go#1.
+Known differences have a reason. Examples are bugs in www, fields that
+describe the server itself, saved sessions that exist only on www, and rows
+that tie in sort order. The nightly run's unexplained differences are tracked
+in cBioPortal/cbioportal-go#1.
 
 ## Frontend e2e run
 
-Method: the frontend's public-origin Playwright suite (598 tests), two
-workers, `CI=1`, against www and go.cbioportal.org, 2026-10-02/03, go's image
-of that day. Tests that passed on both (182):
+The frontend's end-to-end (e2e) tests click through the real web pages in a
+browser. This run used the 598 tests written for public portals, with two
+workers and `CI=1`, against www and go.cbioportal.org on 2026-10-02 and 03.
+The table covers the 182 tests that passed on both.
 
 | | www | go |
 |---|---|---|
@@ -180,15 +209,17 @@ of that day. Tests that passed on both (182):
 | Median per-test ratio go/www | | 0.86 |
 | Faster on go | | 142 of 182 |
 
-go was faster on multi-study expression (≈ 2×) and most views, slower on the
-embeddings tab and the gnomAD tooltip. Most of go's failures were
-environmental: www's saved sessions and a different frontend build.
+go was about twice as fast on multi-study expression and faster on most
+views. It was slower on the embeddings tab and the gnomAD tooltip. Most tests
+that failed on go failed for setup reasons: they needed www's saved sessions,
+or go served a different frontend build.
 
 ## Cost estimate
 
-Java cBioPortal backends running on 2026-10-06 (blue/green: the serving color
-only) and the nodes they run on, from both clusters, at on-demand us-east-1
-list prices.
+This lists the Java cBioPortal backends running on 2026-10-06 in both AWS
+accounts, and the servers ("nodes") they run on. For portals with blue and
+green copies, only the copy serving traffic is counted. Prices are AWS
+on-demand list prices in us-east-1.
 
 | Account | Portals (pods) | Memory request / limit | Node pools | ≈ $/month |
 |---|---|---|---|---|
@@ -196,29 +227,42 @@ list prices.
 | 666628074417 | MSK (2), MSK beta, private, SCLC, triage, staging (1 each) | 32 / 48 GiB | 3 × r7g.large; 3 × t4g.large (SCLC, triage, dev) | 380 |
 | **Total** | 20 pods | 110 / 190 GiB | | **≈ 1,280** |
 
-Redis response caches add 2 × r7g.large (≈ $155) and 2 × t3.medium (≈ $60).
+The Redis response caches add 2 × r7g.large (about $155) and 2 × t3.medium
+(about $60).
 
-go serves the same traffic at 48 MiB per pod on average (131 MiB peak, 2 GiB
-limit), so two replicas per portal for all of them fit on two r7g.large,
-≈ $160/month: **≈ $1,100/month (≈ $13,000/year) less** on the application
-tier, ≈ $1,300/month (≈ $15,000/year) with the Redis caches. Not included: ClickHouse Cloud, where go
-costs 0.75–1.0× Java's CPU per request, and a load test at www's request rate.
+go handles the same traffic with 48 MiB per pod on average (131 MiB at most).
+Two copies of every portal would fit on two r7g.large nodes, about $160 a
+month. That saves about $1,100 a month ($13,000 a year) on the servers, or
+about $1,300 a month ($15,000 a year) counting the Redis caches. This does not
+include ClickHouse Cloud, where go uses 0.75 to 1.0 times Java's CPU per
+request. go has also not been load-tested at www's full request rate.
 
-Most of these portals need features go does not have yet: SAML login (GENIE
-private, MSK, private), `authorization=true` with users from the database and
-`dat.method=uuid` tokens (GENIE public). What go can replace today is www and
-api, about $500/month of the total.
+Most of these portals need features go does not have yet:
+
+- SAML login (GENIE private, MSK, private).
+- Per-user study access with users stored in the database, and data access
+  tokens of type `uuid` (GENIE public).
+
+The portals go can replace today are www and api, about $500 a month of the
+total.
 
 ## Import
 
-Method: `scripts/import-benchmark.sh`, 2026-10-08, one local ClickHouse 25.3;
-the studies as on datahub master (18763f8), LFS files from datahub's own
-store (`fetch`); each run into empty databases with genes, cancer types and
-gene panels preloaded; Java is cbioportal-core from
-`cbioportal/cbioportal:v7.1.2` (`cbioportalImporter.py`, `-Xmx6g`, container
-capped at 8 GiB) then `populate_derived_tables.sql`, go is `ingest` then
-`transform` (4 GiB cap); peak RSS is GNU time's, the largest process. Two
-runs each, both shown.
+The import benchmark loads two large studies with each importer and times
+it. RSS ("resident set size") is the memory a process actually uses; the
+table shows the peak of the largest process.
+
+How it was run: `scripts/import-benchmark.sh` on 2026-10-08, against one
+local ClickHouse 25.3, with the studies as they are on datahub's master
+branch. Each run started from empty databases with genes, cancer types and
+gene panels already loaded.
+
+- **Java:** cbioportal-core from `cbioportal/cbioportal:v7.1.2`
+  (`cbioportalImporter.py`, `-Xmx6g`, container limited to 8 GiB), then
+  `populate_derived_tables.sql`.
+- **go:** `ingest`, then `transform` (container limited to 4 GiB).
+
+Each was run twice, and both results are shown.
 
 | Study (rows, MB) | Importer | Import time | Derived/transform time | Peak RSS |
 |---|---|---|---|---|
@@ -227,22 +271,27 @@ runs each, both shown.
 | msk_impact_50k_2026 (49.2M, 589) | Java | 281 / 256 s | 45 / 54 s | 3.9 / 3.7 GB |
 | | go | 39 / 39 s | 58 / 50 s | 213 MB |
 
-go's importer streams each file into ClickHouse in batches, as is, and builds
-the model and the study-view `*_derived` tables as SQL inside ClickHouse, so
-its own memory stays small; Java parses every record in the JVM, one JVM per
-file. Java's validator, which go does not have, adds 56–71 s (0.6 GB) and
-132–141 s (1.2 GB) and is not counted. Both produced the same samples,
-patients, clinical, mutation, structural-variant, alteration and
-generic-assay rows; Java's `clinical_data_derived` also keeps a row for each
-empty value, and Java skips segments whose start is not below their end (4
-on chord, 10 on 50k), which go keeps. On
-ClickHouse Cloud's replicated tables go now adds a file's new staging columns
-in one `ALTER` per table instead of one per column (07a5caa).
+go uses little memory because it copies each file into ClickHouse in batches
+without changing it. It then builds the tables the API reads with SQL inside
+ClickHouse. Java reads every record into its own memory and starts a new Java
+process for each file.
+
+Java also runs a validator, which go does not have. It is not counted above.
+It adds 56–71 s and 0.6 GB on msk_chord_2024, and 132–141 s and 1.2 GB on
+msk_impact_50k_2026.
+
+Both importers produced the same samples, patients, clinical data, mutations,
+structural variants, alterations and generic-assay rows. Two small
+differences remain:
+
+- Java's `clinical_data_derived` table also keeps a row for each empty value.
+- Java skips copy-number segments whose start is not before their end (4 on
+  chord, 10 on 50k). go keeps them.
 
 ## Code size
 
-Lines of code without blanks and comments, 2026-10-03; the shared frontend
-is not counted.
+Lines of code, not counting blank lines and comments, on 2026-10-03. The
+frontend, which both use, is not counted.
 
 | | Main code | Tests |
 |---|---|---|
@@ -250,10 +299,9 @@ is not counted.
 | cbioportal (Java backend) | ≈ 80,000 | ≈ 60,500 |
 | cbioportal-core (Java importer + Python validator) | ≈ 33,300 | ≈ 22,700 |
 
-go is about a quarter of the size, in one language, with three direct
-dependencies (`go.mod`): ClickHouse's official driver
-`github.com/ClickHouse/clickhouse-go/v2` (14 indirect modules: ch-go,
-compression, decimal), a YAML parser and `golang.org/x/sync`. Not yet in go:
-the study validator, SAML and a few MSK-only endpoints (≈ 5–10k lines). The
-image, frontend included, is ≈ 100 MB against 1.33 GB for
-`cbioportal/cbioportal:master`.
+go is about a quarter of the size and uses one language. It has three direct
+dependencies: ClickHouse's official Go driver, a YAML parser and
+`golang.org/x/sync`. go does not yet have the study validator, SAML login and
+a few MSK-only endpoints, which would add roughly 5,000–10,000 lines. The
+container image, frontend included, is about 100 MB. The Java image
+`cbioportal/cbioportal:master` is 1.33 GB.

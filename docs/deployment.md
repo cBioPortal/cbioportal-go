@@ -1,22 +1,46 @@
 # Deployment
 
+This page explains how cbioportal-go is packaged and where it runs. It covers
+the container image, the public preview at go.cbioportal.org, the hub that
+previews new datahub studies, and the per-pull-request previews.
+
+## Contents
+
+- [Container image](#container-image)
+- [go.cbioportal.org](#gocbioportalorg)
+  - [Sign-in](#sign-in)
+  - [Loading studies](#loading-studies)
+  - [Mirroring production](#mirroring-production)
+- [hub.cbioportal.org](#hubcbioportalorg)
+- [PR previews](#pr-previews)
+
 ## Container image
 
-`docker.io/cbioportal/cbioportal-go` (`latest` and `sha-<7-char commit>`,
-linux/amd64 and linux/arm64) is built and pushed by
-`.github/workflows/docker.yml` on every push to `main`; pull requests
-labelled `preview` get `pr-<N>` and `sha-<commit>` (see
-[PR previews](#pr-previews)). The
-[Dockerfile](../Dockerfile) builds the frontend once on the build platform and
-cross-compiles the Go binaries, so the arm64 image needs no emulation for the
-heavy steps.
+The image `docker.io/cbioportal/cbioportal-go` is built and published by
+`.github/workflows/docker.yml` on every push to `main`. It runs on both Intel
+(linux/amd64) and ARM (linux/arm64) machines.
 
-The image (alpine, non-root uid 10001, `WORKDIR /app`, port 8080) contains
-`/usr/local/bin/cbioportal-api` (the default command),
-`/usr/local/bin/cbioportal-import`, the built frontend in `/app/frontend` and
-the deployment scripts in `/app/deploy`. The build arguments `VERSION` (the
-`-version` line) and `COMMIT` (the `gitCommitId` of `/api/info`) stamp the
-binaries, as the build context has no `.git`.
+| Tag | When |
+|---|---|
+| `latest`, `sha-<7-char commit>` | every push to `main` |
+| `pr-<N>`, `sha-<commit>` | pull requests labelled `preview` (see [PR previews](#pr-previews)) |
+
+The [Dockerfile](../Dockerfile) builds the frontend once and compiles the Go
+programs for each platform, so the ARM image does not need slow emulation.
+
+What is inside:
+
+| Path | Contents |
+|---|---|
+| `/usr/local/bin/cbioportal-api` | the API server (the default command) |
+| `/usr/local/bin/cbioportal-import` | the importer |
+| `/app/frontend` | the built frontend |
+| `/app/deploy` | deployment scripts |
+
+The image is based on Alpine Linux, runs as a non-root user (uid 10001) and
+listens on port 8080. The build has no `.git` folder, so two build arguments
+record the version: `VERSION` is printed by `-version`, and `COMMIT` is shown
+as `gitCommitId` in `/api/info`.
 
 ```bash
 docker build -t cbioportal/cbioportal-go:dev --build-arg VERSION="$(git rev-parse --short HEAD) (dev)" \
@@ -24,34 +48,48 @@ docker build -t cbioportal/cbioportal-go:dev --build-arg VERSION="$(git rev-pars
 docker run --rm --network host cbioportal/cbioportal-go:dev -db cbioportal
 ```
 
-The API container is configured with the settings in
-[Configuration](configuration.md): `PORT=8080`, `FRONTEND_DIR=/app/frontend`,
-`CLICKHOUSE_URL` / `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD`, `CBIOPORTAL_DB` /
-`CBIOPORTAL_RAW_DB` / `CBIOPORTAL_REF_DB`, and `SESSION_STORE_FILE` on a
-persistent volume — or, for more than one replica, cBioPortal's session
-service (`SESSION_SERVICE_URL`, see [Sessions](configuration.md#sessions)). Health check: `GET /health`.
-With a login (`authenticate=oauth2` or `optional_oauth2`) and more than one
-replica, login sessions go to Redis (`spring.session.store-type=redis`, see
-[Login sessions in Redis](configuration.md#login-sessions-in-redis)).
+The API container uses the settings described in
+[Configuration](configuration.md):
+
+- `PORT=8080` and `FRONTEND_DIR=/app/frontend`.
+- `CLICKHOUSE_URL`, `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD` to reach
+  ClickHouse, the database.
+- `CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB` and `CBIOPORTAL_REF_DB`, the three
+  databases it reads.
+- Saved sessions (virtual studies, shared links): `SESSION_STORE_FILE` on a
+  persistent volume. With more than one copy of the server, use cBioPortal's
+  session service instead (`SESSION_SERVICE_URL`, see
+  [Sessions](configuration.md#sessions)).
+- With login turned on (`authenticate=oauth2` or `optional_oauth2`) and more
+  than one copy of the server, keep login sessions in Redis
+  (`spring.session.store-type=redis`, see
+  [Login sessions in Redis](configuration.md#login-sessions-in-redis)).
+
+The health check is `GET /health`.
 
 ## go.cbioportal.org
 
-The preview runs in the cBioPortal production cluster: manifests in
+go.cbioportal.org is the public preview of cbioportal-go. It runs in the
+cBioPortal production Kubernetes cluster. Its setup files (manifests) are in
 [knowledgesystems-k8s-deployment](https://github.com/knowledgesystems/knowledgesystems-k8s-deployment)
-(`apps/cbioportal-go/`), secrets in portal-configuration
-(`secrets/cbioportal-go/`). It serves ClickHouse Cloud databases in two colors,
-`dev_cbioportal_public_go_{blue,green}` with their `_raw` and `_ref`
-companions; the ConfigMap `cbioportal-go-active` says which color is live.
+under `apps/cbioportal-go/`. Its passwords and keys are in
+portal-configuration under `secrets/cbioportal-go/`.
+
+It reads ClickHouse Cloud databases in two copies, blue and green:
+`dev_cbioportal_public_go_blue` and `dev_cbioportal_public_go_green`, each
+with `_raw` and `_ref` companion databases. One copy serves the site while
+the other is rebuilt. The ConfigMap `cbioportal-go-active` says which copy is
+live.
 
 ### Sign-in
 
-As www, the preview offers Google sign-in on an open portal
-(`authenticate=optional_oauth2`). The secrets come from the Secret
-`cbioportal-public-green` as environment variables
-(`GOOGLE_PLUS_CONSUMER_KEY`, `GOOGLE_PLUS_CONSUMER_SECRET`,
-`REDIS_SESSION_HOST`, `REDIS_SESSION_PORT`, `REDIS_SESSION_PASSWORD`); the
-container arguments name them by placeholder, which the server resolves
-(Kubernetes leaves `${…}` alone):
+Like www, the preview is open to everyone and also offers Google sign-in
+(`authenticate=optional_oauth2`). The secrets come from the Kubernetes Secret
+`cbioportal-public-green` as environment variables:
+`GOOGLE_PLUS_CONSUMER_KEY`, `GOOGLE_PLUS_CONSUMER_SECRET`,
+`REDIS_SESSION_HOST`, `REDIS_SESSION_PORT` and `REDIS_SESSION_PASSWORD`. The
+container arguments refer to them with `${…}` placeholders. Kubernetes leaves
+these alone, and the server fills them in when it starts:
 
 ```yaml
 args:
@@ -68,16 +106,17 @@ args:
   - --spring.data.redis.password=${REDIS_SESSION_PASSWORD}
 ```
 
-The Google client must list
-`https://go.cbioportal.org/login/oauth2/code/google` as an authorized
-redirect URI; the ingress sends `X-Forwarded-Proto: https`.
+The Google login client must list
+`https://go.cbioportal.org/login/oauth2/code/google` as an allowed redirect
+address. The ingress (the entry point into the cluster) sends
+`X-Forwarded-Proto: https`, so the server knows the site uses HTTPS.
 
 ### Loading studies
 
-[`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh) copies
-studies staged in a local ClickHouse to another ClickHouse and builds the
-portal database there, for a portal loaded from study files rather than
-mirrored from production:
+Use this when a portal should be loaded from study files instead of copied
+from production. [`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh)
+copies studies already loaded into a local ClickHouse to another ClickHouse,
+then builds the portal database there:
 
 ```bash
 export CLICKHOUSE_URL=https://<host>:8443 CLICKHOUSE_USER=go_import
@@ -86,129 +125,157 @@ deploy/publish-local-studies.sh dev_cbioportal_public_go_blue \
   seed-cbioportal_hg19_hg38_v2.14.5.sql.gz msk_impact_2017 acbc_mskcc_2015
 ```
 
-It copies the studies' staging rows (plus the shared gene panels) into
-`<prefix>_raw`, loads the seed into `<prefix>_ref` and runs `transform` into
-`<prefix>`. It is safe to re-run: a study's rows are replaced. The three
-databases must exist; the user needs SELECT, INSERT, ALTER, CREATE TABLE,
-CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on them.
+For a database name `<prefix>`, the script:
+
+1. copies the studies' loaded rows, plus the shared gene panels, into
+   `<prefix>_raw`;
+2. loads the reference data (genes, cancer types) from the seed file into
+   `<prefix>_ref`;
+3. runs `transform` to build `<prefix>`, the database the API reads.
+
+You can run it again safely: a study's old rows are replaced. The three
+databases must already exist. The ClickHouse user needs SELECT, INSERT,
+ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on them.
 
 ### Mirroring production
 
-[`ops/cbioportal.org/mirror-prod.sh`](../ops/cbioportal.org/mirror-prod.sh) is the hourly job that
-makes the preview serve exactly www.cbioportal.org's data, the same pattern as
-the LibreChat clone job:
+go.cbioportal.org shows exactly the same data as www.cbioportal.org. It does
+this by copying production's database every hour, rather than loading study
+files itself. The hourly job is
+[`ops/cbioportal.org/mirror-prod.sh`](../ops/cbioportal.org/mirror-prod.sh),
+and it works like the LibreChat copy job:
 
-1. read the live production color and its last import from
-   `publicdb_update_management_database.update_status`; stop without changes
-   while an import is running or when the live Go color was already built
-   from that import (recorded in `<prefix>_<color>_ref._go_mirror_source`);
-2. empty the inactive Go color and zero-copy `CREATE TABLE … CLONE AS` every
-   table of `cbioportal_public_<color>` (minus auth / credential tables) into
-   `<prefix>_<color>_ref` (~20 s);
-3. build the portal database from the clone:
+1. It reads which production copy (blue or green) is live and when it was
+   last imported, from `publicdb_update_management_database.update_status`.
+   It stops without changes while an import is running, or when the live go
+   copy was already built from that import. The import it was built from is
+   recorded in `<prefix>_<color>_ref._go_mirror_source`.
+2. It empties go's inactive copy. Then it clones every table of
+   `cbioportal_public_<color>` into `<prefix>_<color>_ref`, except the login
+   and password tables. ClickHouse's `CREATE TABLE … CLONE AS` makes this
+   copy without duplicating the data on disk, in about 20 s.
+3. It builds the portal database from the clone:
 
    ```bash
    cbioportal-import transform --from-prod \
      --ref-db <prefix>_<color>_ref --raw-db <prefix>_<color>_raw --db <prefix>_<color>
    ```
 
-4. hand `CBIOPORTAL_DB` / `CBIOPORTAL_RAW_DB` / `CBIOPORTAL_REF_DB` to the
-   step that flips `cbioportal-go-active`. The API serves the three databases
-   unchanged (`-db`, `-raw-db`, `-ref-db`).
+4. It passes the three database names (`CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB`,
+   `CBIOPORTAL_REF_DB`) to the step that switches `cbioportal-go-active` to
+   the new copy. The API reads the three databases as they are (`-db`,
+   `-raw-db`, `-ref-db`).
 
-`transform --from-prod` reads nothing from staged studies; it takes
-production's schema (cbioportal-core's tables migrated to ClickHouse plus the
-`*_derived` tables) and builds every object the API reads, with the shapes
-and meaning the datahub transform gives them. It takes about a minute on
-ClickHouse Cloud and copies little:
+#### What `transform --from-prod` builds
 
-- **Views over the clone (no copy):** `sample_derived`,
-  `clinical_data_derived` (blank cells left out, as the datahub transform
-  stores only values), `genomic_event_derived`, `genetic_alteration_derived`
-  (10 billion rows), `generic_assay_data_derived` (3.8 billion),
-  `sample_to_gene_panel_derived`, `gene_panel_to_gene_derived`,
-  `clinical_event_derived`, `clinical_event_data_derived`; the discrete
-  copy-number levels −1/0/1 of `cna`; `gene_key_map`; and in the raw database
-  the per-gene matrices the molecular-data, co-expression and enrichment
-  endpoints read (`cna_matrix`, `mrna_expression_matrix`,
-  `methylation_matrix`, `protein_level_matrix` over
-  genetic_alteration_derived; `generic_assay_matrix` over
-  generic_assay_data_derived) plus `genetic_profile` and the generic assay
-  entity tables. The API's study / profile / gene filters reach the sort keys
-  of the derived tables through these views.
-- **Materialized from the normalized tables** (tens of millions of rows at
-  most, sorted for the API's filters): studies, profiles, case lists,
-  patients, samples, long-form clinical data, `sample_profile`, mutations of
-  the mutation and uncalled-mutation profiles (from `mutation_derived`),
-  AMP/HOMDEL events with their driver annotations
-  (`cna_event`), structural variants, segments, gene panels, GISTIC, MutSig,
-  resources, the timeline (`clinical_event` with its attributes), and each
-  matrix profile's samples in matrix order (`profile_sample`, from
-  `genetic_profile_samples`).
+`transform --from-prod` starts from production's tables instead of study
+files. Those are the Java importer's tables plus the `*_derived` tables
+production builds for the study view. From them it builds every table and
+view the API reads, with the same shape and meaning as a normal import. It
+takes about a minute on ClickHouse Cloud and copies little data.
 
-The clone also serves as the reference database (genes, aliases, cancer
-types, reference genomes). A few API responses read production-only columns
-when the portal database has them: a study's `public` flag and import date,
-and a generic-assay profile's pivot threshold, sort order and patient level.
+**Views (no copy).** The largest tables are read in place through views,
+including `genetic_alteration_derived` (10 billion rows) and
+`generic_assay_data_derived` (3.8 billion). The views also cover:
 
-Known differences from www.cbioportal.org on the mirror are those of the API
-itself, not of the data; `cmd/paritydiff` measures them (see
-[Testing](testing.md#api-parity-with-wwwcbioportalorg)). www's study list
-attaches resource definitions of other studies that share a resource id; its
-legacy `studies/fetch` reports `allSampleCount: 1`; `clinical-events-meta`
-and `survival-data` answer HTTP 500 there. Java returns many lists in import
-(internal id) order — studies, patients, clinical data, segments, clinical
-events, sample lists and their members — which the mirror keeps through
-production's internal ids (`internal_id`, `seg_id`, `list_internal_id`,
-`clinical_event_id`). Where Java attaches a single NA count (or bin) to an
-arbitrary gene or entity of a multi-filter study-view request, or appends
-panels to a shared list in `ProfiledCasesCounter`, results depend on Java's
-iteration order. Where Java's order is ClickHouse's alone, a page differs at
-its boundaries: the clinical tab's samples without a sort column (no ORDER BY;
-production itself answers different pages), a study's clinical data paged by
-internal id (the attributes of the boundary sample or patient), and the label
-of a case list or profile type merged across studies (the first in GROUP BY
-order). Expression
-enrichments of a TCGA PanCancer study take a few seconds, since
-genetic_alteration_derived is sorted by gene before profile.
+- samples, clinical data (empty cells left out, as a normal import does),
+  genomic events, gene panels per sample and per gene, and the timeline;
+- the copy-number levels −1, 0 and 1, and the gene id map (`gene_key_map`);
+- in the raw database, the per-gene tables that the molecular-data,
+  co-expression and enrichment endpoints read (`cna_matrix`,
+  `mrna_expression_matrix`, `methylation_matrix`, `protein_level_matrix`,
+  `generic_assay_matrix`), plus `genetic_profile` and the generic assay
+  tables.
+
+These views let the API's study, profile and gene filters use the sort order
+of the production tables, so lookups stay fast.
+
+**Copied tables.** Smaller data, tens of millions of rows at most, is copied
+and sorted to suit the API's filters: studies, profiles, case lists,
+patients, samples, clinical data, which samples are in which profile,
+mutations, amplifications and deep deletions with their driver annotations,
+structural variants, segments, gene panels, GISTIC, MutSig, resources, the
+timeline and its attributes, and each profile's samples in the order the data
+uses.
+
+The clone also serves as the reference database: genes, gene aliases, cancer
+types and reference genomes. A few responses use columns only production has,
+when they exist: a study's `public` flag and import date, and a generic-assay
+profile's pivot threshold, sort order and patient level.
+
+#### Known differences from www
+
+On the mirror, any difference from www.cbioportal.org comes from the API
+code, not from the data. `cmd/paritydiff` measures them (see
+[Testing](testing.md#api-parity-with-wwwcbioportalorg)).
+
+| Where | What happens |
+|---|---|
+| Study list on www | It also shows resource definitions of other studies that share a resource id (a www bug). |
+| `studies/fetch` on www | It reports `allSampleCount: 1` (a www bug). |
+| `clinical-events-meta`, `survival-data` on www | They answer HTTP 500. |
+| Multi-filter study-view requests | Java attaches one NA count (or bin) to whichever gene or entity it happens to process first, so the result depends on Java's internal order. Panels added to a shared list in `ProfiledCasesCounter` have the same problem. |
+| Page boundaries | Where only ClickHouse decides the order, the rows at the edge of a page can differ. This affects the clinical tab's samples when no sort column is chosen (production itself returns different pages), a study's clinical data paged by internal id, and the label of a case list or profile type merged across studies. |
+
+Java returns many lists in import order: studies, patients, clinical data,
+segments, clinical events, and sample lists and their members. The mirror
+keeps that order by using production's internal ids (`internal_id`,
+`seg_id`, `list_internal_id`, `clinical_event_id`).
+
+Expression enrichments of a TCGA PanCancer study take a few seconds, because
+`genetic_alteration_derived` is sorted by gene before profile.
 
 ## hub.cbioportal.org
 
-The hub previews the studies of `preview`-labelled cBioPortal/datahub pull
-requests, on the same ClickHouse Cloud service (`dev_cbioportal_hub_go` with
-its `_raw` and `_ref` databases; manifests in knowledgesystems-k8s-deployment
-`apps/cbioportal-hub/`). An Argo CD ApplicationSet starts a Job per PR commit
-that runs [`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh): it checks out
-the PR's changed studies, ingests each, runs one `transform`, and reports a
-Check Run and a Deployment on the PR. Imports of different PRs take turns
-through a lock table in the raw database. A study that fails to ingest is
-removed (`cbioportal-import remove-study`); when the transform fails, the
-PR's studies are removed and the hub rebuilt without them, while the hub
-keeps serving its previous build. The script's header lists its settings;
-it runs locally against any ClickHouse and GitHub API (`GITHUB_API`).
+The hub shows a preview of the studies in each cBioPortal/datahub pull
+request labelled `preview`. It uses the same ClickHouse Cloud service, with
+the databases `dev_cbioportal_hub_go`, `_raw` and `_ref`. Its manifests are
+in knowledgesystems-k8s-deployment under `apps/cbioportal-hub/`.
+
+For each new commit on such a pull request, Argo CD (the tool that deploys to
+the cluster) starts a job that runs
+[`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh).
+The script:
+
+1. checks out the studies the pull request changes;
+2. loads each one (`ingest`), then runs `transform` once;
+3. reports a Check Run and a Deployment on the pull request.
+
+Imports from different pull requests wait for each other, using a lock table
+in the raw database. If a study fails to load, it is removed
+(`cbioportal-import remove-study`). If `transform` fails, the pull request's
+studies are removed and the hub is rebuilt without them. Meanwhile the hub
+keeps serving its previous build. The script's header lists its settings. It
+can also run locally against any ClickHouse and GitHub API (`GITHUB_API`).
 
 ## PR previews
 
-A pull request labelled `preview` gets its own instance at
-`https://pr-<N>.gopreview.cbioportal.org`: the PR's image on its own
-databases (`dev_cbioportal_go_pr<N>` with `_raw` and `_ref`), built by the
-PR's own `ingest` / `transform`, so schema changes of the PR apply there.
-The "Preview Configuration" of the PR description picks the data
-([template](../.github/pull_request_template.md)):
+A cbioportal-go pull request labelled `preview` gets its own copy of the
+portal at `https://pr-<N>.gopreview.cbioportal.org`. It runs the pull
+request's image on its own databases (`dev_cbioportal_go_pr<N>`, `_raw` and
+`_ref`), built with the pull request's own `ingest` and `transform`. That way
+changes to the database layout are tested too.
+
+The "Preview Configuration" section of the pull request description chooses
+the data ([template](../.github/pull_request_template.md)):
 
 | `preview-data:` | Data |
 |---|---|
-| `prod` (default) | zero-copy clone of production, as the mirror (`mirror-prod.sh` with `TARGET_DB`), then `transform --from-prod` |
-| `datahub-pr <N>` | reference data plus the studies cBioPortal/datahub#N changes, at its head (narrowed by `preview-studies:`) |
-| `studies` | reference data plus the datahub (master) studies listed under `preview-studies:` |
+| `prod` (default) | a copy of production, made as for the mirror (`mirror-prod.sh` with `TARGET_DB`), then `transform --from-prod` |
+| `datahub-pr <N>` | reference data plus the studies that cBioPortal/datahub#N changes, at its latest commit (limit them with `preview-studies:`) |
+| `studies` | reference data plus the datahub master studies listed under `preview-studies:` |
 
 [`ops/cbioportal.org/pr-preview-setup.sh`](../ops/cbioportal.org/pr-preview-setup.sh)
-runs every few minutes in the cluster; it rebuilds from empty databases
-only when the PR head or the configuration changed (recorded in
-`<raw>._preview_setup`) and reports a "Preview" Check Run and a Deployment
-on the PR. Closing the PR or removing the label deletes the instance;
-`pr-preview-teardown.sh` drops its databases. Manifests:
-knowledgesystems-k8s-deployment `apps/cbioportal-go-preview/`. Locally:
+runs every few minutes in the cluster. It rebuilds a preview from empty
+databases only when the pull request's latest commit or its configuration has
+changed. It records what it built in `<raw>._preview_setup`, and reports a
+"Preview" Check Run and a Deployment on the pull request.
+
+Closing the pull request or removing the label deletes the preview, and
+`pr-preview-teardown.sh` drops its databases. The manifests are in
+knowledgesystems-k8s-deployment under `apps/cbioportal-go-preview/`.
+
+To run the scripts locally:
 
 ```bash
 PR_NUMBER=9999 HEAD_SHA=abc1234 PR_BODY="$(cat body.md)" WORKDIR=/tmp/pr \
