@@ -46,14 +46,19 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 	var f struct {
 		GenericAssayDataFilters []genericAssayDataFilter `json:"genericAssayDataFilters"`
 		ProfileType             string                   `json:"profileType"`
-		StudyViewFilter         studyViewFilter          `json:"studyViewFilter"`
+		StudyViewFilter         *studyViewFilter         `json:"studyViewFilter"`
 	}
 	readBody(r, &f)
 	if len(f.GenericAssayDataFilters) == 0 && f.ProfileType == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	svf := f.StudyViewFilter
+	if f.StudyViewFilter == nil {
+		// The controller dereferences the filter: a NullPointerException.
+		springError(w, r, http.StatusInternalServerError)
+		return
+	}
+	svf := *f.StudyViewFilter
 	if len(f.GenericAssayDataFilters) == 1 {
 		svf = svf.withoutGenericAssay(f.GenericAssayDataFilters[0].StableID)
 	}
