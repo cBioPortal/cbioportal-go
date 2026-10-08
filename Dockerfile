@@ -38,22 +38,26 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/ cmd/
 COPY internal/ internal/
+COPY ops/ ops/
+COPY rewrite/ rewrite/
+# The API, the importer, cBioPortal.org's job runner (cbioportal-ops) and
+# the Java-migration tools (cbioportal-rewrite-test).
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}'" -o /out/cbioportal-api ./cmd/cbioportal-api \
- && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}'" -o /out/cbioportal-import ./cmd/cbioportal-import
+    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}'" -o /out/ \
+      ./cmd/cbioportal-api ./cmd/cbioportal-import ./ops/cbioportal.org/cmd/cbioportal-ops ./rewrite/cmd/cbioportal-rewrite-test
 
 FROM alpine:${ALPINE_VERSION}
 RUN apk add --no-cache bash git git-lfs curl jq openssl ca-certificates \
  && addgroup -g 10001 cbioportal \
  && adduser -D -u 10001 -G cbioportal -h /home/cbioportal cbioportal
-COPY --from=go /out/cbioportal-api /out/cbioportal-import /usr/local/bin/
+COPY --from=go /out/ /usr/local/bin/
 COPY --from=frontend-dist / /app/frontend
 # Deployment scripts and configuration: the generic ones and cBioPortal.org's
 # own, side by side under /app/deploy where the cluster manifests expect them.
-COPY deploy/ ops/cbioportal.org/ /app/deploy/
+COPY deploy/ /app/deploy/
+COPY ops/cbioportal.org/*.sh ops/cbioportal.org/*.properties ops/cbioportal.org/*.json /app/deploy/
 WORKDIR /app
 USER 10001:10001
 ENV PORT=8080 FRONTEND_DIR=/app/frontend

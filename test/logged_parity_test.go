@@ -2,7 +2,7 @@ package contract
 
 import "testing"
 
-// Contracts from replaying production's logged requests (test/parity/loggedgen).
+// Contracts from replaying production's logged requests (rewrite/java-v7-to-go/loggedgen).
 
 // Discrete copy-number counts report the samples of the profile's matrix
 // (genetic_profile_samples): the data file's samples, for a wide matrix and

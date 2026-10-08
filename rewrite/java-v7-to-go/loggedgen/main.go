@@ -1,4 +1,4 @@
-// Command loggedgen writes a cmd/paritydiff corpus sampled from the requests
+// Command loggedgen writes a rewrite/java-v7-to-go/paritydiff corpus sampled from the requests
 // production cBioPortal logged (cbioportal_qc.logged_requests): real API
 // traffic, GET and POST, from a capture window (-since, -until) and the
 // public portal's hosts (-servers), spread over the endpoints in proportion
@@ -9,8 +9,8 @@
 // backend compares them on what clients actually ask.
 //
 //	CLICKHOUSE_URL=… CLICKHOUSE_USER=… CLICKHOUSE_PASSWORD=… \
-//	  go run ./test/parity/loggedgen -n 500 > .parity/logged.txt
-//	go run ./cmd/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
+//	  go run ./rewrite/java-v7-to-go/loggedgen -n 500 > .parity/logged.txt
+//	go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
 //	  -ua cbioportal-go-parity -a http://localhost:18091
 //
 // The log is a ReplacingMergeTree keyed by a hash of the request, read with
@@ -24,7 +24,7 @@
 // unspecified tie order) are marked with their reason; -annotate marks them
 // in an existing corpus:
 //
-//	go run ./test/parity/loggedgen -annotate < old.txt > .parity/logged.txt
+//	go run ./rewrite/java-v7-to-go/loggedgen -annotate < old.txt > .parity/logged.txt
 //
 // The corpus header records the window ("# since:", "# until:", "#
 // window:"), the requests per host ("# server …") and the endpoint coverage
@@ -195,7 +195,7 @@ FROM pool GROUP BY server_name, endpoint`, params)
 	}
 	sort.Strings(hosts)
 
-	fmt.Printf("# Requests sampled from %s by test/parity/loggedgen (-n %d -min %d -seed %d -alloc %s -api-share %g).\n",
+	fmt.Printf("# Requests sampled from %s by rewrite/java-v7-to-go/loggedgen (-n %d -min %d -seed %d -alloc %s -api-share %g).\n",
 		*table, *n, *minPer, *seed, *alloc, *apiShare)
 	fmt.Println("# Records are compared unordered: this backend does not keep the Java importer's row order.")
 	fmt.Printf("# since: %s\n# until: %s\n", *since, *until)

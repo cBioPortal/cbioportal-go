@@ -6,21 +6,23 @@ API ?= http://localhost:18090
 
 .PHONY: build test fmt vet lint contract e2e run frontend testdb clean
 
-build: ## build bin/cbioportal-import and bin/cbioportal-api
+build: ## build the programs into bin/
 	go build -o bin/cbioportal-import ./cmd/cbioportal-import
 	go build -o bin/cbioportal-api ./cmd/cbioportal-api
+	go build -o bin/cbioportal-ops ./ops/cbioportal.org/cmd/cbioportal-ops
+	go build -o bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrite-test
 
 test: ## unit tests (no services needed)
-	go test ./internal/...
+	go test ./internal/... ./cmd/... ./ops/... ./rewrite/...
 
 fmt: ## format the code
-	gofmt -w cmd internal test
+	gofmt -w cmd internal ops rewrite test
 
 vet:
 	go vet ./...
 
 lint: vet ## gofmt check + go vet (what CI runs)
-	@out=$$(gofmt -l cmd internal test); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	@out=$$(gofmt -l cmd internal ops rewrite test); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 contract: ## API contract tests against a running API (API=...)
 	API=$(API) go test ./test/

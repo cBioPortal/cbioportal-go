@@ -1,0 +1,371 @@
+package parity
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+const (
+	issueTitle = "Nightly parity: unexplained differences"
+	issueLabel = "parity"
+)
+
+// runOptions configure one nightly comparison (the run subcommand).
+type runOptions struct {
+	root           string // repository root
+	dir, state     string // PARITY_DIR, PARITY_STATE
+	a, b, rate, ua string
+	issueRepo      string
+	issue          string // PARITY_ISSUE
+	memoryMax      string
+	goMemLimit     string
+	regen, dry     bool
+	stdout, stderr io.Writer
+}
+
+// errRun marks a failure of the check itself (exit status 2).
+type errRun struct{ msg string }
+
+func (e errRun) Error() string { return e.msg }
+
+func die(format string, args ...any) error { return errRun{fmt.Sprintf(format, args...)} }
+
+// nightlyRun replays the corpus against A and B, writes the report and
+// keeps the alert issue up to date. It returns whether the night was clean.
+func nightlyRun(o runOptions) (clean bool, err error) {
+	day := time.Now().UTC().Format(time.DateOnly)
+	run := filepath.Join(o.dir, "runs", day)
+	corpusPath := filepath.Join(o.dir, "corpus.txt")
+	if err := os.MkdirAll(filepath.Join(o.dir, "runs"), 0o755); err != nil {
+		return false, die("cannot create %s: %v", o.dir, err)
+	}
+	if err := os.MkdirAll(o.state, 0o755); err != nil {
+		return false, die("cannot create %s: %v", o.state, err)
+	}
+
+	if o.regen || !hasSinceHeader(corpusPath) {
+		if err := writeCorpus(o.root, corpusPath, o.stderr); err != nil {
+			return false, die("corpus generation failed: %v", err)
+		}
+	}
+	bin := filepath.Join(o.dir, "bin")
+	for _, tool := range []string{"loggedgen", "paritydiff"} {
+		cmd := exec.Command("go", "build", "-o", filepath.Join(bin, tool), "./rewrite/java-v7-to-go/"+tool)
+		cmd.Dir, cmd.Stdout, cmd.Stderr = o.root, o.stderr, o.stderr
+		if err := cmd.Run(); err != nil {
+			return false, die("building %s failed: %v", tool, err)
+		}
+	}
+	// Expectations added since the corpus was written apply to it as well.
+	if err := annotate(filepath.Join(bin, "loggedgen"), corpusPath, o.stderr); err != nil {
+		return false, die("annotating the corpus failed: %v", err)
+	}
+	pruneRuns(filepath.Join(o.dir, "runs"), 15*24*time.Hour)
+	os.RemoveAll(run)
+	if err := os.MkdirAll(run, 0o755); err != nil {
+		return false, die("cannot create %s: %v", run, err)
+	}
+
+	versionA, versionB := version(o.a, o.ua), version(o.b, o.ua)
+	start := time.Now()
+	runParitydiff(o, filepath.Join(bin, "paritydiff"), corpusPath, run)
+	minutes := int((time.Since(start) + time.Minute - time.Second) / time.Minute)
+
+	data, err := os.ReadFile(filepath.Join(run, "results.json"))
+	if err != nil || len(data) == 0 {
+		return false, die("paritydiff wrote no results, see %s/output.txt", run)
+	}
+	var results []Result
+	if err := json.Unmarshal(data, &results); err != nil {
+		return false, die("reading %s/results.json: %v", run, err)
+	}
+	c := count(results)
+	bad := c.Bad()
+
+	unexplained := unexplainedNames(results)
+	if err := writeLines(filepath.Join(run, "unexplained.txt"), unexplained); err != nil {
+		return false, die("%v", err)
+	}
+	lastPath := filepath.Join(o.dir, "last-unexplained.txt")
+	newNames := newSince(readLines(lastPath), unexplained)
+	if err := writeLines(filepath.Join(run, "new.txt"), newNames); err != nil {
+		return false, die("%v", err)
+	}
+	nightLines, streak := nights(readLines(filepath.Join(o.state, "nights.txt")), day, bad == 0)
+	if err := writeLines(filepath.Join(run, "nights.txt"), nightLines); err != nil {
+		return false, die("%v", err)
+	}
+
+	corpus, _ := os.ReadFile(corpusPath)
+	corpusDate := "?"
+	if st, err := os.Stat(corpusPath); err == nil {
+		corpusDate = st.ModTime().UTC().Format(time.DateOnly)
+	}
+	text := report(reportInput{
+		Day: day, A: o.a, B: o.b, VersionA: versionA, VersionB: versionB,
+		Rate: o.rate, Minutes: minutes, CorpusDate: corpusDate, Corpus: string(corpus),
+		Results: results, New: newNames, Streak: streak, RunDir: run,
+	})
+	if err := os.WriteFile(filepath.Join(run, "report.md"), []byte(text), 0o644); err != nil {
+		return false, die("%v", err)
+	}
+	fmt.Fprint(o.stdout, text)
+
+	if err := alertIssue(o, run, text, bad, day, c, streak); err != nil {
+		fmt.Fprintf(o.stderr, "nightly: issue: %v\n", err)
+	}
+	if !o.dry {
+		copyFile(filepath.Join(run, "unexplained.txt"), lastPath)
+		copyFile(filepath.Join(run, "nights.txt"), filepath.Join(o.state, "nights.txt"))
+	}
+	return bad == 0, nil
+}
+
+// alertIssue keeps one open issue titled issueTitle while requests are
+// unexplained, and closes it on a clean night.
+func alertIssue(o runOptions, run, text string, bad int, day string, c Counts, streak int) error {
+	gh := func(args ...string) error {
+		if o.dry {
+			fmt.Fprintf(o.stdout, "[dry-run] gh %s\n", strings.Join(args, " "))
+			return nil
+		}
+		cmd := exec.Command("gh", args...)
+		cmd.Stdout, cmd.Stderr = o.stdout, o.stderr
+		return cmd.Run()
+	}
+	issue := o.issue
+	if issue == "" {
+		out, _ := exec.Command("gh", "issue", "list", "-R", o.issueRepo, "--state", "open", "--label", issueLabel,
+			"--json", "number,title", "-q", fmt.Sprintf(".[] | select(.title == %q) | .number", issueTitle)).Output()
+		issue, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
+	}
+	body := filepath.Join(run, "issue.md")
+	if len(text) > 60000 {
+		text = text[:60000]
+	}
+	if err := os.WriteFile(body, []byte(text), 0o644); err != nil {
+		return err
+	}
+	switch decideIssue(bad, issue) {
+	case issueComment:
+		fmt.Fprintf(o.stdout, "updating issue #%s\n", issue)
+		return gh("issue", "comment", issue, "-R", o.issueRepo, "--body-file", body)
+	case issueCreate:
+		fmt.Fprintln(o.stdout, "opening the issue")
+		labels, _ := exec.Command("gh", "label", "list", "-R", o.issueRepo, "--search", issueLabel,
+			"--json", "name", "-q", ".[].name").Output()
+		if !hasLine(string(labels), issueLabel) {
+			if err := gh("label", "create", issueLabel, "-R", o.issueRepo, "--color", "FBCA04",
+				"--description", "API parity between go.cbioportal.org and production"); err != nil {
+				return err
+			}
+		}
+		return gh("issue", "create", "-R", o.issueRepo, "--title", issueTitle, "--label", issueLabel, "--body-file", body)
+	case issueClose:
+		fmt.Fprintf(o.stdout, "closing issue #%s\n", issue)
+		closing := filepath.Join(run, "close.md")
+		msg := fmt.Sprintf("Clean on %s: %d identical, %d known differences, %d Java nondeterministic of %d requests. Clean nights in a row: %d of %d.\n",
+			day, c.Identical, c.Known, c.Nondeterministic, c.All, streak, goal)
+		if err := os.WriteFile(closing, []byte(msg), 0o644); err != nil {
+			return err
+		}
+		if err := gh("issue", "comment", issue, "-R", o.issueRepo, "--body-file", closing); err != nil {
+			return err
+		}
+		return gh("issue", "close", issue, "-R", o.issueRepo)
+	}
+	return nil
+}
+
+// runParitydiff replays the corpus, B twice, in a memory-capped systemd
+// scope where systemd allows one, so a runaway comparison ends only itself.
+func runParitydiff(o runOptions, bin, corpus, run string) {
+	args := []string{bin, "-corpus", corpus, "-a", o.a, "-b", o.b, "-ua", o.ua, "-rate", o.rate,
+		"-cache", "", "-retry", "2m", "-self-check", "-q", "-json", filepath.Join(run, "results.json"),
+		"-dump", filepath.Join(run, "dump"), "-dump-unexplained", "-dump-max", "1000000"}
+	if exec.Command("systemd-run", "--user", "--scope", "-q", "true").Run() == nil {
+		args = append([]string{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=" + o.memoryMax, "-p", "MemorySwapMax=0"}, args...)
+	}
+	out, err := os.Create(filepath.Join(run, "output.txt"))
+	if err != nil {
+		return
+	}
+	defer out.Close()
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Env = append(os.Environ(), "GOMEMLIMIT="+o.goMemLimit)
+	cmd.Stdout, cmd.Stderr = out, out
+	cmd.Run()
+}
+
+// annotate marks the corpus's requests with the known differences, in place.
+func annotate(loggedgen, corpus string, stderr io.Writer) error {
+	in, err := os.Open(corpus)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(corpus), filepath.Base(corpus)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	cmd := exec.Command(loggedgen, "-annotate")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, tmp, stderr
+	err = cmd.Run()
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), corpus)
+}
+
+// version describes a deployment from its /api/info.
+func version(origin, ua string) string {
+	req, err := http.NewRequest(http.MethodGet, origin+"/api/info", nil)
+	if err != nil {
+		return "unreachable"
+	}
+	req.Header.Set("User-Agent", ua)
+	req.Header.Set("Accept", "application/json")
+	resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
+	if err != nil {
+		return "unreachable"
+	}
+	defer resp.Body.Close()
+	var info struct {
+		PortalVersion       *string `json:"portalVersion"`
+		GitCommitID         *string `json:"gitCommitId"`
+		DBVersion           *string `json:"dbVersion"`
+		DerivedTableVersion *string `json:"derivedTableVersion"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "unreachable"
+	}
+	return describeVersion(info.PortalVersion, info.GitCommitID, info.DBVersion, info.DerivedTableVersion)
+}
+
+func describeVersion(portal, commit, db, derived *string) string {
+	parts := []string{deref(portal)}
+	if c := deref(commit); c != "" && c != "not set" {
+		parts = append(parts, "commit "+cut(c, 12))
+	}
+	if d := deref(db); d != "" {
+		parts = append(parts, "db "+d)
+	}
+	if d := deref(derived); d != "" {
+		parts = append(parts, "derived tables "+d)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// pruneRuns removes run directories older than maxAge, and any response
+// cache left in a run directory.
+func pruneRuns(runs string, maxAge time.Duration) {
+	entries, _ := os.ReadDir(runs)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		p := filepath.Join(runs, e.Name())
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) >= maxAge {
+			os.RemoveAll(p)
+			continue
+		}
+		os.RemoveAll(filepath.Join(p, "cache"))
+	}
+}
+
+// hasSinceHeader reports whether the corpus exists and was written by the
+// windowed generator.
+func hasSinceHeader(path string) bool {
+	data, err := os.ReadFile(path)
+	return err == nil && slicesContainsPrefix(string(data), "# since: ")
+}
+
+func slicesContainsPrefix(text, prefix string) bool {
+	for l := range strings.SplitSeq(text, "\n") {
+		if strings.HasPrefix(l, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLine(text, line string) bool {
+	for l := range strings.SplitSeq(text, "\n") {
+		if l == line {
+			return true
+		}
+	}
+	return false
+}
+
+func readLines(path string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var out []string
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 1<<20), 1<<20)
+	for s.Scan() {
+		if s.Text() != "" {
+			out = append(out, s.Text())
+		}
+	}
+	return out
+}
+
+func writeLines(path string, lines []string) error {
+	var b bytes.Buffer
+	for _, l := range lines {
+		b.WriteString(l + "\n")
+	}
+	return os.WriteFile(path, b.Bytes(), 0o644)
+}
+
+func copyFile(from, to string) error {
+	data, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(to, data, 0o644)
+}
+
+// repoRoot is the nearest directory from dir upwards with a go.mod.
+func repoRoot(dir string) (string, error) {
+	for d := dir; ; {
+		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
+			return d, nil
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return "", errors.New("no go.mod above " + dir + "; pass -root")
+		}
+		d = parent
+	}
+}

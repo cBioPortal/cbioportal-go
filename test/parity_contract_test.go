@@ -8,7 +8,7 @@ import (
 )
 
 // Cases fixed while measuring parity with www.cbioportal.org
-// (cmd/paritydiff, test/parity/corpus.txt), against the Java source.
+// (rewrite/java-v7-to-go/paritydiff, test/parity/corpus.txt), against the Java source.
 
 // CancerStudyMapper: a keyword search without sortBy is ordered by name.
 func TestContractStudyKeywordOrderedByName(t *testing.T) {

@@ -1,5 +1,5 @@
 # API parity corpus: requests the cBioPortal frontend makes, for
-# cmd/paritydiff (see docs/testing.md). Studies: acc_tcga_pan_can_atlas_2018
+# rewrite/java-v7-to-go/paritydiff (see docs/testing.md). Studies: acc_tcga_pan_can_atlas_2018
 # (TCGA, all data types), msk_impact_2017 (targeted panels, SV, ~11k samples),
 # acbc_mskcc_2015 (12 samples), lgg_ucsf_2014 (timeline and treatments).
 #

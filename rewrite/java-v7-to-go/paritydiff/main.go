@@ -3,7 +3,7 @@
 // Go API and the Java API (e.g. www.cbioportal.org, which serves the same data
 // as the go.cbioportal.org mirror).
 //
-//	go run ./cmd/paritydiff -a http://localhost:18091 -b https://www.cbioportal.org \
+//	go run ./rewrite/java-v7-to-go/paritydiff -a http://localhost:18091 -b https://www.cbioportal.org \
 //	    -corpus test/parity/corpus.txt
 //
 // JSON responses are compared after normalization: key order is irrelevant,

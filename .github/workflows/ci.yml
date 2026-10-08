@@ -23,11 +23,11 @@ jobs:
           go-version-file: go.mod
       - name: gofmt
         run: |
-          unformatted=$(gofmt -l cmd internal test)
+          unformatted=$(gofmt -l cmd internal ops rewrite test)
           if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
       - run: go vet ./...
       - run: go build ./...
-      - run: go test ./internal/...
+      - run: go test ./internal/... ./cmd/... ./ops/... ./rewrite/...
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
@@ -81,8 +81,8 @@ jobs:
       - run: go test ./test/
         env:
           API: http://localhost:18090
-      - name: Live ClickHouse tests (parameter round trips, raw sources, study export)
-        run: go test ./internal/clickhouse/ ./internal/api/ -run Live
+      - name: Live ClickHouse tests (parameter round trips, raw sources, study export, import lock, mirror)
+        run: go test ./internal/clickhouse/ ./internal/api/ ./internal/studyimport/ ./rewrite/java-v7-to-go/mirror/ -run Live
         env:
           CLICKHOUSE_TEST_URL: http://localhost:18123
       - name: API log
