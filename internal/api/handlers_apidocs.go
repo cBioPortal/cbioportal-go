@@ -24,7 +24,8 @@ import (
 //   - /api/v3/api-docs/swagger-config and /api/swagger-ui/: Swagger UI.
 //
 // The v3 descriptions and Swagger UI are snapshots of api.cbioportal.org's
-// API (scripts/refresh-api-docs.sh refreshes them).
+// API (scripts/refresh-api-docs.sh refreshes them). Every description is
+// served with the paging parameters go adds laid over it (overlayAPIDoc).
 //
 //go:embed apidocs
 var apiDocsFS embed.FS
@@ -76,6 +77,9 @@ func routeAPIDocs(mux *http.ServeMux, s *State) {
 // requesting origin, as springdoc's "Generated server url".
 func openAPIDoc(file string) http.HandlerFunc {
 	b, err := apiDocsFS.ReadFile("apidocs/" + file)
+	if err == nil {
+		b, err = overlayAPIDoc(file, b)
+	}
 	var before, after []byte
 	if err == nil {
 		yaml := strings.HasSuffix(file, ".yaml")
@@ -131,6 +135,9 @@ var legacyDocs struct {
 func (s *State) legacyAPIDocs(w http.ResponseWriter, r *http.Request) {
 	legacyDocs.once.Do(func() {
 		doc, err := apiDocsFS.ReadFile("apidocs/legacy-api.json")
+		if err == nil {
+			doc, err = overlayAPIDoc("legacy-api.json", doc)
+		}
 		if err != nil {
 			legacyDocs.err = err
 			return
