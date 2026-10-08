@@ -97,7 +97,7 @@ func samplesPerPatient(c *client, rawDB, targetDB string) error {
 	computed := fmt.Sprintf(
 		"SELECT study_id, patient_id, 'SAMPLE_COUNT' AS attr_id, toString(uniqExact(sample_id)) AS attr_value "+
 			"FROM `%s`.clinical_sample WHERE sample_id != '' AND patient_id != '' GROUP BY study_id, patient_id", rawDB)
-	base := fmt.Sprintf("SELECT study_id, patient_id, attr_id, attr_value FROM `%s`.clinical_patient WHERE 1 = 0", rawDB)
+	base := "SELECT '' AS study_id, '' AS patient_id, '' AS attr_id, '' AS attr_value WHERE 0"
 	if ok, _ := c.TableExists("clinical_patient"); ok {
 		sel, err := clinicalLongSQL(c, rawDB, "clinical_patient", "patient_id")
 		if err != nil {
