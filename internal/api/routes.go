@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/session"
 )
 
 func (s *State) routes(mux *http.ServeMux) {
@@ -18,7 +19,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.CatchAll)
 
 	// Session service + public virtual studies
-	s.routeSession(mux)
+	session.New(s.State).RouteSession(mux)
 
 	// Studies
 	mux.HandleFunc("GET /api/studies", s.Studies)

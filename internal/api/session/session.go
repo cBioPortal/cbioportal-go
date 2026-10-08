@@ -1,4 +1,4 @@
-package api
+package session
 
 import (
 	"bytes"
@@ -97,7 +97,7 @@ func readObject(r *http.Request) (map[string]any, error) {
 	return m, nil
 }
 
-func (s *State) routeSession(mux *http.ServeMux) {
+func (s Server) RouteSession(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/session/{type}", s.sessionAdd)
 	mux.HandleFunc("POST /api/session/virtual_study/save", s.sessionAddWith("virtual_study", true))
 	mux.HandleFunc("POST /api/session/custom_gene_list/save", s.sessionAddWith("custom_gene_list", true))
@@ -117,7 +117,7 @@ func (s *State) routeSession(mux *http.ServeMux) {
 
 // ---- create ----
 
-func (s *State) sessionAdd(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionAdd(w http.ResponseWriter, r *http.Request) {
 	typ := r.PathValue("type")
 	if !sessionTypes[typ] {
 		core.ReadBody(r, nil)
@@ -127,13 +127,13 @@ func (s *State) sessionAdd(w http.ResponseWriter, r *http.Request) {
 	s.addSession(w, r, typ, false)
 }
 
-func (s *State) sessionAddWith(typ string, save bool) http.HandlerFunc {
+func (s Server) sessionAddWith(typ string, save bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { s.addSession(w, r, typ, save) }
 }
 
 // addSession applies the per-type owner/users rules of the Java controller and
 // stores the payload, answering {"id": ...}.
-func (s *State) addSession(w http.ResponseWriter, r *http.Request, typ string, save bool) {
+func (s Server) addSession(w http.ResponseWriter, r *http.Request, typ string, save bool) {
 	body, err := readObject(r)
 	if err != nil {
 		core.WriteError(w, http.StatusBadRequest, core.MsgBadJSON)
@@ -219,7 +219,7 @@ func applyVirtualStudyDefaults(data map[string]any) {
 
 // ---- read ----
 
-func (s *State) sessionGet(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionGet(w http.ResponseWriter, r *http.Request) {
 	typ, id := r.PathValue("type"), r.PathValue("id")
 	if !sessionTypes[typ] {
 		core.WriteError(w, http.StatusBadRequest, core.MsgEnumMismatch(sessionTypeClass, typ))
@@ -241,7 +241,7 @@ func (s *State) sessionGet(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, sess)
 }
 
-func (s *State) sessionUserVirtualStudies(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionUserVirtualStudies(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUser(r)
 	if !ok {
 		core.WriteJSON(w, []any{})
@@ -258,7 +258,7 @@ func (s *State) sessionUserVirtualStudies(w http.ResponseWriter, r *http.Request
 
 // virtualStudiesFor lists virtual studies whose users contain name, with
 // dynamic ones resolved against the current data.
-func (s *State) virtualStudiesFor(name string) ([]*sessionstore.Session, error) {
+func (s Server) virtualStudiesFor(name string) ([]*sessionstore.Session, error) {
 	list, err := s.SessionStore().Find("virtual_study", sessionstore.Filter{Users: name})
 	if err != nil {
 		return nil, err
@@ -269,7 +269,7 @@ func (s *State) virtualStudiesFor(name string) ([]*sessionstore.Session, error) 
 	return list, nil
 }
 
-func (s *State) sessionUserCustomGeneLists(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionUserCustomGeneLists(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUser(r)
 	if !ok {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -280,7 +280,7 @@ func (s *State) sessionUserCustomGeneLists(w http.ResponseWriter, r *http.Reques
 
 // writeSessions answers the sessions of typ matching f; a store failure is
 // the unhandled exception's Spring error.
-func (s *State) writeSessions(w http.ResponseWriter, r *http.Request, typ string, f sessionstore.Filter) {
+func (s Server) writeSessions(w http.ResponseWriter, r *http.Request, typ string, f sessionstore.Filter) {
 	list, err := s.SessionStore().Find(typ, f)
 	if err != nil {
 		sessionstore.LogError(err)
@@ -292,7 +292,7 @@ func (s *State) writeSessions(w http.ResponseWriter, r *http.Request, typ string
 
 // sessionFetchByOrigin lists sessions of typ owned by the user whose origin
 // is exactly the posted set of study ids (groups/fetch, custom_data/fetch).
-func (s *State) sessionFetchByOrigin(typ string) http.HandlerFunc {
+func (s Server) sessionFetchByOrigin(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var studyIDs []string
 		core.ReadBody(r, &studyIDs)
@@ -307,7 +307,7 @@ func (s *State) sessionFetchByOrigin(typ string) http.HandlerFunc {
 
 // ---- users add/delete ----
 
-func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 	typ, op, id := r.PathValue("type"), r.PathValue("operation"), r.PathValue("id")
 	switch typ {
 	case "virtual_study", "group", "custom_data", "custom_gene_list":
@@ -360,7 +360,7 @@ func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 
 // recentPageSettings returns the most recently updated settings session of
 // the user for the given origin set and page.
-func (s *State) recentPageSettings(user string, origin []string, page string) (*sessionstore.Session, error) {
+func (s Server) recentPageSettings(user string, origin []string, page string) (*sessionstore.Session, error) {
 	list, err := s.SessionStore().Find("settings", sessionstore.Filter{Owner: user, Origin: origin, HasOrigin: true, Page: page})
 	if err != nil {
 		return nil, err
@@ -390,7 +390,7 @@ func numberToInt64(v any) int64 {
 	return 0
 }
 
-func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := readObject(r)
 	page, _ := body["page"].(string)
 	if err != nil || (body["page"] != nil && page != "study_view" && page != "results_view") {
@@ -443,7 +443,7 @@ func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
+func (s Server) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 	var id struct {
 		Page   string   `json:"page"`
 		Origin []string `json:"origin"`
@@ -480,7 +480,7 @@ func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 
 // filterSamples resolves a studyViewFilter to its samples via the
 // /api/filtered-samples/fetch handler.
-func (s *State) filterSamples(filter any) ([]studies.Sample, error) {
+func (s Server) filterSamples(filter any) ([]studies.Sample, error) {
 	raw, err := json.Marshal(filter)
 	if err != nil {
 		return nil, err
@@ -501,7 +501,7 @@ func (s *State) filterSamples(filter any) ([]studies.Sample, error) {
 
 // populateDynamic recomputes data.studies of a dynamic virtual study from its
 // studyViewFilter. On failure the stored studies are kept.
-func (s *State) populateDynamic(vs *sessionstore.Session) {
+func (s Server) populateDynamic(vs *sessionstore.Session) {
 	if dyn, _ := vs.Data["dynamic"].(bool); !dyn || s.CH == nil {
 		return
 	}
@@ -537,7 +537,7 @@ func groupSamplesByStudy(samples []studies.Sample) []any {
 
 // ---- public virtual studies ----
 
-func (s *State) publicVirtualStudies(w http.ResponseWriter, r *http.Request) {
+func (s Server) publicVirtualStudies(w http.ResponseWriter, r *http.Request) {
 	list, err := s.virtualStudiesFor(allUsers)
 	if err != nil {
 		sessionstore.LogError(err)
@@ -549,7 +549,7 @@ func (s *State) publicVirtualStudies(w http.ResponseWriter, r *http.Request) {
 
 // publisherKey is the key publishing virtual studies requires: the
 // session.endpoint.publisher-api-key property, else PUBLISHER_API_KEY.
-func (s *State) publisherKey() string {
+func (s Server) publisherKey() string {
 	if v := strings.TrimSpace(s.Props["session.endpoint.publisher-api-key"]); v != "" {
 		return v
 	}
@@ -559,7 +559,7 @@ func (s *State) publisherKey() string {
 // checkPublisherKey enforces X-PUBLISHER-API-KEY == the publisher key: a
 // missing header is a 400 (Spring required header), a wrong or unconfigured
 // key 403.
-func (s *State) checkPublisherKey(w http.ResponseWriter, r *http.Request) bool {
+func (s Server) checkPublisherKey(w http.ResponseWriter, r *http.Request) bool {
 	provided, present := r.Header["X-Publisher-Api-Key"]
 	if !present {
 		core.SpringError(w, r, http.StatusBadRequest)
@@ -573,7 +573,7 @@ func (s *State) checkPublisherKey(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (s *State) cancerTypeExists(id string) (bool, error) {
+func (s Server) cancerTypeExists(id string) (bool, error) {
 	if s.CH == nil {
 		return false, errors.New("no database")
 	}
@@ -589,7 +589,7 @@ func (s *State) cancerTypeExists(id string) (bool, error) {
 	return len(rows) > 0 && rows[0].N > 0, nil
 }
 
-func (s *State) studyExists(id string) (bool, error) {
+func (s Server) studyExists(id string) (bool, error) {
 	if s.CH == nil {
 		return false, nil
 	}
@@ -606,7 +606,7 @@ func (s *State) studyExists(id string) (bool, error) {
 
 // applyPublishMetadata sets typeOfCancerId / pmid from the query string when
 // given; false (after answering 400) on an unknown cancer type.
-func (s *State) applyPublishMetadata(w http.ResponseWriter, r *http.Request, data map[string]any) bool {
+func (s Server) applyPublishMetadata(w http.ResponseWriter, r *http.Request, data map[string]any) bool {
 	q := r.URL.Query()
 	if q.Has("typeOfCancerId") {
 		toc := q.Get("typeOfCancerId")
@@ -622,7 +622,7 @@ func (s *State) applyPublishMetadata(w http.ResponseWriter, r *http.Request, dat
 	return true
 }
 
-func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	if !s.checkPublisherKey(w, r) {
 		return
@@ -696,7 +696,7 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *State) unpublishVirtualStudy(w http.ResponseWriter, r *http.Request) {
+func (s Server) unpublishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	core.ReadBody(r, nil)
 	if !s.checkPublisherKey(w, r) {
 		return

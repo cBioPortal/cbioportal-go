@@ -1,4 +1,4 @@
-package api
+package session
 
 import (
 	"bytes"
@@ -256,9 +256,9 @@ func newRemoteSessionTestEnv(t *testing.T) (*sessionTestEnv, *fakeSessionService
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newState(&core.State{Sessions: st})
+	s := New(&core.State{Sessions: st})
 	mux := http.NewServeMux()
-	s.routeSession(mux)
+	s.RouteSession(mux)
 	return &sessionTestEnv{t: t, s: s, mux: mux}, f
 }
 
@@ -475,7 +475,7 @@ func TestConfigureSessions(t *testing.T) {
 	t.Setenv("SESSION_SERVICE_URL", "")
 	t.Setenv("SESSION_SERVICE_PASSWORD", "")
 
-	s := newState(&core.State{Props: map[string]string{"session.service.url": ""}})
+	s := New(&core.State{Props: map[string]string{"session.service.url": ""}})
 	if err := s.ConfigureSessions(); err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestConfigureSessions(t *testing.T) {
 		t.Errorf("no session service: %T", s.SessionStore())
 	}
 
-	s = newState(&core.State{Props: map[string]string{
+	s = New(&core.State{Props: map[string]string{
 		"session.service.url":      "http://sess:5000/api/sessions/p/",
 		"session.service.user":     "u",
 		"session.service.password": "hunter2",
@@ -498,7 +498,7 @@ func TestConfigureSessions(t *testing.T) {
 
 	t.Setenv("SESSION_SERVICE_URL", "http://env:5000/api/sessions/p")
 	t.Setenv("SESSION_SERVICE_PASSWORD", "envsecret")
-	s = newState(&core.State{})
+	s = New(&core.State{})
 	if err := s.ConfigureSessions(); err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestConfigureSessions(t *testing.T) {
 		t.Errorf("from the environment: %#v", s.SessionStore())
 	}
 
-	s = newState(&core.State{Props: map[string]string{"session.service.url": "sess:5000"}})
+	s = New(&core.State{Props: map[string]string{"session.service.url": "sess:5000"}})
 	if err := s.ConfigureSessions(); err == nil {
 		t.Error("invalid URL accepted")
 	}
@@ -519,7 +519,7 @@ func TestConfigureSessions(t *testing.T) {
 
 func TestPublisherKeyProperty(t *testing.T) {
 	t.Setenv("PUBLISHER_API_KEY", "env")
-	s := newState(&core.State{})
+	s := New(&core.State{})
 	if s.publisherKey() != "env" {
 		t.Errorf("env key: %q", s.publisherKey())
 	}
