@@ -86,7 +86,8 @@ a transform runs. If a transform fails, nothing changes.
 copy of cBioPortal's production ClickHouse database. Most of them become
 views over production's own `*_derived` tables. This is how go.cbioportal.org
 gets the same data as www.cbioportal.org (see
-[Deployment](deployment.md#mirroring-production)).
+[Deployment](deployment.md#mirroring-production)). It is needed only while
+go replaces the Java cBioPortal.
 
 ### The API
 
@@ -105,8 +106,9 @@ statistics and errors.
 | `cmd/cbioportal-import`, `cmd/cbioportal-api` | The two programs: the importer and the API server. |
 | `cmd/apibench` | A tool that times slow, heavy API requests. |
 | `cmd/e2ereport` | A tool that summarizes the results of an e2e test run. |
-| `cmd/paritydiff` | A tool that sends the same requests to go and to another server (such as www) and compares the answers. |
 | `internal/parser`, `internal/ingest` | Reading study files and streaming them into staging tables. |
+| `internal/studyimport` | Importing into a portal that is being served: the import lock and the import steps (`import-study`). |
+| `internal/datahub` | Checking out datahub studies with their large (LFS) files (`fetch-datahub`). |
 | `internal/reference` | Loading genes, aliases, cancer types and reference-genome genes from the seed file. |
 | `internal/transform` | The SQL that builds the normalized model and the `*_derived` tables. |
 | `internal/api` | The HTTP handlers, one per API endpoint. |
@@ -115,6 +117,8 @@ statistics and errors.
 | `internal/config` | Reading settings, including an existing `portal.properties`. |
 | `internal/metrics` | Server metrics in the Prometheus format. |
 | `internal/clickhouse` | The client that talks to ClickHouse (next section). |
+| `ops/cbioportal.org` | The cBioPortal team's own jobs (`cbioportal-ops`): PR previews and hub.cbioportal.org imports. |
+| `rewrite/java-v7-to-go` | Tools for the move from Java cBioPortal, run as `cbioportal-rewrite-test java-v7-to-go ...`: the production mirror, the nightly parity check, and `paritydiff`, which sends the same requests to go and to another server (such as www) and compares the answers. Deleting the folder removes them. |
 
 ## The ClickHouse client
 

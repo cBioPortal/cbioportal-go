@@ -64,7 +64,7 @@ catches problems the earlier ones cannot.
 | Importer contracts | What the importer stores, checked rule by rule against cbioportal-core (case lists, default values, ids). | `test/import_parity_test.go` |
 | Website e2e tests | cBioPortal's own Playwright test suite (about 365 test files). It drives the real website in a browser against go, logs in through Keycloak, and uses the same settings as cBioPortal's CI. | `test/e2e_api.sh`, `test/run_e2e.sh` |
 | Before/after replay | The same requests sent to a changed build and to the previous build, and the answers compared byte by byte. Used on test data and on production requests. | Refactoring and speed work |
-| Production traffic | Real requests sent to both go and Java, and the answers compared. See [the next section](#production-traffic). | `cmd/paritydiff`, nightly job |
+| Production traffic | Real requests sent to both go and Java, and the answers compared. See [the next section](#production-traffic). | `rewrite/java-v7-to-go/paritydiff`, nightly job |
 | Mirrored live traffic | A share of real traffic is copied to go to measure load, speed, errors and database cost. See [Running next to production](#running-next-to-production). | go.cbioportal.org |
 
 ## Production traffic
@@ -78,12 +78,12 @@ four steps:
    their method, path, query, body and status. They are stored in the
    `cbioportal_qc.logged_requests` table. This is the same data used by the
    quality-check tool in cBioPortal/cbioportal#12238.
-2. **Pick a sample.** `test/parity/loggedgen` picks a set of requests that
+2. **Pick a sample.** `rewrite/java-v7-to-go/loggedgen` picks a set of requests that
    covers every endpoint, with more requests for the busy ones. It leaves
    out anything that changes data, such as saving sessions, publishing
    virtual studies, tokens or clearing the cache. It also marks the
    differences we already know about and have explained.
-3. **Compare.** `cmd/paritydiff` sends each request to go.cbioportal.org and
+3. **Compare.** `rewrite/java-v7-to-go/paritydiff` sends each request to go.cbioportal.org and
    to api.cbioportal.org. It then compares the two JSON answers. First it
    evens out things Java does not promise to keep the same, such as the
    order of keys, the order of unsorted lists, and tiny differences in

@@ -15,7 +15,7 @@ test data as go.
 
 ## API parity with www.cbioportal.org
 
-"Parity" means go gives the same answer as Java. `cmd/paritydiff` sends a
+"Parity" means go gives the same answer as Java. `rewrite/java-v7-to-go/paritydiff` sends a
 list of API requests to two servers and compares the responses.
 
 - The order of keys in JSON does not matter.
@@ -37,7 +37,7 @@ lgg_ucsf_2014). Run it against an API serving a copy of production's data
 (see [Deployment](../deployment.md#mirroring-production)):
 
 ```bash
-go run ./cmd/paritydiff -a http://localhost:18091 -b https://www.cbioportal.org \
+go run ./rewrite/java-v7-to-go/paritydiff -a http://localhost:18091 -b https://www.cbioportal.org \
   -corpus test/parity/corpus.txt -q -dump .parity/dump
 ```
 
@@ -58,11 +58,11 @@ differences. These are listed in
 ### Logged production requests
 
 Production logs the API requests it receives in the ClickHouse table
-`cbioportal_qc.logged_requests`. `test/parity/loggedgen` picks a sample of
+`cbioportal_qc.logged_requests`. `rewrite/java-v7-to-go/loggedgen` picks a sample of
 them, GET and POST, in proportion to how often each endpoint is called.
 
 It also marks requests whose difference is expected. The list is in
-`test/parity/loggedgen/known.go`:
+`rewrite/java-v7-to-go/loggedgen/known.go`:
 
 - **Saved sessions:** sessions and custom data exist only in www's session
   store.
@@ -78,8 +78,8 @@ api.cbioportal.org, with go serving a copy of production built by
 `transform --from-prod`:
 
 ```bash
-go run ./test/parity/loggedgen -n 500 > .parity/logged.txt      # needs CLICKHOUSE_URL/USER/PASSWORD
-go run ./cmd/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
+go run ./rewrite/java-v7-to-go/loggedgen -n 500 > .parity/logged.txt      # needs CLICKHOUSE_URL/USER/PASSWORD
+go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
   -ua cbioportal-go-parity -a http://localhost:18091 -cache .parity/cache-api -q
 ```
 
@@ -90,12 +90,19 @@ reads the whole `clinical_event_data` table.
 
 ### Nightly parity job
 
-`test/parity/nightly.sh` compares go.cbioportal.org with api.cbioportal.org
-on real production traffic every day. For each request it reports whether the
+`cbioportal-rewrite-test java-v7-to-go parity run` compares go.cbioportal.org
+with api.cbioportal.org on real production traffic every day. For each request it reports whether the
 answers are identical, a known difference, or unexplained.
 
-**The request list.** `test/parity/logged_corpus.sh` builds a list of about
-5,000 logged requests:
+```bash
+go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--regen] [--dry-run]
+```
+
+`test/parity/nightly.sh` runs the same command. `parity -h` lists the
+settings (environment variables such as `PARITY_DIR`, `A`, `B`, `RATE`).
+
+**The request list.** `parity corpus` (or `test/parity/logged_corpus.sh`)
+builds a list of about 5,000 logged requests:
 
 - They come from a capture window of `cbioportal_qc.logged_requests` set by
   `CORPUS_SINCE` (default 2026-10-07 22:30 UTC) and `CORPUS_UNTIL`. Each
@@ -132,8 +139,8 @@ once more after 2 minutes, so a server restart is not reported as a bug.
   lines of the difference, marking those that are new since the last run.
 
 `runs/<date>/dump` keeps both responses of each unexplained request, up to
-1 MB each. Runs are kept for 14 days. The script exits with status 1 when
-anything is unexplained.
+1 MB each. Runs are kept for 14 days. The command exits with status 1 when
+anything is unexplained, 2 when the check itself fails.
 
 **The GitHub issue.** While anything is unexplained, the job keeps one issue
 open in this repository, "Nightly parity: unexplained differences", with the
@@ -146,11 +153,18 @@ report as a comment, and closes it after the first clean night.
 | `--regen` | rebuild the request list first (also done when the list has no window) |
 
 **Where it runs.** On the parity host, cron starts it at 15:17 UTC, after the
-mirror is rebuilt at 14:00. `~/.local/share/cbioportal-go-parity/run.sh`
-checks out `origin/main` (or the ref in `state/ref`) into `src/`, keeps the
+mirror is rebuilt at 14:00:
+
+```
+17 15 * * * cd ~/projects/cbioportal-go && go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity nightly
+```
+
+`parity nightly` works in `~/.local/share/cbioportal-go-parity` (`-home`). It
+checks out `origin/main` (or the ref in `state/ref`, e.g. `local/<branch>`
+from the local clone) into `src/`, runs `parity run` from there, keeps the
 record of nights in `state/` (`PARITY_STATE`), rebuilds the request list on
-Sundays, and logs to `logs/<date>.log`. A lock stops two runs from
-overlapping.
+Sundays, and logs to `logs/<date>.log` (kept 60 days). A lock stops two runs
+from overlapping.
 
 ## Java oracle
 
@@ -170,7 +184,7 @@ and its derived-table script. This takes about 2 minutes.
 ```bash
 test/java_oracle.sh db cbioportal-test      # needs ClickHouse on :18123 (container ch-dge)
 test/java_oracle.sh start
-go run ./cmd/paritydiff -a http://localhost:18090 -b http://localhost:18095 \
+go run ./rewrite/java-v7-to-go/paritydiff -a http://localhost:18090 -b http://localhost:18095 \
   -corpus test/parity/fixtures.txt -cache '' -rate 0 -q -dump .parity/oracle
 API=http://localhost:18095 go test ./test/ -run Oracle   # the oracle cases hold for Java too
 test/java_oracle.sh stop

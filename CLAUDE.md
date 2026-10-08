@@ -32,19 +32,29 @@ for invalid requests) still matches Java. Every fix is listed in
 - `cmd/cbioportal-import` — ELT importer: `ingest` streams study files into a
   raw staging DB (schema-on-read), `transform` builds the normalized model and
   the study-view `*_derived` tables with SQL in the target DB,
-  `load-reference` loads genes/aliases/cancer types/reference genomes.
+  `load-reference` loads genes/aliases/cancer types/reference genomes,
+  `import-study` imports into a served portal (lock + staged publish),
+  `fetch-datahub` checks out datahub studies with their LFS files.
 - `cmd/cbioportal-api` — the REST API plus the frontend build (single origin),
   `net/http` with Go 1.22 routing.
 - `internal/api` handlers; `internal/transform` the SQL model;
   `internal/databin`, `internal/stats` ports of Java's binning and statistics;
-  `internal/clickhouse` HTTP client.
+  `internal/clickhouse` HTTP client; `internal/studyimport`,
+  `internal/datahub` the import lock/flow and datahub checkouts.
+- Code is placed by who uses it: generic in `cmd/` + `internal/`;
+  cbioportal.org-only in `ops/cbioportal.org/` (`cbioportal-ops`: PR
+  previews, hub imports); Java-migration-only in `rewrite/<migration>/`
+  (`cbioportal-rewrite-test java-v7-to-go mirror|parity`, `paritydiff`,
+  `loggedgen`), so deleting that folder removes it. The `.sh` files in
+  `ops/cbioportal.org/` are thin wrappers kept for the k8s manifests'
+  `/app/deploy/*.sh` paths.
 
 See README.md for the stack diagram and quick start.
 
 ## Build & test
 
 ```bash
-make build            # bin/cbioportal-import, bin/cbioportal-api
+make build            # bin/: cbioportal-import, -api, -ops, -rewrite-test
 make test             # unit tests, no services
 make lint             # gofmt + vet (CI)
 make contract         # contract tests against a running API (API=...)

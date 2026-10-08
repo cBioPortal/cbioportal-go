@@ -34,8 +34,10 @@ What is inside:
 |---|---|
 | `/usr/local/bin/cbioportal-api` | the API server (the default command) |
 | `/usr/local/bin/cbioportal-import` | the importer |
+| `/usr/local/bin/cbioportal-ops` | the cBioPortal team's jobs: PR previews and the hub ([ops/cbioportal.org](../ops/cbioportal.org/)) |
+| `/usr/local/bin/cbioportal-rewrite-test` | tools for the move from Java cBioPortal, such as the production mirror ([rewrite/](../rewrite/)) |
 | `/app/frontend` | the built frontend |
-| `/app/deploy` | deployment scripts |
+| `/app/deploy` | deployment scripts, which the cluster's jobs run |
 
 The image is based on Alpine Linux, runs as a non-root user (uid 10001) and
 listens on port 8080. The build has no `.git` folder, so two build arguments
@@ -114,7 +116,23 @@ address. The ingress (the entry point into the cluster) sends
 ### Loading studies
 
 Use this when a portal should be loaded from study files instead of copied
-from production. [`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh)
+from production.
+
+To add studies to a portal that is being served, use `import-study`. It
+loads the studies and rebuilds the portal in one step, and is safe while
+the portal serves: one import runs at a time (a lock table in the raw
+database), the new tables are swapped in together at the end, and a study
+that fails is taken out again. `fetch-datahub` checks out datahub studies,
+with their large files from datahub's own file store:
+
+```bash
+cbioportal-import fetch-datahub datahub public/acbc_mskcc_2015
+cbioportal-import import-study datahub/public/acbc_mskcc_2015 --db cbioportal \
+  --seed datahub/seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz \
+  --gene-panels datahub/reference_data/gene_panels
+```
+
+[`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh)
 copies studies already loaded into a local ClickHouse to another ClickHouse,
 then builds the portal database there:
 
@@ -141,9 +159,11 @@ ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE, DROP VIEW and TRUNCATE on them.
 
 go.cbioportal.org shows exactly the same data as www.cbioportal.org. It does
 this by copying production's database every hour, rather than loading study
-files itself. The hourly job is
+files itself. This is needed only while go replaces the Java cBioPortal, so
+the code is in [rewrite/](../rewrite/). The hourly job runs
 [`ops/cbioportal.org/mirror-prod.sh`](../ops/cbioportal.org/mirror-prod.sh),
-and it works like the LibreChat copy job:
+which calls `cbioportal-rewrite-test java-v7-to-go mirror`. It works like
+the LibreChat copy job:
 
 1. It reads which production copy (blue or green) is live and when it was
    last imported, from `publicdb_update_management_database.update_status`.
@@ -154,7 +174,7 @@ and it works like the LibreChat copy job:
    `cbioportal_public_<color>` into `<prefix>_<color>_ref`, except the login
    and password tables. ClickHouse's `CREATE TABLE … CLONE AS` makes this
    copy without duplicating the data on disk, in about 20 s.
-3. It builds the portal database from the clone:
+3. It builds the portal database from the clone, as this command does:
 
    ```bash
    cbioportal-import transform --from-prod \
@@ -169,7 +189,7 @@ and it works like the LibreChat copy job:
 #### What `transform --from-prod` builds
 
 `transform --from-prod` starts from production's tables instead of study
-files. Those are the Java importer's tables plus the `*_derived` tables
+files. Like the mirror, it exists only for the move from Java. Those are the Java importer's tables plus the `*_derived` tables
 production builds for the study view. From them it builds every table and
 view the API reads, with the same shape and meaning as a normal import. It
 takes about a minute on ClickHouse Cloud and copies little data.
@@ -206,7 +226,7 @@ profile's pivot threshold, sort order and patient level.
 #### Known differences from www
 
 On the mirror, any difference from www.cbioportal.org comes from the API
-code, not from the data. `cmd/paritydiff` measures them (see
+code, not from the data. `paritydiff` measures them (see
 [Parity with Java](rewrite/parity.md#api-parity-with-wwwcbioportalorg)).
 
 | Where | What happens |
@@ -234,19 +254,21 @@ in knowledgesystems-k8s-deployment under `apps/cbioportal-hub/`.
 
 For each new commit on such a pull request, Argo CD (the tool that deploys to
 the cluster) starts a job that runs
-[`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh).
-The script:
+[`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh),
+which calls `cbioportal-ops hub import-pr`. The job:
 
 1. checks out the studies the pull request changes;
-2. loads each one (`ingest`), then runs `transform` once;
+2. imports them as `cbioportal-import import-study` does (see
+   [Loading studies](#loading-studies));
 3. reports a Check Run and a Deployment on the pull request.
 
 Imports from different pull requests wait for each other, using a lock table
-in the raw database. If a study fails to load, it is removed
-(`cbioportal-import remove-study`). If `transform` fails, the pull request's
-studies are removed and the hub is rebuilt without them. Meanwhile the hub
-keeps serving its previous build. The script's header lists its settings. It
-can also run locally against any ClickHouse and GitHub API (`GITHUB_API`).
+in the raw database. If a study fails to load, it is removed. If the
+transform fails, the pull request's studies are removed and the hub is
+rebuilt without them. Meanwhile the hub keeps serving its previous build.
+The settings are listed in [ops/cbioportal.org](../ops/cbioportal.org/). The
+job can also run locally against any ClickHouse and GitHub API
+(`GITHUB_API`).
 
 ## PR previews
 
@@ -261,24 +283,28 @@ the data ([template](../.github/pull_request_template.md)):
 
 | `preview-data:` | Data |
 |---|---|
-| `prod` (default) | a copy of production, made as for the mirror (`mirror-prod.sh` with `TARGET_DB`), then `transform --from-prod` |
+| `prod` (default) | a copy of production, made as for the mirror (`cbioportal-rewrite-test java-v7-to-go mirror` with `TARGET_DB`) |
 | `datahub-pr <N>` | reference data plus the studies that cBioPortal/datahub#N changes, at its latest commit (limit them with `preview-studies:`) |
 | `studies` | reference data plus the datahub master studies listed under `preview-studies:` |
 
 [`ops/cbioportal.org/pr-preview-setup.sh`](../ops/cbioportal.org/pr-preview-setup.sh)
-runs every few minutes in the cluster. It rebuilds a preview from empty
+(`cbioportal-ops preview setup`) runs every few minutes in the cluster. It
+rebuilds a preview from empty
 databases only when the pull request's latest commit or its configuration has
 changed. It records what it built in `<raw>._preview_setup`, and reports a
 "Preview" Check Run and a Deployment on the pull request.
 
 Closing the pull request or removing the label deletes the preview, and
-`pr-preview-teardown.sh` drops its databases. The manifests are in
+`pr-preview-teardown.sh` (`cbioportal-ops preview teardown`) drops its
+databases. A cleanup job (`cbioportal-ops preview gc`) also removes the
+previews of closed or unlabelled pull requests. The manifests are in
 knowledgesystems-k8s-deployment under `apps/cbioportal-go-preview/`.
 
-To run the scripts locally:
+To run the jobs locally:
 
 ```bash
+make build && export PATH=$PWD/bin:$PATH
 PR_NUMBER=9999 HEAD_SHA=abc1234 PR_BODY="$(cat body.md)" WORKDIR=/tmp/pr \
-  ops/cbioportal.org/pr-preview-setup.sh    # prod mode: also SRC_DB=<a Java-schema db>
-ops/cbioportal.org/pr-preview-teardown.sh 9999
+  cbioportal-ops preview setup     # prod mode: also SRC_DB=<a Java-schema db>
+cbioportal-ops preview teardown 9999
 ```

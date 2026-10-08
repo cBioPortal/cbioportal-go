@@ -48,7 +48,7 @@ marker a failed study export writes, which would need an export that fails.
   - A unit test in `internal/`.
   - A line in a parity list. Parity checks send the same requests to go
     and to Java and compare the answers. "known.go" is
-    `test/parity/loggedgen/known.go`, the list of differences we expect
+    `rewrite/java-v7-to-go/loggedgen/known.go`, the list of differences we expect
     when replaying requests that production logged. "corpus" names a
     request in `test/parity/corpus.txt`, a hand-written list of requests
     the frontend makes. "fixtures" is the run against the Java backend
