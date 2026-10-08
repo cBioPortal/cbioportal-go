@@ -278,8 +278,9 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 	// Every value row is of the profile's study, so only that study's
 	// samples (a key range) are joined; rows resolved through gene_key_map
 	// carry one of the requested genes, so only those are joined.
+	keyMapped := s.geneKeyMapped(table)
 	genes := "cbioportal_ref.gene"
-	if geneKeyMapSources[table] && len(f.EntrezGeneIDs) > 0 {
+	if keyMapped && len(f.EntrezGeneIDs) > 0 {
 		genes = "(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (" + intListSQL(f.EntrezGeneIDs) + "))"
 	}
 	return fmt.Sprintf(
@@ -290,7 +291,7 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 			"LEFT JOIN %s rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL",
 		javaTruncatedValueSQL("m.value"), extra,
-		resolvedEntrezSQL(args, table, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
+		resolvedEntrezSQL(args, table, keyMapped, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
 		byStudy(meta.StudyID).samples(args), genes), meta, true
 }
 
@@ -300,20 +301,36 @@ var geneKeyMapSources = map[string]bool{
 	"cna_matrix": true, "cna_discrete_long": true, "mrna_expression_matrix": true, "methylation_matrix": true,
 }
 
+// geneKeyMapped reports whether gene_key_map resolves the genes of a staging
+// table: always for geneKeyMapSources, and for another table when
+// gene_key_map holds keys of it (a production clone maps its protein levels
+// there too, by the symbol its rows are stored under).
+func (s *State) geneKeyMapped(table string) bool {
+	if geneKeyMapSources[table] {
+		return true
+	}
+	type keyRow struct {
+		N uint8 `json:"n"`
+	}
+	rows, err := cachedQueryP[keyRow](s, "SELECT toUInt8(1) AS n FROM gene_key_map WHERE source = {source:String} LIMIT 1",
+		ch.Params{"source": table})
+	return err == nil && len(rows) > 0
+}
+
 // resolvedEntrezSQL selects a profile's rows of a staged per-gene table (read
 // from src, a source with at least geneMatrixCols) with an `entrez` column
 // holding the gene each row is stored under: the importer's resolution
 // (entrez id, symbol or unique alias, recorded in gene_key_map) where the
-// transform provides it — rows it could not resolve are dropped — and
-// otherwise the row's entrez id or its symbol's. entrez, if non-empty,
+// transform provides it (keyMapped) — rows it could not resolve are dropped
+// — and otherwise the row's entrez id or its symbol's. entrez, if non-empty,
 // restricts the result to those genes. Values are bound in args.
-func resolvedEntrezSQL(args *sqlArgs, table, src string, meta profileMeta, where string, entrez []int64) string {
+func resolvedEntrezSQL(args *sqlArgs, table string, keyMapped bool, src string, meta profileMeta, where string, entrez []int64) string {
 	ids := make([]string, len(entrez))
 	for i, e := range entrez {
 		ids[i] = fmt.Sprintf("%d", e)
 	}
 	idList := strings.Join(ids, ", ")
-	if geneKeyMapSources[table] {
+	if keyMapped {
 		keyFilter := fmt.Sprintf("source = '%s' AND study_id = %s AND profile_stable_id = %s",
 			table, args.str(meta.StudyID), args.str(meta.StableID))
 		if len(entrez) > 0 {
