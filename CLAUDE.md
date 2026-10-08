@@ -27,6 +27,16 @@ Everything else (fields, field order, shapes, statistics, error statuses
 for invalid requests) still matches Java. Every fix is listed in
 `docs/rewrite/java-quirks.md`, with a test that pins it.
 
+### Upstream changes go does not port
+
+The daily upstream sync ports Java changes into go. These are deliberately
+left out; skip them (and later changes that only tune them) and note the
+skip in the sync report:
+
+| Upstream change | Why go leaves it out |
+|---|---|
+| cBioPortal/cbioportal#12401: `bulk_request.max_matrix_size` / `max_rows_per_request` reject large molecular-data and discrete-copy-number requests with 400 | It protects Java's heap. go streams these responses, so its memory stays flat; it bounds the ClickHouse side with per-query memory and time limits instead, and offers optional paging. If production enables the limits, Java's 400s on large requests are a known parity difference (go answers the data). |
+
 ## Architecture
 
 - `cmd/cbioportal-import` — ELT importer: `ingest` streams study files into a
