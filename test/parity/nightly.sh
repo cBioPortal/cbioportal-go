@@ -3,25 +3,32 @@
 # (test/parity/logged_corpus.sh) against go.cbioportal.org (A, the Go API on
 # the mirror) and api.cbioportal.org (B, the Java API of production), writes
 # a short report, and keeps one GitHub issue open while unexplained
-# differences, status mismatches or errors remain.
+# differences, status mismatches or errors remain. Every request goes to B
+# twice (paritydiff -self-check): where B's two answers differ, the request
+# is nondeterministic in Java, reported apart and never unexplained.
 #
 #   test/parity/nightly.sh [--regen] [--dry-run]
 #
-#   --regen    regenerate the corpus first (also done when there is none)
-#   --dry-run  print the GitHub issue actions and body instead of running gh
+#   --regen    regenerate the corpus first (also done when there is none, or
+#              it predates the windowed generator)
+#   --dry-run  print the GitHub issue actions and body instead of running gh,
+#              and record nothing in the state directory
 #
 # Read-only: the corpus holds no writing endpoints and B is sent at most
-# RATE requests per second. Responses are not cached (a night's would take
-# several GB); only the bodies of the unexplained requests are kept, cut to
-# 1 MB each (runs/<date>/dump).
+# RATE requests per second, both of its runs together. Responses are not
+# cached (a night's would take several GB); only the bodies of the
+# unexplained requests are kept, cut to 1 MB each (runs/<date>/dump).
 #
 # Environment:
 #   PARITY_DIR  corpus.txt, runs/<date>/ (results.json, output.txt,
 #               report.md, issue.md, dump/; runs older than 14 days are
 #               pruned) and
 #               last-unexplained.txt; default .parity/nightly
+#   PARITY_STATE  nights.txt, one "<date> clean|unclean" line per night,
+#               from which the report counts the clean nights in a row
+#               (7 are the go/no-go for api.cbioportal.org); default PARITY_DIR
 #   A, B        origins (default https://go.cbioportal.org, https://api.cbioportal.org)
-#   RATE        requests per second to B (default 4)
+#   RATE        requests per second to B, both runs together (default 4)
 #   UA          User-Agent (api.cbioportal.org refuses browsers; default cbioportal-go-parity)
 #   ISSUE_REPO  repository of the alert issue (default cBioPortal/cbioportal-go)
 #   PARITY_ISSUE  the alert issue's number, instead of looking it up (for --dry-run tests)
@@ -32,6 +39,8 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DIR="${PARITY_DIR:-$ROOT/.parity/nightly}"
+STATE="${PARITY_STATE:-$DIR}"
+GOAL=7 # clean nights in a row for the api.cbioportal.org go/no-go
 A="${A:-https://go.cbioportal.org}"
 B="${B:-https://api.cbioportal.org}"
 RATE="${RATE:-4}"
@@ -55,9 +64,9 @@ die() { echo "nightly: $*" >&2; exit 2; }
 DAY="$(date -u +%F)"
 RUN="$DIR/runs/$DAY"
 CORPUS="$DIR/corpus.txt"
-mkdir -p "$DIR/runs" || die "cannot create $DIR"
+mkdir -p "$DIR/runs" "$STATE" || die "cannot create $DIR or $STATE"
 
-if [ -n "$regen" ] || [ ! -s "$CORPUS" ]; then
+if [ -n "$regen" ] || ! grep -q '^# since: ' "$CORPUS" 2>/dev/null; then
   "$ROOT/test/parity/logged_corpus.sh" "$CORPUS" || die "corpus generation failed"
 fi
 # Expectations added since the corpus was written apply to it as well.
@@ -90,7 +99,7 @@ VB="$(version "$B")"
 
 start=$(date +%s)
 "$DIR/bin/paritydiff" -corpus "$CORPUS" -a "$A" -b "$B" -ua "$UA" -rate "$RATE" \
-  -cache '' -retry 2m -q -json "$RUN/results.json" \
+  -cache '' -retry 2m -self-check -q -json "$RUN/results.json" \
   -dump "$RUN/dump" -dump-unexplained -dump-max 1000000 >"$RUN/output.txt" 2>&1
 rc=$?
 minutes=$(( ($(date +%s) - start + 59) / 60 ))
@@ -104,7 +113,10 @@ n_known=$(count known)
 n_differs=$(count differs)
 n_status=$(count status)
 n_error=$(count error)
+n_nondet=$(count nondeterministic)
 n_retried=$(jq '[.[] | select(.retried)] | length' "$R")
+n_java_differs=$(jq '[.[] | select(.reference == "differs")] | length' "$R")
+n_java_unverified=$(jq '[.[] | select(.reference == "unverified")] | length' "$R")
 
 if [ "$n_differs" -gt 0 ]; then result="unexplained diff"
 elif [ "$n_status" -gt 0 ]; then result="status mismatch"
@@ -121,19 +133,49 @@ touch "$DIR/last-unexplained.txt"
 comm -13 "$DIR/last-unexplained.txt" "$RUN/unexplained.txt" >"$RUN/new.txt"
 n_new=$(wc -l <"$RUN/new.txt")
 
+# Clean nights in a row, tonight included: the recorded nights with tonight's
+# replaced, counted back from today while each day was clean.
+night=unclean
+[ "$bad" -eq 0 ] && night=clean
+touch "$STATE/nights.txt"
+{ grep -v "^$DAY " "$STATE/nights.txt"; echo "$DAY $night"; } | sort >"$RUN/nights.txt"
+streak=0 d="$DAY"
+while grep -qx "$d clean" "$RUN/nights.txt"; do
+  streak=$((streak + 1))
+  d=$(date -u -d "$d - 1 day" +%F)
+done
+
+# The corpus header's description of its capture window.
+header() { sed -n "s/^# $1//p" "$CORPUS"; }
+
 {
   echo "# Nightly parity $DAY"
   echo
   echo "Result: **$result** ($bad unexplained of $n_all requests, $n_new new since the last run)"
   echo
+  echo "Clean nights in a row: **$streak** (go/no-go for api.cbioportal.org: $GOAL)"
+  echo
+  echo "Java nondeterministic: $n_java_differs requests answered differently by B's two runs, $n_nondet of them also differing from A (not counted as unexplained)$([ "$n_java_unverified" -gt 0 ] && echo "; $n_java_unverified not verified (B's second answer failed)")"
+  echo
   echo "- A: $A ($VA)"
-  echo "- B: $B ($VB)"
-  echo "- Corpus: $n_all requests sampled from production traffic, generated $(date -u -r "$CORPUS" +%F); $minutes min at $RATE/s"
+  echo "- B: $B ($VB), every request sent twice"
+  echo "- Corpus: $n_all requests sampled from production traffic, generated $(date -u -r "$CORPUS" +%F); $minutes min at $RATE/s to B"
+  echo "- Window: $(header 'window: ')"
+  header 'server ' | sed 's/^/- Window traffic on /'
+  echo "- Endpoints: $(header 'endpoints: ')"
+  echo
+  echo "| server | requests | identical | known | Java nondeterministic | unexplained |"
+  echo "|---|---:|---:|---:|---:|---:|"
+  jq -r 'group_by(.name | startswith("api-")) | reverse | .[]
+    | (if (.[0].name | startswith("api-")) then "api.cbioportal.org" else "www.cbioportal.org" end) as $server
+    | def n(f): map(select(f)) | length;
+      "| \($server) | \(length) | \(n(.outcome == "identical")) | \(n(.outcome == "known")) | \(n(.outcome == "nondeterministic")) | \(n(.outcome | IN("differs", "status", "error"))) |"' "$R"
   echo
   echo "| outcome | requests |"
   echo "|---|---:|"
   echo "| identical | $n_identical |"
   echo "| known difference | $n_known |"
+  echo "| Java nondeterministic | $n_nondet |"
   echo "| unexplained difference | $n_differs |"
   echo "| status mismatch | $n_status |"
   echo "| error | $n_error |"
@@ -161,6 +203,23 @@ n_new=$(wc -l <"$RUN/new.txt")
     if [ "$bad" -gt "$SHOWN" ]; then
       echo
       echo "… and $((bad - SHOWN)) more, listed in $RUN/unexplained.txt on the parity host."
+    fi
+  fi
+  if [ "$n_java_differs" -gt 0 ]; then
+    echo
+    echo "## Java nondeterministic"
+    echo
+    echo "B answered these differently on its two runs (b, b'); \"also A\" marks those where A differed from B as well."
+    jq -r --argjson shown "$SHOWN" '
+      [.[] | select(.reference == "differs")]
+      | sort_by(if .outcome == "nondeterministic" then 0 else 1 end)
+      | .[:$shown][]
+      | "\n### \(.name)\(if .outcome == "nondeterministic" then " (also A)" else "" end)" +
+        "\n\n`\(.request | .[0:300])`" +
+        "\n\n```\n" + ([.referenceDiffs[]? | .[0:300]] | .[:3] | join("\n")) + "\n```"' "$R"
+    if [ "$n_java_differs" -gt "$SHOWN" ]; then
+      echo
+      echo "… and $((n_java_differs - SHOWN)) more, in $RUN/results.json on the parity host."
     fi
   fi
 } >"$RUN/report.md"
@@ -195,11 +254,14 @@ if [ "$bad" -gt 0 ]; then
   fi
 elif [ -n "$issue" ]; then
   echo "closing issue #$issue"
-  printf 'Clean on %s: %s identical, %s known differences of %s requests.\n' \
-    "$DAY" "$n_identical" "$n_known" "$n_all" >"$RUN/close.md"
+  printf 'Clean on %s: %s identical, %s known differences, %s Java nondeterministic of %s requests. Clean nights in a row: %s of %s.\n' \
+    "$DAY" "$n_identical" "$n_known" "$n_nondet" "$n_all" "$streak" "$GOAL" >"$RUN/close.md"
   gh_run issue comment "$issue" -R "$ISSUE_REPO" --body-file "$RUN/close.md"
   gh_run issue close "$issue" -R "$ISSUE_REPO"
 fi
 
-[ -n "$dry" ] || cp "$RUN/unexplained.txt" "$DIR/last-unexplained.txt"
+if [ -z "$dry" ]; then
+  cp "$RUN/unexplained.txt" "$DIR/last-unexplained.txt"
+  cp "$RUN/nights.txt" "$STATE/nights.txt"
+fi
 [ "$bad" -eq 0 ]

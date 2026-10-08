@@ -156,34 +156,49 @@ without clinical events can time out there (HTTP 502), as
 
 `test/parity/nightly.sh` compares go.cbioportal.org with api.cbioportal.org
 on production traffic every day. It replays a corpus of ~5,000 logged
-requests (`test/parity/logged_corpus.sh`: read-only endpoints only, each
-endpoint's share growing with the square root of its volume, at least 3,
-known differences marked; seeded by ISO week; written to the gitignored
-`.parity/nightly/corpus.txt`, mode 600, as it is real user traffic; each
-run marks it again with `loggedgen -annotate`, so expectations added to
-`known.go` apply before the weekly regeneration) at
-most 4 requests/s without a response cache (a night's responses take
-several GB), and sends requests that failed
-in transport or with 502/503/504 once more after 2 minutes, so a pod
-rollout is not reported as a regression. `runs/<date>/report.md` records
-both deployments' `/api/info` versions and the outcome counts (identical,
-known, unexplained difference, status mismatch, error) and details the
-unexplained requests (request, body cut to 200 bytes, first diff lines),
-marking those new since the previous run; `runs/<date>/dump` keeps both
-bodies of each unexplained request, cut to 1 MB (paritydiff `-dump
--dump-unexplained -dump-max`). Runs are kept 14 days. The exit
-status is 1 when anything is unexplained.
+requests (`test/parity/logged_corpus.sh`) drawn from a capture window of
+`cbioportal_qc.logged_requests` (`CORPUS_SINCE`, default 2026-10-07
+22:30 UTC, and `CORPUS_UNTIL`; read with `FINAL`, so each distinct request
+counts once): only www.cbioportal.org and api.cbioportal.org (not master.*
+or internal hosts), read-only endpoints, status 200, untruncated bodies;
+each endpoint's share grows with the square root of its volume, at least
+3, and a quarter of the corpus (`CORPUS_API_SHARE`) comes from
+api.cbioportal.org, the go/no-go target, as its own stratum (entries named
+`api-…`). It is seeded by ISO week and written to the gitignored
+`.parity/nightly/corpus.txt`, mode 600, as it is real user traffic; its
+header records the window, each host's requests and the endpoint coverage.
+Each run marks it again with `loggedgen -annotate`, so expectations added
+to `known.go` apply before the weekly regeneration.
+
+Every request goes to B twice (paritydiff `-self-check`), at most 4
+requests/s to B in all, without a response cache (a night's responses take
+several GB). Where Java's two answers differ the request is *Java
+nondeterministic*: reported apart, never unexplained. Requests that failed
+in transport or with 502/503/504 are sent once more after 2 minutes, so a
+pod rollout is not reported as a regression. `runs/<date>/report.md`
+records both deployments' `/api/info` versions, the window, the hosts'
+traffic and endpoint coverage, the outcome counts (identical, known, Java
+nondeterministic, unexplained difference, status mismatch, error) overall
+and per host, the clean nights in a row (`nights.txt` in `PARITY_STATE`;
+7 are the go/no-go for api.cbioportal.org), and details the unexplained
+requests (request, body cut to 200 bytes, first diff lines), marking those
+new since the previous run, and the Java nondeterministic ones;
+`runs/<date>/dump` keeps both bodies of each unexplained request, cut to
+1 MB (paritydiff `-dump -dump-unexplained -dump-max`). Runs are kept 14
+days. The exit status is 1 when anything is unexplained.
 
 While anything is unexplained it keeps one issue open in this repository,
 "Nightly parity: unexplained differences" (label `parity`): opened with the
 report, commented with each later failing report, commented and closed on
-the first clean night. `--dry-run` prints the `gh` actions instead,
-`--regen` regenerates the corpus first.
+the first clean night. `--dry-run` prints the `gh` actions instead and
+records no night, `--regen` regenerates the corpus first (as does a
+corpus without a window).
 
 On the parity host it runs from cron at 15:17 UTC, after the 14:00 mirror
 rebuild: `~/.local/share/cbioportal-go-parity/run.sh` checks out
-`origin/main` (or the ref in `state/ref`) into `src/`, regenerates the
-corpus on Sundays, and logs to `logs/<date>.log`; a lock keeps runs from
+`origin/main` (or the ref in `state/ref`) into `src/`, keeps the night
+record in `state/` (`PARITY_STATE`), regenerates the corpus on Sundays,
+and logs to `logs/<date>.log`; a lock keeps runs from
 overlapping.
 
 ## Java oracle

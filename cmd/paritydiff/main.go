@@ -14,6 +14,13 @@
 // not hit the remote origin again. With -retry, requests that failed in
 // transport or with a gateway status (502, 503, 504, as while a deployment
 // rolls out) are sent once more after the given pause.
+//
+// With -self-check every request is sent to -b a second time (B'), right
+// after the first, and B is compared with B' the same way. A request whose
+// two answers differ is nondeterministic in the reference: a difference
+// between A and B is then not attributed to A (outcome "nondeterministic"),
+// and the result records the B/B' differences either way. Both B requests
+// count toward -rate.
 package main
 
 import (
@@ -124,6 +131,15 @@ const (
 	differs   = "differs"
 	status    = "status"
 	failed    = "error"
+	// nondeterministic: A and B differ, and so do B and B' (-self-check).
+	nondeterministic = "nondeterministic"
+)
+
+// Self-check results (result.Reference).
+const (
+	refSame       = "same"       // B and B' agree
+	refDiffers    = "differs"    // B and B' differ
+	refUnverified = "unverified" // B' failed in transport or with a gateway status
 )
 
 type result struct {
@@ -138,14 +154,45 @@ type result struct {
 	StatusB int      `json:"statusB"`
 	MillisA int64    `json:"msA"`
 	Retried bool     `json:"retried,omitempty"`
+	// Reference is B compared with B' under -self-check (refSame, …), and
+	// ReferenceDiffs their first differences.
+	Reference      string   `json:"reference,omitempty"`
+	ReferenceDiffs []string `json:"referenceDiffs,omitempty"`
+}
+
+// selfCheck records how B compares with B' in res, and makes a difference
+// between A and B "nondeterministic" when B and B' differ too.
+func selfCheck(res result, rq request, rb, rb2 response, errB2 error, opts compareOptions) result {
+	if errB2 != nil {
+		res.Reference, res.ReferenceDiffs = refUnverified, []string{fmt.Sprintf("b': %v", errB2)}
+		return res
+	}
+	self := compareResponses(rq, rb, rb2, opts)
+	switch {
+	case self.Outcome == identical:
+		res.Reference = refSame
+		return res
+	case gateway(rb.Status) || gateway(rb2.Status):
+		res.Reference = refUnverified
+	default:
+		res.Reference = refDiffers
+		if res.Outcome == differs || res.Outcome == status {
+			res.Outcome = nondeterministic
+		}
+	}
+	res.ReferenceDiffs = self.Diffs
+	return res
 }
 
 // transient reports whether a result may be a passing failure of either
 // origin rather than a difference: a transport error or a gateway status.
 func transient(r result) bool {
-	gateway := func(code int) bool { return code == 502 || code == 503 || code == 504 }
 	return r.Outcome == failed || (r.Outcome == status && (gateway(r.StatusA) || gateway(r.StatusB)))
 }
+
+// gateway reports whether a status is a proxy's while the origin is down or
+// rolling out.
+func gateway(code int) bool { return code == 502 || code == 503 || code == 504 }
 
 func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	res := result{Name: rq.Name, StatusA: ra.Status, StatusB: rb.Status}
@@ -220,6 +267,7 @@ func main() {
 	dumpMax := flag.Int("dump-max", 0, "cut dumped bodies to this many bytes (0: whole)")
 	dumpUnexplained := flag.Bool("dump-unexplained", false, "dump only responses that differ without a known reason")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
+	selfCheckB := flag.Bool("self-check", false, "send every request to B twice and compare the two answers; A/B differences where they differ are \"nondeterministic\"")
 	retry := flag.Duration("retry", -1, "send requests that failed in transport or with 502/503/504 once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
 	flag.Parse()
@@ -260,6 +308,10 @@ func main() {
 			res = result{Name: rq.Name, Outcome: failed, Diffs: []string{fmt.Sprintf("a: %v", errA), fmt.Sprintf("b: %v", errB)}}
 		default:
 			res = compareResponses(rq, ra, rb, opts)
+			if *selfCheckB {
+				rb2, errB2 := fb.get(rq)
+				res = selfCheck(res, rq, rb, rb2, errB2, opts)
+			}
 		}
 		res.Request = rq.Method + " " + rq.Path
 		res.Body = rq.Body
@@ -269,7 +321,8 @@ func main() {
 		res.MillisA = msA
 		if *dump != "" {
 			pathA, pathB := filepath.Join(*dump, rq.Name+".a.json"), filepath.Join(*dump, rq.Name+".b.json")
-			if res.Outcome == identical || res.Outcome == failed || (*dumpUnexplained && res.Outcome == known) {
+			if res.Outcome == identical || res.Outcome == failed ||
+				(*dumpUnexplained && (res.Outcome == known || res.Outcome == nondeterministic)) {
 				// A retry that settles the request leaves no dump behind.
 				_ = os.Remove(pathA)
 				_ = os.Remove(pathB)
@@ -319,6 +372,14 @@ func main() {
 	}
 	fmt.Printf("\n%d requests: %d identical, %d known differences, %d differ, %d status mismatches, %d errors (%d fetched from B)\n",
 		len(results), counts[identical], counts[known], counts[differs], counts[status], counts[failed], fb.fetched)
+	if *selfCheckB {
+		refs := map[string]int{}
+		for _, r := range results {
+			refs[r.Reference]++
+		}
+		fmt.Printf("self-check: B answered %d requests differently the second time (%d of them also differ from A), %d unverified\n",
+			refs[refDiffers], counts[nondeterministic], refs[refUnverified])
+	}
 	if *report != "" {
 		out, _ := json.MarshalIndent(results, "", "  ")
 		if err := os.WriteFile(*report, out, 0o644); err != nil {
@@ -346,6 +407,8 @@ func printResult(w io.Writer, r result, quiet bool) {
 		fmt.Fprintf(&sb, "STATUS  %s a=%d b=%d\n", r.Name, r.StatusA, r.StatusB)
 	case failed:
 		fmt.Fprintf(&sb, "ERROR   %s\n", r.Name)
+	case nondeterministic:
+		fmt.Fprintf(&sb, "NONDET  %s (B differs from B')\n", r.Name)
 	}
 	if r.Outcome != known {
 		for _, d := range r.Diffs {

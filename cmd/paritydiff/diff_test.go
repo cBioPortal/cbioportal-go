@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -17,6 +18,31 @@ func mustJSON(t *testing.T, s string) any {
 func diff(t *testing.T, a, b string, o compareOptions) diffResult {
 	t.Helper()
 	return compareJSON(mustJSON(t, a), mustJSON(t, b), o)
+}
+
+func TestSelfCheck(t *testing.T) {
+	rq := request{Name: "r", Opts: requestOptions{Unordered: true}}
+	ok := func(body string) response { return response{Status: 200, Body: body} }
+	for _, c := range []struct {
+		name         string
+		a, b, b2     response
+		errB2        error
+		outcome, ref string
+	}{
+		{"stable and identical", ok(`[1,2]`), ok(`[2,1]`), ok(`[1,2]`), nil, identical, refSame},
+		{"stable reference, A differs", ok(`[1]`), ok(`[2]`), ok(`[2]`), nil, differs, refSame},
+		{"unstable reference, A differs", ok(`[1]`), ok(`[2]`), ok(`[3]`), nil, nondeterministic, refDiffers},
+		{"unstable reference, A agrees", ok(`[1]`), ok(`[1]`), ok(`[3]`), nil, identical, refDiffers},
+		{"unstable status", ok(`[1]`), response{Status: 500, Body: "x"}, ok(`[1]`), nil, nondeterministic, refDiffers},
+		{"gateway on B'", ok(`[1]`), ok(`[2]`), response{Status: 503}, nil, differs, refUnverified},
+		{"transport error on B'", ok(`[1]`), ok(`[2]`), response{}, errors.New("reset"), differs, refUnverified},
+	} {
+		res := compareResponses(rq, c.a, c.b, defaultOptions())
+		res = selfCheck(res, rq, c.b, c.b2, c.errB2, defaultOptions())
+		if res.Outcome != c.outcome || res.Reference != c.ref {
+			t.Errorf("%s: outcome %s, reference %s; want %s, %s", c.name, res.Outcome, res.Reference, c.outcome, c.ref)
+		}
+	}
 }
 
 func TestCompareKeyOrderIrrelevant(t *testing.T) {
