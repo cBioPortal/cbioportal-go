@@ -26,8 +26,10 @@ func genomicEventDerivedSQL(rawDB, refDB, targetDB string, hasGenomeGenes bool) 
 	target := "`" + targetDB + "`"
 
 	// Mutation rows: the MAF records the importer stores (resolved gene,
-	// default MutationFilter), as in the `mutation` view.
-	mutation := fmt.Sprintf(`SELECT
+	// MutationFilter) of MUTATION_EXTENDED and MUTATION_UNCALLED profiles,
+	// as in the `mutation` view.
+	mutationOf := func(table string) string {
+		return fmt.Sprintf(`SELECT
   concat(m.study_id, '_', m.tumor_sample_barcode) AS sample_unique_id,
   gk.resolved_hugo_gene_symbol AS hugo_gene_symbol,
   toInt32(gk.resolved_entrez_gene_id) AS entrez_gene_id,
@@ -47,13 +49,15 @@ func genomicEventDerivedSQL(rawDB, refDB, targetDB string, hasGenomeGenes bool) 
   '' AS sv_event_info,
   concat(m.study_id, '_', s.patient_id) AS patient_unique_id,
   (ifNull(sp.gene_panel_id, 'WES'), gk.resolved_hugo_gene_symbol) NOT IN (SELECT gene_panel_id, gene FROM %[4]s.gene_panel_to_gene_derived) AS off_panel
-FROM %[1]s.mutation_extended m%[6]s
+FROM %[1]s.%[7]s m%[6]s
 LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM %[1]s.clinical_sample) s ON m.study_id = s.study_id AND m.tumor_sample_barcode = s.sample_id
 LEFT JOIN %[4]s.sample_profile sp ON m.study_id = sp.study_id AND m.tumor_sample_barcode = sp.sample_id AND m.profile_stable_id = sp.profile_stable_id
 WHERE %[5]s`,
-		rawDB, drv("m.cbp_driver"), drv("m.cbp_driver_tiers"), target,
-		mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
-		geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id"))
+			rawDB, drv("m.cbp_driver"), drv("m.cbp_driver_tiers"), target,
+			mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
+			geneKeyJoin(targetDB, table, "m", "hugo_symbol", "entrez_gene_id"), table)
+	}
+	mutation := mutationOf("mutation_extended") + "\nUNION ALL\n" + mutationOf("mutation_uncalled")
 
 	// Discrete CNA rows (cna_event): AMP and HOMDEL of the `cna` view.
 	cytoband, cytobandJoin := "''", ""

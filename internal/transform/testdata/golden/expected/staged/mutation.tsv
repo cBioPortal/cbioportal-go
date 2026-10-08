@@ -6,6 +6,7 @@ String	String	String	String	String	String	String	String	String	String	String	Str
 														17	41244000	672	BRCA1	golden_c_mutations	Somatic			{}		GC-P2	MUTATED		C		GC-P2-01	41244000	golden_c			T		intron	SNP
 														17	7577120	7157	TP53	golden_b_mutations	Somatic			{"Cust":{"score":1.5e3,"label":"x"}}		GB-P1	R273C		C		GB-P1-01	7577120	golden_b	3	10	T		Missense_Mutation	SNP
 														2	29443000	238	ALK	golden_c_mutations	Somatic			{}		GC-P2	F1174L		C		GC-P2-01	29443000	golden_c			T		Missense_Mutation	SNP
+														2	29443000	238	ALK	golden_c_mutations_uncalled	UNCALLED			{}		GC-P1	F1174L		C		GC-P1-01	29443000	golden_c	0	40	T		Missense_Mutation	SNP
 														7	55249071	1956	EGFR	golden_c_mutations	Somatic			{}		GC-P2	Promoter		C		GC-P2-01	55249071	golden_c			T		5\'Flank	SNP
 													golden	12	25398284	3845	KRAS	golden_a_mutations	Somatic			{"Zygosity":{}}	GRCh37	GA-P1	G12D	12/189	C		GA-P1-01	25398284	golden_a	10	30	T		Missense_Mutation	SNP
 													golden	3	178952085	5290	PIK3CA	golden_a_mutations	Germline			{"Zygosity":{}}	GRCh37	GA-P3	H1047R	1047/1068	A		GA-P3-01	178952085	golden_a	12	12	G		Missense_Mutation	SNP

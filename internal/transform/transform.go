@@ -386,17 +386,24 @@ func hasColumn(c *client, rawDB, table, col string) bool {
 
 // mutationSQL builds the `mutation` view: the MAF records ImportExtendedMutationData
 // stores — gene resolved through gene_key_map (unresolved records are skipped,
-// hugo_symbol / entrez_gene_id are the reference gene's) — that pass the default
-// MutationFilter.
+// hugo_symbol / entrez_gene_id are the reference gene's) — that pass the
+// MutationFilter. Both MUTATION_EXTENDED and MUTATION_UNCALLED profiles are
+// stored this way, each under its own molecular profile.
 func mutationSQL(c *client, rawDB, targetDB string) string {
+	return mutationTableSQL(c, rawDB, targetDB, "mutation_extended") + " UNION ALL " +
+		mutationTableSQL(c, rawDB, targetDB, "mutation_uncalled")
+}
+
+// mutationTableSQL is mutationSQL over one MAF staging table.
+func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 	entrez := "toString(gk.resolved_entrez_gene_id)"
-	join := geneKeyJoin(targetDB, "mutation_extended", "m", "hugo_symbol", "entrez_gene_id")
+	join := geneKeyJoin(targetDB, table, "m", "hugo_symbol", "entrez_gene_id")
 	// Custom driver annotations (cbp_driver*): projected as normalized columns so
 	// the API can populate Mutation.driverFilter/driverTiersFilter, which the
 	// frontend reads directly to enable the custom-driver annotation controls.
 	// Emit the columns unconditionally (empty when the staging table lacks them)
 	// so the view shape is stable across datasets.
-	has, _ := c.TableColumns("mutation_extended")
+	has, _ := c.TableColumns(table)
 	driverCol := func(name string) string {
 		if has[name] {
 			return "if(lower(trimBoth(m." + name + ")) IN ('', 'na'), '', m." + name + ") AS " + name
@@ -440,11 +447,11 @@ func mutationSQL(c *client, rawDB, targetDB string) string {
 			"m.validation_status AS validation_status, "+
 			proteinChangeSQL(has)+" AS protein_change, "+
 			"m.t_alt_count AS t_alt_count, m.t_ref_count AS t_ref_count, "+drivers+", "+nsCol+" AS namespace_columns, "+extras+" "+
-			"FROM `%s`.mutation_extended m%s "+
+			"FROM `%s`.%s m%s "+
 			"LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM `"+rawDB+"`.clinical_sample) sp "+
 			"ON sp.study_id = m.study_id AND sp.sample_id = m.tumor_sample_barcode "+
 			"WHERE "+mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
-		entrez, rawDB, join)
+		entrez, rawDB, table, join)
 }
 
 // cnaSQL builds the `cna` view: the discrete copy-number values cbioportal-core

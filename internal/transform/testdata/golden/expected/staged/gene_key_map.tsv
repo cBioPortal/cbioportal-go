@@ -26,6 +26,7 @@ String	String	UInt8	String	Int64	String	String	String
 2064	ERBB2	0	log2CNA	2064	ERBB2	cna_matrix	golden_a
 2064	ERBB2	0	mutations	2064	ERBB2	mutation_extended	golden_c
 238	ALK	0	mutations	238	ALK	mutation_extended	golden_c
+238	ALK	0	mutations_uncalled	238	ALK	mutation_uncalled	golden_c
 238	ALK	0	structural_variants	238	ALK	structural_variant	golden_a
 27436	EML4	0	mutations	27436	EML4	mutation_extended	golden_c
 3845	KRAS	0	mrna	3845	KRAS	mrna_expression_matrix	golden_a
@@ -48,5 +49,6 @@ String	String	UInt8	String	Int64	String	String	String
 7157	TP53	0	mrna	7157	TP53	mrna_expression_matrix	golden_a
 7157	TP53	0	mutations	7157	TP53	mutation_extended	golden_a
 7157	TP53	0	mutations	7157	TP53	mutation_extended	golden_c
+7157	TP53	0	mutations_uncalled	7157	TP53	mutation_uncalled	golden_c
 7157	TP53	0	protein_quantification	7157	TP53	protein_level_matrix	golden_b
 NA	EML4	0	structural_variants	27436	EML4	structural_variant	golden_a

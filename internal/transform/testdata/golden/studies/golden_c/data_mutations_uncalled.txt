@@ -1,0 +1,4 @@
+Hugo_Symbol	Entrez_Gene_Id	Chromosome	Start_Position	End_Position	Variant_Classification	Variant_Type	Reference_Allele	Tumor_Seq_Allele2	Tumor_Sample_Barcode	Mutation_Status	t_alt_count	t_ref_count	HGVSp_Short
+ALK	238	2	29443000	29443000	Missense_Mutation	SNP	C	T	GC-P1-01	UNCALLED	0	40	p.F1174L
+TP53	7157	17	7577121	7577121	Silent	SNP	G	A	GC-P1-01	UNCALLED	1	30	p.R273R
+NOTAGENE		1	100	100	Missense_Mutation	SNP	C	T	GC-P2-01	UNCALLED	1	30	p.A1V

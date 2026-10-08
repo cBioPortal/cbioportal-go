@@ -35,15 +35,13 @@ var stagingSources = map[string][]sourceColumn{
 		sourceColumn{"patient_attribute", "UInt8"}),
 	"genetic_profile": strCols("molecular_profile_id", "study_id", "profile_stable_id", "alteration_type", "datatype",
 		"name", "description", "show_in_analysis", "generic_assay_type"),
-	"sample_list":      strCols("study_id", "list_id", "category", "name", "description", "sample_id"),
-	"import_order":     append(strCols("study_id", "kind", "name"), sourceColumn{"seq", "UInt32"}),
-	"clinical_sample":  strCols("study_id", "sample_id", "patient_id"),
-	"clinical_patient": strCols("study_id", "patient_id"),
-	"gene_panel":       strCols("study_id", "gene_panel_id", "description", "hugo_symbol"),
-	"mutation_extended": strCols("study_id", "profile_stable_id", "tumor_sample_barcode", "hugo_symbol", "entrez_gene_id",
-		"chromosome", "start_position", "end_position", "reference_allele", "tumor_seq_allele2",
-		"variant_classification", "variant_type", "mutation_status", "validation_status", "t_alt_count", "t_ref_count",
-		"hgvsp_short", "cbp_driver", "cbp_driver_annotation", "cbp_driver_tiers", "cbp_driver_tiers_annotation"),
+	"sample_list":            strCols("study_id", "list_id", "category", "name", "description", "sample_id"),
+	"import_order":           append(strCols("study_id", "kind", "name"), sourceColumn{"seq", "UInt32"}),
+	"clinical_sample":        strCols("study_id", "sample_id", "patient_id"),
+	"clinical_patient":       strCols("study_id", "patient_id"),
+	"gene_panel":             strCols("study_id", "gene_panel_id", "description", "hugo_symbol"),
+	"mutation_extended":      mafColumns,
+	"mutation_uncalled":      mafColumns,
 	"structural_variant":     strCols("study_id", "profile_stable_id", "sample_id"),
 	"cna_matrix":             strCols("study_id", "profile_stable_id", "datatype", "sample_id", "hugo_symbol", "entrez_gene_id", "value"),
 	"cna_discrete_long":      strCols("study_id", "profile_stable_id", "sample_id", "hugo_symbol", "entrez_gene_id", "value"),
@@ -149,3 +147,10 @@ func (c *client) executeUnstaged(sql string) (string, error) {
 	}
 	return c.Client.Execute(sql)
 }
+
+// mafColumns are the MAF columns the transform reads from the mutation
+// staging tables (MUTATION_EXTENDED and MUTATION_UNCALLED profiles).
+var mafColumns = strCols("study_id", "profile_stable_id", "tumor_sample_barcode", "hugo_symbol", "entrez_gene_id",
+	"chromosome", "start_position", "end_position", "reference_allele", "tumor_seq_allele2",
+	"variant_classification", "variant_type", "mutation_status", "validation_status", "t_alt_count", "t_ref_count",
+	"hgvsp_short", "cbp_driver", "cbp_driver_annotation", "cbp_driver_tiers", "cbp_driver_tiers_annotation")

@@ -163,19 +163,14 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 		if !exists(t) {
 			continue
 		}
-		mc, _ := c.TableColumns(t)
-		if mc["mutation_status"] && mc["validation_status"] && mc["variant_classification"] &&
-			mc["entrez_gene_id"] && mc["hugo_symbol"] {
-			// Only records whose gene resolves and that pass the filter are
-			// stored, and only their samples are profiled.
-			sources = append(sources, fmt.Sprintf(
-				"SELECT DISTINCT r.study_id AS study_id, r.tumor_sample_barcode AS sample_id, r.profile_stable_id AS profile_stable_id, "+
-					"'' AS panel, toUInt8(1) AS prio FROM `%s`.%s r%s WHERE %s",
-				rawDB, t, geneKeyJoin(targetDB, t, "r", "hugo_symbol", "entrez_gene_id"),
-				mutationFilterSQL("r", "gk.resolved_entrez_gene_id", targetDB)))
-			continue
-		}
-		record(t, "tumor_sample_barcode", "")
+		// Only records whose gene resolves and that pass the filter are
+		// stored, and only their samples are profiled. Columns the MAF
+		// lacks read as empty (stagingSources).
+		sources = append(sources, fmt.Sprintf(
+			"SELECT DISTINCT r.study_id AS study_id, r.tumor_sample_barcode AS sample_id, r.profile_stable_id AS profile_stable_id, "+
+				"'' AS panel, toUInt8(1) AS prio FROM `%s`.%s r%s WHERE %s",
+			rawDB, t, geneKeyJoin(targetDB, t, "r", "hugo_symbol", "entrez_gene_id"),
+			mutationFilterSQL("r", "gk.resolved_entrez_gene_id", targetDB)))
 	}
 	if exists("structural_variant") {
 		// Samples of the structural variants actually stored.
