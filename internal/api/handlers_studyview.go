@@ -18,17 +18,20 @@ type filteredSample struct {
 	UniquePatientKey string `json:"uniquePatientKey"`
 }
 
+// filteredSampleSortable are the sortBy fields of filtered samples.
+var filteredSampleSortable = map[string]string{"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId"}
+
 // filteredSamplesFetch serves POST /api/filtered-samples/fetch: the samples
 // passing the study-view filter, by sample id (negateFilters is
-// accepted and ignored, as in Java).
+// accepted and ignored, as in Java). A page is read in SQL.
 func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
 	args := newArgs()
 	rows, err := queryA[idRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM %s "+
-			"AND concat(study_id, '_', sample_id) IN (%s) ORDER BY sample_id, study_id",
-		f.scope().from(args, tSample), s.filterSQL(args, f)), args)
+			"AND concat(study_id, '_', sample_id) IN (%s)%s",
+		f.scope().from(args, tSample), s.filterSQL(args, f), sqlListOrder(r, filteredSampleSortable, "sample_id, study_id")), args)
 	if err != nil {
 		fail(w, r, err)
 		return

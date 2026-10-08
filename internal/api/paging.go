@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"maps"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -174,6 +175,12 @@ func pageList(next http.Handler) http.Handler {
 		if sizeErr == nil && size >= 0 {
 			pg.start, pg.size = max(number, 0)*size, size
 		}
+		if a := addedPagingOf(endpoint); a != nil {
+			if pg.sortBy == "" {
+				pg.sortBy, pg.desc = a.defaultSort, false
+			}
+			pg.numeric = slices.Contains(a.numeric, pg.sortBy)
+		}
 		if counted {
 			rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
 			next.ServeHTTP(rec, r2)
@@ -184,15 +191,9 @@ func pageList(next http.Handler) http.Handler {
 			writePage(w, rec.header, rec.status, rec.body.Bytes(), pg)
 			return
 		}
-		if sortBy == "" {
-			pw := &pageWindow{w: w, header: http.Header{}, status: http.StatusOK, page: pg}
-			defer pw.close()
-			next.ServeHTTP(pw, r2)
-			pw.finish()
-			return
-		}
 		sp := &sqlPage{page: pg}
 		cw := &claimWriter{w: w, sp: sp, header: http.Header{}}
+		defer cw.close()
 		next.ServeHTTP(cw, r2.WithContext(context.WithValue(r2.Context(), sqlPageKey{}, sp)))
 		cw.finish()
 	})
@@ -248,7 +249,7 @@ func sqlStablePageQuery(r *http.Request, sortable map[string]string, base, def s
 // or sortBy is not among sortable.
 func claimSortedPage(r *http.Request, sortable map[string]string) (*sqlPage, string) {
 	sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage)
-	if sp == nil {
+	if sp == nil || sp.sortBy == "" {
 		return nil, ""
 	}
 	expr, ok := sortable[sp.sortBy]
@@ -257,6 +258,46 @@ func claimSortedPage(r *http.Request, sortable map[string]string) (*sqlPage, str
 	}
 	sp.claimed = true
 	return sp, expr
+}
+
+// claimListPage claims the page pageList asks the request for, sorted or
+// not, and returns it with the SQL expression of its sortBy ("" for an
+// unsorted page), for a handler that reads it in SQL: ordered by the
+// expression (NULLS LAST), then by the handler's own stable order, and cut
+// with LIMIT / OFFSET (orderLimit). It returns nil when the request asks
+// for no page or its sortBy is not among sortable.
+func claimListPage(r *http.Request, sortable map[string]string) (*sqlPage, string) {
+	sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage)
+	if sp == nil || sp.claimed {
+		return nil, ""
+	}
+	expr := ""
+	if sp.sortBy != "" {
+		var ok bool
+		if expr, ok = sortable[sp.sortBy]; !ok {
+			return nil, ""
+		}
+	}
+	sp.claimed = true
+	return sp, expr
+}
+
+// sqlListOrder is sqlPageOrder for a handler whose rows are the list's
+// items, one for one, in the order def: an unsorted page is read in SQL
+// too, in that order. def must be a stable order.
+func sqlListOrder(r *http.Request, sortable map[string]string, def string) string {
+	sp, expr := claimListPage(r, sortable)
+	if sp == nil {
+		return " ORDER BY " + def
+	}
+	return sp.orderLimit(expr, def)
+}
+
+// pageAsked reports whether pageList asks the request for a page, sorted
+// or not, for handlers that make their order stable only then.
+func pageAsked(r *http.Request) bool {
+	sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage)
+	return sp != nil
 }
 
 // keyedPage is a sorted page a handler cuts itself, for rows it writes
@@ -272,7 +313,7 @@ type keyedPage struct {
 // the handler has not read it in SQL, or returns nil.
 func claimKeyedPage(r *http.Request) *keyedPage {
 	sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage)
-	if sp == nil || sp.claimed {
+	if sp == nil || sp.claimed || sp.sortBy == "" {
 		return nil
 	}
 	sp.claimed = true
@@ -285,7 +326,7 @@ func (k *keyedPage) add(key, out any) error {
 	if err != nil {
 		return err
 	}
-	it := newSortItem(kb, k.pg.sortBy, len(k.items))
+	it := k.pg.item(kb, len(k.items))
 	if it.raw, err = json.Marshal(out); err != nil {
 		return err
 	}
@@ -325,23 +366,29 @@ func (sp *sqlPage) orderLimit(expr, tie string) string {
 }
 
 // claimWriter passes a handler's response on as it is when the handler
-// claimed its sorted page (sqlPageOrder), else to a topPage that sorts it.
-// The choice is made at the first write.
+// claimed its page (sqlPageOrder, claimListPage), else to a topPage that
+// sorts it or, for an unsorted page, a pageWindow that cuts it. The choice
+// is made at the first write.
 type claimWriter struct {
 	w      http.ResponseWriter
 	sp     *sqlPage
 	header http.Header
 	out    http.ResponseWriter
 	top    *topPage
+	window *pageWindow
 }
 
 func (c *claimWriter) decide() {
 	if c.out != nil {
 		return
 	}
-	if c.sp.claimed {
+	switch {
+	case c.sp.claimed:
 		c.out = c.w
-	} else {
+	case c.sp.sortBy == "":
+		c.window = &pageWindow{w: c.w, header: http.Header{}, status: http.StatusOK, page: c.sp.page}
+		c.out = c.window
+	default:
 		c.top = newTopPage(c.w, c.sp.page)
 		c.out = c.top
 	}
@@ -367,8 +414,18 @@ func (c *claimWriter) Write(p []byte) (int, error) {
 
 func (c *claimWriter) finish() {
 	c.decide()
-	if c.top != nil {
+	switch {
+	case c.top != nil:
 		c.top.finish()
+	case c.window != nil:
+		c.window.finish()
+	}
+}
+
+// close releases a pageWindow's stream when the handler ended early.
+func (c *claimWriter) close() {
+	if c.window != nil {
+		c.window.close()
 	}
 }
 
@@ -393,7 +450,7 @@ func newTopPage(w http.ResponseWriter, pg page) *topPage {
 func (t *topPage) worse(i, j int) bool { return t.pg.before(t.items[j], t.items[i]) }
 
 func (t *topPage) add(el []byte) error {
-	it := newSortItem(el, t.pg.sortBy, t.n)
+	it := t.pg.item(el, t.n)
 	t.n++
 	if t.pg.size < 0 {
 		it.raw = bytes.Clone(el)
@@ -481,6 +538,23 @@ type page struct {
 	sortBy      string
 	desc        bool
 	start, size int
+	// numeric compares sortBy values that are JSON strings as numbers; a
+	// string that is no number has no key.
+	numeric bool
+}
+
+// item is the list item raw at index, with its key for the page's sortBy.
+func (pg page) item(raw []byte, index int) sortItem {
+	it := newSortItem(raw, pg.sortBy, index)
+	if pg.numeric && !it.null && it.num == nil {
+		f, err := strconv.ParseFloat(strings.TrimSpace(it.str), 64)
+		if err != nil || math.IsNaN(f) {
+			it.null = true
+		} else {
+			it.num = &f
+		}
+	}
+	return it
 }
 
 // writePage writes the page of a handler's whole response: an array of a
@@ -494,7 +568,14 @@ func writePage(w http.ResponseWriter, header http.Header, status int, body []byt
 		return
 	}
 	if pg.sortBy != "" {
-		sortItems(items, pg.sortBy, pg.desc)
+		ks := make([]sortItem, len(items))
+		for i, it := range items {
+			ks[i] = pg.item(it, i)
+		}
+		slices.SortFunc(ks, pg.compare)
+		for i, k := range ks {
+			items[i] = k.raw
+		}
 	}
 	if pg.size >= 0 {
 		start := min(pg.start, len(items))

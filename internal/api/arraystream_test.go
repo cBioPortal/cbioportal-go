@@ -170,7 +170,7 @@ func TestSortIgnored(t *testing.T) {
 		seen := "unset"
 		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = r.URL.Query().Get("sortBy")
-			if sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage); (sp != nil) != (want != "") {
+			if sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage); (sp != nil && sp.sortBy != "") != (want != "") {
 				t.Errorf("%s: sorted page %v", target, sp)
 			}
 			writeJSON(w, []int{})

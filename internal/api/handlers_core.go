@@ -591,7 +591,7 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 	p := ch.Params{"ids": pairs}
 	rows, err := ch.QueryP[idRow](s.CH,
 		"SELECT study_id AS studyId, patient_id AS patientId FROM "+byStudies(pairStudies(pairs)).from(paramsBinder(p), tPatient)+
-			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY "+s.patientOrder(r), p)
+			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))}"+sqlListOrder(r, patientSortable, s.patientOrder(r)), p)
 	if err != nil {
 		fail(w, r, err)
 		return

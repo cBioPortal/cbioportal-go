@@ -351,7 +351,7 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 	}
 	p := ch.Params{}
 	rows, err := ch.QueryP[row](s.CH,
-		"SELECT sample_id AS sampleId FROM "+s.bySampleList(r.PathValue("sampleListId")).from(paramsBinder(p), tSampleList)+" ORDER BY "+order, p)
+		"SELECT sample_id AS sampleId FROM "+s.bySampleList(r.PathValue("sampleListId")).from(paramsBinder(p), tSampleList)+sqlListOrder(r, nil, order), p)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -420,8 +420,8 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 
 // writeSamples writes the samples of the scope matching a predicate over the
 // `sample` view (aliased s), with type, sequenced and segment flags. where
-// may hold placeholders bound in args. A sorted page is read as sqlPageOrder
+// may hold placeholders bound in args. A page is read as sqlListOrder
 // orders it.
 func (s *State) writeSamples(w http.ResponseWriter, r *http.Request, sc scope, where string, args *sqlArgs) {
-	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+sqlPageOrder(r, sampleSortable, sampleDefaultOrder), args)
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+sqlListOrder(r, sampleSortable, sampleDefaultOrder), args)
 }
