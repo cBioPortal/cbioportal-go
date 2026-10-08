@@ -66,6 +66,7 @@ A few more terms used below:
 ## Contents
 
 - [What go fixes](#what-go-fixes)
+- [What go adds](#what-go-adds)
 - [Request handling and errors](#request-handling-and-errors)
 - [Studies](#studies)
 - [Genes](#genes)
@@ -105,6 +106,19 @@ stores less where Java stores empty rows.
 | Import: `clinical_data_derived` | Java stores a row for every attribute and case, even empty ones. | go stores only real values. The API answers the same. |
 | Import: copy-number segments | Java skips segments whose start is not below their end. | go keeps them. There are 4 on msk_chord_2024 and 10 on msk_impact_50k_2026. |
 | Import: timeline rows | Java drops rows for patients not in the study, and rows with more fields than the header. | go keeps them. |
+
+## What go adds
+
+Java gives 33 endpoints that can return very long lists no way to ask for
+one page at a time. Examples are the molecular data, clinical data and
+structural variant fetches, and the enrichments. go adds Java's paging
+and sorting parameters (`pageSize`, `pageNumber`, `sortBy`, `direction`)
+to them. They are optional: without them, the answer is exactly what Java
+would send. They are checked as Java checks them on its own list
+endpoints, so a bad value gets the same kind of 400. The list of
+endpoints, their sort fields and the endpoints left out are in
+[API coverage](api-coverage.md#paging-that-go-adds). The tests
+`TestAddedPaging` and `TestAddedPagingParams` pin them.
 
 ## Request handling and errors
 

@@ -14,6 +14,7 @@ packages `org.cbioportal.legacy.web` and `org.cbioportal.application`).
 ## Contents
 
 - [How to read the tables](#how-to-read-the-tables)
+- [Paging that go adds](#paging-that-go-adds)
 - [Studies, cancer types, server info](#studies-cancer-types-server-info)
 - [Patients, samples, sample lists](#patients-samples-sample-lists)
 - [Clinical data, attributes, events](#clinical-data-attributes-events)
@@ -71,6 +72,80 @@ Each table below has these columns:
 
 Where go fixes a Java bug or copies an odd Java behaviour, the details are
 in [Java quirks](java-quirks.md).
+
+## Paging that go adds
+
+Many endpoints can return very long lists, such as all the molecular data
+of a profile, but Java gives them no way to ask for one page at a time. go
+adds the paging and sorting parameters of Java's list endpoints to 33 of
+them. The tables in the next sections count only the parameters Java has.
+
+The parameters are optional. A request without them gets exactly the
+answer it got before: the whole list, in the same order. Clients that do
+not know about them, including the cBioPortal frontend, see no change.
+
+| Parameter | What it does | Checked like Java's list endpoints |
+|---|---|---|
+| `pageSize` | The number of items on a page. Without it, the whole list comes back. | 1 to 10,000,000, else a 400 |
+| `pageNumber` | Which page to return, counting from 0. | 0 or more, else a 400 |
+| `sortBy` | The field of the returned items to sort by. Items without that field come last, in either direction. | One of the listed fields, else a 400 that names the bad value |
+| `direction` | `ASC` (the default) or `DESC`. | `ASC` or `DESC`, else a 400 |
+
+Some more rules:
+
+- **Order.** Without `sortBy`, a page is cut from the list in its usual
+  order, which is stable, so page 0 and page 1 never overlap. With
+  `sortBy`, items that tie keep their usual order. A few endpoints have no
+  stable order of their own; for them a page uses one, as the table notes.
+- **Totals.** A page does not say how many items there are in all. Ask
+  with `projection=META` for that, where the endpoint has it: META always
+  counts the whole list and ignores the paging parameters.
+- **Where the page is cut.** Lists that are read straight from the
+  database are sorted and cut in the database, so a page of a list with
+  millions of rows is cheap. Lists that go builds in memory, such as
+  enrichments, are sorted and cut just before they are sent.
+- **Documentation.** The served API descriptions (`/api/v3/api-docs` and
+  `/api/v2/api-docs`) list the parameters. Each one's description starts
+  like Java's and ends with "Added in go".
+
+The `sortBy` fields of each endpoint are the scalar fields of the items it
+returns. "Database" or "memory" says where a page is cut.
+
+| Endpoint | `sortBy` fields | Cut in | Notes |
+|---|---|---|---|
+| POST `/api/clinical-data/fetch`, POST `/api/studies/{studyId}/clinical-data/fetch` | `clinicalAttributeId`, `value` | database | The same fields as Java's other clinical data lists. |
+| POST `/api/samples/fetch` | `sampleId`, `sampleType` | database | |
+| POST `/api/patients/fetch` | `patientId` | database | |
+| POST `/api/filtered-samples/fetch` | `sampleId`, `patientId`, `studyId` | database | |
+| GET `/api/sample-lists/{sampleListId}/sample-ids` | none | database | Paging only: the items are plain ids. |
+| POST `/api/clinical-attributes/fetch` | as GET `/api/clinical-attributes` | memory | |
+| POST `/api/survival-data/fetch` | `clinicalAttributeId`, `value` | memory | |
+| POST `/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch`, GET `/api/molecular-profiles/{molecularProfileId}/molecular-data`, POST `/api/molecular-data/fetch` | `entrezGeneId`, `sampleId`, `patientId`, `studyId`, `molecularProfileId`, `value` | database | `value` sorts as a number. |
+| POST `…/discrete-copy-number/fetch`, GET `…/discrete-copy-number` | `entrezGeneId`, `sampleId`, `patientId`, `alteration` | database | |
+| POST `/api/generic_assay_data/fetch`, POST `/api/generic_assay_data/{molecularProfileId}/fetch`, GET `/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}` | `stableId`, `genericAssayStableId`, `sampleId`, `patientId`, `studyId`, `molecularProfileId`, `value` | database | `value` sorts numbers by size first, then other values (such as HLA alleles) as text. |
+| POST `/api/gene-panel-data/fetch`, POST `…/gene-panel-data/fetch` | `molecularProfileId`, `sampleId`, `patientId`, `studyId`, `genePanelId`, `profiled` | memory | With a `sampleListId`, a page lists the samples by id. |
+| POST `/api/copy-number-segments/fetch` | as GET `…/copy-number-segments` | database | |
+| POST `/api/structural-variant/fetch` | `sampleId`, `patientId`, `studyId`, `molecularProfileId`, both sites' `EntrezGeneId`, `HugoSymbol`, `Chromosome` and `Position`, `variantClass`, `eventInfo`, `svStatus`, `tumorVariantCount`, `tumorReadCount` | database | A page breaks ties between variants of one gene pair by every field. |
+| POST `/api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch` | `genesetId`, `sampleId`, `patientId`, `value` | memory | `value` sorts as a number. |
+| POST `/api/namespace-data/fetch` | `outerKey`, `innerKey`, `sampleId`, `patientId`, `studyId`, `attrValue` | memory | |
+| POST `/api/genes/fetch` | as GET `/api/genes` | memory | A page without `sortBy` is sorted by `entrezGeneId`, as the list has no set order. |
+| POST `/api/genesets/fetch` | `genesetId`, `name`, `description` | memory | |
+| GET `/api/generic-assay-meta/{molecularProfileId}` | `stableId`, `entityType` | memory | |
+| GET `/api/reference-genome-genes/{genomeName}`, POST `…/fetch` | `entrezGeneId`, `hugoGeneSymbol`, `chromosome`, `cytoband`, `start`, `end` | memory | |
+| POST `/api/treatments/sample` | `treatment`, `time`, `count` | memory | |
+| POST `/api/treatments/patient` | `treatment`, `count` | memory | |
+| POST `/api/molecular-profiles/co-expressions/fetch` | `geneticEntityId`, `spearmansCorrelation`, `pValue` | memory | `geneticEntityId` sorts as a number. |
+| POST `/api/expression-enrichments/fetch`, POST `/api/alteration-enrichments/fetch` | `entrezGeneId`, `hugoGeneSymbol`, `pValue` | memory | |
+| POST `/api/generic-assay-enrichments/fetch` | `stableId`, `pValue` | memory | |
+
+These long lists get no paging, on purpose:
+
+| Endpoint | Why not |
+|---|---|
+| POST `/api/mutated-genes/fetch`, `/api/cna-genes/fetch`, `/api/structuralvariant-genes/fetch` | They are counts per gene for the study view's gene tables, which need the whole list. The copy-number list also has no stable order: genes with equal counts can swap places. |
+| POST `/api/mutation-counts-by-position/fetch` | It returns one count per requested position, so the request already sets its length. |
+| POST `/api/clinical-events-meta/fetch` | It returns one short item per event type. |
+| Counts, bins and other single summaries | They are one object, or a few items per chart. |
 
 ## Studies, cancer types, server info
 
