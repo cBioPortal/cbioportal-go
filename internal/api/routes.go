@@ -1,9 +1,13 @@
 package api
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
+)
 
 func (s *State) routes(mux *http.ServeMux) {
-	s.mux = mux
+	s.SetMux(mux)
 	// Bootstrap / config
 	mux.HandleFunc("GET /config_service", s.configService)
 	mux.HandleFunc("GET /api/info", s.info)
@@ -11,7 +15,7 @@ func (s *State) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/cancer-types", s.cancerTypes)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) })
 	// Catch-all: 404 for unknown /api/ paths, the portal UI for the rest.
-	mux.HandleFunc("/", s.catchAll)
+	mux.HandleFunc("/", s.CatchAll)
 
 	// Session service + public virtual studies
 	s.routeSession(mux)
@@ -100,4 +104,24 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.routeCompat(mux)
 	s.routeProxy(mux)
 	s.routeExport(mux)
+	s.routeDATs(mux)
+}
+
+// routeDATs serves the data-access-token endpoints: dat.method=oauth2's, or
+// placeholders without it.
+func (s *State) routeDATs(mux *http.ServeMux) {
+	if s.dat != nil {
+		s.routeDataAccessTokens(mux, s.dat)
+		return
+	}
+	// Data-access tokens without dat.method=oauth2: placeholders.
+	mux.HandleFunc("GET /api/data-access-token", func(w http.ResponseWriter, r *http.Request) { core.WriteJSON(w, map[string]any{}) })
+	mux.HandleFunc("GET /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) { core.WriteJSON(w, []any{}) })
+	mux.HandleFunc("POST /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {
+		core.ReadBody(r, nil)
+		core.WriteJSON(w, map[string]any{})
+	})
+	mux.HandleFunc("DELETE /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {})
+	mux.HandleFunc("GET /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) { core.WriteJSON(w, map[string]any{}) })
+	mux.HandleFunc("DELETE /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) {})
 }

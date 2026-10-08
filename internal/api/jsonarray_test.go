@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 func TestJSONArrayMatchesWriteJSON(t *testing.T) {
@@ -18,15 +20,15 @@ func TestJSONArrayMatchesWriteJSON(t *testing.T) {
 	}
 	for _, n := range []int{0, 1, 2} {
 		want := httptest.NewRecorder()
-		writeJSON(want, rows[:n])
+		core.WriteJSON(want, rows[:n])
 		got := httptest.NewRecorder()
-		a := newJSONArray(got, req)
+		a := core.NewJSONArray(got, req)
 		for _, r := range rows[:n] {
-			if err := a.add(r); err != nil {
+			if err := a.Add(r); err != nil {
 				t.Fatal(err)
 			}
 		}
-		a.finish(nil)
+		a.Finish(nil)
 		if got.Body.String() != want.Body.String() || got.Header().Get("Content-Type") != want.Header().Get("Content-Type") {
 			t.Errorf("%d rows: %q (%s), want %q (%s)", n, got.Body, got.Header().Get("Content-Type"), want.Body, want.Header().Get("Content-Type"))
 		}
@@ -37,8 +39,8 @@ func TestJSONArrayErrors(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/molecular-data", nil)
 	// Before the first element: the error response fail writes.
 	got, want := httptest.NewRecorder(), httptest.NewRecorder()
-	newJSONArray(got, req).finish(errors.New("boom"))
-	fail(want, req, errors.New("boom"))
+	core.NewJSONArray(got, req).Finish(errors.New("boom"))
+	core.Fail(want, req, errors.New("boom"))
 	if got.Code != http.StatusInternalServerError || got.Code != want.Code ||
 		got.Header().Get("Content-Type") != want.Header().Get("Content-Type") || strings.Contains(got.Body.String(), "boom") {
 		t.Errorf("got %d %q, want %d %q", got.Code, got.Body, want.Code, want.Body)
@@ -49,7 +51,7 @@ func TestJSONArrayErrors(t *testing.T) {
 			t.Errorf("recovered %v, want ErrAbortHandler", v)
 		}
 	}()
-	a := newJSONArray(httptest.NewRecorder(), req)
-	a.add(1)
-	a.finish(errors.New("boom"))
+	a := core.NewJSONArray(httptest.NewRecorder(), req)
+	a.Add(1)
+	a.Finish(errors.New("boom"))
 }

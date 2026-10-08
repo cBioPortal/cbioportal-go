@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -35,21 +36,21 @@ func (s *State) studyTagsGet(w http.ResponseWriter, r *http.Request) {
 		"SELECT study_id AS studyId, tags FROM cancer_study_tags WHERE study_id = {study:String} LIMIT 1",
 		ch.Params{"study": r.PathValue("studyId")})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 || !json.Valid([]byte(rows[0].Tags)) {
-		writeJSON(w, map[string]any{})
+		core.WriteJSON(w, map[string]any{})
 		return
 	}
-	writeJSON(w, json.RawMessage(rows[0].Tags))
+	core.WriteJSON(w, json.RawMessage(rows[0].Tags))
 }
 
 // studyTagsFetch — POST /api/studies/tags/fetch (body: study ids; an empty
 // list returns every study's tags). Studies without tags are absent.
 func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
-	readBody(r, &ids)
+	core.ReadBody(r, &ids)
 	where := ""
 	p := ch.Params{}
 	if len(ids) > 0 {
@@ -59,10 +60,10 @@ func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 	rows, err := queryView[studyTagsRow](s.CH,
 		"SELECT study_id AS studyId, tags FROM cancer_study_tags"+where+" ORDER BY study_id", p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	ranks := s.studyRanks()
+	ranks := s.StudyRanks()
 	out := make([]CancerStudyTags, len(rows))
 	for i, row := range rows {
 		out[i] = CancerStudyTags{StudyID: row.StudyID, Tags: row.Tags}
@@ -70,5 +71,5 @@ func (s *State) studyTagsFetch(w http.ResponseWriter, r *http.Request) {
 			out[i].CancerStudyID = &id
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }

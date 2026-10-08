@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // TestAPIDocsOverlay pins the paging parameters laid over the served API
@@ -33,12 +35,12 @@ func TestAPIDocsOverlay(t *testing.T) {
 			t.Fatalf("%s: served description is no JSON: %v", name, err)
 		}
 		found := 0
-		for _, a := range addedPagedEndpoints {
-			key := a.path
+		for _, a := range core.AddedPagedEndpoints {
+			key := a.Path
 			if name == "legacy-api.json" {
 				key = strings.TrimPrefix(key, "/api")
 			}
-			method := strings.ToLower(a.method)
+			method := strings.ToLower(a.Method)
 			old, ok := before.Paths[key][method]
 			if !ok {
 				continue
@@ -47,27 +49,27 @@ func TestAPIDocsOverlay(t *testing.T) {
 			got := after.Paths[key][method].Parameters
 			added := got[len(old.Parameters):]
 			want := []string{"pageSize", "pageNumber"}
-			if a.sorted() {
+			if a.Sorted() {
 				want = append(want, "sortBy", "direction")
 			}
 			if len(got) != len(old.Parameters)+len(want) {
-				t.Errorf("%s %s %s: %d parameters, want %d more than %d", name, a.method, key, len(got), len(want), len(old.Parameters))
+				t.Errorf("%s %s %s: %d parameters, want %d more than %d", name, a.Method, key, len(got), len(want), len(old.Parameters))
 				continue
 			}
 			for i, n := range want {
 				if added[i]["name"] != n || added[i]["in"] != "query" || added[i]["required"] != false {
-					t.Errorf("%s %s %s: parameter %d is %v", name, a.method, key, i, added[i])
+					t.Errorf("%s %s %s: parameter %d is %v", name, a.Method, key, i, added[i])
 				}
 			}
-			if a.sorted() {
+			if a.Sorted() {
 				enum := added[2]["enum"]
 				if s, ok := added[2]["schema"].(map[string]any); ok {
 					enum = s["enum"]
 				}
 				b, _ := json.Marshal(enum)
-				w, _ := json.Marshal(a.sort.values)
+				w, _ := json.Marshal(a.Sort.Values)
 				if string(b) != string(w) {
-					t.Errorf("%s %s %s: sortBy enum %s, want %s", name, a.method, key, b, w)
+					t.Errorf("%s %s %s: sortBy enum %s, want %s", name, a.Method, key, b, w)
 				}
 			}
 			// With the added parameters taken out, the operation is the
@@ -80,7 +82,7 @@ func TestAPIDocsOverlay(t *testing.T) {
 			}
 			tb, _ := json.Marshal(trimmed)
 			if string(ob) != string(tb) {
-				t.Errorf("%s %s %s: other parameters changed", name, a.method, key)
+				t.Errorf("%s %s %s: other parameters changed", name, a.Method, key)
 			}
 		}
 		if found < 10 {

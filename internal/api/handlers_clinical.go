@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -41,9 +42,9 @@ func toClinicalData(r *clinicalRow, patient bool) ClinicalData {
 		d.PatientID = r.ID
 	} else {
 		d.SampleID, d.PatientID = r.ID, r.PatientID
-		d.UniqueSampleKey = uniqueKey(r.StudyID, r.ID)
+		d.UniqueSampleKey = core.UniqueKey(r.StudyID, r.ID)
 	}
-	d.UniquePatientKey = uniqueKey(r.StudyID, d.PatientID)
+	d.UniquePatientKey = core.UniqueKey(r.StudyID, d.PatientID)
 	return d
 }
 
@@ -55,19 +56,19 @@ func toClinicalData(r *clinicalRow, patient bool) ClinicalData {
 // internal id of their sample or patient, then attribute (the storage order
 // of clinical_sample / clinical_patient); a page, sorted by
 // ClinicalDataSortBy or not, is read as sqlListOrder orders it.
-func clinicalSQL(r *http.Request, b binder, patient, importOrder bool, where string, studies []string) string {
+func clinicalSQL(r *http.Request, b core.Binder, patient, importOrder bool, where string, studies []string) string {
 	def := "studyId, id, clinicalAttributeId"
 	if importOrder {
 		def = "c.internal_id, studyId, id, clinicalAttributeId"
 	}
-	order := sqlListOrder(r, clinicalDataSortable, def)
+	order := core.SQLListOrder(r, clinicalDataSortable, def)
 	if patient {
 		return "SELECT c.study_id AS studyId, c.patient_id AS id, c.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 			"c.attr_value AS value FROM clinical_patient c WHERE " + where + order
 	}
 	return "SELECT c.study_id AS studyId, c.sample_id AS id, s.patient_id AS patientId, c.attr_id AS clinicalAttributeId, " +
 		"c.attr_value AS value FROM (SELECT * FROM clinical_sample WHERE " + where + ") c " +
-		"LEFT JOIN " + byStudies(studies).samples(b) + " s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
+		"LEFT JOIN " + core.ByStudies(studies).Samples(b) + " s ON s.study_id = c.study_id AND s.sample_id = c.sample_id" + order
 }
 
 // clinicalDataSortable are the ClinicalDataSortBy columns (attrId,
@@ -94,7 +95,7 @@ type clinicalDataOut struct {
 // SUMMARY, DETAILED with the attribute metadata of studies, or META as a
 // count header). where holds the rows to studies and may hold placeholders
 // bound in args.
-func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, studies []string, where string, args *sqlArgs) {
+func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bool, studies []string, where string, args *core.SQLArgs) {
 	projection := projectionParam(r)
 	if projection == "META" {
 		type c struct {
@@ -104,7 +105,7 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		if patient {
 			view = "clinical_patient"
 		}
-		rows, _ := queryA[c](s.CH, fmt.Sprintf("SELECT count() AS n FROM %s WHERE %s", view, where), args)
+		rows, _ := core.QueryA[c](s.CH, fmt.Sprintf("SELECT count() AS n FROM %s WHERE %s", view, where), args)
 		var n uint64
 		if len(rows) > 0 {
 			n = rows[0].N
@@ -117,9 +118,9 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 	if projection == "DETAILED" {
 		attrs = s.clinicalAttributes(studies)
 	}
-	out := newJSONArray(w, r)
-	sql := clinicalSQL(r, args, patient, s.importOrdered(), where, studies)
-	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *clinicalRow) error {
+	out := core.NewJSONArray(w, r)
+	sql := clinicalSQL(r, args, patient, s.ImportOrdered(), where, studies)
+	err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(row *clinicalRow) error {
 		d := toClinicalData(row, patient)
 		o := clinicalDataOut{
 			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey, SampleID: d.SampleID,
@@ -132,16 +133,16 @@ func (s *State) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 			o.ClinicalAttribute = &a
 			o.PatientAttribute = &a.PatientAttribute
 		}
-		return out.add(o)
+		return out.Add(o)
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 func (s *State) clinicalData(w http.ResponseWriter, r *http.Request) {
-	args := newArgs()
-	where := "study_id = " + args.str(r.PathValue("studyId"))
+	args := core.NewArgs()
+	where := "study_id = " + args.Str(r.PathValue("studyId"))
 	if a := r.URL.Query().Get("attributeId"); a != "" {
-		where += " AND attr_id = " + args.str(a)
+		where += " AND attr_id = " + args.Str(a)
 	}
 	s.writeClinical(w, r, isPatient(r), []string{r.PathValue("studyId")}, where, args)
 }
@@ -151,19 +152,19 @@ func (s *State) clinicalDataStudyFetch(w http.ResponseWriter, r *http.Request) {
 		IDs          []string `json:"ids"`
 		AttributeIDs []string `json:"attributeIds"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	patient := isPatient(r)
 	idCol := "sample_id"
 	if patient {
 		idCol = "patient_id"
 	}
-	args := newArgs()
-	where := "study_id = " + args.str(r.PathValue("studyId"))
+	args := core.NewArgs()
+	where := "study_id = " + args.Str(r.PathValue("studyId"))
 	if len(f.IDs) > 0 {
-		where += fmt.Sprintf(" AND %s IN %s", idCol, args.strs(f.IDs))
+		where += fmt.Sprintf(" AND %s IN %s", idCol, args.Strs(f.IDs))
 	}
 	if len(f.AttributeIDs) > 0 {
-		where += " AND attr_id IN " + args.strs(f.AttributeIDs)
+		where += " AND attr_id IN " + args.Strs(f.AttributeIDs)
 	}
 	s.writeClinical(w, r, patient, []string{r.PathValue("studyId")}, where, args)
 }
@@ -179,9 +180,9 @@ func (s *State) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 		} `json:"identifiers"`
 		AttributeIDs []string `json:"attributeIds"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	if len(f.Identifiers) == 0 {
-		writeJSON(w, []ClinicalData{})
+		core.WriteJSON(w, []ClinicalData{})
 		return
 	}
 	patient := isPatient(r)
@@ -195,12 +196,12 @@ func (s *State) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 		pairs[i] = [2]string{id.StudyID, id.EntityID}
 		studies[id.StudyID] = true
 	}
-	args := newArgs()
-	where := fmt.Sprintf("(study_id, %s) IN %s", idCol, args.pairs(pairs))
+	args := core.NewArgs()
+	where := fmt.Sprintf("(study_id, %s) IN %s", idCol, args.Pairs(pairs))
 	if len(f.AttributeIDs) > 0 {
-		where += " AND attr_id IN " + args.strs(f.AttributeIDs)
+		where += " AND attr_id IN " + args.Strs(f.AttributeIDs)
 	}
-	s.writeClinical(w, r, patient, sortedKeys(studies), where, args)
+	s.writeClinical(w, r, patient, core.SortedKeys(studies), where, args)
 }
 
 // clinicalAttributes indexes the studies' attribute metadata by study and id.
@@ -241,25 +242,25 @@ type ClinicalAttribute struct {
 // as ClinicalAttributeMapper does: by attribute id, then internal study id.
 func (s *State) clinicalAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
-	readBody(r, &studyIDs)
+	core.ReadBody(r, &studyIDs)
 	if len(studyIDs) == 0 {
-		writeJSON(w, []ClinicalAttribute{})
+		core.WriteJSON(w, []ClinicalAttribute{})
 		return
 	}
 	rows, err := ch.QueryP[clinAttrRow](s.CH,
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
-			"ORDER BY clinical_attribute_id, "+s.studyOrder("study_id"),
+			"ORDER BY clinical_attribute_id, "+s.StudyOrder("study_id"),
 		ch.Params{"studies": studyIDs})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]ClinicalAttribute, len(rows))
 	for i, r := range rows {
 		out[i] = r.toAttribute()
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 func (r clinAttrRow) toAttribute() ClinicalAttribute {

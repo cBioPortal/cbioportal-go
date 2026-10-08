@@ -2,17 +2,13 @@ package api
 
 import (
 	_ "embed"
-	"encoding/json"
 	"net/http"
-	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
-
-//go:embed portal.html
-var portalHTML []byte
 
 // configService returns the full frontend property set (as the Java
 // FrontendPropertiesService does), so feature-gating flags like
@@ -21,16 +17,16 @@ var portalHTML []byte
 func (s *State) configService(w http.ResponseWriter, r *http.Request) {
 	cfg := config.FrontendConfig("/", s.Props, s.PropsReplaceDefaults)
 	cfg["authenticationMethod"] = "noauthsessionservice"
-	if s.login != nil {
-		cfg["authenticationMethod"] = s.login.cfg.Method
+	if s.AuthMethod != "" {
+		cfg["authenticationMethod"] = s.AuthMethod
 	}
 	cfg["sessionServiceEnabled"] = true
 	cfg["clickhouse_mode"] = true
-	if u, ok := GetUser(r.Context()); ok && u.Name != "" {
+	if u, ok := core.GetUser(r.Context()); ok && u.Name != "" {
 		cfg["user_display_name"] = u.Name
 		cfg["user_email_address"] = u.Name
 	}
-	writeJSON(w, cfg)
+	core.WriteJSON(w, cfg)
 }
 
 // customDriverAnnotationReport reports whether the given mutation profiles carry
@@ -39,7 +35,7 @@ func (s *State) configService(w http.ResponseWriter, r *http.Request) {
 // mutation, CNA and SV events of genomic_event_derived.
 func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Request) {
 	var ids []string
-	readBody(r, &ids)
+	core.ReadBody(r, &ids)
 	type row struct {
 		HasBinary uint8    `json:"hasBinary"`
 		Tiers     []string `json:"tiers"`
@@ -47,21 +43,21 @@ func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 	report := map[string]any{"hasBinary": false, "tiers": []string{}}
 	// An empty list reports nothing, as the Java backend answers it.
 	if len(ids) == 0 {
-		writeJSON(w, report)
+		core.WriteJSON(w, report)
 		return
 	}
 	p := ch.Params{}
 	rows, _ := ch.QueryP[row](s.CH,
 		"SELECT toUInt8(countIf(driver_filter IN ('Putative_Driver', 'Putative_Passenger')) > 0) AS hasBinary, "+
 			"arraySort(groupUniqArrayIf(driver_tiers_filter, driver_tiers_filter NOT IN ('', 'NA'))) AS tiers "+
-			"FROM "+byProfiles(ids).from(paramsBinder(p), tGenomicEventDerived), p)
+			"FROM "+core.ByProfiles(ids).From(core.ParamsBinder(p), core.TGenomicEventDerived), p)
 	if len(rows) > 0 {
 		report["hasBinary"] = rows[0].HasBinary == 1
 		if len(rows[0].Tiers) > 0 {
 			report["tiers"] = rows[0].Tiers
 		}
 	}
-	writeJSON(w, report)
+	core.WriteJSON(w, report)
 }
 
 // Info is InfoController's response. Versions name what this backend serves:
@@ -111,95 +107,5 @@ func (s *State) info(w http.ResponseWriter, r *http.Request) {
 		}
 		info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
 	}
-	writeJSON(w, info)
-}
-
-func (s *State) portal(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(portalHTML)
-}
-
-// catchAll serves every path no route matches. An /api/ path gets Spring's
-// default error body, as Java answers it: 405 when the path is served for
-// other methods, else 404. Other paths go to the frontend, or, without one,
-// the portal at "/" and an empty list elsewhere.
-func (s *State) catchAll(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/api/") {
-		readBody(r, nil)
-		if allow := s.allowedMethods(r); len(allow) > 0 {
-			w.Header().Set("Allow", strings.Join(allow, ", "))
-			springError(w, r, http.StatusMethodNotAllowed)
-			return
-		}
-		springNotFound(w, r)
-		return
-	}
-	if s.frontend != nil {
-		if r.Method == http.MethodPost && portalPages[r.URL.Path] {
-			s.postedPage(w, r)
-			return
-		}
-		s.frontend.ServeHTTP(w, r)
-		return
-	}
-	if r.URL.Path == "/" && r.Method == http.MethodGet {
-		s.portal(w, r)
-		return
-	}
-	readBody(r, nil)
-	writeJSON(w, []any{})
-}
-
-// allowedMethods lists the methods a route serves r's path for.
-func (s *State) allowedMethods(r *http.Request) []string {
-	var out []string
-	if s.mux == nil {
-		return out
-	}
-	for _, m := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
-		probe := r.Clone(r.Context())
-		probe.Method = m
-		if _, pattern := s.mux.Handler(probe); pattern != "/" {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// portalPages are the pages that accept a posted query (IndexPageController).
-var portalPages = map[string]bool{"/": true, "/index": true, "/index.html": true, "/study/summary": true, "/results": true}
-
-// postedPage serves the portal page for a form POST with the posted parameters
-// exposed as window.postData, for queries too long for a URL.
-func (s *State) postedPage(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	params := map[string]string{}
-	for k, v := range r.Form {
-		if len(v) > 0 {
-			params[k] = v[0]
-		}
-	}
-	get := r.Clone(r.Context())
-	get.Method = http.MethodGet
-	get.Body = http.NoBody
-	get.ContentLength = 0
-	get.Header.Del("Content-Type")
-	get.Header.Del("Accept-Encoding")
-	rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
-	s.frontend.ServeHTTP(rec, get)
-	data, _ := json.Marshal(params)
-	script := "<script>var postData = " + string(data) + ";</script>"
-	page := rec.body.String()
-	if i := strings.Index(page, "<head>"); i >= 0 {
-		page = page[:i+len("<head>")] + script + page[i+len("<head>"):]
-	} else {
-		page = script + page
-	}
-	for k, v := range rec.header {
-		if k != "Content-Length" {
-			w.Header()[k] = v
-		}
-	}
-	w.WriteHeader(rec.status)
-	w.Write([]byte(page))
+	core.WriteJSON(w, info)
 }

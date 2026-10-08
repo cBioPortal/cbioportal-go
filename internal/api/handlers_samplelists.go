@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -31,13 +32,13 @@ type SampleList struct {
 // grouped by study and list), each list's samples in SampleListMapper's
 // order: by internal id (the storage order of sample_list_list) where the
 // database carries them.
-func (s *State) sampleListSelect(b binder, sc scope) string {
+func (s *State) sampleListSelect(b core.Binder, sc core.Scope) string {
 	ids := "groupArray(sample_id)"
-	if s.importOrdered() {
+	if s.ImportOrdered() {
 		ids = "arrayMap(x -> x.2, arraySort(groupArray((internal_id, sample_id))))"
 	}
 	return "SELECT list_id AS sampleListId, any(category) AS category, any(name) AS name, " +
-		"any(description) AS description, study_id AS studyId, " + ids + " AS sampleIds FROM " + sc.from(b, tSampleList)
+		"any(description) AS description, study_id AS studyId, " + ids + " AS sampleIds FROM " + sc.From(b, core.TSampleList)
 }
 
 func toSampleList(r sampleListRow) SampleList {
@@ -53,20 +54,20 @@ func toSampleList(r sampleListRow) SampleList {
 // carries them.
 // The lists stream as they are read; a sorted page is read as sqlPageOrder
 // orders it.
-func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, sc scope, byInternalID bool) {
+func (s *State) sampleListsQuery(w http.ResponseWriter, r *http.Request, sc core.Scope, byInternalID bool) {
 	p := ch.Params{}
-	sql := s.sampleListSelect(paramsBinder(p), sc)
+	sql := s.sampleListSelect(core.ParamsBinder(p), sc)
 	order := "list_id"
-	if byInternalID && s.modelHasColumn("sample_list", "list_internal_id") {
+	if byInternalID && s.ModelHasColumn("sample_list", "list_internal_id") {
 		order = "any(list_internal_id), list_id"
 	}
 	// Small blocks: a list carries up to every sample of its study.
-	sql += " GROUP BY study_id, list_id" + sqlPageOrder(r, sampleListSortable, order) + " SETTINGS max_block_size = 64"
-	out := newJSONArray(w, r)
+	sql += " GROUP BY study_id, list_id" + core.SQLPageOrder(r, sampleListSortable, order) + " SETTINGS max_block_size = 64"
+	out := core.NewJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, p, func(row *sampleListRow) error {
-		return out.add(toSampleList(*row))
+		return out.Add(toSampleList(*row))
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 // sampleListSortable are the SampleListSortBy columns (stableId, category,
@@ -76,32 +77,32 @@ var sampleListSortable = map[string]string{
 }
 
 func (s *State) studySampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, r, byStudy(r.PathValue("studyId")), false)
+	s.sampleListsQuery(w, r, core.ByStudy(r.PathValue("studyId")), false)
 }
 
 // sampleList serves GET /api/sample-lists/{sampleListId}: the DETAILED list.
 func (s *State) sampleList(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	p := ch.Params{}
-	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect(paramsBinder(p), s.bySampleList(id))+
+	rows, err := ch.QueryP[sampleListRow](s.CH, s.sampleListSelect(core.ParamsBinder(p), s.BySampleList(id))+
 		" GROUP BY study_id, list_id", p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, msgSampleListNotFound(id))
+		core.WriteError(w, http.StatusNotFound, core.MsgSampleListNotFound(id))
 		return
 	}
-	writeJSON(w, toSampleList(rows[0]))
+	core.WriteJSON(w, toSampleList(rows[0]))
 }
 
 func (s *State) sampleListsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
-	readBody(r, &ids)
+	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
-		writeJSON(w, []SampleList{})
+		core.WriteJSON(w, []SampleList{})
 		return
 	}
-	s.sampleListsQuery(w, r, s.bySampleLists(ids...), true)
+	s.sampleListsQuery(w, r, s.BySampleLists(ids...), true)
 }

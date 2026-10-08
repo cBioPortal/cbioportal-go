@@ -82,7 +82,7 @@ jobs:
         env:
           API: http://localhost:18090
       - name: Live ClickHouse tests (parameter round trips, raw sources, study export, import lock, mirror)
-        run: go test ./internal/clickhouse/ ./internal/api/ ./internal/studyimport/ ./rewrite/java-v7-to-go/mirror/ -run Live
+        run: go test ./internal/clickhouse/ ./internal/api/... ./internal/studyimport/ ./rewrite/java-v7-to-go/mirror/ -run Live
         env:
           CLICKHOUSE_TEST_URL: http://localhost:18123
       - name: API log

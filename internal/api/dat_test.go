@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // datOf is the data access token provider of each datPortal.
@@ -41,14 +43,14 @@ func datPortal(t *testing.T, p *fakeProvider, extra map[string]string) *httptest
 	for k, v := range extra {
 		props[k] = v
 	}
-	s := &State{Props: props, PropsReplaceDefaults: true}
+	s := &State{State: &core.State{Props: props, PropsReplaceDefaults: true}}
 	if err := s.ConfigureAuth(); err != nil {
 		t.Fatalf("ConfigureAuth: %v", err)
 	}
 	mux := http.NewServeMux()
 	s.routeDataAccessTokens(mux, s.dat)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		u, _ := GetUser(r.Context())
+		u, _ := core.GetUser(r.Context())
 		fmt.Fprintf(w, "%s %s user=%s roles=%s", r.Method, r.URL.Path, u.Name, strings.Join(u.Roles, ","))
 	})
 	srv.Config.Handler = s.login.middleware(mux)
@@ -377,9 +379,9 @@ func TestLoadDATConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "dat.oauth2.jwkUrl") || strings.Contains(err.Error(), "clientId") {
 		t.Errorf("missing keys: %v", err)
 	}
-	s := &State{Props: map[string]string{"dat.method": "oauth2", "dat.oauth2.clientId": "c", "dat.oauth2.issuer": "i",
+	s := &State{State: &core.State{Props: map[string]string{"dat.method": "oauth2", "dat.oauth2.clientId": "c", "dat.oauth2.issuer": "i",
 		"dat.oauth2.accessTokenUri": "t", "dat.oauth2.userAuthorizationUri": "a", "dat.oauth2.jwkUrl": "j",
-		"dat.oauth2.redirectUri": "r"}, PropsReplaceDefaults: true}
+		"dat.oauth2.redirectUri": "r"}, PropsReplaceDefaults: true}}
 	if err := s.ConfigureAuth(); err == nil || !strings.Contains(err.Error(), "authenticate=oauth2") {
 		t.Errorf("dat.method=oauth2 without login: %v", err)
 	}

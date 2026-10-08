@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -143,11 +144,11 @@ type svFilter struct {
 
 func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	var f svFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	var where string
 	var studies []string
-	args := newArgs()
+	args := core.NewArgs()
 	switch {
 	case len(f.SampleMolecularIdentifiers) > 0:
 		pairs := make([][2]string, len(f.SampleMolecularIdentifiers))
@@ -155,18 +156,18 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 			pairs[i] = [2]string{svStudy(id.MolecularProfileID), id.SampleID}
 			studies = append(studies, pairs[i][0])
 		}
-		where = "(sv.study_id, sv.sample_id) IN " + args.pairs(pairs)
+		where = "(sv.study_id, sv.sample_id) IN " + args.Pairs(pairs)
 	case len(f.MolecularProfileIDs) > 0:
 		studies = make([]string, len(f.MolecularProfileIDs))
 		for i, p := range f.MolecularProfileIDs {
 			studies[i] = svStudy(p)
 		}
-		where = "sv.study_id IN " + args.strs(studies)
+		where = "sv.study_id IN " + args.Strs(studies)
 		if f.SampleListID != "" {
-			where += " AND sv.sample_id IN " + s.bySampleList(f.SampleListID).listMembers(args)
+			where += " AND sv.sample_id IN " + s.BySampleList(f.SampleListID).ListMembers(args)
 		}
 	default:
-		writeJSON(w, []StructuralVariant{})
+		core.WriteJSON(w, []StructuralVariant{})
 		return
 	}
 
@@ -174,7 +175,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	// structuralVariantQueries; neither given means no gene restriction.
 	var geneOrs []string
 	if len(f.EntrezGeneIDs) > 0 {
-		joined := intListSQL(f.EntrezGeneIDs)
+		joined := core.IntListSQL(f.EntrezGeneIDs)
 		geneOrs = append(geneOrs, fmt.Sprintf("sv.e1 IN (%s) OR sv.e2 IN (%s)", joined, joined))
 	}
 	for _, q := range f.StructuralVariantQueries {
@@ -186,7 +187,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 
 	cols := svSelectColumns(s.svViewColumns())
 	order := " ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId"
-	if sp, expr := claimListPage(r, structuralVariantSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, structuralVariantSortable); sp != nil {
 		// Records of one gene pair in a sample tie in that order; a page
 		// breaks the ties by every field, so pages do not overlap.
 		tie := []string{"site1HugoSymbol", "site2HugoSymbol", "studyId", "sampleId"}
@@ -195,7 +196,7 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 				tie = append(tie, alias)
 			}
 		}
-		order = sp.orderLimit(expr, strings.Join(tie, ", "))
+		order = sp.OrderLimit(expr, strings.Join(tie, ", "))
 	}
 	query := fmt.Sprintf(
 		"SELECT %s FROM (%s) sv "+
@@ -203,12 +204,12 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 			"WHERE %s%s",
-		strings.Join(cols, ", "), svSiteEntrezSQL, byStudies(studies).samples(args), where, order)
-	out := newJSONArray(w, r)
-	err := ch.QueryEachP(s.CH, query, args.params(query), func(r *map[string]any) error {
-		return out.add(toStructuralVariant(*r))
+		strings.Join(cols, ", "), svSiteEntrezSQL, core.ByStudies(studies).Samples(args), where, order)
+	out := core.NewJSONArray(w, r)
+	err := ch.QueryEachP(s.CH, query, args.Params(query), func(r *map[string]any) error {
+		return out.Add(toStructuralVariant(*r))
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 // structuralVariantSortable are the sortBy fields of structural variants
@@ -301,11 +302,11 @@ func toStructuralVariant(r map[string]any) StructuralVariant {
 		}
 		return nil
 	}
-	na := func(k string) string { return naString(str(k)) }
-	num := func(k string) int64 { return javaPartInt(str(k)) }
+	na := func(k string) string { return core.NAString(str(k)) }
+	num := func(k string) int64 { return core.JavaPartInt(str(k)) }
 	study, sample, patient := str("studyId"), str("sampleId"), str("patientId")
 	v := StructuralVariant{
-		UniqueSampleKey: uniqueKey(study, sample), UniquePatientKey: uniqueKey(study, patient),
+		UniqueSampleKey: core.UniqueKey(study, sample), UniquePatientKey: core.UniqueKey(study, patient),
 		MolecularProfileID: str("molecularProfileId"), SampleID: sample, PatientID: patient, StudyID: study,
 		Site1EntrezGeneID: entrez("site1EntrezGeneId"), Site1HugoSymbol: str("site1HugoSymbol"),
 		Site1EnsemblTranscriptID: na("site1EnsemblTranscriptId"), Site1Chromosome: na("site1Chromosome"),
@@ -324,13 +325,13 @@ func toStructuralVariant(r map[string]any) StructuralVariant {
 		Annotation: na("annotation"), BreakpointType: na("breakpointType"), ConnectionType: na("connectionType"),
 		EventInfo: na("eventInfo"), VariantClass: na("variantClass"), Length: num("length"), Comments: na("comments"),
 		SvStatus:         str("svStatus"),
-		NamespaceColumns: namespaceColumnsJSON(str("namespaceColumns")),
+		NamespaceColumns: core.NamespaceColumnsJSON(str("namespaceColumns")),
 	}
 	// An NA status takes the column default.
 	if v.SvStatus == "" || v.SvStatus == "NA" {
 		v.SvStatus = "SOMATIC"
 	}
-	d := newDriverAnnotation(str("driverFilter"), str("driverFilterAnn"), str("driverTiersFilter"), str("driverTiersFilterAnn"), naString)
+	d := core.NewDriverAnnotation(str("driverFilter"), str("driverFilterAnn"), str("driverTiersFilter"), str("driverTiersFilterAnn"), core.NAString)
 	v.DriverFilter, v.DriverFilterAnn, v.DriverTiersFilter, v.DriverTiersFilterAnn = d.Filter, d.FilterAnn, d.TiersFilter, d.TiersFilterAnn
 	return v
 }
@@ -364,7 +365,7 @@ func (s *State) resolvePanelProfiles(ids []string) map[string]panelProfile {
 	if len(ids) == 0 {
 		return out
 	}
-	rows, _ := cachedQueryP[panelProfile](s,
+	rows, _ := core.CachedQueryP[panelProfile](s.State,
 		"SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, profile_stable_id AS stableId "+
 			"FROM molecular_profile WHERE molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": ids})
 	for _, r := range rows {
@@ -383,7 +384,7 @@ func (s *State) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 			SampleID           string `json:"sampleId"`
 		} `json:"sampleMolecularIdentifiers"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	var reqs []gpReq
 	switch {
@@ -408,9 +409,9 @@ func (s *State) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 
 // writeGenePanelData streams genePanelDataEach's records.
 func (s *State) writeGenePanelData(w http.ResponseWriter, r *http.Request, reqs []gpReq) {
-	out := newJSONArray(w, r)
-	out.finish(s.genePanelDataEach(reqs, func(d GenePanelData) error {
-		return out.add(d)
+	out := core.NewJSONArray(w, r)
+	out.Finish(s.genePanelDataEach(reqs, func(d GenePanelData) error {
+		return out.Add(d)
 	}))
 }
 
@@ -420,9 +421,9 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 		SampleIDs    []string `json:"sampleIds"`
 		SampleListID string   `json:"sampleListId"`
 	}
-	readBody(r, &f)
-	if noSamples(f.SampleIDs, f.SampleListID) {
-		writeJSON(w, []struct{}{})
+	core.ReadBody(r, &f)
+	if core.NoSamples(f.SampleIDs, f.SampleListID) {
+		core.WriteJSON(w, []struct{}{})
 		return
 	}
 
@@ -435,8 +436,8 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 			SampleID string `json:"sampleId"`
 		}
 		p := ch.Params{}
-		sql := "SELECT sample_id AS sampleId FROM " + s.bySampleList(f.SampleListID).from(paramsBinder(p), tSampleList)
-		if pageAsked(r) {
+		sql := "SELECT sample_id AS sampleId FROM " + s.BySampleList(f.SampleListID).From(core.ParamsBinder(p), core.TSampleList)
+		if core.PageAsked(r) {
 			// Pages need a stable order.
 			sql += " ORDER BY sample_id"
 		}
@@ -462,7 +463,7 @@ func (s *State) studySampleIDs(study string) []string {
 		SampleID string `json:"sampleId"`
 	}
 	p := ch.Params{}
-	rows, _ := cachedQueryP[sr](s, "SELECT sample_id AS sampleId FROM "+byStudy(study).from(paramsBinder(p), tSample)+" ORDER BY sample_id", p)
+	rows, _ := core.CachedQueryP[sr](s.State, "SELECT sample_id AS sampleId FROM "+core.ByStudy(study).From(core.ParamsBinder(p), core.TSample)+" ORDER BY sample_id", p)
 	out := make([]string, len(rows))
 	for i, r := range rows {
 		out[i] = r.SampleID
@@ -484,7 +485,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	for _, q := range reqs {
 		profSet[q.profileID] = true
 	}
-	profIDs := sortedKeys(profSet)
+	profIDs := core.SortedKeys(profSet)
 	profs := s.resolvePanelProfiles(profIDs)
 	type typeRow struct {
 		ID   string `json:"id"`
@@ -501,14 +502,14 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	for _, p := range profs {
 		studySet[p.StudyID] = true
 	}
-	studies := sortedKeys(studySet)
+	studies := core.SortedKeys(studySet)
 	if len(studies) == 0 {
 		return nil
 	}
 	patientOf := map[string]string{}
 	sp := ch.Params{}
 	ch.QueryEachP(s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+byStudies(studies).from(paramsBinder(sp), tSample), sp,
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(studies).From(core.ParamsBinder(sp), core.TSample), sp,
 		func(r *idRow) error {
 			patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
 			return nil
@@ -539,7 +540,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	}
 	seqP := ch.Params{}
 	seqRows, _ := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, sample_id AS sampleId FROM "+s.bySampleLists(sequencedLists...).from(paramsBinder(seqP), tSampleList), seqP)
+		"SELECT study_id AS studyId, sample_id AS sampleId FROM "+s.BySampleLists(sequencedLists...).From(core.ParamsBinder(seqP), core.TSampleList), seqP)
 	for _, r := range seqRows {
 		sequenced[jkey(r.StudyID, r.SampleID)] = true
 	}
@@ -563,8 +564,8 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 			Profiled:           profiled,
 			SampleID:           q.sampleID,
 			StudyID:            p.StudyID,
-			UniquePatientKey:   uniqueKey(p.StudyID, patient),
-			UniqueSampleKey:    uniqueKey(p.StudyID, q.sampleID),
+			UniquePatientKey:   core.UniqueKey(p.StudyID, patient),
+			UniqueSampleKey:    core.UniqueKey(p.StudyID, q.sampleID),
 		})
 		if err != nil {
 			return err
@@ -590,7 +591,7 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 			SampleID           string `json:"sampleId"`
 		} `json:"sampleMolecularIdentifiers"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	profileSet := map[string]bool{}
 	samplesByStudy := map[string]map[string]bool{}
@@ -603,10 +604,10 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 			profileSet[p] = true
 		}
 	}
-	profiles := sortedKeys(profileSet)
+	profiles := core.SortedKeys(profileSet)
 	studyOf := map[string]string{}
 	for _, p := range profiles {
-		if m, ok := s.profileMeta(p); ok {
+		if m, ok := s.ProfileMeta(p); ok {
 			studyOf[p] = m.StudyID
 		}
 	}
@@ -622,10 +623,10 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	// Samples sort by internal id (where the database carries them) unless
 	// requested by id, then by stable id and study.
 	sampleRank := "toUInt64(0)"
-	if len(f.SampleMolecularIdentifiers) == 0 && s.importOrdered() {
+	if len(f.SampleMolecularIdentifiers) == 0 && s.ImportOrdered() {
 		sampleRank = "toUInt64(s.internal_id)"
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	var parts []string
 	for _, p := range profiles {
 		study, ok := studyOf[p]
@@ -634,53 +635,53 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 		}
 		var sampleIDs []string
 		if len(f.SampleMolecularIdentifiers) > 0 {
-			sampleIDs = sortedKeys(samplesByStudy[study])
+			sampleIDs = core.SortedKeys(samplesByStudy[study])
 		}
 		extra := fmt.Sprintf(", %s AS molecularProfileId, %s AS studyId, %s AS sampleRank, rg.genetic_entity_id AS entityRank",
-			args.str(p), args.str(study), sampleRank)
+			args.Str(p), args.Str(study), sampleRank)
 		if sel, _, ok := s.molecularDataSelect(args, p, molecularDataFilter{EntrezGeneIDs: f.EntrezGeneIDs, SampleIDs: sampleIDs}, extra); ok {
 			parts = append(parts, sel)
 		}
 	}
-	if projectionOf(r) == "META" && len(parts) > 0 {
-		sql := "SELECT count() AS n FROM (" + strings.Join(parts, " UNION ALL ") + ") WHERE " + javaNumericSQL("value")
-		writeMetaCount(w, r, s.CH, sql, args.params(sql))
+	if core.ProjectionOf(r) == "META" && len(parts) > 0 {
+		sql := "SELECT count() AS n FROM (" + strings.Join(parts, " UNION ALL ") + ") WHERE " + core.JavaNumericSQL("value")
+		core.WriteMetaCount(w, r, s.CH, sql, args.Params(sql))
 		return
 	}
-	out := newJSONArray(w, r)
+	out := core.NewJSONArray(w, r)
 	if len(parts) == 0 {
-		out.finish(nil)
+		out.Finish(nil)
 		return
 	}
 	// Within a cell, genes in request order (their first occurrence), else
 	// as a single profile orders them.
 	geneOrder := ""
 	if len(f.EntrezGeneIDs) > 0 {
-		geneOrder = "indexOf([" + intListSQL(f.EntrezGeneIDs) + "], entrezGeneId), "
+		geneOrder = "indexOf([" + core.IntListSQL(f.EntrezGeneIDs) + "], entrezGeneId), "
 	}
 	order := "sampleRank, sampleId, studyId, molecularProfileId, " + geneOrder + "entityRank, entrezGeneId"
 	query := "SELECT sampleId, patientId, entrezGeneId, hugoGeneSymbol, geneType, value, molecularProfileId, studyId FROM (" +
 		strings.Join(parts, " UNION ALL ") + ")"
 	// A page holds the records the numeric filter below keeps.
-	if sp, expr := claimListPage(r, molecularDataMultiSortable); sp != nil {
-		query += " WHERE " + javaNumericSQL("value") + sp.orderLimit(expr, order)
+	if sp, expr := core.ClaimListPage(r, molecularDataMultiSortable); sp != nil {
+		query += " WHERE " + core.JavaNumericSQL("value") + sp.OrderLimit(expr, order)
 	} else {
 		query += " ORDER BY " + order
 	}
-	projection := projectionOf(r)
-	err := ch.QueryEachP(s.CH, query, args.params(query), func(row *molecularDataMultiRow) error {
+	projection := core.ProjectionOf(r)
+	err := ch.QueryEachP(s.CH, query, args.Params(query), func(row *molecularDataMultiRow) error {
 		d := MolecularData{
 			MolecularProfileID: row.MolecularProfileID, SampleID: row.SampleID, PatientID: row.PatientID, EntrezGeneID: row.EntrezGeneID,
 			Gene:    Gene{EntrezGeneID: row.EntrezGeneID, HugoGeneSymbol: row.HugoGeneSymbol, Type: row.GeneType},
 			StudyID: row.StudyID, Value: row.Value,
-			UniqueSampleKey: uniqueKey(row.StudyID, row.SampleID), UniquePatientKey: uniqueKey(row.StudyID, row.PatientID),
+			UniqueSampleKey: core.UniqueKey(row.StudyID, row.SampleID), UniquePatientKey: core.UniqueKey(row.StudyID, row.PatientID),
 		}
 		if rec, ok := numericRecord(d, projection); ok {
-			return out.add(rec)
+			return out.Add(rec)
 		}
 		return nil
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 // molecularDataMultiSortable are molecularDataSortable over the columns of

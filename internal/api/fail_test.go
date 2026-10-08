@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -31,7 +32,7 @@ func TestFailHidesDatabaseErrors(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
 	defer slog.SetDefault(prev)
 
-	h := NewRouter(&State{CH: ch.New(fake.URL, "dev_cbioportal_hub_go_ref")})
+	h := NewRouter(&State{State: &core.State{CH: ch.New(fake.URL, "dev_cbioportal_hub_go_ref")}})
 	for _, path := range []string{"/api/cancer-types", "/api/studies?projection=META"} {
 		logBuf.Reset()
 		req := httptest.NewRequest(http.MethodGet, path, nil)

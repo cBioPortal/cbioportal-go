@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -36,10 +37,10 @@ type GenomicEnrichment struct {
 // GenericAssayEnrichment is the generic-assay-enrichments response element
 // (Java sets neither name nor qValue on numeric enrichments).
 type GenericAssayEnrichment struct {
-	GroupsStatistics            []GroupStatistics `json:"groupsStatistics"`
-	StableID                    string            `json:"stableId"`
-	GenericEntityMetaProperties javaStringMap     `json:"genericEntityMetaProperties"`
-	PValue                      float64           `json:"pValue"`
+	GroupsStatistics            []GroupStatistics  `json:"groupsStatistics"`
+	StableID                    string             `json:"stableId"`
+	GenericEntityMetaProperties core.JavaStringMap `json:"genericEntityMetaProperties"`
+	PValue                      float64            `json:"pValue"`
 }
 
 // GenericAssayCountSummary mirrors the client type for binary enrichments.
@@ -54,7 +55,7 @@ type GenericAssayCountSummary struct {
 type GenericAssayBinaryEnrichment struct {
 	GroupsStatistics            []GroupStatistics          `json:"groupsStatistics"`
 	StableID                    string                     `json:"stableId"`
-	GenericEntityMetaProperties javaStringMap              `json:"genericEntityMetaProperties"`
+	GenericEntityMetaProperties core.JavaStringMap         `json:"genericEntityMetaProperties"`
 	Counts                      []GenericAssayCountSummary `json:"counts"`
 	PValue                      float64                    `json:"pValue"`
 	QValue                      float64                    `json:"qValue"`
@@ -65,7 +66,7 @@ type GenericAssayBinaryEnrichment struct {
 type GenericAssayCategoricalEnrichment struct {
 	GroupsStatistics            []CategoricalGroupStatistics `json:"groupsStatistics"`
 	StableID                    string                       `json:"stableId"`
-	GenericEntityMetaProperties javaStringMap                `json:"genericEntityMetaProperties"`
+	GenericEntityMetaProperties core.JavaStringMap           `json:"genericEntityMetaProperties"`
 	PValue                      float64                      `json:"pValue"`
 	QValue                      float64                      `json:"qValue"`
 }
@@ -87,15 +88,15 @@ type contResult struct {
 // resolveGroupTriples turns a group's case identifiers into
 // (study_id, profile_stable_id, sample_id) triples plus the staging table the
 // referenced profiles live in. metaCache memoises molecular-profile lookups.
-func (s *State) resolveGroupTriples(g casesGroup, metaCache map[string]profileMeta) ([][3]string, string) {
+func (s *State) resolveGroupTriples(g casesGroup, metaCache map[string]core.ProfileMeta) ([][3]string, string) {
 	triples := make([][3]string, 0, len(g.MolecularProfileCaseIdentifiers))
 	table := ""
 	for _, c := range g.MolecularProfileCaseIdentifiers {
 		meta, seen := metaCache[c.MolecularProfileID]
 		if !seen {
-			m, ok := s.profileMeta(c.MolecularProfileID)
+			m, ok := s.ProfileMeta(c.MolecularProfileID)
 			if !ok {
-				m = profileMeta{}
+				m = core.ProfileMeta{}
 			}
 			metaCache[c.MolecularProfileID] = m
 			meta = m
@@ -104,7 +105,7 @@ func (s *State) resolveGroupTriples(g casesGroup, metaCache map[string]profileMe
 			continue
 		}
 		if table == "" {
-			table = meta.dataTable()
+			table = meta.DataTable()
 		}
 		triples = append(triples, [3]string{meta.StudyID, meta.StableID, c.CaseID})
 	}
@@ -140,8 +141,8 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 	if withGene {
 		key = "hugo_symbol AS symbol, toInt64OrNull(entrez_gene_id) AS entrez"
 	}
-	metaCache := map[string]profileMeta{}
-	args := newArgs()
+	metaCache := map[string]core.ProfileMeta{}
+	args := core.NewArgs()
 	var parts []string
 	for gi, g := range groups {
 		triples, table := s.resolveGroupTriples(g, metaCache)
@@ -151,9 +152,9 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		parts = append(parts, fmt.Sprintf(
 			"SELECT %s, toUInt32(%d) AS grp, "+
 				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v, pos_ "+
-				"FROM (SELECT *, %s AS pos_, toFloat64OrNull("+javaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
+				"FROM (SELECT *, %s AS pos_, toFloat64OrNull("+core.JavaTruncatedValueSQL("value")+") AS x FROM cbioportal_raw.%s "+
 				"WHERE (study_id, profile_stable_id, sample_id) IN %s) WHERE isFinite(x)",
-			key, gi, s.rawFileOrder(table, ""), table, args.triples(triples)))
+			key, gi, s.RawFileOrder(table, ""), table, args.Triples(triples)))
 	}
 	if len(parts) < 2 {
 		return []contResult{}, nil
@@ -167,7 +168,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 			"LEFT JOIN (SELECT entrez_gene_id, genetic_entity_id FROM cbioportal_ref.gene) g ON g.entrez_gene_id = a.entrez " +
 			"ORDER BY g.genetic_entity_id, a.symbol, a.grp"
 	}
-	rows, err := queryA[contStatRow](s.CH, query, args)
+	rows, err := core.QueryA[contStatRow](s.CH, query, args)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +180,7 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		names[i] = g.Name
 	}
 	rank := map[string]int{}
-	for i, n := range javaHashMapOrder(names) {
+	for i, n := range core.JavaHashMapOrder(names) {
 		rank[n] = i
 	}
 	type acc struct {
@@ -249,21 +250,21 @@ func (s *State) computeContinuous(groups []casesGroup, keyCol string, withGene b
 // posted groups: per-group mean/stddev and a Kruskal-Wallis p-value.
 func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
-	readBody(r, &groups)
+	core.ReadBody(r, &groups)
 	if id, ok := s.enrichmentProfileValid(groups, expressionAlterationTypes); !ok {
-		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(id))
+		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(id))
 		return
 	}
 	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
 		groups = s.patientCasesToSamples(groups)
 	}
 	if len(groups) < 2 {
-		writeJSON(w, []GenomicEnrichment{})
+		core.WriteJSON(w, []GenomicEnrichment{})
 		return
 	}
 	results, err := s.computeContinuous(groups, "hugo_symbol", true)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]GenomicEnrichment, len(results))
@@ -275,34 +276,34 @@ func (s *State) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			PValue:           res.pValue,
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // genericAssayEnrichmentsFetch computes per-entity continuous enrichment over the
 // generic-assay matrix (keyed by entity_stable_id).
 func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
-	readBody(r, &groups)
+	core.ReadBody(r, &groups)
 	if id, ok := s.enrichmentProfileValid(groups, map[string]bool{"GENERIC_ASSAY": true}); !ok {
-		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(id))
+		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(id))
 		return
 	}
 	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
 		groups = s.patientCasesToSamples(groups)
 	}
 	if len(groups) < 2 {
-		writeJSON(w, []GenericAssayEnrichment{})
+		core.WriteJSON(w, []GenericAssayEnrichment{})
 		return
 	}
 	results, err := s.computeContinuous(groups, "entity_stable_id", false)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	props := map[string]javaStringMap{}
+	props := map[string]core.JavaStringMap{}
 	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
-		args := newArgs()
-		props, _ = s.genericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.pairs(pairs), args)
+		args := core.NewArgs()
+		props, _ = s.genericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.Pairs(pairs), args)
 		props = summaryMetaProperties(props)
 	}
 	out := make([]GenericAssayEnrichment, len(results))
@@ -314,7 +315,7 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 			StableID:                    res.stable,
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // expressionAlterationTypes are the profile types ExpressionEnrichmentService
@@ -331,7 +332,7 @@ var expressionAlterationTypes = map[string]bool{
 func (s *State) enrichmentProfileValid(groups []casesGroup, types map[string]bool) (string, bool) {
 	for _, g := range groups {
 		for _, c := range g.MolecularProfileCaseIdentifiers {
-			m, ok := s.profileMeta(c.MolecularProfileID)
+			m, ok := s.ProfileMeta(c.MolecularProfileID)
 			if !ok || !types[strings.ToUpper(m.AlterationType)] {
 				return c.MolecularProfileID, false
 			}
@@ -352,7 +353,7 @@ func (s *State) groupProfilePairs(groups []casesGroup) [][2]string {
 				continue
 			}
 			seen[c.MolecularProfileID] = true
-			if m, ok := s.profileMeta(c.MolecularProfileID); ok {
+			if m, ok := s.ProfileMeta(c.MolecularProfileID); ok {
 				pairs = append(pairs, [2]string{m.StudyID, m.StableID})
 			}
 		}
@@ -364,13 +365,13 @@ func (s *State) groupProfilePairs(groups []casesGroup) [][2]string {
 // (enrichmentType=PATIENT) to the samples of those patients, as the Java
 // backend compares every sample of a patient.
 func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
-	metaCache := map[string]profileMeta{}
+	metaCache := map[string]core.ProfileMeta{}
 	var pairs [][2]string
 	for _, g := range groups {
 		for _, c := range g.MolecularProfileCaseIdentifiers {
 			m, seen := metaCache[c.MolecularProfileID]
 			if !seen {
-				m, _ = s.profileMeta(c.MolecularProfileID)
+				m, _ = s.ProfileMeta(c.MolecularProfileID)
 				metaCache[c.MolecularProfileID] = m
 			}
 			pairs = append(pairs, [2]string{m.StudyID, c.CaseID})
@@ -380,7 +381,7 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	if len(pairs) > 0 {
 		p := ch.Params{"ids": pairs}
 		rows, _ := ch.QueryP[idRow](s.CH,
-			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+byStudies(pairStudies(pairs)).from(paramsBinder(p), tSample)+
+			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(core.PairStudies(pairs)).From(core.ParamsBinder(p), core.TSample)+
 				" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id", p)
 		for _, r := range rows {
 			k := jkey(r.StudyID, r.PatientID)

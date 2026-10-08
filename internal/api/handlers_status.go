@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -22,7 +23,7 @@ func (s *State) routeStatus(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/cache", s.clearCache)
 	mux.HandleFunc("DELETE /api/cache/{studyId}", s.clearCache)
 	mux.HandleFunc("GET /robots.txt", s.robots)
-	mux.HandleFunc("GET /llms.txt", s.serveLlmsTxt)
+	mux.HandleFunc("GET /llms.txt", s.ServeLLMsTxt)
 	mux.HandleFunc("GET /sitemap_index.xml", s.sitemapIndex)
 	mux.HandleFunc("GET /sitemap_study.xml", s.sitemapStudy)
 }
@@ -36,7 +37,7 @@ func (s *State) health(w http.ResponseWriter, r *http.Request) {
 			status = "UP"
 		}
 	}
-	writeJSON(w, map[string]string{"status": status})
+	core.WriteJSON(w, map[string]string{"status": status})
 }
 
 // timestampTables are StaticDataTimestampController.TIMESTAMP_TABLES.
@@ -54,16 +55,16 @@ func (s *State) timestamps(w http.ResponseWriter, r *http.Request) {
 		"SELECT t.name AS name, toString(if(p.m > toDateTime(0), p.m, t.metadata_modification_time)) AS t "+
 			"FROM system.tables t LEFT JOIN (SELECT table, max(modification_time) AS m FROM system.parts "+
 			"WHERE database = 'cbioportal_ref' AND active GROUP BY table) p ON p.table = t.name "+
-			"WHERE t.database = 'cbioportal_ref' AND t.name IN (%s)", inList(timestampTables)))
+			"WHERE t.database = 'cbioportal_ref' AND t.name IN (%s)", core.InList(timestampTables)))
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := map[string]string{}
 	for _, rw := range rows {
 		out[rw.Name] = rw.T
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // clearCache serves DELETE /api/cache and /api/cache/{studyId}
@@ -73,7 +74,7 @@ func (s *State) timestamps(w http.ResponseWriter, r *http.Request) {
 func (s *State) clearCache(w http.ResponseWriter, r *http.Request) {
 	key, ok := r.Header["X-Api-Key"]
 	if !ok {
-		springError(w, r, http.StatusBadRequest)
+		core.SpringError(w, r, http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain;charset=UTF-8")
@@ -87,9 +88,7 @@ func (s *State) clearCache(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	s.meta.mu.Lock()
-	s.meta.entries = nil
-	s.meta.mu.Unlock()
+	s.ClearMetaCache()
 	if id := r.PathValue("studyId"); id != "" {
 		w.Write([]byte("Flushed " + id + " caches!!!"))
 		return
@@ -146,7 +145,7 @@ func (s *State) robots(w http.ResponseWriter, r *http.Request) {
 		return def
 	}
 	var b strings.Builder
-	if strings.TrimSpace(prop(llmsTxtProperty, "")) != "" {
+	if strings.TrimSpace(prop(core.LLMsTxtProperty, "")) != "" {
 		b.WriteString("# Guidance for AI agents and bulk data access: " + seoBaseURL(r) + "/llms.txt\n\n")
 	}
 	for _, a := range strings.Split(prop("robots.disallow_user_agents", ""), ",") {
@@ -184,10 +183,10 @@ func (s *State) sitemapIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := ch.Query[row](s.CH,
 		"SELECT c.study_id AS studyId, ifNull(p.n, 0) AS patients FROM cancer_study c "+
-			"LEFT JOIN (SELECT study_id, count() AS n FROM "+acrossStudies.rows(paramsBinder{}, tPatient)+" GROUP BY study_id) p ON p.study_id = c.study_id "+
+			"LEFT JOIN (SELECT study_id, count() AS n FROM "+core.AcrossStudies.Rows(core.ParamsBinder{}, core.TPatient)+" GROUP BY study_id) p ON p.study_id = c.study_id "+
 			"ORDER BY c.study_id")
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	base := seoBaseURL(r)
@@ -215,20 +214,20 @@ func (s *State) sitemapStudy(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	studyID, ok := q["studyId"]
 	if !ok {
-		writeError(w, http.StatusBadRequest, "Request parameter is missing: studyId")
+		core.WriteError(w, http.StatusBadRequest, "Request parameter is missing: studyId")
 		return
 	}
 	page := 0
 	if v := q.Get("page"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, msgIntMismatch(v))
+			core.WriteError(w, http.StatusBadRequest, core.MsgIntMismatch(v))
 			return
 		}
 		page = n
 	}
 	id := studyID[0]
-	if page < 0 || !s.studyKnown(id) {
+	if page < 0 || !s.StudyKnown(id) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -238,9 +237,9 @@ func (s *State) sitemapStudy(w http.ResponseWriter, r *http.Request) {
 	p := ch.Params{}
 	patients, err := ch.QueryP[row](s.CH, fmt.Sprintf(
 		"SELECT patient_id AS patientId FROM %s ORDER BY patient_id LIMIT %d OFFSET %d",
-		byStudy(id).from(paramsBinder(p), tPatient), patientsPerSitemap, page*patientsPerSitemap), p)
+		core.ByStudy(id).From(core.ParamsBinder(p), core.TPatient), patientsPerSitemap, page*patientsPerSitemap), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if page > 0 && len(patients) == 0 {

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -18,8 +19,8 @@ import (
 // are AND-ed (the mapper's INTERSECT).
 type studyViewFilter struct {
 	StudyIDs                     []string                      `json:"studyIds"`
-	SampleIdentifiers            []identifier                  `json:"sampleIdentifiers"`
-	AlterationFilter             *alterationFilter             `json:"alterationFilter"`
+	SampleIdentifiers            []core.Identifier             `json:"sampleIdentifiers"`
+	AlterationFilter             *core.AlterationFilter        `json:"alterationFilter"`
 	ClinicalDataFilters          []clinicalDataFilter          `json:"clinicalDataFilters"`
 	CustomDataFilters            []clinicalDataFilter          `json:"customDataFilters"`
 	GeneFilters                  []svGeneFilter                `json:"geneFilters"`
@@ -157,29 +158,29 @@ func (f studyViewFilter) hasSubFilters() bool {
 }
 
 // baseScope is the study/sample-identifier scope over sample_derived.
-func (f studyViewFilter) baseScope(a *sqlArgs) string {
+func (f studyViewFilter) baseScope(a *core.SQLArgs) string {
 	if len(f.SampleIdentifiers) > 0 {
 		ids := make([]string, len(f.SampleIdentifiers))
 		for i, id := range f.SampleIdentifiers {
-			ids[i] = id.StudyID + "_" + id.id()
+			ids[i] = id.StudyID + "_" + id.ID()
 		}
-		return f.scope().key(a, tSampleDerived, "") + "sample_unique_id IN " + a.strs(ids)
+		return f.scope().Key(a, core.TSampleDerived, "") + "sample_unique_id IN " + a.Strs(ids)
 	}
 	if len(f.StudyIDs) > 0 {
-		return byStudies(f.StudyIDs).cond(a, tSampleDerived, "")
+		return core.ByStudies(f.StudyIDs).Cond(a, core.TSampleDerived, "")
 	}
-	return falseClause
+	return core.FalseClause
 }
 
 // filterWhere compiles the filter to a predicate over sample_derived columns
 // (sample_unique_id, patient_unique_id, cancer_study_identifier).
-func (s *State) filterWhere(a *sqlArgs, f studyViewFilter) string {
+func (s *State) filterWhere(a *core.SQLArgs, f studyViewFilter) string {
 	preds := []string{f.baseScope(a)}
 	if !f.hasSubFilters() {
 		return preds[0]
 	}
 	studies := f.studyIDs()
-	c := filterCompiler{s: s, a: a, studies: studies, studyIn: a.strs(studies), sc: byStudies(studies)}
+	c := filterCompiler{s: s, a: a, studies: studies, studyIn: a.Strs(studies), sc: core.ByStudies(studies)}
 	preds = append(preds, c.caseLists(f.CaseLists)...)
 	preds = append(preds, c.genomicProfiles(f.GenomicProfiles)...)
 	preds = append(preds, c.customData(f.CustomDataFilters)...)
@@ -209,7 +210,7 @@ func (s *State) filterWhere(a *sqlArgs, f studyViewFilter) string {
 		}
 		preds = append(preds, fmt.Sprintf(
 			"patient_unique_id IN (SELECT patient_unique_id FROM %s AND event_type IN %s)",
-			c.sc.from(a, tClinicalEventDataDerived), a.strs(types)))
+			c.sc.From(a, core.TClinicalEventDataDerived), a.Strs(types)))
 	}
 	preds = append(preds, c.patientTreatments(f.PatientTreatmentFilters)...)
 	return "(" + strings.Join(preds, ") AND (") + ")"
@@ -219,10 +220,10 @@ func (s *State) filterWhere(a *sqlArgs, f studyViewFilter) string {
 // array of its study ids, sc the scope of those studies.
 type filterCompiler struct {
 	s       *State
-	a       *sqlArgs
+	a       *core.SQLArgs
 	studies []string
 	studyIn string
-	sc      scope
+	sc      core.Scope
 }
 
 func (c filterCompiler) caseLists(groups [][]string) []string {
@@ -230,14 +231,14 @@ func (c filterCompiler) caseLists(groups [][]string) []string {
 	for _, g := range groups {
 		var ors []string
 		for _, l := range g {
-			ors = append(ors, fmt.Sprintf("endsWith(list_id, %s)", c.a.str("_"+l)))
+			ors = append(ors, fmt.Sprintf("endsWith(list_id, %s)", c.a.Str("_"+l)))
 		}
 		if len(ors) == 0 {
 			continue
 		}
 		out = append(out, fmt.Sprintf(
 			"sample_unique_id IN (SELECT concat(study_id, '_', sample_id) FROM %s AND (%s))",
-			c.sc.from(c.a, tSampleList), strings.Join(ors, " OR ")))
+			c.sc.From(c.a, core.TSampleList), strings.Join(ors, " OR ")))
 	}
 	return out
 }
@@ -252,7 +253,7 @@ func (c filterCompiler) genomicProfiles(groups [][]string) []string {
 			}
 		}
 		out = append(out, fmt.Sprintf(
-			"sample_unique_id IN (SELECT sample_unique_id FROM %s)", byProfiles(ids).from(c.a, tSampleToGenePanelDerived)))
+			"sample_unique_id IN (SELECT sample_unique_id FROM %s)", core.ByProfiles(ids).From(c.a, core.TSampleToGenePanelDerived)))
 	}
 	return out
 }
@@ -263,7 +264,7 @@ func (c filterCompiler) geneFilters(filters []svGeneFilter) []string {
 		for _, queries := range g.GeneQueries {
 			var ors []string
 			for _, q := range queries {
-				cond := "hugo_gene_symbol = " + c.a.str(q.HugoGeneSymbol)
+				cond := "hugo_gene_symbol = " + c.a.Str(q.HugoGeneSymbol)
 				var codes []string
 				for _, a := range q.Alterations {
 					if code, ok := cnaCodes[a]; ok {
@@ -280,17 +281,17 @@ func (c filterCompiler) geneFilters(filters []svGeneFilter) []string {
 			}
 			out = append(out, fmt.Sprintf(
 				"sample_unique_id IN (SELECT sample_unique_id FROM %s AND (%s))",
-				byProfiles(g.MolecularProfileIDs).from(c.a, tGenomicEventDerived), strings.Join(ors, " OR ")))
+				core.ByProfiles(g.MolecularProfileIDs).From(c.a, core.TGenomicEventDerived), strings.Join(ors, " OR ")))
 		}
 	}
 	return out
 }
 
 func (c filterCompiler) mutationData(m mutationDataFilter) string {
-	gene := c.a.str(m.HugoGeneSymbol)
+	gene := c.a.Str(m.HugoGeneSymbol)
 	mutated := fmt.Sprintf(
 		"SELECT sample_unique_id FROM %s "+
-			"AND hugo_gene_symbol = %s AND variant_type = 'mutation'", c.sc.from(c.a, tGenomicEventDerived), gene)
+			"AND hugo_gene_symbol = %s AND variant_type = 'mutation'", c.sc.From(c.a, core.TGenomicEventDerived), gene)
 	if m.Categorization == "MUTATION_TYPE" {
 		var ands []string
 		for _, group := range m.Values {
@@ -300,7 +301,7 @@ func (c filterCompiler) mutationData(m mutationDataFilter) string {
 					types = append(types, *v.Value)
 				}
 			}
-			ands = append(ands, fmt.Sprintf("sample_unique_id IN (%s AND mutation_type IN %s)", mutated, c.a.strs(types)))
+			ands = append(ands, fmt.Sprintf("sample_unique_id IN (%s AND mutation_type IN %s)", mutated, c.a.Strs(types)))
 		}
 		if len(ands) == 0 {
 			return "1 = 1"
@@ -311,7 +312,7 @@ func (c filterCompiler) mutationData(m mutationDataFilter) string {
 		"SELECT sgp.sample_unique_id FROM %s sgp "+
 			"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
 			"WHERE gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'",
-		c.sc.rows(c.a, tSampleToGenePanelDerived), gene)
+		c.sc.Rows(c.a, core.TSampleToGenePanelDerived), gene)
 	var ors []string
 	if len(m.Values) > 0 {
 		for _, v := range m.Values[0] {
@@ -329,7 +330,7 @@ func (c filterCompiler) mutationData(m mutationDataFilter) string {
 		}
 	}
 	if len(ors) == 0 {
-		return falseClause
+		return core.FalseClause
 	}
 	return strings.Join(ors, " OR ")
 }
@@ -347,7 +348,7 @@ func (c filterCompiler) patientTreatments(f *andedTreatmentFilters) []string {
 		out = append(out, fmt.Sprintf(
 			"patient_unique_id IN (SELECT patient_unique_id FROM %s "+
 				"AND lower(event_type) = 'treatment' AND key = 'AGENT' AND value IN %s)",
-			c.sc.from(c.a, tClinicalEventDataDerived), c.a.strs(treatments)))
+			c.sc.From(c.a, core.TClinicalEventDataDerived), c.a.Strs(treatments)))
 	}
 	return out
 }
@@ -367,7 +368,7 @@ func (c filterCompiler) sampleTreatments(f *andedTreatmentFilters) []string {
 				op = "<="
 			}
 			ors = append(ors, fmt.Sprintf("(cedd_inner.treatment = %s AND cedd.time_taken %s cedd_inner.treatment_time_taken)",
-				c.a.str(t.Treatment), op))
+				c.a.Str(t.Treatment), op))
 		}
 		if len(ors) == 0 {
 			continue
@@ -382,7 +383,7 @@ func (c filterCompiler) sampleTreatments(f *andedTreatmentFilters) []string {
 				"FROM %[1]s "+
 				"AND lower(event_type) = 'treatment' AND key = 'AGENT' GROUP BY patient_unique_id, value) cedd_inner "+
 				"ON cedd_inner.patient_unique_id = cedd.patient_unique_id WHERE %[2]s)",
-			c.sc.from(c.a, tClinicalEventDataDerived), strings.Join(ors, " OR ")))
+			c.sc.From(c.a, core.TClinicalEventDataDerived), strings.Join(ors, " OR ")))
 	}
 	return out
 }
@@ -412,7 +413,7 @@ func numLit(n *json.Number) string {
 
 // numericalValuesSQL is the OR over the selected values of a numeric chart:
 // categorical special values match case-insensitively, ranges are (start, end].
-func numericalValuesSQL(a *sqlArgs, col string, values []dataFilterValue) string {
+func numericalValuesSQL(a *core.SQLArgs, col string, values []dataFilterValue) string {
 	var ors []string
 	for _, v := range values {
 		conds := []string{}
@@ -420,7 +421,7 @@ func numericalValuesSQL(a *sqlArgs, col string, values []dataFilterValue) string
 			conds = append(conds, isNASQL(col))
 		}
 		if v.Value != nil {
-			conds = append(conds, fmt.Sprintf("%s ILIKE %s", col, a.str(*v.Value)))
+			conds = append(conds, fmt.Sprintf("%s ILIKE %s", col, a.Str(*v.Value)))
 		}
 		switch {
 		case v.Start != nil && v.End == nil:
@@ -446,7 +447,7 @@ func numericalValuesSQL(a *sqlArgs, col string, values []dataFilterValue) string
 		ors = append(ors, "("+strings.Join(conds, " AND ")+")")
 	}
 	if len(ors) == 0 {
-		return falseClause
+		return core.FalseClause
 	}
 	return strings.Join(ors, " OR ")
 }
@@ -479,7 +480,7 @@ func splitNA(values []dataFilterValue) (na bool, rest []dataFilterValue) {
 // patient matches it at patient level. NA covers missing/NA-like values in
 // studies that define the attribute, plus every sample of studies that do not.
 func (c filterCompiler) clinicalData(f clinicalDataFilter) string {
-	attr := c.a.str(f.AttributeID)
+	attr := c.a.Str(f.AttributeID)
 	categorical := isCategorical(f.Values)
 	na, rest := splitNA(f.Values)
 	var ors []string
@@ -497,7 +498,7 @@ func (c filterCompiler) clinicalData(f clinicalDataFilter) string {
 			var vals []string
 			for _, v := range rest {
 				if v.Value != nil {
-					vals = append(vals, "attribute_value ILIKE "+c.a.str(*v.Value))
+					vals = append(vals, "attribute_value ILIKE "+c.a.Str(*v.Value))
 				}
 			}
 			if len(vals) > 0 {
@@ -520,7 +521,7 @@ func (c filterCompiler) clinicalData(f clinicalDataFilter) string {
 				"(SELECT study_id FROM clinical_attribute_meta WHERE clinical_attribute_id = %s)", c.studyIn, attr))
 	}
 	if len(ors) == 0 {
-		return falseClause
+		return core.FalseClause
 	}
 	return strings.Join(ors, " OR ")
 }
@@ -528,7 +529,7 @@ func (c filterCompiler) clinicalData(f clinicalDataFilter) string {
 func (c filterCompiler) genomicData(g genomicDataFilter) string {
 	src := fmt.Sprintf(
 		"SELECT sample_unique_id FROM %s AND profile_type = %s AND hugo_gene_symbol = %s",
-		c.sc.from(c.a, tGeneticAlterationDerived), c.a.str(g.ProfileType), c.a.str(g.HugoGeneSymbol))
+		c.sc.From(c.a, core.TGeneticAlterationDerived), c.a.Str(g.ProfileType), c.a.Str(g.HugoGeneSymbol))
 	na, rest := splitNA(g.Values)
 	var ors []string
 	if na {
@@ -542,14 +543,14 @@ func (c filterCompiler) genomicData(g genomicDataFilter) string {
 			}
 		}
 		if len(vals) > 0 {
-			ors = append(ors, fmt.Sprintf("sample_unique_id IN (%s AND alteration_value IN %s)", src, c.a.strs(vals)))
+			ors = append(ors, fmt.Sprintf("sample_unique_id IN (%s AND alteration_value IN %s)", src, c.a.Strs(vals)))
 		}
 	} else if len(rest) > 0 {
 		ors = append(ors, fmt.Sprintf("sample_unique_id IN (%s AND (%s))", src,
 			numericalValuesSQL(c.a, "assumeNotNull(alteration_value)", rest)))
 	}
 	if len(ors) == 0 {
-		return falseClause
+		return core.FalseClause
 	}
 	return strings.Join(ors, " OR ")
 }
@@ -577,7 +578,7 @@ func (c filterCompiler) genericAssayData(g genericAssayDataFilter) string {
 	}
 	src := fmt.Sprintf(
 		"SELECT %s FROM generic_assay_data_derived WHERE profile_type = %s AND entity_stable_id = %s",
-		col, c.a.str(g.ProfileType), c.a.str(g.StableID))
+		col, c.a.Str(g.ProfileType), c.a.Str(g.StableID))
 	na, rest := splitNA(g.Values)
 	var ors []string
 	if na {
@@ -590,7 +591,7 @@ func (c filterCompiler) genericAssayData(g genericAssayDataFilter) string {
 		var vals []string
 		for _, v := range rest {
 			if v.Value != nil {
-				vals = append(vals, "value ILIKE "+c.a.str(*v.Value))
+				vals = append(vals, "value ILIKE "+c.a.Str(*v.Value))
 			}
 		}
 		if len(vals) > 0 {
@@ -598,7 +599,7 @@ func (c filterCompiler) genericAssayData(g genericAssayDataFilter) string {
 		}
 	}
 	if len(ors) == 0 {
-		return falseClause
+		return core.FalseClause
 	}
 	return strings.Join(ors, " OR ")
 }
@@ -612,11 +613,11 @@ func (c filterCompiler) genericAssaySelection(g genericAssaySelectionFilter) []s
 	for _, group := range g.Values {
 		var ors []string
 		for _, sel := range group {
-			cond := fmt.Sprintf("lower(multiIf(%s, 'NA', value)) = lower(%s)", isNASQL("value"), c.a.str(sel.Value))
+			cond := fmt.Sprintf("lower(multiIf(%s, 'NA', value)) = lower(%s)", isNASQL("value"), c.a.Str(sel.Value))
 			if sel.Value == "NA" {
 				cond = fmt.Sprintf("(value IS NULL OR %s)", isNASQL("value"))
 			}
-			ors = append(ors, fmt.Sprintf("(entity_stable_id = %s AND %s)", c.a.str(sel.StableID), cond))
+			ors = append(ors, fmt.Sprintf("(entity_stable_id = %s AND %s)", c.a.Str(sel.StableID), cond))
 		}
 		if len(ors) == 0 {
 			continue
@@ -624,7 +625,7 @@ func (c filterCompiler) genericAssaySelection(g genericAssaySelectionFilter) []s
 		out = append(out, fmt.Sprintf(
 			"%s IN (SELECT %s FROM generic_assay_data_derived WHERE profile_type = %s AND datatype != 'LIMIT-VALUE' "+
 				"AND sample_unique_id IN (SELECT sample_unique_id FROM %s) AND (%s))",
-			col, col, c.a.str(g.ProfileType), c.sc.from(c.a, tSampleDerived), strings.Join(ors, " OR ")))
+			col, col, c.a.Str(g.ProfileType), c.sc.From(c.a, core.TSampleDerived), strings.Join(ors, " OR ")))
 	}
 	return out
 }
@@ -667,7 +668,7 @@ func (c filterCompiler) customData(filters []clinicalDataFilter) []string {
 			}
 			continue
 		}
-		raw, ok := c.s.sessionData("custom_data", f.AttributeID)
+		raw, ok := c.s.SessionData("custom_data", f.AttributeID)
 		if !ok {
 			continue
 		}
@@ -705,10 +706,10 @@ func (c filterCompiler) customData(filters []clinicalDataFilter) []string {
 	}
 	var out []string
 	for _, f := range filters {
-		pred := "sample_unique_id IN " + c.a.strs(pass)
+		pred := "sample_unique_id IN " + c.a.Strs(pass)
 		na, _ := splitNA(f.Values)
 		if na {
-			pred += " OR sample_unique_id NOT IN " + c.a.strs(all)
+			pred += " OR sample_unique_id NOT IN " + c.a.Strs(all)
 		}
 		out = append(out, pred)
 	}
@@ -945,31 +946,31 @@ func (f studyViewFilter) withoutMutation(gene, profileType, categorization strin
 
 // sampleScope is the filter as a predicate over views keyed by
 // (study_id, sample_id).
-func (s *State) sampleScope(a *sqlArgs, f studyViewFilter) string {
+func (s *State) sampleScope(a *core.SQLArgs, f studyViewFilter) string {
 	if !f.hasSubFilters() {
 		if len(f.SampleIdentifiers) > 0 {
 			pairs := make([][2]string, len(f.SampleIdentifiers))
 			for i, id := range f.SampleIdentifiers {
-				pairs[i] = [2]string{id.StudyID, id.id()}
+				pairs[i] = [2]string{id.StudyID, id.ID()}
 			}
-			return "(study_id, sample_id) IN " + a.pairs(pairs)
+			return "(study_id, sample_id) IN " + a.Pairs(pairs)
 		}
 		if len(f.StudyIDs) > 0 {
-			return "study_id IN " + a.strs(f.StudyIDs)
+			return "study_id IN " + a.Strs(f.StudyIDs)
 		}
-		return falseClause
+		return core.FalseClause
 	}
-	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.scope().key(a, tSample, ""), s.filterSQL(a, f))
+	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.scope().Key(a, core.TSample, ""), s.filterSQL(a, f))
 }
 
 // sampleDerivedScope is the filter as a predicate over a *_derived view's
 // sample_unique_id or patient_unique_id column.
-func (s *State) sampleDerivedScope(a *sqlArgs, f studyViewFilter, uniqueCol string) string {
+func (s *State) sampleDerivedScope(a *core.SQLArgs, f studyViewFilter, uniqueCol string) string {
 	if !f.hasSubFilters() && len(f.SampleIdentifiers) == 0 {
 		if len(f.StudyIDs) > 0 {
-			return byStudies(f.StudyIDs).cond(a, tSampleDerived, "")
+			return core.ByStudies(f.StudyIDs).Cond(a, core.TSampleDerived, "")
 		}
-		return falseClause
+		return core.FalseClause
 	}
 	if uniqueCol == "patient_unique_id" {
 		return fmt.Sprintf("patient_unique_id IN (SELECT patient_unique_id FROM %s)", s.filterFrom(a, f))
@@ -981,8 +982,8 @@ func (s *State) scopeSampleCount(f studyViewFilter) uint64 {
 	type c struct {
 		N uint64 `json:"n"`
 	}
-	a := newArgs()
-	rows, _ := queryA[c](s.CH, "SELECT count() AS n FROM "+s.filterFrom(a, f), a)
+	a := core.NewArgs()
+	rows, _ := core.QueryA[c](s.CH, "SELECT count() AS n FROM "+s.filterFrom(a, f), a)
 	if len(rows) > 0 {
 		return rows[0].N
 	}

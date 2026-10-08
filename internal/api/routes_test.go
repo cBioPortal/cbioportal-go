@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // frontendAPIDocs are the Swagger documents the frontend's generated API
@@ -30,10 +32,10 @@ var conditionalOperations = map[string]bool{
 // servedOutsideMux reports whether the wrapping middleware answers a request
 // before it reaches the mux.
 func servedOutsideMux(method, path string) bool {
-	if _, ok := apiAliasPath(path); ok {
+	if _, ok := core.APIAliasPath(path); ok {
 		return true
 	}
-	return method == http.MethodGet && (path == "/api/studies/meta" || isCacheStatsPath(path))
+	return method == http.MethodGet && (path == "/api/studies/meta" || core.IsCacheStatsPath(path))
 }
 
 // TestFrontendOperationsRouted checks that no operation of the frontend's
@@ -41,7 +43,7 @@ func servedOutsideMux(method, path string) bool {
 // for unknown /api/ paths.
 func TestFrontendOperationsRouted(t *testing.T) {
 	mux := http.NewServeMux()
-	(&State{}).routes(mux)
+	(&State{State: &core.State{}}).routes(mux)
 	var missing []string
 	checked := 0
 	for _, doc := range frontendAPIDocs {
@@ -80,7 +82,7 @@ func TestFrontendOperationsRouted(t *testing.T) {
 // TestUnknownAPIPathNotFound checks that an unmatched /api/ path answers
 // Spring's default 404 body.
 func TestUnknownAPIPathNotFound(t *testing.T) {
-	s := &State{}
+	s := &State{State: &core.State{}}
 	mux := http.NewServeMux()
 	s.routes(mux)
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
@@ -102,7 +104,7 @@ func TestUnknownAPIPathNotFound(t *testing.T) {
 // TestKnownAPIPathWrongMethod checks that a routed /api/ path requested with
 // a method it is not served for answers Spring's 405.
 func TestKnownAPIPathWrongMethod(t *testing.T) {
-	s := &State{}
+	s := &State{State: &core.State{}}
 	mux := http.NewServeMux()
 	s.routes(mux)
 	w := httptest.NewRecorder()

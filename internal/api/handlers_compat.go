@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // routeCompat registers endpoints that are thin views over others: the GET
@@ -33,12 +35,12 @@ type MrnaPercentile struct {
 // values all take the highest rank of their group (TiesStrategy.MAXIMUM).
 func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 	var entrez []int64
-	readBody(r, &entrez)
+	core.ReadBody(r, &entrez)
 	sampleID := r.URL.Query().Get("sampleId")
 	out := []MrnaPercentile{}
 	data, err := s.molecularData(r.PathValue("id"), molecularDataFilter{EntrezGeneIDs: entrez})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	byGene := map[int64][]float64{}
@@ -72,7 +74,7 @@ func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 			UniqueSampleKey: d.UniqueSampleKey, UniquePatientKey: d.UniquePatientKey,
 		})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // roundHalfUp rounds x to the given decimals as Java's

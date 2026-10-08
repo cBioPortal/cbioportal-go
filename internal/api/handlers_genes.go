@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -24,9 +25,9 @@ type geneRow struct {
 // item. Unknown identifiers are skipped.
 func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 	var raw []json.RawMessage
-	readBody(r, &raw)
+	core.ReadBody(r, &raw)
 	if len(raw) == 0 {
-		writeJSON(w, []geneRow{})
+		core.WriteJSON(w, []geneRow{})
 		return
 	}
 	var entrez, symbols []string
@@ -56,10 +57,10 @@ func (s *State) genesFetch(w http.ResponseWriter, r *http.Request) {
 			"FROM cbioportal_ref.gene WHERE %s",
 		strings.Join(conds, " OR ")), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, rows)
+	core.WriteJSON(w, rows)
 }
 
 // gene by id (entrez or hugo).
@@ -73,12 +74,12 @@ func (s *State) gene(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[geneRow](s.CH,
 		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type FROM cbioportal_ref.gene WHERE "+cond+" LIMIT 1", p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, msgGeneNotFound(id))
+		core.WriteError(w, http.StatusNotFound, core.MsgGeneNotFound(id))
 		return
 	}
-	writeJSON(w, rows[0])
+	core.WriteJSON(w, rows[0])
 }

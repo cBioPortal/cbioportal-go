@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/ingest"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
@@ -74,7 +75,7 @@ func TestLiveTreatmentTiers(t *testing.T) {
 
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, refDB)
-	s := &State{CH: c}
+	s := &State{State: &core.State{CH: c}}
 	mux := http.NewServeMux()
 	s.routeTreatments(mux)
 	post := func(path, body string) string {

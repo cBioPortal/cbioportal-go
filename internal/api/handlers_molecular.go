@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -50,7 +51,7 @@ const mpSelectTmpl = "SELECT molecular_profile_id AS molecularProfileId, study_i
 // patient level where the portal database carries them.
 func (s *State) mpSelect() string {
 	extra := ""
-	if s.modelHasColumn("molecular_profile", "sort_order") {
+	if s.ModelHasColumn("molecular_profile", "sort_order") {
 		extra = ", toFloat64OrNull(toString(toFloat32(pivot_threshold))) AS pivotThreshold, sort_order AS sortOrder, toUInt8(patient_level) AS patientLevel"
 	}
 	return strings.Replace(mpSelectTmpl, "{extra}", extra, 1)
@@ -82,14 +83,14 @@ func (s *State) mpQuery(w http.ResponseWriter, r *http.Request, where string, p 
 	}
 	rows, err := ch.QueryP[mpRow](s.CH, sql+" ORDER BY molecularProfileId", p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]MolecularProfile, len(rows))
 	for i, r := range rows {
 		out[i] = toMP(r)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 func (s *State) molecularProfiles(w http.ResponseWriter, r *http.Request) { s.mpQuery(w, r, "", nil) }
@@ -101,14 +102,14 @@ func (s *State) studyMolecularProfiles(w http.ResponseWriter, r *http.Request) {
 func (s *State) molecularProfile(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[mpRow](s.CH, s.mpSelect()+" WHERE molecular_profile_id = {id:String}", ch.Params{"id": r.PathValue("id")})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
 		http.Error(w, "molecular profile not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, toMP(rows[0]))
+	core.WriteJSON(w, toMP(rows[0]))
 }
 
 func (s *State) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
@@ -116,14 +117,14 @@ func (s *State) molecularProfilesFetch(w http.ResponseWriter, r *http.Request) {
 		StudyIDs            []string `json:"studyIds"`
 		MolecularProfileIDs []string `json:"molecularProfileIds"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	switch {
 	case len(f.MolecularProfileIDs) > 0:
 		s.mpQuery(w, r, "molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": f.MolecularProfileIDs})
 	case len(f.StudyIDs) > 0:
 		s.mpQuery(w, r, "study_id IN {ids:Array(String)}", ch.Params{"ids": f.StudyIDs})
 	default:
-		writeJSON(w, []MolecularProfile{})
+		core.WriteJSON(w, []MolecularProfile{})
 	}
 }
 
@@ -153,7 +154,7 @@ const mutationSelect = "SELECT study_id AS studyId, sample_id AS sampleId, hugo_
 func mutationSelectFor(entrez []int64) string {
 	genes := ""
 	if len(entrez) > 0 {
-		genes = " WHERE entrez_gene_id IN (" + intListSQL(entrez) + ")"
+		genes = " WHERE entrez_gene_id IN (" + core.IntListSQL(entrez) + ")"
 	}
 	return strings.Replace(mutationSelect, "{genes}", genes, 1)
 }
@@ -295,14 +296,14 @@ type MutationID struct {
 
 // alleleSpecificCopyNumber is the ASCN namespace of a MAF record.
 type alleleSpecificCopyNumber struct {
-	AscnIntegerCopyNumber  *int64     `json:"ascnIntegerCopyNumber,omitempty"`
-	AscnMethod             string     `json:"ascnMethod,omitempty"`
-	CcfExpectedCopiesUpper *javaFloat `json:"ccfExpectedCopiesUpper,omitempty"`
-	CcfExpectedCopies      *javaFloat `json:"ccfExpectedCopies,omitempty"`
-	Clonal                 string     `json:"clonal,omitempty"`
-	MinorCopyNumber        *int64     `json:"minorCopyNumber,omitempty"`
-	ExpectedAltCopies      *int64     `json:"expectedAltCopies,omitempty"`
-	TotalCopyNumber        *int64     `json:"totalCopyNumber,omitempty"`
+	AscnIntegerCopyNumber  *int64          `json:"ascnIntegerCopyNumber,omitempty"`
+	AscnMethod             string          `json:"ascnMethod,omitempty"`
+	CcfExpectedCopiesUpper *core.JavaFloat `json:"ccfExpectedCopiesUpper,omitempty"`
+	CcfExpectedCopies      *core.JavaFloat `json:"ccfExpectedCopies,omitempty"`
+	Clonal                 string          `json:"clonal,omitempty"`
+	MinorCopyNumber        *int64          `json:"minorCopyNumber,omitempty"`
+	ExpectedAltCopies      *int64          `json:"expectedAltCopies,omitempty"`
+	TotalCopyNumber        *int64          `json:"totalCopyNumber,omitempty"`
 }
 
 func (a alleleSpecificCopyNumber) present() bool {
@@ -328,22 +329,22 @@ func geneHugo(ref, own string) string {
 // and keyword derived as the importer derives them.
 func toMutation(r mutationRow, detailed bool) Mutation {
 	hugo := geneHugo(r.RefHugoGeneSymbol, r.HugoGeneSymbol)
-	mutationType := naString(r.MutationType)
+	mutationType := core.NAString(r.MutationType)
 	m := Mutation{
 		MolecularProfileID: r.StudyID + "_mutations", SampleID: r.SampleID, StudyID: r.StudyID,
 		EntrezGeneID: r.EntrezGeneID,
-		Chr:          naString(r.Chr), StartPosition: r.StartPosition, EndPosition: r.EndPosition,
-		ReferenceAllele: naString(r.ReferenceAllele), VariantAllele: r.VariantAllele, ProteinChange: r.ProteinChange,
-		MutationType: mutationType, TumorAltCount: javaCount(r.TumorAltCount), TumorRefCount: javaCount(r.TumorRefCount),
-		UniqueSampleKey:  uniqueKey(r.StudyID, r.SampleID),
-		Keyword:          mutationKeyword(hugo, r.ProteinChange, mutationType),
-		NamespaceColumns: namespaceColumnsJSON(r.NamespaceColumns),
-		PatientID:        r.PatientID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
-		Center: naString(r.Center), MutationStatus: naString(r.MutationStatus), ValidationStatus: naString(r.ValidationStatus),
-		NormalAltCount: javaCount(r.NormalAltCount), NormalRefCount: javaCount(r.NormalRefCount),
-		NcbiBuild: naString(r.NcbiBuild), VariantType: naString(r.VariantType), RefseqMrnaID: naString(r.RefseqMrnaID),
+		Chr:          core.NAString(r.Chr), StartPosition: r.StartPosition, EndPosition: r.EndPosition,
+		ReferenceAllele: core.NAString(r.ReferenceAllele), VariantAllele: r.VariantAllele, ProteinChange: r.ProteinChange,
+		MutationType: mutationType, TumorAltCount: core.JavaCount(r.TumorAltCount), TumorRefCount: core.JavaCount(r.TumorRefCount),
+		UniqueSampleKey:  core.UniqueKey(r.StudyID, r.SampleID),
+		Keyword:          core.MutationKeyword(hugo, r.ProteinChange, mutationType),
+		NamespaceColumns: core.NamespaceColumnsJSON(r.NamespaceColumns),
+		PatientID:        r.PatientID, UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID),
+		Center: core.NAString(r.Center), MutationStatus: core.NAString(r.MutationStatus), ValidationStatus: core.NAString(r.ValidationStatus),
+		NormalAltCount: core.JavaCount(r.NormalAltCount), NormalRefCount: core.JavaCount(r.NormalRefCount),
+		NcbiBuild: core.NAString(r.NcbiBuild), VariantType: core.NAString(r.VariantType), RefseqMrnaID: core.NAString(r.RefseqMrnaID),
 	}
-	d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, mafDriverFilter)
+	d := core.NewDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, core.MAFDriverFilter)
 	m.DriverFilter, m.DriverTiersFilter = d.Filter, d.TiersFilter
 	if d.Filter != nil {
 		ann, tiersAnn := strings.TrimSpace(r.DriverFilterAnnotation), strings.TrimSpace(r.DriverTiersFilterAnnotation)
@@ -352,7 +353,7 @@ func toMutation(r mutationRow, detailed bool) Mutation {
 	if r.MolecularProfileID != "" {
 		m.MolecularProfileID = r.MolecularProfileID
 	}
-	m.ProteinPosStart, m.ProteinPosEnd = javaProteinPositions(r.ProteinPosition, r.ProteinChange)
+	m.ProteinPosStart, m.ProteinPosEnd = core.JavaProteinPositions(r.ProteinPosition, r.ProteinChange)
 	if detailed {
 		m.Gene = &Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: hugo, Type: r.GeneType}
 		if r.alleleSpecificCopyNumber.present() {
@@ -363,28 +364,20 @@ func toMutation(r mutationRow, detailed bool) Mutation {
 	return m
 }
 
-// projectionOf is the request's projection (SUMMARY when absent).
-func projectionOf(r *http.Request) string {
-	if p := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("projection"))); p != "" {
-		return p
-	}
-	return "SUMMARY"
-}
-
 // mutationsWhere streams the mutations matching where, whose placeholders
 // are bound in args, and which holds the records to the entrez genes (all
 // genes when none).
-func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *sqlArgs, entrez []int64, limit int) {
+func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where string, args *core.SQLArgs, entrez []int64, limit int) {
 	sel := mutationSelectFor(entrez)
-	if projectionOf(r) == "META" && limit == 0 {
+	if core.ProjectionOf(r) == "META" && limit == 0 {
 		// MutationMeta: the records and their distinct samples.
 		sql := fmt.Sprintf("SELECT count() AS n, uniqExact(studyId, sampleId) AS samples FROM (%s WHERE %s)", sel, where)
 		rows, err := ch.QueryP[struct {
 			N       uint64 `json:"n"`
 			Samples uint64 `json:"samples"`
-		}](s.CH, sql, args.params(sql))
+		}](s.CH, sql, args.Params(sql))
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		w.Header().Set("total-count", fmt.Sprint(rows[0].N))
@@ -398,47 +391,47 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 	} else {
 		// mutationOrder leaves ties (records of one gene and protein change in
 		// a sample).
-		sql = sqlStablePageQuery(r, mutationSortable, sel+" WHERE "+where, mutationOrder)
+		sql = core.SQLStablePageQuery(r, mutationSortable, sel+" WHERE "+where, mutationOrder)
 	}
-	projection := projectionOf(r)
+	projection := core.ProjectionOf(r)
 	// An ID page sorted by a field SQL does not compute (keyword, the
 	// protein positions) is sorted here, by the full records.
-	var keyed *keyedPage
+	var keyed *core.KeyedPage
 	if projection == "ID" {
-		keyed = claimKeyedPage(r)
+		keyed = core.ClaimKeyedPage(r)
 	}
-	out := newJSONArray(w, r)
-	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *mutationRow) error {
+	out := core.NewJSONArray(w, r)
+	err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(row *mutationRow) error {
 		if projection == "ID" {
 			m := toMutation(*row, false)
 			id := MutationID{MolecularProfileID: m.MolecularProfileID, SampleID: m.SampleID, PatientID: m.PatientID,
 				EntrezGeneID: m.EntrezGeneID, StudyID: m.StudyID, UniqueSampleKey: m.UniqueSampleKey, UniquePatientKey: m.UniquePatientKey}
 			if keyed != nil {
-				return keyed.add(m, id)
+				return keyed.Add(m, id)
 			}
-			return out.add(id)
+			return out.Add(id)
 		}
-		return out.add(toMutation(*row, projection == "DETAILED"))
+		return out.Add(toMutation(*row, projection == "DETAILED"))
 	})
 	if keyed != nil && err == nil {
-		for _, row := range keyed.rows() {
-			if err = out.add(row); err != nil {
+		for _, row := range keyed.Rows() {
+			if err = out.Add(row); err != nil {
 				break
 			}
 		}
 	}
-	out.finish(err)
+	out.Finish(err)
 }
 
 // mutations serves GET /api/molecular-profiles/{id}/mutations: the profile's
 // mutations in the sampleListId sample list, for the entrezGeneId gene.
 func (s *State) mutations(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if blankSampleList(q) {
-		writeJSON(w, []Mutation{})
+	if core.BlankSampleList(q) {
+		core.WriteJSON(w, []Mutation{})
 		return
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
 	where += s.sampleListClause(args, "sample_id", q.Get("sampleListId"))
 	entrez := singleEntrezGeneID(q)
@@ -462,17 +455,17 @@ func singleEntrezGeneID(q url.Values) []int64 {
 
 // profileMutationsClause selects a mutation profile's rows (a study can hold
 // both its MUTATION_EXTENDED and MUTATION_UNCALLED profiles).
-func profileMutationsClause(a *sqlArgs, profileID string) string {
-	return fmt.Sprintf("study_id = %s AND molecular_profile_id = %s", a.str(profileStudy(profileID)), a.str(profileID))
+func profileMutationsClause(a *core.SQLArgs, profileID string) string {
+	return fmt.Sprintf("study_id = %s AND molecular_profile_id = %s", a.Str(profileStudy(profileID)), a.Str(profileID))
 }
 
 // sampleListClause restricts col to the members of a sample list (no-op for
 // an empty list id).
-func (s *State) sampleListClause(a *sqlArgs, col, listID string) string {
+func (s *State) sampleListClause(a *core.SQLArgs, col, listID string) string {
 	if listID == "" {
 		return ""
 	}
-	return fmt.Sprintf(" AND %s IN %s", col, s.bySampleList(listID).listMembers(a))
+	return fmt.Sprintf(" AND %s IN %s", col, s.BySampleList(listID).ListMembers(a))
 }
 
 type mutationFilter struct {
@@ -499,16 +492,16 @@ func geneFilter(entrez []int64) string {
 
 func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
-	readBody(r, &f)
-	if noSamples(f.SampleIDs, f.SampleListID) {
-		writeJSON(w, []Mutation{})
+	core.ReadBody(r, &f)
+	if core.NoSamples(f.SampleIDs, f.SampleListID) {
+		core.WriteJSON(w, []Mutation{})
 		return
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
 	// MutationFilter is EITHER explicit sample ids OR a sample list.
 	if len(f.SampleIDs) > 0 {
-		where += " AND sample_id IN " + args.strs(f.SampleIDs)
+		where += " AND sample_id IN " + args.Strs(f.SampleIDs)
 	} else {
 		where += s.sampleListClause(args, "sample_id", f.SampleListID)
 	}
@@ -518,17 +511,17 @@ func (s *State) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 	var f mutationFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	// MutationMultipleStudyFilter is EITHER a set of (profile, sample) pairs OR a
 	// list of molecular profiles (all their samples), each with an optional gene
 	// filter. The results view uses the molecularProfileIds form.
-	args := newArgs()
+	args := core.NewArgs()
 	if len(f.SampleMolecularIdentifiers) > 0 {
 		triples := make([][3]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {
 			triples[i] = [3]string{profileStudy(id.MolecularProfileID), id.MolecularProfileID, id.SampleID}
 		}
-		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN %s%s", args.triples(triples), geneFilter(f.EntrezGeneIDs))
+		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN %s%s", args.Triples(triples), geneFilter(f.EntrezGeneIDs))
 		s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 		return
 	}
@@ -538,11 +531,11 @@ func (s *State) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 			studies[i] = profileStudy(id)
 		}
 		where := fmt.Sprintf("study_id IN %s AND molecular_profile_id IN %s%s",
-			args.strs(studies), args.strs(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))
+			args.Strs(studies), args.Strs(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))
 		s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 		return
 	}
-	writeJSON(w, []Mutation{})
+	core.WriteJSON(w, []Mutation{})
 }
 
 // ---------- Gene panels ----------
@@ -586,10 +579,10 @@ func groupPanels(rows []panelGeneRow) []GenePanel {
 func (s *State) genePanels(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[panelGeneRow](s.CH, panelSelect+" ORDER BY genePanelId, hugoGeneSymbol")
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, groupPanels(rows))
+	core.WriteJSON(w, groupPanels(rows))
 }
 
 // genePanelsFetch returns gene panels (with their gene lists) for the posted
@@ -597,25 +590,25 @@ func (s *State) genePanels(w http.ResponseWriter, r *http.Request) {
 // per-gene coverage.
 func (s *State) genePanelsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
-	readBody(r, &ids)
+	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
-		writeJSON(w, []GenePanel{})
+		core.WriteJSON(w, []GenePanel{})
 		return
 	}
 	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId IN {ids:Array(String)} ORDER BY genePanelId, hugoGeneSymbol",
 		ch.Params{"ids": ids})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, groupPanels(rows))
+	core.WriteJSON(w, groupPanels(rows))
 }
 
 func (s *State) genePanel(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.QueryP[panelGeneRow](s.CH, panelSelect+" WHERE genePanelId = {id:String} ORDER BY hugoGeneSymbol",
 		ch.Params{"id": r.PathValue("id")})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	panels := groupPanels(rows)
@@ -623,5 +616,5 @@ func (s *State) genePanel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "gene panel not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, panels[0])
+	core.WriteJSON(w, panels[0])
 }

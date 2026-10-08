@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/sessionstore"
 )
 
 // sessionTestEnv serves only the session routes; user "" means anonymous.
@@ -20,7 +22,7 @@ type sessionTestEnv struct {
 }
 
 func newSessionTestEnv(t *testing.T, storePath string) *sessionTestEnv {
-	s := &State{sessions: newSessionStore(storePath)}
+	s := &State{State: &core.State{Sessions: sessionstore.NewMemoryStore(storePath)}}
 	mux := http.NewServeMux()
 	s.routeSession(mux)
 	return &sessionTestEnv{t: t, s: s, mux: mux}
@@ -37,7 +39,7 @@ func (e *sessionTestEnv) do(method, path, user string, body any, header map[stri
 		req.Header.Set(k, v)
 	}
 	if user != "" {
-		req = req.WithContext(context.WithValue(req.Context(), userCtxKey{}, User{Name: user}))
+		req = core.WithUser(req, core.User{Name: user})
 	}
 	rec := httptest.NewRecorder()
 	e.mux.ServeHTTP(rec, req)
@@ -62,20 +64,20 @@ func (e *sessionTestEnv) create(path, user string, body any) string {
 	return id
 }
 
-func (e *sessionTestEnv) session(path, user string) Session {
+func (e *sessionTestEnv) session(path, user string) sessionstore.Session {
 	e.t.Helper()
 	rec := e.do("GET", path, user, nil, nil)
 	if rec.Code != 200 {
 		e.t.Fatalf("GET %s -> %d: %s", path, rec.Code, rec.Body)
 	}
-	var s Session
+	var s sessionstore.Session
 	if err := json.Unmarshal(rec.Body.Bytes(), &s); err != nil {
 		e.t.Fatalf("GET %s: %v", path, err)
 	}
 	return s
 }
 
-func (e *sessionTestEnv) list(path, user string, body any) []Session {
+func (e *sessionTestEnv) list(path, user string, body any) []sessionstore.Session {
 	e.t.Helper()
 	method := "GET"
 	if body != nil {
@@ -85,7 +87,7 @@ func (e *sessionTestEnv) list(path, user string, body any) []Session {
 	if rec.Code != 200 {
 		e.t.Fatalf("%s %s -> %d: %s", method, path, rec.Code, rec.Body)
 	}
-	var out []Session
+	var out []sessionstore.Session
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		e.t.Fatalf("%s %s: %v (%s)", method, path, err, rec.Body)
 	}
@@ -93,7 +95,7 @@ func (e *sessionTestEnv) list(path, user string, body any) []Session {
 }
 
 func TestSessionRoutesRegisterWithoutConflict(t *testing.T) {
-	NewRouter(&State{sessions: newSessionStore("")})
+	NewRouter(&State{State: &core.State{Sessions: sessionstore.NewMemoryStore("")}})
 }
 
 func TestMainSessionRoundTrip(t *testing.T) {
@@ -213,10 +215,10 @@ func TestGroupsAndCustomDataFetch(t *testing.T) {
 		if s.Data["owner"] != "alice" || s.Data["displayName"] != "x" {
 			t.Errorf("custom data payload: %v", s.Data)
 		}
-		if raw, ok := e.s.sessionData("custom_data", cd); !ok || !bytes.Contains(raw, []byte(`"displayName":"x"`)) {
+		if raw, ok := e.s.SessionData("custom_data", cd); !ok || !bytes.Contains(raw, []byte(`"displayName":"x"`)) {
 			t.Errorf("sessionData: %s %v", raw, ok)
 		}
-		if _, ok := e.s.sessionData("custom_data", "nope"); ok {
+		if _, ok := e.s.SessionData("custom_data", "nope"); ok {
 			t.Error("sessionData of missing id")
 		}
 	})
@@ -240,7 +242,7 @@ func TestPageSettings(t *testing.T) {
 				t.Fatalf("save settings: %d", rec.Code)
 			}
 		}
-		if all, _ := e.s.store().find("settings", sessionFilter{}); len(all) != 1 {
+		if all, _ := e.s.SessionStore().Find("settings", sessionstore.Filter{}); len(all) != 1 {
 			t.Errorf("second save should update in place, have %d sessions", len(all))
 		}
 		rec := e.do("POST", "/api/session/settings/fetch", "alice", ident, nil)

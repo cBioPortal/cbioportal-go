@@ -2,8 +2,6 @@ package api
 
 import (
 	"bytes"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/sessionstore"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -44,30 +44,6 @@ var (
 	customGeneListFields = []string{"name", "description", "geneList", "users"}
 )
 
-func checksum(data map[string]any) string {
-	raw, _ := json.Marshal(data)
-	sum := md5.Sum(raw)
-	return hex.EncodeToString(sum[:])
-}
-
-// decodeJSON decodes keeping numbers as json.Number so ids and timestamps
-// round-trip unchanged.
-func decodeJSON(raw []byte, v any) error {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	return dec.Decode(v)
-}
-
-func deepCopyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	raw, _ := json.Marshal(m)
-	var out map[string]any
-	decodeJSON(raw, &out)
-	return out
-}
-
 func pickFields(m map[string]any, fields []string) map[string]any {
 	out := map[string]any{}
 	for _, f := range fields {
@@ -87,20 +63,6 @@ func setDefault(m map[string]any, k string, v any) {
 	}
 }
 
-// stringSet reads a JSON array of strings, de-duplicated in input order.
-func stringSet(v any) []string {
-	arr, _ := v.([]any)
-	out := []string{}
-	seen := map[string]bool{}
-	for _, x := range arr {
-		if s, ok := x.(string); ok && !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 func toAnySlice(ss []string) []any {
 	out := make([]any, len(ss))
 	for i, s := range ss {
@@ -109,35 +71,9 @@ func toAnySlice(ss []string) []any {
 	return out
 }
 
-// containsUser matches a users entry case-insensitively.
-func containsUser(users []string, name string) bool {
-	for _, u := range users {
-		if strings.EqualFold(u, name) {
-			return true
-		}
-	}
-	return false
-}
-
-func sameSet(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	set := map[string]bool{}
-	for _, x := range a {
-		set[x] = true
-	}
-	for _, x := range b {
-		if !set[x] {
-			return false
-		}
-	}
-	return true
-}
-
 // sessionUser returns the logged-in user name (Java isAuthorized/userName).
 func sessionUser(r *http.Request) (string, bool) {
-	u, ok := GetUser(r.Context())
+	u, ok := core.GetUser(r.Context())
 	if !ok || u.Name == "" {
 		return "", false
 	}
@@ -151,63 +87,13 @@ func readObject(r *http.Request) (map[string]any, error) {
 		return nil, err
 	}
 	var m map[string]any
-	if err := decodeJSON(raw, &m); err != nil {
+	if err := sessionstore.DecodeJSON(raw, &m); err != nil {
 		return nil, err
 	}
 	if m == nil {
 		return nil, errors.New("body must be a JSON object")
 	}
 	return m, nil
-}
-
-// ConfigureSessions selects the session store: cBioPortal's session service
-// when session.service.url is set — with basic authentication when
-// session.service.password is — else the built-in store (SESSION_STORE_FILE).
-// The session.service.* properties fall back to the environment variables
-// SESSION_SERVICE_URL, SESSION_SERVICE_USER and SESSION_SERVICE_PASSWORD,
-// as Spring's relaxed binding reads them for the Java portal.
-func (s *State) ConfigureSessions() error {
-	prop := func(key, env string) string {
-		if v := s.Props[key]; strings.TrimSpace(v) != "" {
-			return v
-		}
-		return os.Getenv(env)
-	}
-	base := strings.TrimSpace(prop("session.service.url", "SESSION_SERVICE_URL"))
-	if base == "" {
-		s.store()
-		if f := os.Getenv("SESSION_STORE_FILE"); f != "" {
-			log.Printf("sessions: built-in store, persisted to %s", f)
-		} else {
-			log.Print("sessions: built-in store, in memory")
-		}
-		return nil
-	}
-	st, err := newRemoteStore(base,
-		prop("session.service.user", "SESSION_SERVICE_USER"),
-		prop("session.service.password", "SESSION_SERVICE_PASSWORD"))
-	if err != nil {
-		return err
-	}
-	s.sessions = st
-	auth := ""
-	if st.password != "" {
-		auth = " (basic authentication)"
-	}
-	log.Printf("sessions: session service %s%s", redactURL(base), auth)
-	if os.Getenv("SESSION_STORE_FILE") != "" {
-		log.Print("sessions: SESSION_STORE_FILE is ignored with a session service")
-	}
-	return nil
-}
-
-func (s *State) store() sessionStore {
-	s.sessionsOnce.Do(func() {
-		if s.sessions == nil {
-			s.sessions = newSessionStore(os.Getenv("SESSION_STORE_FILE"))
-		}
-	})
-	return s.sessions
 }
 
 func (s *State) routeSession(mux *http.ServeMux) {
@@ -233,8 +119,8 @@ func (s *State) routeSession(mux *http.ServeMux) {
 func (s *State) sessionAdd(w http.ResponseWriter, r *http.Request) {
 	typ := r.PathValue("type")
 	if !sessionTypes[typ] {
-		readBody(r, nil)
-		writeError(w, http.StatusBadRequest, msgEnumMismatch(sessionTypeClass, typ))
+		core.ReadBody(r, nil)
+		core.WriteError(w, http.StatusBadRequest, core.MsgEnumMismatch(sessionTypeClass, typ))
 		return
 	}
 	s.addSession(w, r, typ, false)
@@ -249,7 +135,7 @@ func (s *State) sessionAddWith(typ string, save bool) http.HandlerFunc {
 func (s *State) addSession(w http.ResponseWriter, r *http.Request, typ string, save bool) {
 	body, err := readObject(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, msgBadJSON)
+		core.WriteError(w, http.StatusBadRequest, core.MsgBadJSON)
 		return
 	}
 	user, authed := sessionUser(r)
@@ -277,7 +163,7 @@ func (s *State) addSession(w http.ResponseWriter, r *http.Request, typ string, s
 			return
 		}
 		if p, _ := body["page"].(string); p != "study_view" && p != "results_view" {
-			springError(w, r, http.StatusInternalServerError)
+			core.SpringError(w, r, http.StatusInternalServerError)
 			return
 		}
 		data = body
@@ -305,14 +191,14 @@ func (s *State) addSession(w http.ResponseWriter, r *http.Request, typ string, s
 	default:
 		data = body
 	}
-	id, err := s.store().create(typ, data)
+	id, err := s.SessionStore().Create(typ, data)
 	if err != nil {
 		// RestTemplate's exception is not handled by the controller.
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, map[string]any{"id": id})
+	core.WriteJSON(w, map[string]any{"id": id})
 }
 
 func applyTimestampDefaults(data map[string]any) {
@@ -335,44 +221,44 @@ func applyVirtualStudyDefaults(data map[string]any) {
 func (s *State) sessionGet(w http.ResponseWriter, r *http.Request) {
 	typ, id := r.PathValue("type"), r.PathValue("id")
 	if !sessionTypes[typ] {
-		writeError(w, http.StatusBadRequest, msgEnumMismatch(sessionTypeClass, typ))
+		core.WriteError(w, http.StatusBadRequest, core.MsgEnumMismatch(sessionTypeClass, typ))
 		return
 	}
-	sess, err := s.store().get(typ, id)
-	if errors.Is(err, errSessionNotFound) {
+	sess, err := s.SessionStore().Get(typ, id)
+	if errors.Is(err, sessionstore.ErrNotFound) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	if err != nil {
-		logSessionError(err)
+		sessionstore.LogError(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 	if typ == "virtual_study" {
 		s.populateDynamic(sess)
 	}
-	writeJSON(w, sess)
+	core.WriteJSON(w, sess)
 }
 
 func (s *State) sessionUserVirtualStudies(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUser(r)
 	if !ok {
-		writeJSON(w, []any{})
+		core.WriteJSON(w, []any{})
 		return
 	}
 	list, err := s.virtualStudiesFor(user)
 	if err != nil {
-		logSessionError(err)
+		sessionstore.LogError(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, list)
+	core.WriteJSON(w, list)
 }
 
 // virtualStudiesFor lists virtual studies whose users contain name, with
 // dynamic ones resolved against the current data.
-func (s *State) virtualStudiesFor(name string) ([]*Session, error) {
-	list, err := s.store().find("virtual_study", sessionFilter{users: name})
+func (s *State) virtualStudiesFor(name string) ([]*sessionstore.Session, error) {
+	list, err := s.SessionStore().Find("virtual_study", sessionstore.Filter{Users: name})
 	if err != nil {
 		return nil, err
 	}
@@ -388,19 +274,19 @@ func (s *State) sessionUserCustomGeneLists(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	s.writeSessions(w, r, "custom_gene_list", sessionFilter{users: user})
+	s.writeSessions(w, r, "custom_gene_list", sessionstore.Filter{Users: user})
 }
 
 // writeSessions answers the sessions of typ matching f; a store failure is
 // the unhandled exception's Spring error.
-func (s *State) writeSessions(w http.ResponseWriter, r *http.Request, typ string, f sessionFilter) {
-	list, err := s.store().find(typ, f)
+func (s *State) writeSessions(w http.ResponseWriter, r *http.Request, typ string, f sessionstore.Filter) {
+	list, err := s.SessionStore().Find(typ, f)
 	if err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, list)
+	core.WriteJSON(w, list)
 }
 
 // sessionFetchByOrigin lists sessions of typ owned by the user whose origin
@@ -408,13 +294,13 @@ func (s *State) writeSessions(w http.ResponseWriter, r *http.Request, typ string
 func (s *State) sessionFetchByOrigin(typ string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var studyIDs []string
-		readBody(r, &studyIDs)
+		core.ReadBody(r, &studyIDs)
 		user, ok := sessionUser(r)
 		if !ok {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		s.writeSessions(w, r, typ, sessionFilter{users: user, origin: studyIDs, hasOrigin: true})
+		s.writeSessions(w, r, typ, sessionstore.Filter{Users: user, Origin: studyIDs, HasOrigin: true})
 	}
 }
 
@@ -426,29 +312,29 @@ func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 	case "virtual_study", "group", "custom_data", "custom_gene_list":
 	default:
 		// The route's {type} pattern admits only these types.
-		springNotFound(w, r)
+		core.SpringNotFound(w, r)
 		return
 	}
 	if op != "add" && op != "delete" {
-		writeError(w, http.StatusBadRequest, msgEnumMismatch("org.cbioportal.legacy.web.Operation", op))
+		core.WriteError(w, http.StatusBadRequest, core.MsgEnumMismatch("org.cbioportal.legacy.web.Operation", op))
 		return
 	}
 	user, ok := sessionUser(r)
 	if !ok {
 		// HttpServletResponse.sendError: the Spring error body.
-		springError(w, r, http.StatusServiceUnavailable)
+		core.SpringError(w, r, http.StatusServiceUnavailable)
 		return
 	}
-	sess, err := s.store().get(typ, id)
+	sess, err := s.SessionStore().Get(typ, id)
 	if err != nil {
 		// Java dereferences the missing session.
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	users := stringSet(sess.Data["users"])
+	users := sessionstore.StringSet(sess.Data["users"])
 	if op == "add" {
-		if !containsUser(users, user) {
+		if !sessionstore.ContainsUser(users, user) {
 			users = append(users, user)
 		}
 	} else {
@@ -461,9 +347,9 @@ func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 		users = kept
 	}
 	sess.Data["users"] = toAnySlice(users)
-	if err := s.store().update(typ, id, sess.Data); err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+	if err := s.SessionStore().Update(typ, id, sess.Data); err != nil {
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -473,12 +359,12 @@ func (s *State) sessionUpdateUsers(w http.ResponseWriter, r *http.Request) {
 
 // recentPageSettings returns the most recently updated settings session of
 // the user for the given origin set and page.
-func (s *State) recentPageSettings(user string, origin []string, page string) (*Session, error) {
-	list, err := s.store().find("settings", sessionFilter{owner: user, origin: origin, hasOrigin: true, page: page})
+func (s *State) recentPageSettings(user string, origin []string, page string) (*sessionstore.Session, error) {
+	list, err := s.SessionStore().Find("settings", sessionstore.Filter{Owner: user, Origin: origin, HasOrigin: true, Page: page})
 	if err != nil {
 		return nil, err
 	}
-	var best *Session
+	var best *sessionstore.Session
 	var bestTS int64
 	for _, x := range list {
 		ts := numberToInt64(x.Data["lastUpdated"])
@@ -507,7 +393,7 @@ func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	body, err := readObject(r)
 	page, _ := body["page"].(string)
 	if err != nil || (body["page"] != nil && page != "study_view" && page != "results_view") {
-		writeError(w, http.StatusBadRequest, msgBadJSON)
+		core.WriteError(w, http.StatusBadRequest, core.MsgBadJSON)
 		return
 	}
 	user, ok := sessionUser(r)
@@ -518,29 +404,29 @@ func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	if page == "" {
 		// settingsData.getPage().name() on a missing page: the IOException
 		// handler does not catch it.
-		springError(w, r, http.StatusInternalServerError)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	origin := stringSet(body["origin"])
+	origin := sessionstore.StringSet(body["origin"])
 	existing, err := s.recentPageSettings(user, origin, page)
 	if err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
 	if existing == nil {
 		applyTimestampDefaults(body)
 		body["owner"] = user
-		if _, err := s.store().create("settings", body); err != nil {
-			logSessionError(err)
-			springError(w, r, http.StatusInternalServerError)
+		if _, err := s.SessionStore().Create("settings", body); err != nil {
+			sessionstore.LogError(err)
+			core.SpringError(w, r, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 	owner, _ := existing.Data["owner"].(string)
-	if owner != user || !sameSet(stringSet(existing.Data["origin"]), origin) {
+	if owner != user || !sessionstore.SameSet(sessionstore.StringSet(existing.Data["origin"]), origin) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -548,9 +434,9 @@ func (s *State) sessionUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	body["owner"] = owner
 	body["origin"] = existing.Data["origin"]
 	setDefault(body, "lastUpdated", nowMillis())
-	if err := s.store().update("settings", existing.ID, body); err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+	if err := s.SessionStore().Update("settings", existing.ID, body); err != nil {
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -561,9 +447,9 @@ func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 		Page   string   `json:"page"`
 		Origin []string `json:"origin"`
 	}
-	readBody(r, &id)
+	core.ReadBody(r, &id)
 	if id.Page != "" && id.Page != "study_view" && id.Page != "results_view" {
-		writeError(w, http.StatusBadRequest, msgBadJSON)
+		core.WriteError(w, http.StatusBadRequest, core.MsgBadJSON)
 		return
 	}
 	user, ok := sessionUser(r)
@@ -578,7 +464,7 @@ func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 	existing, err := s.recentPageSettings(user, id.Origin, id.Page)
 	if err != nil {
 		// The controller answers any exception with a bare 400.
-		logSessionError(err)
+		sessionstore.LogError(err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -586,7 +472,7 @@ func (s *State) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	writeJSON(w, existing.Data)
+	core.WriteJSON(w, existing.Data)
 }
 
 // ---- dynamic virtual studies ----
@@ -614,7 +500,7 @@ func (s *State) filterSamples(filter any) ([]Sample, error) {
 
 // populateDynamic recomputes data.studies of a dynamic virtual study from its
 // studyViewFilter. On failure the stored studies are kept.
-func (s *State) populateDynamic(vs *Session) {
+func (s *State) populateDynamic(vs *sessionstore.Session) {
 	if dyn, _ := vs.Data["dynamic"].(bool); !dyn || s.CH == nil {
 		return
 	}
@@ -653,11 +539,11 @@ func groupSamplesByStudy(samples []Sample) []any {
 func (s *State) publicVirtualStudies(w http.ResponseWriter, r *http.Request) {
 	list, err := s.virtualStudiesFor(allUsers)
 	if err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, list)
+	core.WriteJSON(w, list)
 }
 
 // publisherKey is the key publishing virtual studies requires: the
@@ -675,12 +561,12 @@ func (s *State) publisherKey() string {
 func (s *State) checkPublisherKey(w http.ResponseWriter, r *http.Request) bool {
 	provided, present := r.Header["X-Publisher-Api-Key"]
 	if !present {
-		springError(w, r, http.StatusBadRequest)
+		core.SpringError(w, r, http.StatusBadRequest)
 		return false
 	}
 	required := s.publisherKey()
 	if required == "" || len(provided) == 0 || provided[0] != required {
-		writeError(w, http.StatusForbidden, "The access is forbidden.")
+		core.WriteError(w, http.StatusForbidden, "The access is forbidden.")
 		return false
 	}
 	return true
@@ -709,7 +595,7 @@ func (s *State) studyExists(id string) (bool, error) {
 	type countRow struct {
 		N uint64 `json:"n"`
 	}
-	rows, err := cachedQueryP[countRow](s,
+	rows, err := core.CachedQueryP[countRow](s.State,
 		"SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": id})
 	if err != nil {
 		return false, err
@@ -724,7 +610,7 @@ func (s *State) applyPublishMetadata(w http.ResponseWriter, r *http.Request, dat
 	if q.Has("typeOfCancerId") {
 		toc := q.Get("typeOfCancerId")
 		if ok, err := s.cancerTypeExists(toc); err != nil || !ok {
-			springError(w, r, http.StatusInternalServerError)
+			core.SpringError(w, r, http.StatusInternalServerError)
 			return false
 		}
 		data["typeOfCancerId"] = toc
@@ -742,19 +628,19 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if len(bytes.TrimSpace(raw)) == 0 {
-		vs, err := s.store().get("virtual_study", id)
+		vs, err := s.SessionStore().Get("virtual_study", id)
 		if err != nil {
-			logSessionError(err)
-			springError(w, r, http.StatusInternalServerError)
+			sessionstore.LogError(err)
+			core.SpringError(w, r, http.StatusInternalServerError)
 			return
 		}
 		if !s.applyPublishMetadata(w, r, vs.Data) {
 			return
 		}
 		vs.Data["users"] = []any{allUsers}
-		if err := s.store().update("virtual_study", id, vs.Data); err != nil {
-			logSessionError(err)
-			springError(w, r, http.StatusInternalServerError)
+		if err := s.SessionStore().Update("virtual_study", id, vs.Data); err != nil {
+			sessionstore.LogError(err)
+			core.SpringError(w, r, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -762,25 +648,25 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body map[string]any
-	if err := decodeJSON(raw, &body); err != nil || body == nil {
-		writeError(w, http.StatusBadRequest, msgBadJSON)
+	if err := sessionstore.DecodeJSON(raw, &body); err != nil || body == nil {
+		core.WriteError(w, http.StatusBadRequest, core.MsgBadJSON)
 		return
 	}
 	data := pickFields(body, virtualStudyFields)
 	if msg := virtualStudyDataViolation(data); msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
+		core.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 	// VirtualStudyService.validateResolvableVirtualStudyData: the filter must
 	// select samples (a missing filter selects none).
 	filter, ok := data["studyViewFilter"]
 	if !ok || filter == nil || s.CH == nil {
-		writeError(w, http.StatusBadRequest, msgVSInvalidFilters)
+		core.WriteError(w, http.StatusBadRequest, msgVSInvalidFilters)
 		return
 	}
 	samples, err := s.filterSamples(filter)
 	if err != nil || len(samples) == 0 {
-		writeError(w, http.StatusBadRequest, msgVSInvalidFilters)
+		core.WriteError(w, http.StatusBadRequest, msgVSInvalidFilters)
 		return
 	}
 	applyVirtualStudyDefaults(data)
@@ -790,68 +676,54 @@ func (s *State) publishVirtualStudy(w http.ResponseWriter, r *http.Request) {
 	data["users"] = []any{allUsers}
 	exists, err := s.studyExists(id)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if exists {
 		conflict(w, "The study with id="+id+" already exists. Use a different id for the virtual study.")
 		return
 	}
-	if err := s.store().insert("virtual_study", id, data); err != nil {
-		if errors.Is(err, errSessionConflict) {
+	if err := s.SessionStore().Insert("virtual_study", id, data); err != nil {
+		if errors.Is(err, sessionstore.ErrConflict) {
 			conflict(w, "A virtual study with the same ID or identical definition already exists: "+id)
 			return
 		}
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *State) unpublishVirtualStudy(w http.ResponseWriter, r *http.Request) {
-	readBody(r, nil)
+	core.ReadBody(r, nil)
 	if !s.checkPublisherKey(w, r) {
 		return
 	}
 	id := r.PathValue("id")
-	vs, err := s.store().get("virtual_study", id)
+	vs, err := s.SessionStore().Get("virtual_study", id)
 	if err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	if !containsUser(stringSet(vs.Data["users"]), allUsers) {
-		writeError(w, http.StatusNotFound, "The virtual study with id="+id+" has not been found in the public list.")
+	if !sessionstore.ContainsUser(sessionstore.StringSet(vs.Data["users"]), allUsers) {
+		core.WriteError(w, http.StatusNotFound, "The virtual study with id="+id+" has not been found in the public list.")
 		return
 	}
 	if r.URL.Query().Get("softDelete") == "false" {
-		err = s.store().remove("virtual_study", id)
+		err = s.SessionStore().Remove("virtual_study", id)
 	} else {
 		owner, _ := vs.Data["owner"].(string)
 		vs.Data["users"] = []any{owner}
-		err = s.store().update("virtual_study", id, vs.Data)
+		err = s.SessionStore().Update("virtual_study", id, vs.Data)
 	}
 	if err != nil {
-		logSessionError(err)
-		springError(w, r, http.StatusInternalServerError)
+		sessionstore.LogError(err)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-}
-
-// sessionData returns the stored `data` JSON of session (typ, id).
-func (s *State) sessionData(typ, id string) (json.RawMessage, bool) {
-	sess, err := s.store().get(typ, id)
-	if err != nil {
-		logSessionError(err)
-		return nil, false
-	}
-	raw, err := json.Marshal(sess.Data)
-	if err != nil {
-		return nil, false
-	}
-	return raw, true
 }
 
 // sessionTypeClass is the enum Spring converts the {type} path variable to.

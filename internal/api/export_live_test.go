@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/ingest"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
@@ -99,7 +100,7 @@ func TestLiveExportGeneKeyColumns(t *testing.T) {
 
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, refDB)
-	s := &State{CH: c, Props: map[string]string{"feature.study.export": "true"}}
+	s := &State{State: &core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}}}
 	mux := http.NewServeMux()
 	s.routeExport(mux)
 	w := httptest.NewRecorder()

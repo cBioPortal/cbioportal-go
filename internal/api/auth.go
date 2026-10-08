@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -12,21 +11,9 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
-
-// User is the authenticated principal extracted from a bearer token.
-type User struct {
-	Name  string
-	Roles []string
-}
-
-type userCtxKey struct{}
-
-// GetUser returns the authenticated user from the request context, if any.
-func GetUser(ctx context.Context) (User, bool) {
-	u, ok := ctx.Value(userCtxKey{}).(User)
-	return u, ok
-}
 
 // AuthConfig is read from the environment at startup.
 type AuthConfig struct {
@@ -53,13 +40,13 @@ func loadAuthConfig() AuthConfig {
 // tokens instead (dat.method=oauth2, dat.go), which excludes AUTH_ENABLED.
 func auth(cfg AuthConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := GetUser(r.Context()); ok {
+		if _, ok := core.GetUser(r.Context()); ok {
 			next.ServeHTTP(w, r) // logged in (authenticate=oauth2)
 			return
 		}
 		if !cfg.Enabled {
 			if cfg.DefaultUser != "" {
-				r = withUser(r, User{Name: cfg.DefaultUser})
+				r = core.WithUser(r, core.User{Name: cfg.DefaultUser})
 			}
 			next.ServeHTTP(w, r)
 			return
@@ -70,32 +57,32 @@ func auth(cfg AuthConfig, next http.Handler) http.Handler {
 			// An empty 401, as Java's HttpStatusEntryPoint answers a refused
 			// API token; the reason goes to the server log.
 			slog.Warn("bearer token refused", slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
-			readBody(r, nil)
+			core.ReadBody(r, nil)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, withUser(r, user))
+		next.ServeHTTP(w, core.WithUser(r, user))
 	})
 }
 
-func verifyHS256(token string, secret []byte) (User, error) {
+func verifyHS256(token string, secret []byte) (core.User, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 || len(secret) == 0 {
-		return User{}, fmt.Errorf("malformed token or no secret configured")
+		return core.User{}, fmt.Errorf("malformed token or no secret configured")
 	}
 	signing := parts[0] + "." + parts[1]
 	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil {
-		return User{}, fmt.Errorf("bad signature encoding")
+		return core.User{}, fmt.Errorf("bad signature encoding")
 	}
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(signing))
 	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return User{}, fmt.Errorf("signature mismatch")
+		return core.User{}, fmt.Errorf("signature mismatch")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return User{}, fmt.Errorf("bad payload encoding")
+		return core.User{}, fmt.Errorf("bad payload encoding")
 	}
 	var claims struct {
 		Sub               string `json:"sub"`
@@ -107,10 +94,10 @@ func verifyHS256(token string, secret []byte) (User, error) {
 		} `json:"realm_access"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return User{}, fmt.Errorf("bad claims")
+		return core.User{}, fmt.Errorf("bad claims")
 	}
 	if claims.Exp > 0 && time.Now().Unix() > claims.Exp {
-		return User{}, fmt.Errorf("token expired")
+		return core.User{}, fmt.Errorf("token expired")
 	}
 	name := claims.PreferredUsername
 	if name == "" {
@@ -119,5 +106,5 @@ func verifyHS256(token string, secret []byte) (User, error) {
 	if name == "" {
 		name = claims.Sub
 	}
-	return User{Name: name, Roles: claims.RealmAccess.Roles}, nil
+	return core.User{Name: name, Roles: claims.RealmAccess.Roles}, nil
 }

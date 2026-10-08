@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 func TestGeneAlterationCountEventKeys(t *testing.T) {
@@ -58,7 +60,7 @@ func TestMergeCaseListCounts(t *testing.T) {
 }
 
 func TestJavaHashMapOrderMolecularProfileCounts(t *testing.T) {
-	got := javaHashMapOrder([]string{"cna", "mutations", "structural_variants"})
+	got := core.JavaHashMapOrder([]string{"cna", "mutations", "structural_variants"})
 	if want := []string{"mutations", "cna", "structural_variants"}; !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
@@ -90,7 +92,7 @@ func TestClinicalEnrichmentAttributeOrder(t *testing.T) {
 		tested[id] = true
 	}
 	var got []string
-	for _, k := range javaHashMapOrder(keys) {
+	for _, k := range core.JavaHashMapOrder(keys) {
 		id := strings.TrimSuffix(strings.TrimSuffix(k, "true"), "false")
 		if tested[id] {
 			got = append(got, id)

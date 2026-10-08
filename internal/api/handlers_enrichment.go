@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
 
@@ -69,16 +70,16 @@ type AlterationEnrichment struct {
 // chi-square.
 func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Groups               []casesGroup      `json:"molecularProfileCasesGroupFilter"`
-		AlterationEventTypes *alterationFilter `json:"alterationEventTypes"`
+		Groups               []casesGroup           `json:"molecularProfileCasesGroupFilter"`
+		AlterationEventTypes *core.AlterationFilter `json:"alterationEventTypes"`
 	}
-	readBody(r, &body)
+	core.ReadBody(r, &body)
 	patient := strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT")
 	unit := "sample_unique_id"
 	if patient {
 		unit = "patient_unique_id"
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	a := alterationSQL{args: args}
 	if body.AlterationEventTypes != nil {
 		a.af = *body.AlterationEventTypes
@@ -106,7 +107,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	// profiled counts are needed for those genes alone.
 	type groupScope struct {
 		entities string
-		profiles scope
+		profiles core.Scope
 		studies  []string
 		altered  []geneRow
 	}
@@ -126,14 +127,14 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		if len(entitySet) == 0 {
 			continue
 		}
-		sc := &groupScope{entities: args.strs(sortedKeys(entitySet)), profiles: byProfiles(sortedKeys(profileSet)), studies: sortedKeys(studySet)}
-		altered, err := queryA[geneRow](s.CH, fmt.Sprintf(
+		sc := &groupScope{entities: args.Strs(core.SortedKeys(entitySet)), profiles: core.ByProfiles(core.SortedKeys(profileSet)), studies: core.SortedKeys(studySet)}
+		altered, err := core.QueryA[geneRow](s.CH, fmt.Sprintf(
 			"SELECT hugo_gene_symbol AS gene, any(toInt64OrNull(toString(entrez_gene_id))) AS entrez, toInt64(uniqExact(%[1]s)) AS n "+
 				"FROM %[2]s AND mutation_status != 'UNCALLED' "+
 				"AND %[1]s IN %[3]s AND %[4]s GROUP BY hugo_gene_symbol",
-			unit, sc.profiles.from(args, tGenomicEventDerived), sc.entities, a.enrichmentClause()), args)
+			unit, sc.profiles.From(args, core.TGenomicEventDerived), sc.entities, a.enrichmentClause()), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		sc.altered = altered
@@ -142,7 +143,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		}
 		scopes[i] = sc
 	}
-	geneList := args.strs(sortedKeys(alteredGenes))
+	geneList := args.Strs(core.SortedKeys(alteredGenes))
 	for i, g := range body.Groups {
 		sc := scopes[i]
 		if sc == nil || len(alteredGenes) == 0 {
@@ -150,7 +151,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		}
 		profiled, err := s.profiledPerGene(args, unit, sc.profiles, sc.studies, sc.entities, geneList)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for gene, n := range profiled {
@@ -166,7 +167,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	out := []AlterationEnrichment{}
-	for _, gene := range sortedKeys(genes) {
+	for _, gene := range core.SortedKeys(genes) {
 		c := genes[gene]
 		any := false
 		counts := make([]CountSummary, len(body.Groups))
@@ -185,7 +186,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		}
 		out = append(out, AlterationEnrichment{Counts: counts, EntrezGeneID: entrez, HugoGeneSymbol: gene, PValue: enrichmentPValue(counts)})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // enrichmentPValue follows AlterationEnrichmentScoreUtil: 0 unless at least two
@@ -227,7 +228,7 @@ func (s *State) profileStudies(groups []casesGroup) map[string]string {
 		}
 	}
 	out := map[string]string{}
-	for id, p := range s.resolvePanelProfiles(sortedKeys(set)) {
+	for id, p := range s.resolvePanelProfiles(core.SortedKeys(set)) {
 		out[id] = p.StudyID
 	}
 	return out
@@ -241,16 +242,16 @@ func (s *State) routeEnrichment(mux *http.ServeMux) {
 // panel of profiles covering it: entities are grouped by their panel
 // combination and each combination's genes are expanded once. entities and
 // genes are array placeholders bound in args.
-func (s *State) profiledPerGene(args *sqlArgs, unit string, profiles scope, studies []string, entities, genes string) (map[string]int, error) {
+func (s *State) profiledPerGene(args *core.SQLArgs, unit string, profiles core.Scope, studies []string, entities, genes string) (map[string]int, error) {
 	type combo struct {
 		Panels []string `json:"panels"`
 		N      int      `json:"n"`
 	}
-	combos, err := queryA[combo](s.CH, fmt.Sprintf(
+	combos, err := core.QueryA[combo](s.CH, fmt.Sprintf(
 		"SELECT panels, toInt64(count()) AS n FROM (SELECT sd.%[1]s AS entity, arraySort(groupUniqArray(p.gene_panel_id)) AS panels "+
 			"FROM %[2]s p JOIN %[4]s sd ON sd.sample_unique_id = p.sample_unique_id "+
 			"WHERE sd.%[1]s IN %[3]s GROUP BY entity) GROUP BY panels",
-		unit, profiles.rows(args, tSampleToGenePanelDerived), entities, byStudies(studies).rows(args, tSampleDerived)), args)
+		unit, profiles.Rows(args, core.TSampleToGenePanelDerived), entities, core.ByStudies(studies).Rows(args, core.TSampleDerived)), args)
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +261,7 @@ func (s *State) profiledPerGene(args *sqlArgs, unit string, profiles scope, stud
 			panelSet[p] = true
 		}
 	}
-	panelGenes, err := s.panelGenes(args, sortedKeys(panelSet), genes)
+	panelGenes, err := s.panelGenes(args, core.SortedKeys(panelSet), genes)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +282,7 @@ func (s *State) profiledPerGene(args *sqlArgs, unit string, profiles scope, stud
 
 // panelGenes returns each panel's genes among genes (an array placeholder
 // bound in args); WES covers every gene.
-func (s *State) panelGenes(args *sqlArgs, panels []string, genes string) (map[string][]string, error) {
+func (s *State) panelGenes(args *core.SQLArgs, panels []string, genes string) (map[string][]string, error) {
 	out := map[string][]string{}
 	if len(panels) == 0 {
 		return out, nil
@@ -290,9 +291,9 @@ func (s *State) panelGenes(args *sqlArgs, panels []string, genes string) (map[st
 		Panel string   `json:"panel"`
 		Genes []string `json:"genes"`
 	}
-	rows, err := queryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT gene_panel_id AS panel, groupArray(gene) AS genes FROM gene_panel_to_gene_derived "+
-			"WHERE gene_panel_id IN %s AND gene IN %s GROUP BY gene_panel_id", args.strs(panels), genes), args)
+			"WHERE gene_panel_id IN %s AND gene IN %s GROUP BY gene_panel_id", args.Strs(panels), genes), args)
 	if err != nil {
 		return nil, err
 	}

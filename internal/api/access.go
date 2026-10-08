@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // Study-level authorization under authenticate=oauth2 (and optional_oauth2
@@ -57,7 +59,7 @@ func newAccessPolicy(props map[string]string) accessPolicy {
 }
 
 // authorities are the user's study-access groups, uppercased.
-func (p accessPolicy) authorities(u User) map[string]bool {
+func (p accessPolicy) authorities(u core.User) map[string]bool {
 	app := strings.ToUpper(p.appName)
 	if app == "" {
 		app = "PUBLIC_PORTAL"
@@ -122,9 +124,9 @@ func (s *State) studyIndex() (studyIndex, error) {
 	}{
 		{idx.groups, "SELECT study_id AS k, ifNull(groups, '') AS v FROM cancer_study"},
 		{idx.profiles, "SELECT molecular_profile_id AS k, any(study_id) AS v FROM molecular_profile GROUP BY k"},
-		{idx.lists, "SELECT list_id AS k, any(study_id) AS v FROM " + acrossStudies.rows(paramsBinder{}, tSampleList) + " GROUP BY k"},
+		{idx.lists, "SELECT list_id AS k, any(study_id) AS v FROM " + core.AcrossStudies.Rows(core.ParamsBinder{}, core.TSampleList) + " GROUP BY k"},
 	} {
-		rows, err := cachedQuery[pair](s, q.sql)
+		rows, err := core.CachedQuery[pair](s.State, q.sql)
 		if err != nil {
 			return idx, err
 		}
@@ -168,25 +170,25 @@ var filteredLists = map[string]bool{
 // studyAccess enforces the policy on API requests of logged-in users.
 func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := GetUser(r.Context())
-		if (!ok && !policy.anonymous) || !isAPIPath(r.URL.Path) {
+		user, ok := core.GetUser(r.Context())
+		if (!ok && !policy.anonymous) || !core.IsAPIPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		idx, err := s.studyIndex()
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "could not check study permissions")
+			core.WriteError(w, http.StatusInternalServerError, "could not check study permissions")
 			return
 		}
 		auth := policy.authorities(user)
 		studies, profiles, lists := pathTargets(r)
 		if r.Method == http.MethodPost {
-			bs, bp, bl := bodyTargets(r.URL.Path, bufferedBody(r))
+			bs, bp, bl := bodyTargets(r.URL.Path, core.BufferedBody(r))
 			studies, profiles, lists = append(studies, bs...), append(profiles, bp...), append(lists, bl...)
 		}
 		if !idx.readable(auth, studies, profiles, lists) {
-			readBody(r, nil)
-			writeError(w, http.StatusForbidden, "Access to the specified resource has been forbidden")
+			core.ReadBody(r, nil)
+			core.WriteError(w, http.StatusForbidden, "Access to the specified resource has been forbidden")
 			return
 		}
 		if r.Method != http.MethodGet || !filteredLists[r.URL.Path] {
@@ -201,7 +203,7 @@ func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 		// A successful array is filtered element by element as it is
 		// written, unless its total-count header must count the kept records.
 		var bw *bufio.Writer
-		rec := newElementWriter(func(h http.Header) bool {
+		rec := core.NewElementWriter(func(h http.Header) bool {
 			if h.Get("total-count") != "" {
 				return false
 			}
@@ -217,17 +219,17 @@ func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			return err
 		})
 		next.ServeHTTP(rec, r)
-		if rec.finish() {
+		if rec.Finish() {
 			bw.WriteByte(']')
 			bw.Flush()
 			return
 		}
-		status := rec.status
-		body := rec.raw.Bytes()
+		status := rec.Status
+		body := rec.Raw.Bytes()
 		if status == http.StatusOK {
-			body = filterByStudy(body, f.readable, keepAll, f.studies, rec.header)
+			body = filterByStudy(body, f.readable, keepAll, f.studies, rec.Header())
 		}
-		for k, v := range rec.header {
+		for k, v := range rec.Header() {
 			w.Header()[k] = v
 		}
 		w.Header().Del("Content-Length")
@@ -355,7 +357,7 @@ type studyFilter struct {
 
 // record writes rec to out, after a comma unless it is the first, when it
 // is kept.
-func (f *studyFilter) record(out byteWriter, rec []byte) {
+func (f *studyFilter) record(out core.ByteWriter, rec []byte) {
 	var id struct {
 		StudyID string `json:"studyId"`
 	}

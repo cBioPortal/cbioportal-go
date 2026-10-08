@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/databin"
 )
 
@@ -100,7 +101,7 @@ func countsByAttr(items []ClinicalDataCountItem) map[string][]databin.Value {
 func decodeBinRequest(r *http.Request, v any, key string) []json.RawMessage {
 	var raw map[string]json.RawMessage
 	body := json.RawMessage{}
-	readBody(r, &body)
+	core.ReadBody(r, &body)
 	json.Unmarshal(body, v)
 	json.Unmarshal(body, &raw)
 	var filters []json.RawMessage
@@ -139,12 +140,12 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 		bins, err := databin.Calculate(a.AttributeID, unfiltered[a.AttributeID], filtered[a.AttributeID],
 			a.binFilterOpts.options(method, false, methods[i]))
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		out = append(out, bins...)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // scopedValueCounts counts, for each (entity, profile type) key, the non-NA
@@ -153,13 +154,13 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 // keyCol names the entity column and valueCol the value column; naSQL is the
 // predicate that marks a value as NA; unit is the case column counted
 // (sample_unique_id, or patient_unique_id for a patient-level profile).
-func (s *State) scopedValueCounts(t keyedTable, keyCol, valueCol, naSQL, unit string, keys [][2]string,
+func (s *State) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, unit string, keys [][2]string,
 	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value) {
 	unfiltered, filtered = map[[2]string][]databin.Value{}, map[[2]string][]databin.Value{}
 	if len(keys) == 0 {
 		return
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	scopes := fmt.Sprintf("WITH unfiltered AS (%s), filtered AS (%s) ",
 		s.filterSQL(args, unfilteredScope), s.filterSQL(args, filteredScope))
 	// Both scopes' samples belong to their studies, the key range read.
@@ -170,11 +171,11 @@ func (s *State) scopedValueCounts(t keyedTable, keyCol, valueCol, naSQL, unit st
 	}
 	total := "SELECT (SELECT count() FROM unfiltered) AS u, (SELECT count() FROM filtered) AS f"
 	if unit == "patient_unique_id" {
-		samples := both.from(args, tSampleDerived)
+		samples := both.From(args, core.TSampleDerived)
 		total = "SELECT (SELECT uniqExact(patient_unique_id) FROM " + samples + " AND sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, " +
 			"(SELECT uniqExact(patient_unique_id) FROM " + samples + " AND sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f"
 	}
-	totals, _ := queryA[totalRow](s.CH, scopes+total, args)
+	totals, _ := core.QueryA[totalRow](s.CH, scopes+total, args)
 	var totalU, totalF uint64
 	if len(totals) > 0 {
 		totalU, totalF = totals[0].U, totals[0].F
@@ -193,18 +194,18 @@ func (s *State) scopedValueCounts(t keyedTable, keyCol, valueCol, naSQL, unit st
 	}
 	// Tables with a study column read the scopes' studies; the others
 	// (generic_assay_data_derived) lead their key with the keys' columns.
-	from := t.name + " WHERE 1"
-	if t.study != "" {
-		from = both.from(args, t)
+	from := t.Name + " WHERE 1"
+	if t.Study != "" {
+		from = both.From(args, t)
 	}
-	rows, _ := queryA[row](s.CH, fmt.Sprintf(scopes+
+	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(scopes+
 		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
 		"FROM %[3]s AND (%[1]s, profile_type) IN %[4]s AND NOT %[5]s "+
 		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
 		"GROUP BY key, profileType, value",
-		keyCol, valueCol, from, args.pairs(keys), naSQL, countIf), args)
+		keyCol, valueCol, from, args.Pairs(keys), naSQL, countIf), args)
 	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
 		k := [2]string{r.Key, r.ProfileType}
@@ -261,7 +262,7 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 	for i, g := range f.GenomicDataBinFilters {
 		keys[i] = [2]string{g.HugoGeneSymbol, g.ProfileType}
 	}
-	unfiltered, filtered := s.scopedValueCounts(tGeneticAlterationDerived, "hugo_gene_symbol", "alteration_value",
+	unfiltered, filtered := s.scopedValueCounts(core.TGeneticAlterationDerived, "hugo_gene_symbol", "alteration_value",
 		isNASQL("assumeNotNull(alteration_value)"), "sample_unique_id", keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenomicDataBin{}
@@ -269,7 +270,7 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 		bins, err := databin.Calculate(g.HugoGeneSymbol+g.ProfileType, unfiltered[keys[i]], filtered[keys[i]],
 			g.binFilterOpts.options(method, true, methods[i]))
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for _, b := range bins {
@@ -277,7 +278,7 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 				SpecialValue: b.SpecialValue, Start: b.Start, End: b.End, Count: b.Count})
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 type GenericAssayDataBin struct {
@@ -311,7 +312,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 	if len(f.GenericAssayDataBinFilters) > 0 {
 		unit = s.gaCountUnit(f.GenericAssayDataBinFilters[0].ProfileType)
 	}
-	unfiltered, filtered := s.scopedValueCounts(tGenericAssayDataDerived, "entity_stable_id", "value",
+	unfiltered, filtered := s.scopedValueCounts(core.TGenericAssayDataDerived, "entity_stable_id", "value",
 		isNASQL("value"), unit, keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenericAssayDataBin{}
@@ -319,7 +320,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 		bins, err := databin.Calculate(g.StableID+g.ProfileType, unfiltered[keys[i]], filtered[keys[i]],
 			g.binFilterOpts.options(method, true, methods[i]))
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for _, b := range bins {
@@ -327,7 +328,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 				SpecialValue: b.SpecialValue, Start: b.Start, End: b.End, Count: b.Count})
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // customDataBinCountsFetch bins numeric custom-chart data (custom_data
@@ -350,8 +351,8 @@ func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 		SampleID string `json:"sampleId"`
 	}
 	inScope := func(scope studyViewFilter) map[string]bool {
-		args := newArgs()
-		rows, _ := queryA[sample](s.CH,
+		args := core.NewArgs()
+		rows, _ := core.QueryA[sample](s.CH,
 			"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM "+s.filterFrom(args, scope), args)
 		m := map[string]bool{}
 		for _, r := range rows {
@@ -363,7 +364,7 @@ func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []databin.Bin{}
 	for i, a := range f.Attributes {
-		raw, ok := s.sessionData("custom_data", a.AttributeID)
+		raw, ok := s.SessionData("custom_data", a.AttributeID)
 		if !ok {
 			continue
 		}
@@ -390,10 +391,10 @@ func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 		bins, err := databin.Calculate(a.AttributeID, values(unfilteredSamples), values(filteredSamples),
 			a.binFilterOpts.options(method, false, methods[i]))
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		out = append(out, bins...)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }

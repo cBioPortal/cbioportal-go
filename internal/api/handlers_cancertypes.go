@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -61,12 +62,12 @@ func (s *State) cancerType(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("cancerTypeId")
 	rows, err := s.queryCancerTypes(" WHERE type_of_cancer_id = {id:String}", ch.Params{"id": id})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
 		http.Error(w, "cancer type not found: "+id, http.StatusNotFound)
 		return
 	}
-	writeJSON(w, rows[0])
+	core.WriteJSON(w, rows[0])
 }

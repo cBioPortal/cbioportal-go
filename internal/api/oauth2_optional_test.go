@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // keycloakProps are the properties of a login through the fake provider.
@@ -29,14 +31,14 @@ func keycloakProps(p *fakeProvider, method string) map[string]string {
 // handler echoes the request's user; /config_service is the real one.
 func optionalPortal(t *testing.T, props map[string]string) *httptest.Server {
 	t.Helper()
-	s := &State{Props: props, PropsReplaceDefaults: true}
+	s := &State{State: &core.State{Props: props, PropsReplaceDefaults: true}}
 	if err := s.ConfigureAuth(); err != nil {
 		t.Fatalf("ConfigureAuth: %v", err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /config_service", s.configService)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		u, ok := GetUser(r.Context())
+		u, ok := core.GetUser(r.Context())
 		fmt.Fprintf(w, "%s %s user=%s known=%v", r.Method, r.URL.Path, u.Name, ok)
 	})
 	srv := httptest.NewServer(s.login.middleware(mux))
@@ -133,7 +135,7 @@ func TestOptionalOAuth2StudyAuthorization(t *testing.T) {
 	}
 	props = keycloakProps(p, "optional_oauth2")
 	props["dat.method"] = "oauth2"
-	if err := (&State{Props: props, PropsReplaceDefaults: true}).ConfigureAuth(); err == nil {
+	if err := (&State{State: &core.State{Props: props, PropsReplaceDefaults: true}}).ConfigureAuth(); err == nil {
 		t.Error("dat.method=oauth2 accepted with optional_oauth2")
 	}
 }
@@ -235,7 +237,7 @@ func TestBaseURLBehindProxy(t *testing.T) {
 		if tc.tls {
 			r.TLS = &tls.ConnectionState{}
 		}
-		if got := baseURL(r); got != tc.want {
+		if got := core.BaseURL(r); got != tc.want {
 			t.Errorf("baseURL(%s %v) = %q, want %q", tc.host, tc.hdr, got, tc.want)
 		}
 	}

@@ -6,10 +6,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 func TestLegacyAPIDocs(t *testing.T) {
-	s := &State{}
+	s := &State{State: &core.State{}}
 	r := httptest.NewRequest(http.MethodGet, "/api/v2/api-docs", nil)
 	r.Host = "api.example.org"
 	w := httptest.NewRecorder()
@@ -47,7 +49,7 @@ func TestSplitTopLevelValue(t *testing.T) {
 
 func TestOpenAPIDocs(t *testing.T) {
 	mux := http.NewServeMux()
-	routeAPIDocs(mux, &State{})
+	routeAPIDocs(mux, &State{State: &core.State{}})
 	get := func(path string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		r.Host = "go.example.org"

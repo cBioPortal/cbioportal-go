@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -70,54 +71,54 @@ type CancerStudy struct {
 // allSampleCount, the counts, referenceGenome, readPermission, the treatment
 // and structural variant counts, resourceCounts.
 func (c CancerStudy) MarshalJSON() ([]byte, error) {
-	var o jsonObject
+	var o core.JSONObject
 	sum, cnt := c.studySummary, c.studyCounts
-	o.add("studyId", c.StudyID)
+	o.Add("studyId", c.StudyID)
 	if sum != nil {
-		o.add("cancerTypeId", sum.CancerTypeID)
-		o.add("name", sum.Name)
-		o.add("description", sum.Description)
-		o.add("publicStudy", sum.PublicStudy)
-		o.addIf(sum.Pmid != "", "pmid", sum.Pmid)
-		o.addIf(sum.Citation != "", "citation", sum.Citation)
-		o.add("groups", sum.Groups)
-		o.add("status", sum.Status)
-		o.addIf(sum.ImportDate != "", "importDate", sum.ImportDate)
+		o.Add("cancerTypeId", sum.CancerTypeID)
+		o.Add("name", sum.Name)
+		o.Add("description", sum.Description)
+		o.Add("publicStudy", sum.PublicStudy)
+		o.AddIf(sum.Pmid != "", "pmid", sum.Pmid)
+		o.AddIf(sum.Citation != "", "citation", sum.Citation)
+		o.Add("groups", sum.Groups)
+		o.Add("status", sum.Status)
+		o.AddIf(sum.ImportDate != "", "importDate", sum.ImportDate)
 	}
 	if c.legacy {
-		o.addIf(c.CancerType != nil, "cancerType", c.CancerType)
+		o.AddIf(c.CancerType != nil, "cancerType", c.CancerType)
 	}
 	if sum != nil {
-		o.add("allSampleCount", sum.AllSampleCount)
+		o.Add("allSampleCount", sum.AllSampleCount)
 	}
 	if cnt != nil {
-		o.add("sequencedSampleCount", cnt.SequencedSampleCount)
-		o.add("cnaSampleCount", cnt.CnaSampleCount)
-		o.add("mrnaRnaSeqSampleCount", cnt.MrnaRnaSeqSampleCount)
-		o.add("mrnaRnaSeqV2SampleCount", cnt.MrnaRnaSeqV2SampleCount)
-		o.add("mrnaMicroarraySampleCount", cnt.MrnaMicroarraySampleCount)
-		o.add("miRnaSampleCount", cnt.MiRnaSampleCount)
-		o.add("methylationHm27SampleCount", cnt.MethylationHm27SampleCount)
-		o.add("rppaSampleCount", cnt.RppaSampleCount)
-		o.add("massSpectrometrySampleCount", cnt.MassSpectrometrySampleCount)
-		o.add("completeSampleCount", cnt.CompleteSampleCount)
+		o.Add("sequencedSampleCount", cnt.SequencedSampleCount)
+		o.Add("cnaSampleCount", cnt.CnaSampleCount)
+		o.Add("mrnaRnaSeqSampleCount", cnt.MrnaRnaSeqSampleCount)
+		o.Add("mrnaRnaSeqV2SampleCount", cnt.MrnaRnaSeqV2SampleCount)
+		o.Add("mrnaMicroarraySampleCount", cnt.MrnaMicroarraySampleCount)
+		o.Add("miRnaSampleCount", cnt.MiRnaSampleCount)
+		o.Add("methylationHm27SampleCount", cnt.MethylationHm27SampleCount)
+		o.Add("rppaSampleCount", cnt.RppaSampleCount)
+		o.Add("massSpectrometrySampleCount", cnt.MassSpectrometrySampleCount)
+		o.Add("completeSampleCount", cnt.CompleteSampleCount)
 	}
 	if sum != nil {
-		o.add("referenceGenome", sum.ReferenceGenome)
+		o.Add("referenceGenome", sum.ReferenceGenome)
 	}
 	if c.legacy {
-		o.add("readPermission", c.ReadPermission)
+		o.Add("readPermission", c.ReadPermission)
 	}
 	if cnt != nil {
-		o.add("treatmentCount", cnt.TreatmentCount)
-		o.add("structuralVariantCount", cnt.StructuralVariantCount)
+		o.Add("treatmentCount", cnt.TreatmentCount)
+		o.Add("structuralVariantCount", cnt.StructuralVariantCount)
 	}
 	if !c.legacy {
-		o.addIf(c.CancerType != nil, "cancerType", c.CancerType)
-		o.add("readPermission", c.ReadPermission)
+		o.AddIf(c.CancerType != nil, "cancerType", c.CancerType)
+		o.Add("readPermission", c.ReadPermission)
 	}
-	o.addIf(c.ResourceCounts != nil, "resourceCounts", c.ResourceCounts)
-	return o.bytes()
+	o.AddIf(c.ResourceCounts != nil, "resourceCounts", c.ResourceCounts)
+	return o.Bytes()
 }
 
 // studySummary is the SUMMARY block of a study.
@@ -220,25 +221,16 @@ const studySelectTmpl = "SELECT c.study_id AS studyId, c.cancer_type_id AS cance
 // public when the portal cancer_study says so (public_study, built from a
 // production clone), else when its groups include PUBLIC.
 func (s *State) studySelect() string {
-	return strings.NewReplacer("{public}", s.studyPublicSQL("c."), "{status}", s.studyStatusSQL("c.")).Replace(studySelectTmpl)
+	return strings.NewReplacer("{public}", s.StudyPublicSQL("c."), "{status}", s.studyStatusSQL("c.")).Replace(studySelectTmpl)
 }
 
 // studyStatusSQL is the status of a cancer_study row: 1 (AVAILABLE) unless
 // the study is being (re)imported, and for databases built without it.
 func (s *State) studyStatusSQL(alias string) string {
-	if s.modelHasColumn("cancer_study", "status") {
+	if s.ModelHasColumn("cancer_study", "status") {
 		return "toInt64(" + alias + "status)"
 	}
 	return "toInt64(1)"
-}
-
-// studyPublicSQL is the UInt8 public flag of a cancer_study row (alias is
-// the table alias with its dot, or empty).
-func (s *State) studyPublicSQL(alias string) string {
-	if s.modelHasColumn("cancer_study", "public_study") {
-		return "toUInt8(" + alias + "public_study)"
-	}
-	return "toUInt8(position(" + alias + "groups, 'PUBLIC') > 0)"
 }
 
 // studyShape selects the parts of a study a response carries.
@@ -257,7 +249,7 @@ func toCancerStudy(r studyRow, shape studyShape, importDates map[string]string) 
 	out.studySummary = &studySummary{
 		CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description, PublicStudy: r.PublicFlag != 0,
 		Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups, Status: r.Status, ImportDate: importDates[r.StudyID],
-		AllSampleCount: r.AllSampleCount, ReferenceGenome: referenceGenome(r.ReferenceGenome),
+		AllSampleCount: r.AllSampleCount, ReferenceGenome: core.ReferenceGenome(r.ReferenceGenome),
 	}
 	if shape.detailed {
 		counts := r.studyCounts
@@ -296,11 +288,11 @@ func cancerTypeName(name, id string) string {
 func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	where := "1 = 1"
-	args := newArgs()
+	args := core.NewArgs()
 	if kw := strings.TrimSpace(q.Get("keyword")); kw != "" {
 		var ands []string
 		for term := range strings.FieldsSeq(kw) {
-			t := args.str("%" + term + "%")
+			t := args.Str("%" + term + "%")
 			ands = append(ands, fmt.Sprintf("(c.name ILIKE %[1]s OR c.study_id ILIKE %[1]s OR "+
 				"ifNull(t.name, '') ILIKE %[1]s OR c.cancer_type_id ILIKE %[1]s)", t))
 		}
@@ -308,7 +300,7 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	}
 	// Unsorted, the mapper returns the studies in cancer_study's storage
 	// order (cancer_study_id, i.e. import order), which also orders ties.
-	importOrder := s.studyOrder("c.study_id")
+	importOrder := s.StudyOrder("c.study_id")
 	order := importOrder
 	if strings.TrimSpace(q.Get("keyword")) != "" {
 		order = "c.name, " + importOrder
@@ -325,12 +317,12 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 	}
 	projection := projectionParam(r)
 	if projection == "ID" {
-		writeJSON(w, []CancerStudy{})
+		core.WriteJSON(w, []CancerStudy{})
 		return
 	}
-	rows, err := cachedQueryA[studyRow](s, fmt.Sprintf("%s WHERE %s ORDER BY %s", s.studySelect(), where, order), args)
+	rows, err := core.CachedQueryA[studyRow](s.State, fmt.Sprintf("%s WHERE %s ORDER BY %s", s.studySelect(), where, order), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if projection == "META" {
@@ -340,51 +332,51 @@ func (s *State) studies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	shape := studyShape{summary: true, detailed: projection == "DETAILED", columnStore: true}
-	dates := s.studyImportDates()
-	availability := s.studyAvailabilityEnabled()
+	dates := s.StudyImportDates()
+	availability := s.StudyAvailabilityEnabled()
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
 		out[i] = toCancerStudy(r, shape, dates)
 		out[i].ReadPermission = studyReadable(availability, r.Status)
 	}
-	writeJSON(w, s.withResourceCounts(out))
+	core.WriteJSON(w, s.withResourceCounts(out))
 }
 
 // study serves GET /api/studies/{studyId} (ColumnStoreStudyController
 // .getStudy): the DETAILED study with its resource counts.
 func (s *State) study(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("studyId")
-	rows, err := cachedQueryP[studyRow](s, s.studySelect()+" WHERE c.study_id = {study:String}", ch.Params{"study": id})
+	rows, err := core.CachedQueryP[studyRow](s.State, s.studySelect()+" WHERE c.study_id = {study:String}", ch.Params{"study": id})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, msgStudyNotFound(id))
+		core.WriteError(w, http.StatusNotFound, core.MsgStudyNotFound(id))
 		return
 	}
-	st := toCancerStudy(rows[0], studyShape{summary: true, detailed: true, columnStore: true}, s.studyImportDates())
-	writeJSON(w, s.withResourceCounts([]CancerStudy{st})[0])
+	st := toCancerStudy(rows[0], studyShape{summary: true, detailed: true, columnStore: true}, s.StudyImportDates())
+	core.WriteJSON(w, s.withResourceCounts([]CancerStudy{st})[0])
 }
 
 // studiesFetch serves POST /api/studies/fetch (legacy StudyController
 // .fetchStudies) in the ID, SUMMARY or DETAILED projection.
 func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
-	readBody(r, &ids)
+	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
-		writeJSON(w, []CancerStudy{})
+		core.WriteJSON(w, []CancerStudy{})
 		return
 	}
-	rows, err := cachedQueryP[studyRow](s, s.studySelect()+" WHERE c.study_id IN {ids:Array(String)} ORDER BY c.study_id",
+	rows, err := core.CachedQueryP[studyRow](s.State, s.studySelect()+" WHERE c.study_id IN {ids:Array(String)} ORDER BY c.study_id",
 		ch.Params{"ids": ids})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	projection := projectionParam(r)
 	shape := studyShape{summary: projection != "ID", detailed: projection == "DETAILED"}
-	dates := s.studyImportDates()
+	dates := s.StudyImportDates()
 	out := make([]CancerStudy, len(rows))
 	for i, r := range rows {
 		out[i] = toCancerStudy(r, shape, dates)
@@ -392,46 +384,7 @@ func (s *State) studiesFetch(w http.ResponseWriter, r *http.Request) {
 	if shape.summary {
 		out = s.withResourceCounts(out)
 	}
-	writeJSON(w, out)
-}
-
-// studyImportDates maps each study to its import time, formatted as Java's
-// importDate: the portal cancer_study's import_date where the database
-// carries one (built from a production clone), else the time its study row
-// was loaded (the raw cancer_study part it lives in). Studies are absent when
-// the raw database is not reachable.
-func (s *State) studyImportDates() map[string]string {
-	type row struct {
-		StudyID    string `json:"studyId"`
-		ImportDate string `json:"importDate"`
-	}
-	out := map[string]string{}
-	if s.CH == nil {
-		return out
-	}
-	sql := "SELECT c.study_id AS studyId, " +
-		"formatDateTime(max(p.modification_time), '%Y-%m-%d %H:%i:%S') AS importDate " +
-		"FROM (SELECT study_id, _part FROM cbioportal_raw.cancer_study) c " +
-		"JOIN (SELECT name, modification_time FROM system.parts " +
-		"WHERE database = 'cbioportal_raw' AND table = 'cancer_study' AND active) p ON p.name = c._part " +
-		"GROUP BY c.study_id"
-	if s.modelHasColumn("cancer_study", "import_date") {
-		sql = "SELECT study_id AS studyId, formatDateTime(import_date, '%Y-%m-%d %H:%i:%S') AS importDate " +
-			"FROM cancer_study WHERE import_date IS NOT NULL"
-	} else if s.rawHasColumn("cancer_study", "import_time") {
-		// Ingest records the time; system.parts may not be readable (a
-		// ClickHouse Cloud user without that grant).
-		sql = "SELECT study_id AS studyId, formatDateTime(max(import_time), '%Y-%m-%d %H:%i:%S') AS importDate " +
-			"FROM cbioportal_raw.cancer_study WHERE import_time > 0 GROUP BY study_id"
-	}
-	rows, err := cachedQuery[row](s, sql)
-	if err != nil {
-		return out
-	}
-	for _, r := range rows {
-		out[r.StudyID] = r.ImportDate
-	}
-	return out
+	core.WriteJSON(w, out)
 }
 
 // ---------- Samples ----------
@@ -454,65 +407,48 @@ type Sample struct {
 }
 
 func (s *State) samples(w http.ResponseWriter, r *http.Request) {
-	args := newArgs()
-	s.writeSamples(w, r, byStudy(r.PathValue("studyId")), "1", args)
-}
-
-type identifier struct {
-	StudyID  string `json:"studyId"`
-	SampleID string `json:"sampleId"`
-	// patient fetches use patientId; entity fetches use entityId.
-	PatientID string `json:"patientId"`
-	EntityID  string `json:"entityId"`
-}
-
-func (i identifier) id() string {
-	for _, v := range []string{i.SampleID, i.PatientID, i.EntityID} {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
+	args := core.NewArgs()
+	s.writeSamples(w, r, core.ByStudy(r.PathValue("studyId")), "1", args)
 }
 
 func (s *State) samplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
-		SampleIdentifiers []identifier `json:"sampleIdentifiers"`
-		SampleListIDs     []string     `json:"sampleListIds"`
-		UniqueSampleKeys  []string     `json:"uniqueSampleKeys"`
+		SampleIdentifiers []core.Identifier `json:"sampleIdentifiers"`
+		SampleListIDs     []string          `json:"sampleListIds"`
+		UniqueSampleKeys  []string          `json:"uniqueSampleKeys"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	// SampleFilter is EITHER explicit (study,sample) identifiers, OR a set of
 	// sample-list ids (resolved via the sample_list view), OR base64 unique
 	// sample keys. The results view uses the sampleListIds form to expand a case
 	// set into its samples.
 	var where string
-	var sc scope
-	args := newArgs()
+	var sc core.Scope
+	args := core.NewArgs()
 	switch {
 	case len(f.SampleIdentifiers) > 0:
 		pairs := make([][2]string, len(f.SampleIdentifiers))
 		for i, id := range f.SampleIdentifiers {
-			pairs[i] = [2]string{id.StudyID, id.id()}
+			pairs[i] = [2]string{id.StudyID, id.ID()}
 		}
-		sc, where = byStudies(pairStudies(pairs)), "(s.study_id, s.sample_id) IN "+args.pairs(pairs)
+		sc, where = core.ByStudies(core.PairStudies(pairs)), "(s.study_id, s.sample_id) IN "+args.Pairs(pairs)
 	case len(f.UniqueSampleKeys) > 0:
 		var pairs [][2]string
 		for _, k := range f.UniqueSampleKeys {
-			if st, sid, ok := decodeUniqueKey(k); ok {
+			if st, sid, ok := core.DecodeUniqueKey(k); ok {
 				pairs = append(pairs, [2]string{st, sid})
 			}
 		}
 		if len(pairs) == 0 {
-			writeJSON(w, []Sample{})
+			core.WriteJSON(w, []Sample{})
 			return
 		}
-		sc, where = byStudies(pairStudies(pairs)), "(s.study_id, s.sample_id) IN "+args.pairs(pairs)
+		sc, where = core.ByStudies(core.PairStudies(pairs)), "(s.study_id, s.sample_id) IN "+args.Pairs(pairs)
 	case len(f.SampleListIDs) > 0:
-		sc = s.bySampleLists(f.SampleListIDs...)
-		where = "(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM " + sc.from(args, tSampleList) + ")"
+		sc = s.BySampleLists(f.SampleListIDs...)
+		where = "(s.study_id, s.sample_id) IN (SELECT study_id, sample_id FROM " + sc.From(args, core.TSampleList) + ")"
 	default:
-		writeJSON(w, []Sample{})
+		core.WriteJSON(w, []Sample{})
 		return
 	}
 	s.writeSamples(w, r, sc, where, args)
@@ -532,7 +468,7 @@ type Patient struct {
 // them: by stable id for the ID projection, else unsorted, i.e. in the patient
 // table's internal id order where the database carries it.
 func (s *State) patientOrder(r *http.Request) string {
-	if projectionOf(r) != "ID" && s.importOrdered() {
+	if core.ProjectionOf(r) != "ID" && s.ImportOrdered() {
 		return "internal_id"
 	}
 	return "patient_id, study_id"
@@ -543,30 +479,30 @@ var patientSortable = map[string]string{"patientId": "patient_id"}
 
 func (s *State) patients(w http.ResponseWriter, r *http.Request) {
 	p := ch.Params{}
-	s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+byStudy(r.PathValue("studyId")).from(paramsBinder(p), tPatient)+
-		sqlPageOrder(r, patientSortable, s.patientOrder(r)), p)
+	s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+core.ByStudy(r.PathValue("studyId")).From(core.ParamsBinder(p), core.TPatient)+
+		core.SQLPageOrder(r, patientSortable, s.patientOrder(r)), p)
 }
 
 // writePatientRows streams the patients sql selects, or counts them for
 // projection=META.
 func (s *State) writePatientRows(w http.ResponseWriter, r *http.Request, sql string, p ch.Params) {
-	if projectionOf(r) == "META" {
-		writeMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", p)
+	if core.ProjectionOf(r) == "META" {
+		core.WriteMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", p)
 		return
 	}
-	out := newJSONArray(w, r)
+	out := core.NewJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, p, func(r *idRow) error {
-		return out.add(Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID)})
+		return out.Add(Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID)})
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
-		PatientIdentifiers []identifier `json:"patientIdentifiers"`
-		UniquePatientKeys  []string     `json:"uniquePatientKeys"`
+		PatientIdentifiers []core.Identifier `json:"patientIdentifiers"`
+		UniquePatientKeys  []string          `json:"uniquePatientKeys"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	// PatientFilter is EITHER explicit (studyId, patientId) identifiers OR a list
 	// of base64 unique patient keys. The results view (coverage / plots) uses the
 	// uniquePatientKeys form.
@@ -575,34 +511,34 @@ func (s *State) patientsFetch(w http.ResponseWriter, r *http.Request) {
 	case len(f.PatientIdentifiers) > 0:
 		pairs = make([][2]string, len(f.PatientIdentifiers))
 		for i, id := range f.PatientIdentifiers {
-			pairs[i] = [2]string{id.StudyID, id.id()}
+			pairs[i] = [2]string{id.StudyID, id.ID()}
 		}
 	case len(f.UniquePatientKeys) > 0:
 		for _, k := range f.UniquePatientKeys {
-			if st, pid, ok := decodeUniqueKey(k); ok {
+			if st, pid, ok := core.DecodeUniqueKey(k); ok {
 				pairs = append(pairs, [2]string{st, pid})
 			}
 		}
 	}
 	if len(pairs) == 0 {
-		writeJSON(w, []Patient{})
+		core.WriteJSON(w, []Patient{})
 		return
 	}
 	p := ch.Params{"ids": pairs}
 	rows, err := ch.QueryP[idRow](s.CH,
-		"SELECT study_id AS studyId, patient_id AS patientId FROM "+byStudies(pairStudies(pairs)).from(paramsBinder(p), tPatient)+
-			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))}"+sqlListOrder(r, patientSortable, s.patientOrder(r)), p)
+		"SELECT study_id AS studyId, patient_id AS patientId FROM "+core.ByStudies(core.PairStudies(pairs)).From(core.ParamsBinder(p), core.TPatient)+
+			" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))}"+core.SQLListOrder(r, patientSortable, s.patientOrder(r)), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, toPatients(rows))
+	core.WriteJSON(w, toPatients(rows))
 }
 
 func toPatients(rows []idRow) []Patient {
 	out := make([]Patient, len(rows))
 	for i, r := range rows {
-		out[i] = Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: uniqueKey(r.StudyID, r.PatientID)}
+		out[i] = Patient{PatientID: r.PatientID, StudyID: r.StudyID, UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID)}
 	}
 	return out
 }
@@ -620,19 +556,10 @@ type CancerType struct {
 func (s *State) cancerTypes(w http.ResponseWriter, r *http.Request) {
 	out, err := s.queryCancerTypes("", nil)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, out)
-}
-
-// referenceGenome defaults to hg19, the importer's default for studies whose
-// meta file names none.
-func referenceGenome(g string) string {
-	if g == "" {
-		return "hg19"
-	}
-	return g
+	core.WriteJSON(w, out)
 }
 
 // withResourceCounts attaches each study's resource counts (resources shown in
@@ -646,14 +573,14 @@ func (s *State) withResourceCounts(studies []CancerStudy) []CancerStudy {
 		ids[i] = st.StudyID
 	}
 	p := ch.Params{"ids": ids}
-	rows, err := cachedQueryP[ResourceCount](s,
+	rows, err := core.CachedQueryP[ResourceCount](s.State,
 		"SELECT rd.resource_id AS resourceId, any(rd.display_name) AS displayName, any(rd.description) AS description, "+
 			"any(rd.resource_type) AS resourceType, toString(any(rd.priority)) AS priority, toBool(any(rd.open_by_default) = 1) AS openByDefault, "+
 			"rd.study_id AS cancerStudyIdentifier, ifNull(any(rd.custom_metadata), '') AS customMetaData, "+
 			"toInt64(uniqExact(x.sample_id)) AS sampleCount, toInt64(uniqExact(x.patient_id)) AS patientCount FROM ("+
 			"SELECT study_id, resource_id, sample_id, patient_id FROM resource_sample "+
 			"UNION ALL SELECT r.study_id, r.resource_id, s.sample_id, r.patient_id FROM resource_patient r "+
-			"LEFT JOIN "+byStudies(ids).samples(paramsBinder(p))+" s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+
+			"LEFT JOIN "+core.ByStudies(ids).Samples(core.ParamsBinder(p))+" s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+
 			"JOIN resource_definition rd ON rd.study_id = x.study_id AND rd.resource_id = x.resource_id "+
 			"WHERE x.study_id IN {ids:Array(String)} GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId", p)
 	if err != nil {

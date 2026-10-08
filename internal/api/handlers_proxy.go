@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // The frontend reaches OncoKB through an obfuscated proxy: the path, query
@@ -56,7 +58,7 @@ func decodeB64Bytes(src []byte) []byte {
 
 func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Proxy-User-Agreement") != oncokbUserAgreement {
-		readBody(r, nil)
+		core.ReadBody(r, nil)
 		http.Error(w, "Fair Usage Agreement is missing", http.StatusBadRequest)
 		return
 	}
@@ -74,7 +76,7 @@ func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := oncokbExchange(r, path, query.Encode(), body, os.Getenv("ONCOKB_TOKEN"))
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	defer resp.Body.Close()
@@ -88,7 +90,7 @@ func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte{'"'})
 	enc := base64.NewEncoder(base64.StdEncoding, w)
 	if _, err := io.Copy(enc, resp.Body); err != nil {
-		logServerError(r, "proxied response aborted", err)
+		core.LogServerError(r, "proxied response aborted", err)
 		panic(http.ErrAbortHandler)
 	}
 	enc.Close()
@@ -104,14 +106,14 @@ func (s *State) oncokbDevProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := oncokbExchange(r, strings.TrimPrefix(r.URL.Path, "/proxy/dev/oncokb"), r.URL.RawQuery, body, token)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	if _, err := io.Copy(w, resp.Body); err != nil {
-		logServerError(r, "proxied response aborted", err)
+		core.LogServerError(r, "proxied response aborted", err)
 		panic(http.ErrAbortHandler)
 	}
 }

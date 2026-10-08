@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
@@ -37,31 +38,31 @@ type clinicalEventRequestIdentifier struct {
 }
 
 // patientIdentifierPairs turns PatientIdentifiers into (studyId, patientId) pairs.
-func patientIdentifierPairs(ids []identifier) [][2]string {
+func patientIdentifierPairs(ids []core.Identifier) [][2]string {
 	pairs := make([][2]string, 0, len(ids))
 	for _, id := range ids {
-		pairs = append(pairs, [2]string{id.StudyID, id.id()})
+		pairs = append(pairs, [2]string{id.StudyID, id.ID()})
 	}
 	return pairs
 }
 
 // patientEvents is the clinical_event_data_derived rows of the given
 // patients, as a FROM source.
-func patientEvents(a *sqlArgs, pairs [][2]string) string {
+func patientEvents(a *core.SQLArgs, pairs [][2]string) string {
 	keys := make([]string, len(pairs))
 	for i, p := range pairs {
 		keys[i] = p[0] + "_" + p[1]
 	}
-	return byStudies(pairStudies(pairs)).from(a, tClinicalEventDataDerived) + " AND patient_unique_id IN " + a.strs(keys)
+	return core.ByStudies(core.PairStudies(pairs)).From(a, core.TClinicalEventDataDerived) + " AND patient_unique_id IN " + a.Strs(keys)
 }
 
 // eventRequestsSQL renders event requests as an OR over event type (and, with
 // attributes, the event_type_key[_value] combinations); "" selects every event.
-func eventRequestsSQL(a *sqlArgs, reqs []clinicalEventRequest, withValue bool) string {
+func eventRequestsSQL(a *core.SQLArgs, reqs []clinicalEventRequest, withValue bool) string {
 	var ors []string
 	for _, q := range reqs {
 		if len(q.Attributes) == 0 {
-			ors = append(ors, "event_type = "+a.str(q.EventType))
+			ors = append(ors, "event_type = "+a.Str(q.EventType))
 			continue
 		}
 		combos := make([]string, len(q.Attributes))
@@ -75,7 +76,7 @@ func eventRequestsSQL(a *sqlArgs, reqs []clinicalEventRequest, withValue bool) s
 		if withValue {
 			expr = "concat(event_type, '_', key, '_', value)"
 		}
-		ors = append(ors, fmt.Sprintf("%s IN %s", expr, a.strs(combos)))
+		ors = append(ors, fmt.Sprintf("%s IN %s", expr, a.Strs(combos)))
 	}
 	if len(ors) == 0 {
 		return ""
@@ -110,7 +111,7 @@ func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs 
 	if len(pairs) == 0 {
 		return starts, ends, censors, nil, nil
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	cond := func(reqs []clinicalEventRequest) string {
 		if c := eventRequestsSQL(args, reqs, true); c != "" {
 			return strings.TrimPrefix(c, " AND ")
@@ -135,7 +136,7 @@ func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs 
 		CensorStop  int64  `json:"censorStop"`
 	}
 	sc, ec, cc := cond(startReqs), cond(endReqs), cond(censorReqs)
-	rows, err := queryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT cancer_study_identifier AS studyId, substring(patient_unique_id, length(cancer_study_identifier) + 2) AS patientId, "+
 			"%s, %s, %s FROM %s AND ((%s) OR (%s) OR (%s)) "+
 			"GROUP BY cancer_study_identifier, patient_unique_id HAVING startN > 0 ORDER BY studyId, patientId",
@@ -175,15 +176,15 @@ func javaDouble(v float64) string {
 func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AttributeIDPrefix              string                          `json:"attributeIdPrefix"`
-		PatientIdentifiers             []identifier                    `json:"patientIdentifiers"`
+		PatientIdentifiers             []core.Identifier               `json:"patientIdentifiers"`
 		StartEventRequestIdentifier    *clinicalEventRequestIdentifier `json:"startEventRequestIdentifier"`
 		EndEventRequestIdentifier      *clinicalEventRequestIdentifier `json:"endEventRequestIdentifier"`
 		CensoredEventRequestIdentifier *clinicalEventRequestIdentifier `json:"censoredEventRequestIdentifier"`
 	}
-	readBody(r, &req)
+	core.ReadBody(r, &req)
 	out := []ClinicalData{}
 	if req.AttributeIDPrefix == "" || len(req.PatientIdentifiers) == 0 || req.StartEventRequestIdentifier == nil {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	start := req.StartEventRequestIdentifier
@@ -198,7 +199,7 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 	starts, ends, censors, order, err := s.survivalSpans(patientIdentifierPairs(req.PatientIdentifiers),
 		start.ClinicalEventRequests, end.ClinicalEventRequests, censored.ClinicalEventRequests)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	var kept []string
@@ -227,11 +228,11 @@ func (s *State) survivalDataFetch(w http.ResponseWriter, r *http.Request) {
 		} {
 			out = append(out, ClinicalData{
 				ClinicalAttributeID: d[0], Value: d[1], PatientID: ev.PatientID, StudyID: ev.StudyID,
-				UniquePatientKey: uniqueKey(ev.StudyID, ev.PatientID), PatientAttribute: true,
+				UniquePatientKey: core.UniqueKey(ev.StudyID, ev.PatientID), PatientAttribute: true,
 			})
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- Clinical events (timeline) ----------
@@ -287,7 +288,7 @@ func (row timelineRow) toEvent() ClinicalEvent {
 		StartNumberOfDaysSinceDiagnosis: row.StartDate,
 		EndNumberOfDaysSinceDiagnosis:   row.StopDate,
 		Attributes:                      attrs,
-		UniquePatientKey:                uniqueKey(row.StudyID, row.PatientID),
+		UniquePatientKey:                core.UniqueKey(row.StudyID, row.PatientID),
 	}
 }
 
@@ -303,7 +304,7 @@ func (row timelineRow) toEvent() ClinicalEvent {
 // timeline carries it (production's, or the importer's numbering: timeline
 // files in import order, rows in file order), else empty.
 func (s *State) timelineSelect() (sql, order string) {
-	cols := s.rawColumns("timeline")
+	cols := s.RawColumns("timeline")
 	if slices.Contains(cols, "event_attributes") {
 		if slices.Contains(cols, "clinical_event_id") {
 			order = "clinical_event_id"
@@ -312,17 +313,17 @@ func (s *State) timelineSelect() (sql, order string) {
 			"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " +
 			"event_attributes AS attrs FROM cbioportal_raw.timeline", order
 	}
-	from := s.rawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
+	from := s.RawSource("timeline", "study_id", "patient_id", "event_type", "start_date", "stop_date")
 	joinable := from == "cbioportal_raw.timeline" && slices.Contains(cols, "source_file")
-	headers := joinable && slices.Contains(s.rawColumns("source_header"), "header")
+	headers := joinable && slices.Contains(s.RawColumns("source_header"), "header")
 	var kv []string
 	for i, c := range cols {
 		if transform.TimelineCoreColumns[c] || transform.OrderColumns[c] {
 			continue
 		}
-		key, pos := fmt.Sprintf("'%s'", sqlLit(strings.ToUpper(c))), fmt.Sprintf("toUInt32(%d)", i)
+		key, pos := fmt.Sprintf("'%s'", core.SQLLit(strings.ToUpper(c))), fmt.Sprintf("toUInt32(%d)", i)
 		if headers {
-			lit := fmt.Sprintf("'%s'", sqlLit(c))
+			lit := fmt.Sprintf("'%s'", core.SQLLit(c))
 			key = fmt.Sprintf("if(mapContains(h_header, %[1]s), h_header[%[1]s], %[2]s)", lit, key)
 			pos = fmt.Sprintf("if(mapContains(h_position, %[1]s), h_position[%[1]s], %[2]s)", lit, pos)
 		}
@@ -340,10 +341,10 @@ func (s *State) timelineSelect() (sql, order string) {
 			"FROM cbioportal_raw.source_header WHERE table_name = 'timeline' GROUP BY study_id, source_file) h " +
 			"ON h.h_study = timeline.study_id AND h.h_file = timeline.source_file"
 	}
-	if joinable && len(s.rawColumns("import_order")) > 0 {
+	if joinable && len(s.RawColumns("import_order")) > 0 {
 		from += " LEFT JOIN (SELECT study_id AS o_study, name AS o_file, seq AS o_seq FROM cbioportal_raw.import_order " +
 			"WHERE kind = 'data') o ON o.o_study = timeline.study_id AND o.o_file = timeline.source_file"
-		order = "o_seq, " + s.rawFileOrder("timeline", "timeline.")
+		order = "o_seq, " + s.RawFileOrder("timeline", "timeline.")
 	}
 	return "SELECT study_id AS studyId, patient_id AS patientId, event_type AS eventType, " +
 		"toInt64OrNull(start_date) AS startDate, toInt64OrNull(stop_date) AS stopDate, " + attrs +
@@ -380,13 +381,13 @@ type ClinicalEventMeta struct {
 // clinicalEventRequests types / attribute keys), its distinct attributes.
 func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		PatientIdentifiers    []identifier           `json:"patientIdentifiers"`
+		PatientIdentifiers    []core.Identifier      `json:"patientIdentifiers"`
 		ClinicalEventRequests []clinicalEventRequest `json:"clinicalEventRequests"`
 	}
-	readBody(r, &req)
+	core.ReadBody(r, &req)
 	out := []ClinicalEventMeta{}
 	if len(req.PatientIdentifiers) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	type metaRow struct {
@@ -394,13 +395,13 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 		Key       string `json:"attrKey"`
 		Value     string `json:"attrValue"`
 	}
-	args := newArgs()
-	rows, err := queryA[metaRow](s.CH, fmt.Sprintf(
+	args := core.NewArgs()
+	rows, err := core.QueryA[metaRow](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT lower(event_type) AS eventType, lower(key) AS attrKey, lower(value) AS attrValue "+
 			"FROM %s%s ORDER BY eventType, attrKey, attrValue",
 		patientEvents(args, patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(args, req.ClinicalEventRequests, false)), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	for _, row := range rows {
@@ -410,7 +411,7 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 		m := &out[len(out)-1]
 		m.Attributes = append(m.Attributes, ClinicalEventData{Key: row.Key, Value: row.Value})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // studyClinicalEvents serves GET /api/studies/{studyId}/clinical-events. Returns
@@ -441,29 +442,29 @@ func (s *State) writeClinicalEvents(w http.ResponseWriter, r *http.Request, wher
 	if def == "" {
 		def = "patientId, startDate, eventType"
 	}
-	if projectionOf(r) == "META" {
-		writeMetaCount(w, r, s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s WHERE %s)", sel, where), p)
+	if core.ProjectionOf(r) == "META" {
+		core.WriteMetaCount(w, r, s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s WHERE %s)", sel, where), p)
 		return
 	}
 	// Without clinical_event_id the order leaves ties.
-	query := sqlStablePageQuery(r, clinicalEventSortable, fmt.Sprintf("%s WHERE %s", sel, where), def)
+	query := core.SQLStablePageQuery(r, clinicalEventSortable, fmt.Sprintf("%s WHERE %s", sel, where), def)
 	// ImportTimelineData collects a staged event's attributes in a HashMap,
 	// so they are stored (and read back) in its iteration order; events of a
 	// production clone carry their stored order.
-	staged := !slices.Contains(s.rawColumns("timeline"), "event_attributes")
-	idOnly := projectionOf(r) == "ID"
-	out := newJSONArray(w, r)
+	staged := !slices.Contains(s.RawColumns("timeline"), "event_attributes")
+	idOnly := core.ProjectionOf(r) == "ID"
+	out := core.NewJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, query, p, func(row *timelineRow) error {
 		if idOnly {
-			return out.add(clinicalEventID{StudyID: row.StudyID, PatientID: row.PatientID,
-				UniquePatientKey: uniqueKey(row.StudyID, row.PatientID), EventType: row.EventType})
+			return out.Add(clinicalEventID{StudyID: row.StudyID, PatientID: row.PatientID,
+				UniquePatientKey: core.UniqueKey(row.StudyID, row.PatientID), EventType: row.EventType})
 		}
 		if staged {
 			row.Attrs = javaHashMapAttrs(timelineEventData(row.Attrs))
 		}
-		return out.add(row.toEvent())
+		return out.Add(row.toEvent())
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 // javaHashMapAttrs orders (key, value) attributes as a java.util.HashMap
@@ -476,7 +477,7 @@ func javaHashMapAttrs(attrs [][2]string) [][2]string {
 		value[kv[0]] = kv[1]
 	}
 	out := make([][2]string, 0, len(attrs))
-	for _, k := range javaHashMapOrder(keys) {
+	for _, k := range core.JavaHashMapOrder(keys) {
 		out = append(out, [2]string{k, value[k]})
 	}
 	return out

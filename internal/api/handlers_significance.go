@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -72,7 +73,7 @@ func (s *State) writeTotalCount(w http.ResponseWriter, r *http.Request, sql stri
 		N uint64 `json:"n"`
 	}](s.CH, sql, p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	var n uint64
@@ -115,7 +116,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 		"SELECT gistic_roi_id, chromosome, cytoband, wide_peak_start, wide_peak_end, q_value, q_value_text, amp FROM gistic WHERE "+where+
 			pagingClause(r, gisticSort, "amp DESC, chromosome ASC, wide_peak_start ASC, gistic_roi_id ASC"), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	genes := map[uint64][]GisticToGene{}
@@ -130,7 +131,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 			"SELECT gistic_roi_id, entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol FROM gistic_to_gene WHERE "+
 				where+" ORDER BY gistic_roi_id, entrez_gene_id", p)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for _, g := range rows {
@@ -150,7 +151,7 @@ func (s *State) significantCopyNumberRegions(w http.ResponseWriter, r *http.Requ
 			}
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 var mutSigSort = map[string]string{
@@ -181,7 +182,7 @@ func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request
 			"p_value_text AS pValueText, q_value_text AS qValueText FROM mutsig WHERE "+where+
 			pagingClause(r, mutSigSort, "entrez_gene_id ASC"), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]MutSig, len(rows))
@@ -190,5 +191,5 @@ func (s *State) significantlyMutatedGenes(w http.ResponseWriter, r *http.Request
 		out[i].PValue = importerFloat(row.PValueText, row.PValue)
 		out[i].QValue = importerFloat(row.QValueText, row.QValue)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }

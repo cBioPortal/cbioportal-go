@@ -3,8 +3,9 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // filteredSample is a sample as ColumnarStoreStudyViewController's
@@ -26,24 +27,24 @@ var filteredSampleSortable = map[string]string{"sampleId": "sampleId", "patientI
 // accepted and ignored, as in Java). A page is read in SQL.
 func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
-	readBody(r, &f)
-	args := newArgs()
-	rows, err := queryA[idRow](s.CH, fmt.Sprintf(
+	core.ReadBody(r, &f)
+	args := core.NewArgs()
+	rows, err := core.QueryA[idRow](s.CH, fmt.Sprintf(
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM %s "+
 			"AND concat(study_id, '_', sample_id) IN (%s)%s",
-		f.scope().from(args, tSample), s.filterSQL(args, f), sqlListOrder(r, filteredSampleSortable, "sample_id, study_id")), args)
+		f.scope().From(args, core.TSample), s.filterSQL(args, f), core.SQLListOrder(r, filteredSampleSortable, "sample_id, study_id")), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]filteredSample, len(rows))
 	for i, r := range rows {
 		out[i] = filteredSample{
 			SampleID: r.SampleID, PatientID: r.PatientID, StudyID: r.StudyID,
-			UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID), UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
+			UniqueSampleKey: core.UniqueKey(r.StudyID, r.SampleID), UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID),
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- Clinical data counts ----------
@@ -64,7 +65,7 @@ func (s *State) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		} `json:"attributes"`
 		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	svf := f.StudyViewFilter
 	if len(f.Attributes) == 1 {
 		svf = svf.withoutClinical(f.Attributes[0].AttributeID)
@@ -73,7 +74,7 @@ func (s *State) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	for i, a := range f.Attributes {
 		ids[i] = a.AttributeID
 	}
-	writeJSON(w, s.clinicalDataCountsWithMissing(svf, ids))
+	core.WriteJSON(w, s.clinicalDataCountsWithMissing(svf, ids))
 }
 
 // clinicalDataCountsWithMissing is GetClinicalDataCountsUseCase: the counts of
@@ -104,11 +105,11 @@ func (s *State) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 		AttrID  string `json:"attrId"`
 		Patient uint8  `json:"patient"`
 	}
-	args := newArgs()
-	defs, err := queryA[defRow](s.CH, fmt.Sprintf(
+	args := core.NewArgs()
+	defs, err := core.QueryA[defRow](s.CH, fmt.Sprintf(
 		"SELECT clinical_attribute_id AS attrId, toUInt8(patient_attribute = 1) AS patient FROM clinical_attribute_meta "+
 			"WHERE study_id IN %s AND clinical_attribute_id IN %s ORDER BY clinical_attribute_id, study_id",
-		args.strs(studies), args.strs(attrIDs)), args)
+		args.Strs(studies), args.Strs(attrIDs)), args)
 	if err != nil {
 		return out
 	}
@@ -116,7 +117,7 @@ func (s *State) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 		Samples  uint64 `json:"samples"`
 		Patients uint64 `json:"patients"`
 	}
-	n, _ := queryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM "+s.filterFrom(args, f), args)
+	n, _ := core.QueryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM "+s.filterFrom(args, f), args)
 	var total c
 	if len(n) > 0 {
 		total = n[0]
@@ -149,11 +150,11 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		Patient uint8  `json:"patient"`
 		Sample  uint8  `json:"sample"`
 	}
-	args := newArgs()
-	levels, _ := queryA[levelRow](s.CH, fmt.Sprintf(
+	args := core.NewArgs()
+	levels, _ := core.QueryA[levelRow](s.CH, fmt.Sprintf(
 		"SELECT clinical_attribute_id AS attrId, max(patient_attribute = 1) AS patient, max(patient_attribute = 0) AS sample "+
 			"FROM clinical_attribute_meta WHERE study_id IN %s AND clinical_attribute_id IN %s GROUP BY clinical_attribute_id",
-		args.strs(studies), args.strs(attrIDs)), args)
+		args.Strs(studies), args.Strs(attrIDs)), args)
 	var sampleAttrs, patientAttrs, conflicting []string
 	isPatient := map[string]bool{}
 	for _, l := range levels {
@@ -170,7 +171,7 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 	filtered := s.filterSQL(args, f)
 	notNA := "NOT " + isNASQL("attribute_value")
 	sc := f.scope()
-	clinical, samples := sc.from(args, tClinicalDataDerived), sc.from(args, tSampleDerived)
+	clinical, samples := sc.From(args, core.TClinicalDataDerived), sc.From(args, core.TSampleDerived)
 	type countRow struct {
 		AttrID string `json:"attrId"`
 		Value  string `json:"value"`
@@ -181,14 +182,14 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		queries = append(queries, fmt.Sprintf(
 			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM %s "+
 				"AND type = 'sample' AND %s AND sample_unique_id IN (%s) AND attribute_name IN %s GROUP BY attribute_name, attribute_value",
-			clinical, notNA, filtered, args.strs(sampleAttrs)))
+			clinical, notNA, filtered, args.Strs(sampleAttrs)))
 	}
 	if len(patientAttrs) > 0 {
 		queries = append(queries, fmt.Sprintf(
 			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM %[1]s "+
 				"AND type = 'patient' AND %[2]s AND patient_unique_id IN (SELECT patient_unique_id FROM %[5]s AND sample_unique_id IN (%[3]s)) "+
 				"AND attribute_name IN %[4]s GROUP BY attribute_name, attribute_value",
-			clinical, notNA, filtered, args.strs(patientAttrs), samples))
+			clinical, notNA, filtered, args.Strs(patientAttrs), samples))
 	}
 	if len(conflicting) > 0 {
 		queries = append(queries, fmt.Sprintf(
@@ -199,12 +200,12 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 				"JOIN %[6]s sd ON cdd.patient_unique_id = sd.patient_unique_id "+
 				"WHERE cdd.type = 'patient' AND %[1]s AND sd.sample_unique_id IN (%[2]s) AND cdd.attribute_name IN %[3]s"+
 				") GROUP BY attribute_name, attribute_value",
-			notNA, filtered, args.strs(conflicting), clinical, sc.rows(args, tClinicalDataDerived), sc.rows(args, tSampleDerived)))
+			notNA, filtered, args.Strs(conflicting), clinical, sc.Rows(args, core.TClinicalDataDerived), sc.Rows(args, core.TSampleDerived)))
 	}
 	counts := map[string]map[string]*ClinicalDataCount{}
 	sums := map[string]uint64{}
 	for _, q := range queries {
-		rows, err := queryA[countRow](s.CH, q, args)
+		rows, err := core.QueryA[countRow](s.CH, q, args)
 		if err != nil {
 			continue
 		}
@@ -232,7 +233,7 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		type c struct {
 			N uint64 `json:"n"`
 		}
-		rows, _ := queryA[c](s.CH, fmt.Sprintf(
+		rows, _ := core.QueryA[c](s.CH, fmt.Sprintf(
 			"SELECT uniqExact(patient_unique_id) AS n FROM %s AND sample_unique_id IN (%s)", samples, filtered), args)
 		if len(rows) > 0 {
 			nPatients = rows[0].N
@@ -247,7 +248,7 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		// value (NA included); the frontend keeps this order for equal counts.
 		byValue := map[string]ClinicalDataCount{}
 		var values []string
-		for _, k := range javaHashMapOrder(sortedKeys(counts[l.AttrID])) {
+		for _, k := range core.JavaHashMapOrder(core.SortedKeys(counts[l.AttrID])) {
 			c := *counts[l.AttrID][k]
 			byValue[c.Value] = c
 			values = append(values, c.Value)
@@ -257,21 +258,11 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 			values = append(values, "NA")
 		}
 		item := ClinicalDataCountItem{AttributeID: l.AttrID, Counts: []ClinicalDataCount{}}
-		for _, v := range javaHashMapOrder(values) {
+		for _, v := range core.JavaHashMapOrder(values) {
 			item.Counts = append(item.Counts, byValue[v])
 		}
 		out = append(out, item)
 	}
-	return out
-}
-
-// sortedKeys returns the map's keys in order.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
 	return out
 }
 

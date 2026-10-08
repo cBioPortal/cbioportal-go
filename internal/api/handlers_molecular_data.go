@@ -6,56 +6,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
-
-// alterationTypeTable maps a molecular alteration type to its unpivoted matrix
-// staging table (long form: study_id, profile_stable_id, hugo_symbol,
-// entrez_gene_id, sample_id, value).
-func alterationTypeTable(at string) string {
-	switch strings.ToUpper(at) {
-	case "COPY_NUMBER_ALTERATION":
-		return "cna_matrix"
-	case "MRNA_EXPRESSION":
-		return "mrna_expression_matrix"
-	case "METHYLATION":
-		return "methylation_matrix"
-	case "PROTEIN_LEVEL":
-		return "protein_level_matrix"
-	case "GENESET_SCORE":
-		return "geneset_score_matrix"
-	case "GENERIC_ASSAY":
-		return "generic_assay_matrix"
-	}
-	return ""
-}
-
-type profileMeta struct {
-	StudyID        string `json:"studyId"`
-	AlterationType string `json:"alterationType"`
-	Datatype       string `json:"datatype"`
-	StableID       string `json:"stableId"`
-}
-
-func (s *State) profileMeta(mpid string) (profileMeta, bool) {
-	rows, _ := cachedQueryP[profileMeta](s,
-		"SELECT study_id AS studyId, molecular_alteration_type AS alterationType, datatype, profile_stable_id AS stableId "+
-			"FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1", ch.Params{"profile": mpid})
-	if len(rows) == 0 {
-		return profileMeta{}, false
-	}
-	return rows[0], true
-}
-
-// dataTable resolves the staging table holding a profile's per-cell data,
-// accounting for the DISCRETE_LONG copy-number layout.
-func (m profileMeta) dataTable() string {
-	if strings.EqualFold(m.AlterationType, "COPY_NUMBER_ALTERATION") &&
-		strings.EqualFold(m.Datatype, "DISCRETE_LONG") {
-		return "cna_discrete_long"
-	}
-	return alterationTypeTable(m.AlterationType)
-}
 
 type molecularDataRow struct {
 	SampleID       string `json:"sampleId"`
@@ -109,7 +62,7 @@ func numericMolecularData(data []MolecularData, projection string) []NumericGene
 // numericRecord is one record of numericMolecularData; ok is false for a
 // value that is not a number.
 func numericRecord(d MolecularData, projection string) (NumericGeneMolecularData, bool) {
-	v, ok := javaDecimal(d.Value)
+	v, ok := core.JavaDecimal(d.Value)
 	if !ok {
 		return NumericGeneMolecularData{}, false
 	}
@@ -133,9 +86,9 @@ type molecularDataFilter struct {
 
 func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f molecularDataFilter
-	readBody(r, &f)
-	if noSamples(f.SampleIDs, f.SampleListID) {
-		writeJSON(w, []NumericGeneMolecularData{})
+	core.ReadBody(r, &f)
+	if core.NoSamples(f.SampleIDs, f.SampleListID) {
+		core.WriteJSON(w, []NumericGeneMolecularData{})
 		return
 	}
 	s.streamMolecularData(w, r, r.PathValue("id"), f)
@@ -144,8 +97,8 @@ func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 // molecularDataGet serves GET /api/molecular-profiles/{id}/molecular-data
 // (sampleListId and entrezGeneId query parameters).
 func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
-	if blankSampleList(r.URL.Query()) {
-		writeJSON(w, []NumericGeneMolecularData{})
+	if core.BlankSampleList(r.URL.Query()) {
+		core.WriteJSON(w, []NumericGeneMolecularData{})
 		return
 	}
 	f := molecularDataFilter{SampleListID: r.URL.Query().Get("sampleListId"), EntrezGeneIDs: singleEntrezGeneID(r.URL.Query())}
@@ -165,25 +118,25 @@ var molecularDataSortable = map[string]string{
 // streamMolecularData writes a profile's numeric records as they are read:
 // a whole profile can be millions of records.
 func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid string, f molecularDataFilter) {
-	projection := projectionOf(r)
+	projection := core.ProjectionOf(r)
 	if projection == "META" {
-		args := newArgs()
+		args := core.NewArgs()
 		sel, _, ok := s.molecularDataSelect(args, mpid, f, "")
 		if !ok {
 			sel = "SELECT '' AS value WHERE 0"
 		}
-		sql := "SELECT count() AS n FROM (" + sel + ") WHERE " + javaNumericSQL("value")
-		writeMetaCount(w, r, s.CH, sql, args.params(sql))
+		sql := "SELECT count() AS n FROM (" + sel + ") WHERE " + core.JavaNumericSQL("value")
+		core.WriteMetaCount(w, r, s.CH, sql, args.Params(sql))
 		return
 	}
-	out := newJSONArray(w, r)
-	err := s.molecularDataPage(r, mpid, f, molecularDataSortable, javaNumericSQL("value"), func(d MolecularData) error {
+	out := core.NewJSONArray(w, r)
+	err := s.molecularDataPage(r, mpid, f, molecularDataSortable, core.JavaNumericSQL("value"), func(d MolecularData) error {
 		if rec, ok := numericRecord(d, projection); ok {
-			return out.add(rec)
+			return out.Add(rec)
 		}
 		return nil
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 // molecularData returns a profile's per-sample gene values, optionally limited
@@ -220,12 +173,12 @@ func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(Mo
 // molecularDataEach's order. r may be nil.
 func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataFilter, sortable map[string]string, keep string,
 	fn func(MolecularData) error) error {
-	var sp *sqlPage
+	var sp *core.SQLPage
 	var expr string
 	if r != nil {
-		sp, expr = claimListPage(r, sortable)
+		sp, expr = core.ClaimListPage(r, sortable)
 	}
-	sampleOrder := s.sampleOrder("s", "m.sample_id")
+	sampleOrder := s.SampleOrder("s", "m.sample_id")
 	if len(f.SampleIDs) > 0 || f.SampleListID != "" {
 		sampleOrder = "m.sample_id"
 	}
@@ -233,7 +186,7 @@ func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataF
 	if sp != nil {
 		extra = fmt.Sprintf(", tuple(%s) AS pageSampleRank, rg.genetic_entity_id AS pageEntityRank", sampleOrder)
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	sel, meta, ok := s.molecularDataSelect(args, mpid, f, extra)
 	if !ok {
 		return nil
@@ -241,14 +194,14 @@ func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataF
 	query := fmt.Sprintf("%s ORDER BY %s, rg.genetic_entity_id, m.entrez", sel, sampleOrder)
 	if sp != nil {
 		query = "SELECT * FROM (" + sel + ") WHERE " + keep +
-			sp.orderLimit(expr, "pageSampleRank, pageEntityRank, entrezGeneId")
+			sp.OrderLimit(expr, "pageSampleRank, pageEntityRank, entrezGeneId")
 	}
-	return ch.QueryEachP(s.CH, query, args.params(query), func(r *molecularDataRow) error {
+	return ch.QueryEachP(s.CH, query, args.Params(query), func(r *molecularDataRow) error {
 		return fn(MolecularData{
 			MolecularProfileID: mpid, SampleID: r.SampleID, PatientID: r.PatientID, EntrezGeneID: r.EntrezGeneID,
 			Gene:    Gene{EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol, Type: r.GeneType},
 			StudyID: meta.StudyID, Value: r.Value,
-			UniqueSampleKey: uniqueKey(meta.StudyID, r.SampleID), UniquePatientKey: uniqueKey(meta.StudyID, r.PatientID),
+			UniqueSampleKey: core.UniqueKey(meta.StudyID, r.SampleID), UniquePatientKey: core.UniqueKey(meta.StudyID, r.PatientID),
 		})
 	})
 }
@@ -258,22 +211,22 @@ func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataF
 // aliases m (the values), s (their sample) and rg (their reference gene),
 // plus extra columns if any. ok is false for a profile without gene-keyed
 // values. Values are bound in args.
-func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataFilter, extra string) (string, profileMeta, bool) {
-	meta, ok := s.profileMeta(mpid)
+func (s *State) molecularDataSelect(args *core.SQLArgs, mpid string, f molecularDataFilter, extra string) (string, core.ProfileMeta, bool) {
+	meta, ok := s.ProfileMeta(mpid)
 	if !ok {
 		return "", meta, false
 	}
-	table := meta.dataTable()
+	table := meta.DataTable()
 	// Gene-keyed data only: geneset scores and generic assays have their own
 	// endpoints.
 	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
 		return "", meta, false
 	}
-	where := byStudy(meta.StudyID).cond(args, rawMatrix(table), "") + " AND profile_stable_id = " + args.str(meta.StableID)
+	where := core.ByStudy(meta.StudyID).Cond(args, core.RawMatrix(table), "") + " AND profile_stable_id = " + args.Str(meta.StableID)
 	if len(f.SampleIDs) > 0 {
-		where += " AND sample_id IN " + args.strs(f.SampleIDs)
+		where += " AND sample_id IN " + args.Strs(f.SampleIDs)
 	} else if f.SampleListID != "" {
-		where += " AND sample_id IN " + s.bySampleList(f.SampleListID).listMembers(args)
+		where += " AND sample_id IN " + s.BySampleList(f.SampleListID).ListMembers(args)
 	}
 	// Every value row is of the profile's study, so only that study's
 	// samples (a key range) are joined; rows resolved through gene_key_map
@@ -281,7 +234,7 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 	keyMapped := s.geneKeyMapped(table)
 	genes := "cbioportal_ref.gene"
 	if keyMapped && len(f.EntrezGeneIDs) > 0 {
-		genes = "(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (" + intListSQL(f.EntrezGeneIDs) + "))"
+		genes = "(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (" + core.IntListSQL(f.EntrezGeneIDs) + "))"
 	}
 	return fmt.Sprintf(
 		"SELECT m.sample_id AS sampleId, s.patient_id AS patientId, m.entrez AS entrezGeneId, "+
@@ -290,9 +243,9 @@ func (s *State) molecularDataSelect(args *sqlArgs, mpid string, f molecularDataF
 			"LEFT JOIN %s s ON s.study_id = m.study_id AND s.sample_id = m.sample_id "+
 			"LEFT JOIN %s rg ON rg.entrez_gene_id = m.entrez "+
 			"WHERE m.entrez IS NOT NULL",
-		javaTruncatedValueSQL("m.value"), extra,
-		resolvedEntrezSQL(args, table, keyMapped, s.rawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
-		byStudy(meta.StudyID).samples(args), genes), meta, true
+		core.JavaTruncatedValueSQL("m.value"), extra,
+		resolvedEntrezSQL(args, table, keyMapped, s.RawSource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
+		core.ByStudy(meta.StudyID).Samples(args), genes), meta, true
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the
@@ -312,7 +265,7 @@ func (s *State) geneKeyMapped(table string) bool {
 	type keyRow struct {
 		N uint8 `json:"n"`
 	}
-	rows, err := cachedQueryP[keyRow](s, "SELECT toUInt8(1) AS n FROM gene_key_map WHERE source = {source:String} LIMIT 1",
+	rows, err := core.CachedQueryP[keyRow](s.State, "SELECT toUInt8(1) AS n FROM gene_key_map WHERE source = {source:String} LIMIT 1",
 		ch.Params{"source": table})
 	return err == nil && len(rows) > 0
 }
@@ -324,7 +277,7 @@ func (s *State) geneKeyMapped(table string) bool {
 // transform provides it (keyMapped) — rows it could not resolve are dropped
 // — and otherwise the row's entrez id or its symbol's. entrez, if non-empty,
 // restricts the result to those genes. Values are bound in args.
-func resolvedEntrezSQL(args *sqlArgs, table string, keyMapped bool, src string, meta profileMeta, where string, entrez []int64) string {
+func resolvedEntrezSQL(args *core.SQLArgs, table string, keyMapped bool, src string, meta core.ProfileMeta, where string, entrez []int64) string {
 	ids := make([]string, len(entrez))
 	for i, e := range entrez {
 		ids[i] = fmt.Sprintf("%d", e)
@@ -332,7 +285,7 @@ func resolvedEntrezSQL(args *sqlArgs, table string, keyMapped bool, src string, 
 	idList := strings.Join(ids, ", ")
 	if keyMapped {
 		keyFilter := fmt.Sprintf("source = '%s' AND study_id = %s AND profile_stable_id = %s",
-			table, args.str(meta.StudyID), args.str(meta.StableID))
+			table, args.Str(meta.StudyID), args.Str(meta.StableID))
 		if len(entrez) > 0 {
 			keyFilter += fmt.Sprintf(" AND resolved_entrez_gene_id IN (%s)", idList)
 			// Implied by the join on (hugo_symbol, entrez_gene_id); it lets a

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // routeStudyView2 registers the remaining study-view aggregation endpoints:
@@ -38,22 +40,22 @@ type genomicDataCountFilter struct {
 // per-mutation-type table.
 func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f genomicDataCountFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	// Only SUMMARY counts mutated / not mutated / not profiled samples; the
 	// other projections count by mutation type.
-	summary := projectionOf(r) == "SUMMARY"
+	summary := core.ProjectionOf(r) == "SUMMARY"
 	includeSampleIDs := r.URL.Query().Get("includeSampleIds") == "true"
 	svf := f.StudyViewFilter
 	if len(f.GenomicDataFilters) == 1 && summary {
 		g := f.GenomicDataFilters[0]
 		svf = svf.withoutMutation(g.HugoGeneSymbol, g.ProfileType, "MUTATED")
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	filtered := s.filterSQL(args, svf)
 	out := []GenomicDataCountItem{}
 	if summary {
 		if len(f.GenomicDataFilters) == 0 {
-			writeJSON(w, out)
+			core.WriteJSON(w, out)
 			return
 		}
 		total := s.scopeSampleCount(svf)
@@ -66,7 +68,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			Mutated  uint64 `json:"mutated"`
 			Profiled uint64 `json:"profiled"`
 		}
-		rows, err := queryA[countsRow](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[countsRow](s.CH, fmt.Sprintf(
 			"WITH scope AS (%[1]s) SELECT gene, sum(m) AS mutated, sum(p) AS profiled FROM ("+
 				"SELECT hugo_gene_symbol AS gene, uniqExact(sample_unique_id) AS m, toUInt64(0) AS p FROM %[3]s "+
 				"AND sample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN %[2]s "+
@@ -76,9 +78,9 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 				"WHERE sgp.sample_unique_id IN (SELECT sample_unique_id FROM scope) AND gpg.gene IN %[2]s "+
 				"AND sgp.alteration_type = 'MUTATION_EXTENDED' GROUP BY gene"+
 				") GROUP BY gene",
-			filtered, args.strs(genes), svf.scope().from(args, tGenomicEventDerived), svf.scope().rows(args, tSampleToGenePanelDerived)), args)
+			filtered, args.Strs(genes), svf.scope().From(args, core.TGenomicEventDerived), svf.scope().Rows(args, core.TSampleToGenePanelDerived)), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		byGene := make(map[string]countsRow, len(rows))
@@ -102,11 +104,11 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			}
 			out = append(out, item)
 		}
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	if len(f.GenomicDataFilters) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	genes := make([]string, len(f.GenomicDataFilters))
@@ -123,12 +125,12 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		U      uint64 `json:"u"`
 		Sample string `json:"samples"`
 	}
-	rows, _ := queryA[typeRow](s.CH, fmt.Sprintf(
+	rows, _ := core.QueryA[typeRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
 			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM %s "+
 			"AND sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
-		svf.scope().from(args, tGenomicEventDerived), filtered, args.strs(genes)), args)
+		svf.scope().From(args, core.TGenomicEventDerived), filtered, args.Strs(genes)), args)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	for _, r := range rows {
@@ -148,7 +150,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		out = append(out, *byGene[g])
 	}
 	if includeSampleIDs {
-		gene := args.str(genes[0])
+		gene := args.Str(genes[0])
 		type idsRow struct {
 			N   uint64 `json:"n"`
 			IDs string `json:"ids"`
@@ -157,19 +159,19 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			"SELECT DISTINCT sgp.sample_unique_id FROM %s sgp "+
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
 				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'",
-			svf.scope().rows(args, tSampleToGenePanelDerived), filtered, gene)
+			svf.scope().Rows(args, core.TSampleToGenePanelDerived), filtered, gene)
 		mutated := fmt.Sprintf(
 			"SELECT sample_unique_id FROM %s AND sample_unique_id IN (%s) "+
-				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", svf.scope().from(args, tGenomicEventDerived), filtered, gene)
+				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", svf.scope().From(args, core.TGenomicEventDerived), filtered, gene)
 		extra := []struct{ label, value, sql string }{
 			{"Not Mutated", "NOT_MUTATED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM (%s) WHERE sample_unique_id NOT IN (%s)", profiled, mutated)},
-			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM %s AND sample_unique_id NOT IN (%s)", byStudies(svf.studyIDs()).from(args, tSampleDerived), profiled)},
+			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM %s AND sample_unique_id NOT IN (%s)", core.ByStudies(svf.studyIDs()).From(args, core.TSampleDerived), profiled)},
 		}
 		// The mapper's result map groups rows by gene and profile type: the
 		// not-mutated and not-profiled rows (always present, counts possibly
 		// 0) are items of their own, with the label as profile type.
 		for _, e := range extra {
-			r, err := queryA[idsRow](s.CH, e.sql, args)
+			r, err := core.QueryA[idsRow](s.CH, e.sql, args)
 			if err != nil || len(r) == 0 {
 				continue
 			}
@@ -181,7 +183,7 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			out = append(out, GenomicDataCountItem{HugoGeneSymbol: genes[0], ProfileType: e.label, Counts: []GenomicDataCount{c}})
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // cnaLabels names the discrete copy-number values.
@@ -193,10 +195,10 @@ var cnaLabels = map[string]string{
 // samples (the endpoint is CNA-specific), with the remainder reported as NA.
 func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f genomicDataCountFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	out := []GenomicDataCountItem{}
 	if len(f.GenomicDataFilters) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	svf := f.StudyViewFilter
@@ -214,13 +216,13 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Value string `json:"value"`
 		C     uint64 `json:"c"`
 	}
-	args := newArgs()
-	rows, _ := queryA[row](s.CH, fmt.Sprintf(
+	args := core.NewArgs()
+	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM %s "+
 			"AND NOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, alteration_value ORDER BY hugo_gene_symbol, alteration_value",
-		svf.scope().from(args, tGeneticAlterationDerived), isNASQL("assumeNotNull(alteration_value)"), args.str(profileType),
-		s.filterSQL(args, svf), args.strs(genes)), args)
+		svf.scope().From(args, core.TGeneticAlterationDerived), isNASQL("assumeNotNull(alteration_value)"), args.Str(profileType),
+		s.filterSQL(args, svf), args.Strs(genes)), args)
 	total := s.scopeSampleCount(svf)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
@@ -258,7 +260,7 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	for _, g := range order {
 		out = append(out, *byGene[g])
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- Treatments (no treatment data loaded) ----------
@@ -288,7 +290,7 @@ func mergeCaseListCounts(rows []CaseListDataCount) []CaseListDataCount {
 		values = append(values, r.Value)
 	}
 	out := make([]CaseListDataCount, 0, len(values))
-	for _, v := range javaHashMapOrder(values) {
+	for _, v := range core.JavaHashMapOrder(values) {
 		out = append(out, *merged[v])
 	}
 	return out
@@ -298,14 +300,14 @@ func mergeCaseListCounts(rows []CaseListDataCount) []CaseListDataCount {
 // (ClickhousePatientMapper.getCaseListDataCounts), keyed by list type.
 func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
-	readBody(r, &f)
-	args := newArgs()
-	rows, err := queryA[CaseListDataCount](s.CH, fmt.Sprintf(
+	core.ReadBody(r, &f)
+	args := core.NewArgs()
+	rows, err := core.QueryA[CaseListDataCount](s.CH, fmt.Sprintf(
 		"SELECT replaceAll(list_id, concat(study_id, '_'), '') AS value, any(name) AS label, count() AS count "+
-			"FROM %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", s.sampleScopeFrom(args, f, tSampleList)), args)
+			"FROM %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", s.sampleScopeFrom(args, f, core.TSampleList)), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, mergeCaseListCounts(rows))
+	core.WriteJSON(w, mergeCaseListCounts(rows))
 }

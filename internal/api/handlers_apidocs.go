@@ -10,6 +10,8 @@ import (
 	"path"
 	"strings"
 	"sync"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // The API descriptions and Swagger UI, as the Java portal serves them:
@@ -49,19 +51,19 @@ func routeAPIDocs(mux *http.ServeMux, s *State) {
 	// /api and /api/ lead to the API docs, as springdoc's redirect does on
 	// the Java portal for /api.
 	toDocs := func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, baseURL(r)+"/api/swagger-ui", http.StatusFound)
+		http.Redirect(w, r, core.BaseURL(r)+"/api/swagger-ui", http.StatusFound)
 	}
 	mux.HandleFunc("GET /api", toDocs)
 	mux.HandleFunc("GET /api/{$}", toDocs)
 	mux.HandleFunc("GET /api/swagger-ui", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, baseURL(r)+"/api/swagger-ui/index.html", http.StatusFound)
+		http.Redirect(w, r, core.BaseURL(r)+"/api/swagger-ui/index.html", http.StatusFound)
 	})
 	ui, _ := fs.Sub(apiDocsFS, "apidocs/swagger-ui")
 	mux.HandleFunc("GET /api/swagger-ui/{file}", func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("file")
 		b, err := fs.ReadFile(ui, name)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "No static resource api/swagger-ui/"+name+".")
+			core.WriteError(w, http.StatusNotFound, "No static resource api/swagger-ui/"+name+".")
 			return
 		}
 		ct := mime.TypeByExtension(path.Ext(name))
@@ -100,13 +102,13 @@ func openAPIDoc(file string) http.HandlerFunc {
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "API description unavailable")
+			core.WriteError(w, http.StatusInternalServerError, "API description unavailable")
 			return
 		}
 		w.Header().Set("Content-Type", ct)
 		w.Write(before)
 		if after != nil {
-			w.Write([]byte(baseURL(r)))
+			w.Write([]byte(core.BaseURL(r)))
 			w.Write(after)
 		}
 	}
@@ -115,7 +117,7 @@ func openAPIDoc(file string) http.HandlerFunc {
 // swaggerConfig is springdoc's Swagger UI configuration for the portal's two
 // API groups.
 func swaggerConfig(w http.ResponseWriter, r *http.Request) {
-	redirect, _ := json.Marshal(baseURL(r) + "/api/swagger-ui/oauth2-redirect.html")
+	redirect, _ := json.Marshal(core.BaseURL(r) + "/api/swagger-ui/oauth2-redirect.html")
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"configUrl":"/api/v3/api-docs/swagger-config","oauth2RedirectUrl":` + string(redirect) +
 		`,"urls":[{"url":"/api/v3/api-docs/internal","name":"internal"},{"url":"/api/v3/api-docs/public","name":"public"}],` +
@@ -145,7 +147,7 @@ func (s *State) legacyAPIDocs(w http.ResponseWriter, r *http.Request) {
 		legacyDocs.before, legacyDocs.after, legacyDocs.err = splitTopLevelValue(doc, "host")
 	})
 	if legacyDocs.err != nil {
-		writeError(w, http.StatusInternalServerError, "legacy API description unavailable")
+		core.WriteError(w, http.StatusInternalServerError, "legacy API description unavailable")
 		return
 	}
 	host, _ := json.Marshal(r.Host)

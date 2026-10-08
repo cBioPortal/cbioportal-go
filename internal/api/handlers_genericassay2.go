@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -48,14 +49,14 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		ProfileType             string                   `json:"profileType"`
 		StudyViewFilter         *studyViewFilter         `json:"studyViewFilter"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	if len(f.GenericAssayDataFilters) == 0 && f.ProfileType == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	if f.StudyViewFilter == nil {
 		// The controller dereferences the filter: a NullPointerException.
-		springError(w, r, http.StatusInternalServerError)
+		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
 	svf := *f.StudyViewFilter
@@ -71,23 +72,23 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		}
 	}
 	unit := s.gaCountUnit(profileType)
-	args := newArgs()
-	scope := fmt.Sprintf("profile_type = %s AND sample_unique_id IN (%s)", args.str(profileType), s.filterSQL(args, svf))
+	args := core.NewArgs()
+	scope := fmt.Sprintf("profile_type = %s AND sample_unique_id IN (%s)", args.Str(profileType), s.filterSQL(args, svf))
 	entityClause := ""
 	if len(entities) > 0 {
-		entityClause = " AND entity_stable_id IN " + args.strs(entities)
+		entityClause = " AND entity_stable_id IN " + args.Strs(entities)
 	}
 	type row struct {
 		StableID string `json:"stableId"`
 		Value    string `json:"value"`
 		Count    uint64 `json:"count"`
 	}
-	rows, err := queryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, value, uniqExact(%s) AS count FROM generic_assay_data_derived "+
 			"WHERE NOT %s AND %s%s GROUP BY entity_stable_id, value",
 		unit, isNASQL("value"), scope, entityClause), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	var total uint64
@@ -96,7 +97,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 			type c struct {
 				N uint64 `json:"n"`
 			}
-			t, _ := queryA[c](s.CH,
+			t, _ := core.QueryA[c](s.CH,
 				"SELECT uniqExact(patient_unique_id) AS n FROM "+s.filterFrom(args, svf), args)
 			if len(t) > 0 {
 				total = t[0].N
@@ -108,7 +109,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		type c struct {
 			N uint64 `json:"n"`
 		}
-		t, _ := queryA[c](s.CH, fmt.Sprintf(
+		t, _ := core.QueryA[c](s.CH, fmt.Sprintf(
 			"SELECT uniqExact(%s) AS n FROM generic_assay_data_derived WHERE %s", unit, scope), args)
 		if len(t) > 0 {
 			total = t[0].N
@@ -116,7 +117,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		type e struct {
 			StableID string `json:"stableId"`
 		}
-		es, _ := queryA[e](s.CH,
+		es, _ := core.QueryA[e](s.CH,
 			"SELECT DISTINCT entity_stable_id AS stableId FROM generic_assay_data_derived WHERE "+scope, args)
 		for _, x := range es {
 			entities = append(entities, x.StableID)
@@ -150,7 +151,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 		}
 		out = append(out, GenericAssayDataCountItem{StableID: id, Counts: counts})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // entityLess orders entity ids by their leading number, then lexically.
@@ -191,7 +192,7 @@ func (s *State) genericAssayDataInProfileGet(w http.ResponseWriter, r *http.Requ
 // genericAssayMetasWhere returns distinct entity metadata rows matching the
 // given WHERE clause (with placeholders bound in args), in
 // generic_assay_meta_derived's order.
-func (s *State) genericAssayMetasWhere(where string, args *sqlArgs) ([]GenericAssayMeta, error) {
+func (s *State) genericAssayMetasWhere(where string, args *core.SQLArgs) ([]GenericAssayMeta, error) {
 	props, err := s.genericAssayMetaProperties(where, args)
 	if err != nil {
 		return nil, err
@@ -204,32 +205,32 @@ func (s *State) genericAssayMetasWhere(where string, args *sqlArgs) ([]GenericAs
 // one entity across all profiles it appears in. Returns an array.
 func (s *State) genericAssayMetaByStableIdGet(w http.ResponseWriter, r *http.Request) {
 	stableID := r.PathValue("genericAssayStableId")
-	args := newArgs()
-	out, err := s.genericAssayMetasWhere("entity_stable_id = "+args.str(stableID), args)
+	args := core.NewArgs()
+	out, err := s.genericAssayMetasWhere("entity_stable_id = "+args.Str(stableID), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // genericAssayMetaByIDGet handles GET /api/generic-assay-meta/{molecularProfileId}:
 // the entities of a generic-assay profile (none for any other id).
 func (s *State) genericAssayMetaByIDGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("molecularProfileId")
-	m, ok := s.profileMeta(id)
+	m, ok := s.ProfileMeta(id)
 	if !ok || !strings.EqualFold(m.AlterationType, "GENERIC_ASSAY") {
-		writeJSON(w, []GenericAssayMeta{})
+		core.WriteJSON(w, []GenericAssayMeta{})
 		return
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	out, err := s.genericAssayMetasWhere(fmt.Sprintf(
-		"study_id = %s AND profile_stable_id = %s", args.str(m.StudyID), args.str(m.StableID)), args)
+		"study_id = %s AND profile_stable_id = %s", args.Str(m.StudyID), args.Str(m.StableID)), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // gaCountUnit is the case column generic assay chart counts count for a
@@ -240,7 +241,7 @@ func (s *State) gaCountUnit(profileType string) string {
 	type lvl struct {
 		P uint64 `json:"p"`
 	}
-	lv, _ := cachedQueryP[lvl](s,
+	lv, _ := core.CachedQueryP[lvl](s.State,
 		"SELECT count() AS p FROM cbioportal_raw.genetic_profile WHERE profile_stable_id = {profile:String} AND lower(toString(patient_level)) = 'true'",
 		ch.Params{"profile": profileType})
 	if len(lv) > 0 && lv[0].P > 0 {

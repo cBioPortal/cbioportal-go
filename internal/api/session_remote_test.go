@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/sessionstore"
 )
 
 // fakeSessionService mimics cBioPortal's session service for one portal
@@ -23,7 +26,7 @@ import (
 type fakeSessionService struct {
 	t      *testing.T
 	mu     sync.Mutex
-	docs   map[string][]*Session // by type, in insertion order
+	docs   map[string][]*sessionstore.Session // by type, in insertion order
 	nextID int
 	// auth is the Authorization header of the last request; queries the
 	// filters posted to query/fetch.
@@ -36,7 +39,7 @@ type fakeSessionService struct {
 const fakePortal = "test_portal"
 
 func newFakeSessionService(t *testing.T) (*fakeSessionService, *httptest.Server) {
-	f := &fakeSessionService{t: t, docs: map[string][]*Session{}}
+	f := &fakeSessionService{t: t, docs: map[string][]*sessionstore.Session{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return f, srv
@@ -64,38 +67,38 @@ func (f *fakeSessionService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case len(parts) == 1 && r.Method == http.MethodGet:
-		writeJSON(w, f.docs[typ])
+		core.WriteJSON(w, f.docs[typ])
 	case len(parts) == 1 && r.Method == http.MethodPost:
 		data, err := f.object(raw)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		sum := checksum(data)
+		sum := sessionstore.Checksum(data)
 		for _, d := range f.docs[typ] {
 			if d.Checksum == sum {
-				writeJSON(w, map[string]string{"id": d.ID})
+				core.WriteJSON(w, map[string]string{"id": d.ID})
 				return
 			}
 		}
 		f.nextID++
 		id := fmt.Sprintf("%024x", f.nextID)
-		f.docs[typ] = append(f.docs[typ], &Session{ID: id, Checksum: sum, Data: data, Source: fakePortal, Type: typ})
-		writeJSON(w, map[string]string{"id": id})
+		f.docs[typ] = append(f.docs[typ], &sessionstore.Session{ID: id, Checksum: sum, Data: data, Source: fakePortal, Type: typ})
+		core.WriteJSON(w, map[string]string{"id": id})
 	case len(parts) == 3 && parts[1] == "query" && parts[2] == "fetch" && r.Method == http.MethodPost:
 		f.queries = append(f.queries, string(raw))
 		var q map[string]any
-		if err := decodeJSON(raw, &q); err != nil {
+		if err := sessionstore.DecodeJSON(raw, &q); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		out := []*Session{}
+		out := []*sessionstore.Session{}
 		for _, d := range f.docs[typ] {
 			if mongoMatch(f.t, d, q) {
 				out = append(out, f.served(d))
 			}
 		}
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 	case len(parts) == 2:
 		id := parts[1]
 		i := f.index(typ, id)
@@ -105,20 +108,20 @@ func (f *fakeSessionService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			writeJSON(w, f.served(f.docs[typ][i]))
+			core.WriteJSON(w, f.served(f.docs[typ][i]))
 		case http.MethodPost:
 			data, err := f.object(raw)
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			sum := checksum(data)
+			sum := sessionstore.Checksum(data)
 			if i >= 0 || f.hasChecksum(typ, sum) {
 				w.WriteHeader(http.StatusConflict)
 				return
 			}
-			f.docs[typ] = append(f.docs[typ], &Session{ID: id, Checksum: sum, Data: data, Source: fakePortal, Type: typ})
-			writeJSON(w, map[string]string{"id": id})
+			f.docs[typ] = append(f.docs[typ], &sessionstore.Session{ID: id, Checksum: sum, Data: data, Source: fakePortal, Type: typ})
+			core.WriteJSON(w, map[string]string{"id": id})
 		case http.MethodPut:
 			data, err := f.object(raw)
 			if err != nil {
@@ -129,7 +132,7 @@ func (f *fakeSessionService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			f.docs[typ][i].Data, f.docs[typ][i].Checksum = data, checksum(data)
+			f.docs[typ][i].Data, f.docs[typ][i].Checksum = data, sessionstore.Checksum(data)
 		case http.MethodDelete:
 			if i < 0 {
 				w.WriteHeader(http.StatusNotFound)
@@ -146,7 +149,7 @@ func (f *fakeSessionService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeSessionService) object(raw []byte) (map[string]any, error) {
 	var m map[string]any
-	if err := decodeJSON(raw, &m); err != nil || m == nil {
+	if err := sessionstore.DecodeJSON(raw, &m); err != nil || m == nil {
 		return nil, fmt.Errorf("not an object")
 	}
 	return m, nil
@@ -171,14 +174,14 @@ func (f *fakeSessionService) hasChecksum(typ, sum string) bool {
 }
 
 // served is the document as the service answers it: without checksum.
-func (f *fakeSessionService) served(d *Session) *Session {
-	c := d.clone()
+func (f *fakeSessionService) served(d *sessionstore.Session) *sessionstore.Session {
+	c := d.Clone()
 	c.Checksum = ""
 	return c
 }
 
 // mongoMatch evaluates the subset of MongoDB filters the Java client uses.
-func mongoMatch(t *testing.T, d *Session, q map[string]any) bool {
+func mongoMatch(t *testing.T, d *sessionstore.Session, q map[string]any) bool {
 	for k, cond := range q {
 		if k == "$and" {
 			for _, sub := range cond.([]any) {
@@ -249,11 +252,11 @@ func mongoMatch(t *testing.T, d *Session, q map[string]any) bool {
 
 func newRemoteSessionTestEnv(t *testing.T) (*sessionTestEnv, *fakeSessionService) {
 	f, srv := newFakeSessionService(t)
-	st, err := newRemoteStore(srv.URL+"/api/sessions/"+fakePortal+"/", "", "")
+	st, err := sessionstore.NewRemoteStore(srv.URL+"/api/sessions/"+fakePortal+"/", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &State{sessions: st}
+	s := &State{State: &core.State{Sessions: st}}
 	mux := http.NewServeMux()
 	s.routeSession(mux)
 	return &sessionTestEnv{t: t, s: s, mux: mux}, f
@@ -308,26 +311,26 @@ func TestRemoteStoreServesSameBodies(t *testing.T) {
 // The filters are the MongoDB queries SessionServiceRequestHandler posts.
 func TestSessionFilterMongoQuery(t *testing.T) {
 	cases := []struct {
-		f    sessionFilter
+		f    sessionstore.Filter
 		want string
 	}{
-		{sessionFilter{users: "alice"}, `{"data.users":{"$options":"i","$regex":"\\Qalice\\E"}}`},
-		{sessionFilter{users: "*"}, `{"data.users":{"$options":"i","$regex":"\\Q*\\E"}}`},
-		{sessionFilter{users: "a", origin: []string{"x", "y"}, hasOrigin: true},
+		{sessionstore.Filter{Users: "alice"}, `{"data.users":{"$options":"i","$regex":"\\Qalice\\E"}}`},
+		{sessionstore.Filter{Users: "*"}, `{"data.users":{"$options":"i","$regex":"\\Q*\\E"}}`},
+		{sessionstore.Filter{Users: "a", Origin: []string{"x", "y"}, HasOrigin: true},
 			`{"$and":[{"data.users":{"$options":"i","$regex":"\\Qa\\E"}},{"data.origin":{"$all":["x","y"]}},{"data.origin":{"$size":2}}]}`},
-		{sessionFilter{owner: "a", hasOrigin: true, page: "study_view"},
+		{sessionstore.Filter{Owner: "a", HasOrigin: true, Page: "study_view"},
 			`{"$and":[{"data.owner":{"$options":"i","$regex":"\\Qa\\E"}},{"data.origin":{"$all":[]}},{"data.origin":{"$size":0}},{"data.page":"study_view"}]}`},
 	}
 	for _, c := range cases {
-		raw, _ := json.Marshal(c.f.mongoQuery())
+		raw, _ := json.Marshal(c.f.MongoQuery())
 		if string(raw) != c.want {
 			t.Errorf("%+v:\n got %s\nwant %s", c.f, raw, c.want)
 		}
 	}
-	if got := javaPatternQuote(`a\Eb`); got != `\Qa\E\\E\Qb\E` {
+	if got := sessionstore.JavaPatternQuote(`a\Eb`); got != `\Qa\E\\E\Qb\E` {
 		t.Errorf("javaPatternQuote: %s", got)
 	}
-	if !regexp.MustCompile(`(?i)` + javaPatternQuote(`x.y\E(`)).MatchString(`AX.Y\E(`) {
+	if !regexp.MustCompile(`(?i)` + sessionstore.JavaPatternQuote(`x.y\E(`)).MatchString(`AX.Y\E(`) {
 		t.Error("quoted pattern does not match its literal")
 	}
 }
@@ -353,16 +356,16 @@ func TestRemoteStoreUserSubstring(t *testing.T) {
 func TestRemoteStoreBasicAuth(t *testing.T) {
 	f, srv := newFakeSessionService(t)
 	base := srv.URL + "/api/sessions/" + fakePortal
-	st, _ := newRemoteStore(base, "u", "p@ss")
-	if _, err := st.create("main_session", map[string]any{"a": 1}); err != nil {
+	st, _ := sessionstore.NewRemoteStore(base, "u", "p@ss")
+	if _, err := st.Create("main_session", map[string]any{"a": 1}); err != nil {
 		t.Fatal(err)
 	}
 	if want := "Basic dTpwQHNz"; f.auth != want {
 		t.Errorf("Authorization %q, want %q", f.auth, want)
 	}
 	// As in Java, a user without a password sends no credentials.
-	st, _ = newRemoteStore(base, "u", "")
-	st.create("main_session", map[string]any{"a": 2})
+	st, _ = sessionstore.NewRemoteStore(base, "u", "")
+	st.Create("main_session", map[string]any{"a": 2})
 	if f.auth != "" {
 		t.Errorf("Authorization %q without a password", f.auth)
 	}
@@ -415,7 +418,7 @@ func TestRemoteStoreFailures(t *testing.T) {
 			t.Errorf("%s %s: body %q", c.method, c.path, rec.Body)
 		}
 	}
-	if _, ok := e.s.sessionData("custom_data", cd); ok {
+	if _, ok := e.s.SessionData("custom_data", cd); ok {
 		t.Error("sessionData while the service fails")
 	}
 	if !strings.Contains(logs.String(), "status 503") {
@@ -426,23 +429,23 @@ func TestRemoteStoreFailures(t *testing.T) {
 func TestRemoteStorePublishConflict(t *testing.T) {
 	e, f := newRemoteSessionTestEnv(t)
 	data := map[string]any{"name": "vs"}
-	if err := e.s.store().insert("virtual_study", "my_vs", data); err != nil {
+	if err := e.s.SessionStore().Insert("virtual_study", "my_vs", data); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.store().insert("virtual_study", "my_vs", map[string]any{"name": "other"}); err != errSessionConflict {
+	if err := e.s.SessionStore().Insert("virtual_study", "my_vs", map[string]any{"name": "other"}); err != sessionstore.ErrConflict {
 		t.Errorf("taken id: %v", err)
 	}
-	if err := e.s.store().insert("virtual_study", "my_vs2", data); err != errSessionConflict {
+	if err := e.s.SessionStore().Insert("virtual_study", "my_vs2", data); err != sessionstore.ErrConflict {
 		t.Errorf("identical data: %v", err)
 	}
-	if err := e.s.store().update("virtual_study", "nope", data); err != errSessionNotFound {
+	if err := e.s.SessionStore().Update("virtual_study", "nope", data); err != sessionstore.ErrNotFound {
 		t.Errorf("update unknown: %v", err)
 	}
-	if err := e.s.store().remove("virtual_study", "nope"); err != errSessionNotFound {
+	if err := e.s.SessionStore().Remove("virtual_study", "nope"); err != sessionstore.ErrNotFound {
 		t.Errorf("remove unknown: %v", err)
 	}
 	f.fail = http.StatusInternalServerError
-	if err := e.s.store().insert("virtual_study", "x", data); err == nil || err == errSessionConflict {
+	if err := e.s.SessionStore().Insert("virtual_study", "x", data); err == nil || err == sessionstore.ErrConflict {
 		t.Errorf("failing service: %v", err)
 	}
 }
@@ -451,12 +454,12 @@ func TestRemoteStoreUnreachable(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	base := strings.Replace(srv.URL, "http://", "http://u:secret@", 1) + "/api/sessions/p/"
 	srv.Close()
-	st, err := newRemoteStore(base, "", "")
+	st, err := sessionstore.NewRemoteStore(base, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.get("main_session", "x")
-	if err == nil || err == errSessionNotFound {
+	_, err = st.Get("main_session", "x")
+	if err == nil || err == sessionstore.ErrNotFound {
 		t.Fatalf("unreachable service: %v", err)
 	}
 	if strings.Contains(err.Error(), "secret") {
@@ -472,38 +475,38 @@ func TestConfigureSessions(t *testing.T) {
 	t.Setenv("SESSION_SERVICE_URL", "")
 	t.Setenv("SESSION_SERVICE_PASSWORD", "")
 
-	s := &State{Props: map[string]string{"session.service.url": ""}}
+	s := &State{State: &core.State{Props: map[string]string{"session.service.url": ""}}}
 	if err := s.ConfigureSessions(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := s.store().(*memoryStore); !ok {
-		t.Errorf("no session service: %T", s.store())
+	if _, ok := s.SessionStore().(*sessionstore.MemoryStore); !ok {
+		t.Errorf("no session service: %T", s.SessionStore())
 	}
 
-	s = &State{Props: map[string]string{
+	s = &State{State: &core.State{Props: map[string]string{
 		"session.service.url":      "http://sess:5000/api/sessions/p/",
 		"session.service.user":     "u",
 		"session.service.password": "hunter2",
-	}}
+	}}}
 	if err := s.ConfigureSessions(); err != nil {
 		t.Fatal(err)
 	}
-	st, ok := s.store().(*remoteStore)
-	if !ok || st.base != "http://sess:5000/api/sessions/p" || st.user != "u" || st.password != "hunter2" {
-		t.Errorf("session service: %#v", s.store())
+	st, ok := s.SessionStore().(*sessionstore.RemoteStore)
+	if !ok || st.Base != "http://sess:5000/api/sessions/p" || st.User != "u" || st.Password != "hunter2" {
+		t.Errorf("session service: %#v", s.SessionStore())
 	}
 
 	t.Setenv("SESSION_SERVICE_URL", "http://env:5000/api/sessions/p")
 	t.Setenv("SESSION_SERVICE_PASSWORD", "envsecret")
-	s = &State{}
+	s = &State{State: &core.State{}}
 	if err := s.ConfigureSessions(); err != nil {
 		t.Fatal(err)
 	}
-	if st, ok := s.store().(*remoteStore); !ok || st.base != "http://env:5000/api/sessions/p" || st.password != "envsecret" {
-		t.Errorf("from the environment: %#v", s.store())
+	if st, ok := s.SessionStore().(*sessionstore.RemoteStore); !ok || st.Base != "http://env:5000/api/sessions/p" || st.Password != "envsecret" {
+		t.Errorf("from the environment: %#v", s.SessionStore())
 	}
 
-	s = &State{Props: map[string]string{"session.service.url": "sess:5000"}}
+	s = &State{State: &core.State{Props: map[string]string{"session.service.url": "sess:5000"}}}
 	if err := s.ConfigureSessions(); err == nil {
 		t.Error("invalid URL accepted")
 	}
@@ -516,7 +519,7 @@ func TestConfigureSessions(t *testing.T) {
 
 func TestPublisherKeyProperty(t *testing.T) {
 	t.Setenv("PUBLISHER_API_KEY", "env")
-	s := &State{}
+	s := &State{State: &core.State{}}
 	if s.publisherKey() != "env" {
 		t.Errorf("env key: %q", s.publisherKey())
 	}

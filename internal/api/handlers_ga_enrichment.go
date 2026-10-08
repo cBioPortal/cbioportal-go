@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -46,7 +47,7 @@ type gaGroupValues map[string][][]string
 // and the per-entity group values.
 type gaEnrichmentInput struct {
 	profileID string
-	meta      profileMeta
+	meta      core.ProfileMeta
 	groups    []string
 	sizes     []int
 	entities  []string
@@ -67,14 +68,14 @@ func (in *gaEnrichmentInput) groupValues(e string, gi int) []string {
 // response and returns nil when the request fails.
 func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, datatype string) *gaEnrichmentInput {
 	var groups []casesGroup
-	readBody(r, &groups)
+	core.ReadBody(r, &groups)
 	patient := false
 	switch et := strings.TrimSpace(r.URL.Query().Get("enrichmentType")); et {
 	case "", "SAMPLE":
 	case "PATIENT":
 		patient = true
 	default:
-		writeError(w, http.StatusBadRequest, msgEnumMismatch("org.cbioportal.legacy.model.EnrichmentType", et))
+		core.WriteError(w, http.StatusBadRequest, core.MsgEnumMismatch("org.cbioportal.legacy.model.EnrichmentType", et))
 		return nil
 	}
 
@@ -88,7 +89,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 	}
 	switch {
 	case len(profileIDs) > 1:
-		writeError(w, http.StatusNotImplemented, "Requested API is not implemented yet")
+		core.WriteError(w, http.StatusNotImplemented, "Requested API is not implemented yet")
 		return nil
 	case len(profileIDs) == 0:
 		w.Header().Set("Content-Type", "application/json")
@@ -96,9 +97,9 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 		w.Write([]byte("{}"))
 		return nil
 	}
-	meta, ok := s.profileMeta(profileID)
+	meta, ok := s.ProfileMeta(profileID)
 	if !ok || meta.AlterationType != "GENERIC_ASSAY" || meta.Datatype != datatype {
-		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(profileID))
+		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(profileID))
 		return nil
 	}
 	in := &gaEnrichmentInput{profileID: profileID, meta: meta}
@@ -110,7 +111,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 		names[i] = g.Name
 		byName[g.Name] = g
 	}
-	in.groups = javaHashMapOrder(names)
+	in.groups = core.JavaHashMapOrder(names)
 
 	cases := make([][]string, len(in.groups))
 	for i, n := range in.groups {
@@ -124,7 +125,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 	}
 	keys, err := s.gaCaseMatrixKeys(meta.StudyID, profileID, cases, patient, patientLevel)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return nil
 	}
 	in.sizes = make([]int, len(keys))
@@ -133,7 +134,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 	}
 	in.entities, in.values, err = s.gaValueSequences(meta, keys)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return nil
 	}
 	return in
@@ -141,11 +142,11 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 
 // gaProfilePatientLevel reports whether the profile's meta file declares
 // patient_level: true (its matrix columns are then patient ids).
-func (s *State) gaProfilePatientLevel(meta profileMeta) bool {
+func (s *State) gaProfilePatientLevel(meta core.ProfileMeta) bool {
 	type row struct {
 		P string `json:"p"`
 	}
-	rows, err := cachedQueryP[row](s,
+	rows, err := core.CachedQueryP[row](s.State,
 		"SELECT toString(patient_level) AS p FROM cbioportal_raw.genetic_profile "+
 			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} LIMIT 1",
 		ch.Params{"study": meta.StudyID, "profile": meta.StableID})
@@ -164,7 +165,7 @@ func (s *State) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 	if len(all) > 0 {
 		p := ch.Params{}
 		rows, _ := ch.QueryP[idRow](s.CH,
-			"SELECT sample_id AS sampleId, patient_id AS patientId FROM "+bySamples(studyID, all).from(paramsBinder(p), tSample), p)
+			"SELECT sample_id AS sampleId, patient_id AS patientId FROM "+core.BySamples(studyID, all).From(core.ParamsBinder(p), core.TSample), p)
 		for _, r := range rows {
 			patientOf[r.SampleID] = "p:" + r.PatientID
 		}
@@ -203,7 +204,7 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 			"SELECT sample_id AS sampleId, patient_id AS patientId FROM %s "+
 				"AND %s IN {ids:Array(String)} "+
 				"AND sample_id IN (SELECT sample_id FROM sample_profile WHERE study_id = {study:String} AND molecular_profile_id = {profile:String}) "+
-				"ORDER BY sample_id", byStudy(studyID).from(paramsBinder(p), tSample), idCol), p)
+				"ORDER BY sample_id", core.ByStudy(studyID).From(core.ParamsBinder(p), core.TSample), idCol), p)
 		if err != nil {
 			return nil, err
 		}
@@ -233,15 +234,15 @@ func (s *State) gaCaseMatrixKeys(studyID, profileID string, cases [][]string, pa
 // gaValueSequences returns the profile's entities in storage order and, per
 // entity and group, the (Java-truncated) values at the group's matrix keys,
 // with the empty string for a cell without a stored value.
-func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, gaGroupValues, error) {
-	args := newArgs()
-	from := byStudy(meta.StudyID).from(args, rawMatrix("generic_assay_matrix")) + " AND profile_stable_id = " + args.str(meta.StableID)
+func (s *State) gaValueSequences(meta core.ProfileMeta, keys [][]string) ([]string, gaGroupValues, error) {
+	args := core.NewArgs()
+	from := core.ByStudy(meta.StudyID).From(args, core.RawMatrix("generic_assay_matrix")) + " AND profile_stable_id = " + args.Str(meta.StableID)
 	type entityRow struct {
 		E string `json:"e"`
 	}
-	ents, err := queryA[entityRow](s.CH, fmt.Sprintf(
+	ents, err := core.QueryA[entityRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS e FROM %s "+
-			"GROUP BY entity_stable_id ORDER BY min(%s), entity_stable_id", from, s.rawFileOrder("generic_assay_matrix", "")), args)
+			"GROUP BY entity_stable_id ORDER BY min(%s), entity_stable_id", from, s.RawFileOrder("generic_assay_matrix", "")), args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -255,12 +256,12 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 		if len(k) == 0 {
 			continue
 		}
-		list := args.strs(k)
+		list := args.Strs(k)
 		parts = append(parts, fmt.Sprintf(
 			"SELECT e, toUInt32(%d) AS grp, arrayMap(k -> m[k], %s) AS vs FROM ("+
 				"SELECT entity_stable_id AS e, mapFromArrays(groupArray(sample_id), groupArray(%s)) AS m "+
 				"FROM %s AND sample_id IN %s GROUP BY e)",
-			gi, list, javaTruncatedValueSQL("trimBoth(value)"), from, list))
+			gi, list, core.JavaTruncatedValueSQL("trimBoth(value)"), from, list))
 	}
 	values := gaGroupValues{}
 	if len(parts) == 0 {
@@ -271,7 +272,7 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 		Grp uint32   `json:"grp"`
 		Vs  []string `json:"vs"`
 	}
-	rows, err := queryA[seqRow](s.CH, strings.Join(parts, " UNION ALL "), args)
+	rows, err := core.QueryA[seqRow](s.CH, strings.Join(parts, " UNION ALL "), args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -288,14 +289,14 @@ func (s *State) gaValueSequences(meta profileMeta, keys [][]string) ([]string, g
 
 // gaMetaProperties returns the SUMMARY meta properties of the profile's
 // entities.
-func (s *State) gaMetaProperties(meta profileMeta) map[string]javaStringMap {
-	args := newArgs()
+func (s *State) gaMetaProperties(meta core.ProfileMeta) map[string]core.JavaStringMap {
+	args := core.NewArgs()
 	props, _ := s.genericAssayMetaProperties(fmt.Sprintf(
-		"study_id = %s AND profile_stable_id = %s", args.str(meta.StudyID), args.str(meta.StableID)), args)
+		"study_id = %s AND profile_stable_id = %s", args.Str(meta.StudyID), args.Str(meta.StableID)), args)
 	return summaryMetaProperties(props)
 }
 
-func metaOrEmpty(props map[string]javaStringMap, stableID string) javaStringMap {
+func metaOrEmpty(props map[string]core.JavaStringMap, stableID string) core.JavaStringMap {
 	return props[stableID]
 }
 
@@ -325,12 +326,12 @@ func (s *State) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r
 	}
 	out := []GenericAssayCategoricalEnrichment{}
 	if len(rowGroups) < 2 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	// Contingency-table rows follow the HashMap holding only these groups.
 	tableOrder := map[string]int{}
-	for i, n := range javaHashMapOrder(rowNames) {
+	for i, n := range core.JavaHashMapOrder(rowNames) {
 		tableOrder[n] = i
 	}
 	tableRows := append([]int(nil), rowGroups...)
@@ -358,9 +359,9 @@ func (s *State) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r
 				m[v]++
 			}
 			rowCounts[i] = m
-			cats = append(cats, javaHashMapOrder(firstSeen)...)
+			cats = append(cats, core.JavaHashMapOrder(firstSeen)...)
 		}
-		cats = javaHashMapOrder(cats)
+		cats = core.JavaHashMapOrder(cats)
 		p := 1.0
 		if len(cats) > 1 {
 			table := make([][]int64, len(tableRows))
@@ -393,7 +394,7 @@ func (s *State) genericAssayCategoricalEnrichmentsFetch(w http.ResponseWriter, r
 			StableID:                    res.stable,
 		})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // genericAssayBinaryEnrichmentsFetch is /generic-assay-binary-enrichments/fetch:
@@ -430,7 +431,7 @@ func (s *State) genericAssayBinaryEnrichmentsFetch(w http.ResponseWriter, r *htt
 			for i, v := range vals {
 				x, ok := javaParseBinaryValue(v)
 				if !ok {
-					writeError(w, http.StatusInternalServerError, `For input string: "`+v+`"`)
+					core.WriteError(w, http.StatusInternalServerError, `For input string: "`+v+`"`)
 					return
 				}
 				if rnaSeq {
@@ -485,7 +486,7 @@ func (s *State) genericAssayBinaryEnrichmentsFetch(w http.ResponseWriter, r *htt
 			StableID:                    res.stable,
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // javaParseBinaryValue maps a binary generic assay value to a number as

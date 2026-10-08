@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -77,28 +78,28 @@ func namespaceRows(cols, scope string) string {
 
 // nsValue is JSON_UNQUOTE(JSON_EXTRACT(ANNOTATION_JSON, '$.outer.inner')):
 // strings unquoted, other JSON values (numbers, booleans, null) as written.
-func nsValue(a *sqlArgs, outer, inner string) string {
-	o, i := a.str(outer), a.str(inner)
+func nsValue(a *core.SQLArgs, outer, inner string) string {
+	o, i := a.Str(outer), a.Str(inner)
 	return fmt.Sprintf("if(JSONType(namespace_columns, %s, %s) = 'String', "+
 		"JSONExtractString(namespace_columns, %s, %s), JSONExtractRaw(namespace_columns, %s, %s))",
 		o, i, o, i, o, i)
 }
 
 // nsHas is JSON_EXTRACT(ANNOTATION_JSON, '$.outer.inner') IS NOT NULL.
-func nsHas(a *sqlArgs, outer, inner string) string {
-	return fmt.Sprintf("JSONHas(namespace_columns, %s, %s)", a.str(outer), a.str(inner))
+func nsHas(a *core.SQLArgs, outer, inner string) string {
+	return fmt.Sprintf("JSONHas(namespace_columns, %s, %s)", a.Str(outer), a.Str(inner))
 }
 
 // samplePairsScope restricts (study_id, sample_id) to the given samples.
-func samplePairsScope(a *sqlArgs, ids []identifier) string {
+func samplePairsScope(a *core.SQLArgs, ids []core.Identifier) string {
 	if len(ids) == 0 {
-		return falseClause
+		return core.FalseClause
 	}
 	pairs := make([][2]string, len(ids))
 	for i, id := range ids {
-		pairs[i] = [2]string{id.StudyID, id.id()}
+		pairs[i] = [2]string{id.StudyID, id.ID()}
 	}
-	return "(study_id, sample_id) IN " + a.pairs(pairs)
+	return "(study_id, sample_id) IN " + a.Pairs(pairs)
 }
 
 // mysqlJSONKeyLess orders object keys as MySQL stores them in a JSON column
@@ -119,10 +120,10 @@ func mysqlJSONKeyLess(a, b string) bool {
 // namespace is found whichever record carries it.
 func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
-	readBody(r, &studyIDs)
+	core.ReadBody(r, &studyIDs)
 	out := []NamespaceAttribute{}
 	if len(studyIDs) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	type keyRow struct {
@@ -135,7 +136,7 @@ func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request)
 			"SELECT t, namespace_columns, arrayJoin(JSONExtractKeys(namespace_columns)) AS outer FROM (%s))",
 		namespaceRows("namespace_columns", "study_id IN {studies:Array(String)}")), ch.Params{"studies": studyIDs})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -167,7 +168,7 @@ func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request)
 			out = append(out, NamespaceAttribute{OuterKey: o, InnerKey: i})
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // namespaceAttributeCountsFetch serves POST /api/namespace-attributes/counts/fetch:
@@ -175,16 +176,16 @@ func (s *State) namespaceAttributesFetch(w http.ResponseWriter, r *http.Request)
 // value in any of their records. Attributes no sample has are left out.
 func (s *State) namespaceAttributeCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
-		SampleIdentifiers   []identifier         `json:"sampleIdentifiers"`
+		SampleIdentifiers   []core.Identifier    `json:"sampleIdentifiers"`
 		NamespaceAttributes []NamespaceAttribute `json:"namespaceAttributes"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	out := []NamespaceAttributeCount{}
 	if len(f.SampleIdentifiers) == 0 || len(f.NamespaceAttributes) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	scope := samplePairsScope(args, f.SampleIdentifiers)
 	parts := make([]string, len(f.NamespaceAttributes))
 	for i, a := range f.NamespaceAttributes {
@@ -196,9 +197,9 @@ func (s *State) namespaceAttributeCountsFetch(w http.ResponseWriter, r *http.Req
 		A     int    `json:"a"`
 		Count uint64 `json:"count"`
 	}
-	rows, err := queryA[countRow](s.CH, "SELECT * FROM ("+strings.Join(parts, " UNION ALL ")+") ORDER BY a", args)
+	rows, err := core.QueryA[countRow](s.CH, "SELECT * FROM ("+strings.Join(parts, " UNION ALL ")+") ORDER BY a", args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	for _, row := range rows {
@@ -208,7 +209,7 @@ func (s *State) namespaceAttributeCountsFetch(w http.ResponseWriter, r *http.Req
 		a := f.NamespaceAttributes[row.A]
 		out = append(out, NamespaceAttributeCount{OuterKey: a.OuterKey, InnerKey: a.InnerKey, Count: row.Count})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // namespaceDataFilter is a study-view selection on a namespace attribute:
@@ -232,43 +233,43 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 			NamespaceDataFilters []namespaceDataFilter `json:"namespaceDataFilters"`
 		} `json:"studyViewFilter"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	type sample struct {
 		StudyID  string `json:"studyId"`
 		SampleID string `json:"sampleId"`
 	}
-	args := newArgs()
-	samples, err := queryA[sample](s.CH, fmt.Sprintf(
+	args := core.NewArgs()
+	samples, err := core.QueryA[sample](s.CH, fmt.Sprintf(
 		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM %s "+
 			"ORDER BY cancer_study_identifier, sample_stable_id", s.filterFrom(args, f.StudyViewFilter.studyViewFilter)), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	ids := make([]identifier, len(samples))
+	ids := make([]core.Identifier, len(samples))
 	for i, sm := range samples {
-		ids[i] = identifier{StudyID: sm.StudyID, SampleID: sm.SampleID}
+		ids[i] = core.Identifier{StudyID: sm.StudyID, SampleID: sm.SampleID}
 	}
 	if len(f.StudyViewFilter.NamespaceDataFilters) > 0 {
 		if ids, err = s.applyNamespaceDataFilters(ids, f.StudyViewFilter.NamespaceDataFilters); err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 	}
 	out := []*NamespaceDataCountItem{}
 	if len(ids) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	scope := samplePairsScope(args, ids)
 	for _, a := range f.Attributes {
-		counts, err := queryA[NamespaceDataCount](s.CH, fmt.Sprintf(
+		counts, err := core.QueryA[NamespaceDataCount](s.CH, fmt.Sprintf(
 			"SELECT value, uniqExact(study_id, sample_id) AS count, count() AS totalCount FROM (%s) "+
 				"WHERE has AND value != 'null' GROUP BY value ORDER BY value",
 			namespaceRows(fmt.Sprintf("study_id, sample_id, %s AS has, %s AS value",
 				nsHas(args, a.OuterKey, a.InnerKey), nsValue(args, a.OuterKey, a.InnerKey)), scope)), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		if len(counts) == 0 {
@@ -277,7 +278,7 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 		}
 		out = append(out, &NamespaceDataCountItem{OuterKey: a.OuterKey, InnerKey: a.InnerKey, Counts: counts})
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // applyNamespaceDataFilters ports StudyViewFilterApplier.filterNamespaceData:
@@ -285,11 +286,11 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 // the attribute is among them, or it has none and "NA" is selected. Each list
 // is applied to the full sample set; the first non-empty result seeds the
 // selection and later results are intersected with it.
-func (s *State) applyNamespaceDataFilters(ids []identifier, filters []namespaceDataFilter) ([]identifier, error) {
+func (s *State) applyNamespaceDataFilters(ids []core.Identifier, filters []namespaceDataFilter) ([]core.Identifier, error) {
 	if len(ids) == 0 {
 		return ids, nil
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	scope := samplePairsScope(args, ids)
 	type valueRow struct {
 		StudyID  string `json:"study_id"`
@@ -302,7 +303,7 @@ func (s *State) applyNamespaceDataFilters(ids []identifier, filters []namespaceD
 		if values[attr] != nil {
 			continue
 		}
-		rows, err := queryA[valueRow](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[valueRow](s.CH, fmt.Sprintf(
 			"SELECT DISTINCT study_id, sample_id, value FROM (%s) WHERE has",
 			namespaceRows(fmt.Sprintf("study_id, sample_id, %s AS has, %s AS value",
 				nsHas(args, nf.OuterKey, nf.InnerKey), nsValue(args, nf.OuterKey, nf.InnerKey)), scope)), args)
@@ -316,7 +317,7 @@ func (s *State) applyNamespaceDataFilters(ids []identifier, filters []namespaceD
 		}
 		values[attr] = m
 	}
-	var selected []identifier
+	var selected []core.Identifier
 	for _, nf := range filters {
 		byCase := values[nf.OuterKey+nf.InnerKey]
 		for _, list := range nf.Values {
@@ -326,7 +327,7 @@ func (s *State) applyNamespaceDataFilters(ids []identifier, filters []namespaceD
 					want[strings.ToUpper(*v.Value)] = true
 				}
 			}
-			var pass []identifier
+			var pass []core.Identifier
 			for _, id := range ids {
 				vals, ok := byCase[id.StudyID+"\x00"+id.SampleID]
 				hit := !ok && want["NA"]
@@ -341,7 +342,7 @@ func (s *State) applyNamespaceDataFilters(ids []identifier, filters []namespaceD
 				selected = pass
 				continue
 			}
-			keep := map[identifier]bool{}
+			keep := map[core.Identifier]bool{}
 			for _, id := range pass {
 				keep[id] = true
 			}
@@ -363,18 +364,18 @@ func (s *State) applyNamespaceDataFilters(ids []identifier, filters []namespaceD
 // that value, one entry per sample.
 func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
-		SampleIdentifiers  []identifier       `json:"sampleIdentifiers"`
+		SampleIdentifiers  []core.Identifier  `json:"sampleIdentifiers"`
 		NamespaceAttribute NamespaceAttribute `json:"namespaceAttribute"`
 		Values             []string           `json:"values"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	out := []NamespaceData{}
 	if len(f.SampleIdentifiers) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	a := f.NamespaceAttribute
-	args := newArgs()
+	args := core.NewArgs()
 	scope := samplePairsScope(args, f.SampleIdentifiers)
 	studies := make([]string, len(f.SampleIdentifiers))
 	for i, id := range f.SampleIdentifiers {
@@ -386,14 +387,14 @@ func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 		PatientID string `json:"patientId"`
 	}
 	for _, v := range f.Values {
-		rows, err := queryA[row](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 			"SELECT DISTINCT n.study_id AS studyId, n.sample_id AS sampleId, sm.patient_id AS patientId FROM (%s) n "+
 				"JOIN %s sm ON sm.study_id = n.study_id AND sm.sample_id = n.sample_id "+
 				"WHERE n.value = %s ORDER BY studyId, sampleId",
 			namespaceRows(fmt.Sprintf("study_id, sample_id, %s AS value", nsValue(args, a.OuterKey, a.InnerKey)), scope),
-			byStudies(studies).samples(args), args.str(v)), args)
+			core.ByStudies(studies).Samples(args), args.Str(v)), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for _, rw := range rows {
@@ -401,5 +402,5 @@ func (s *State) namespaceDataFetch(w http.ResponseWriter, r *http.Request) {
 				StudyID: rw.StudyID, PatientID: rw.PatientID, AttrValue: v})
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }

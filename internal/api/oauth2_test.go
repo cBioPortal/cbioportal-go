@@ -18,6 +18,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // fakeProvider is a minimal OpenID provider: discovery, JWKS, an authorize
@@ -48,13 +50,13 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/realms/cbio/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := p.URL + "/realms/cbio"
-		writeJSON(w, map[string]string{
+		core.WriteJSON(w, map[string]string{
 			"issuer": base, "authorization_endpoint": base + "/auth", "token_endpoint": base + "/token",
 			"userinfo_endpoint": base + "/userinfo", "jwks_uri": base + "/certs", "end_session_endpoint": base + "/logout",
 		})
 	})
 	mux.HandleFunc("/realms/cbio/certs", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"keys": []map[string]string{{
+		core.WriteJSON(w, map[string]any{"keys": []map[string]string{{
 			"kid": "k1", "kty": "RSA", "use": "sig", "alg": "RS256",
 			"n": base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
 			"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
@@ -81,7 +83,7 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		nonce, ok := p.codes[code]
 		if !ok || r.PostForm.Get("client_secret") != "secret" {
 			w.WriteHeader(http.StatusBadRequest)
-			writeJSON(w, map[string]string{"error": "invalid_grant"})
+			core.WriteJSON(w, map[string]string{"error": "invalid_grant"})
 			return
 		}
 		claims := map[string]any{
@@ -94,14 +96,14 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 		}
 		offline := "offline-" + code
 		p.offline[offline] = true
-		writeJSON(w, map[string]string{"access_token": "at", "id_token": p.sign(t, claims), "refresh_token": offline})
+		core.WriteJSON(w, map[string]string{"access_token": "at", "id_token": p.sign(t, claims), "refresh_token": offline})
 	})
 	mux.HandleFunc("/realms/cbio/userinfo", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer at" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		writeJSON(w, map[string]any{"sub": "u1", "email": "testuser@example.org"})
+		core.WriteJSON(w, map[string]any{"sub": "u1", "email": "testuser@example.org"})
 	})
 	p.Server = httptest.NewServer(mux)
 	t.Cleanup(p.Close)
@@ -112,7 +114,7 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 func (p *fakeProvider) refresh(t *testing.T, w http.ResponseWriter, form url.Values) {
 	if !p.offline[form.Get("refresh_token")] || form.Get("client_id") != "portal" || form.Get("client_secret") != "secret" {
 		w.WriteHeader(http.StatusBadRequest)
-		writeJSON(w, map[string]string{"error": "invalid_grant"})
+		core.WriteJSON(w, map[string]string{"error": "invalid_grant"})
 		return
 	}
 	p.refreshes++
@@ -124,7 +126,7 @@ func (p *fakeProvider) refresh(t *testing.T, w http.ResponseWriter, form url.Val
 	if p.tamperAccess != nil {
 		p.tamperAccess(claims)
 	}
-	writeJSON(w, map[string]string{"access_token": p.sign(t, claims), "refresh_token": form.Get("refresh_token")})
+	core.WriteJSON(w, map[string]string{"access_token": p.sign(t, claims), "refresh_token": form.Get("refresh_token")})
 }
 
 func (p *fakeProvider) sign(t *testing.T, claims map[string]any) string {
@@ -158,7 +160,7 @@ func loginPortal(t *testing.T, p *fakeProvider) *httptest.Server {
 	}
 	login := newOAuth2Login(cfg, nil)
 	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, _ := GetUser(r.Context())
+		u, _ := core.GetUser(r.Context())
 		r.ParseForm()
 		fmt.Fprintf(w, "%s %s user=%s roles=%s form=%s", r.Method, r.URL.Path, u.Name, strings.Join(u.Roles, ","), r.PostForm.Encode())
 	})

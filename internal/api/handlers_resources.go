@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -120,9 +121,9 @@ func queryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
 // existsIn reports whether a SELECT count() query, with placeholder values p,
 // returns a non-zero count.
 func (s *State) existsIn(sql string, p ch.Params) (bool, error) {
-	rows, err := cachedQueryP[struct {
+	rows, err := core.CachedQueryP[struct {
 		N uint64 `json:"n"`
-	}](s, sql, p)
+	}](s.State, sql, p)
 	if err != nil {
 		return false, err
 	}
@@ -133,7 +134,7 @@ func (s *State) existsIn(sql string, p ch.Params) (bool, error) {
 func (s *State) requireStudy(w http.ResponseWriter, r *http.Request, studyID string) bool {
 	ok, err := s.existsIn("SELECT count() AS n FROM cancer_study WHERE study_id = {study:String}", ch.Params{"study": studyID})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return false
 	}
 	if !ok {
@@ -155,14 +156,14 @@ func (s *State) writeResourceDefinitions(w http.ResponseWriter, r *http.Request,
 	rows, err := queryView[resourceDefinitionRow](s.CH,
 		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE "+where+tail, p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]ResourceDefinition, len(rows))
 	for i, r := range rows {
 		out[i] = r.model(projection)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // resourceDefinitionsInStudy — GET /api/studies/{studyId}/resource-definitions.
@@ -172,7 +173,7 @@ func (s *State) resourceDefinitionsInStudy(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.writeResourceDefinitions(w, r, "study_id = {study:String}", ch.Params{"study": studyID},
-		sqlPageOrder(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
+		core.SQLPageOrder(r, resourceDefinitionSort, "resource_id ASC"), projectionParam(r))
 }
 
 // resourceDefinitionInStudy — GET /api/studies/{studyId}/resource-definitions/{resourceId}
@@ -186,20 +187,20 @@ func (s *State) resourceDefinitionInStudy(w http.ResponseWriter, r *http.Request
 		"SELECT "+resourceDefinitionCols+" FROM resource_definition WHERE study_id = {study:String} AND resource_id = {resource:String} LIMIT 1",
 		ch.Params{"study": studyID, "resource": resourceID})
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
 		http.Error(w, fmt.Sprintf("resource definition not found: %s in %s", resourceID, studyID), http.StatusNotFound)
 		return
 	}
-	writeJSON(w, rows[0].model("DETAILED"))
+	core.WriteJSON(w, rows[0].model("DETAILED"))
 }
 
 // resourceDefinitionsFetch — POST /api/resource-definitions/fetch (body: study ids).
 func (s *State) resourceDefinitionsFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []string
-	readBody(r, &ids)
+	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
 		http.Error(w, "studyIds: size must be between 1 and 10000000", http.StatusBadRequest)
 		return
@@ -255,7 +256,7 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 	// storage order of resource_patient / resource_sample, i.e. by the
 	// internal id of the patient or sample.
 	join, tie := "", lvl.tieBreaker+" ASC"
-	if lvl.entity != "" && s.importOrdered() {
+	if lvl.entity != "" && s.ImportOrdered() {
 		join = fmt.Sprintf(" LEFT JOIN (SELECT %[1]s_id, min(internal_id) AS internal_id FROM %[1]s "+
 			"WHERE study_id = {study:String} GROUP BY %[1]s_id) io ON io.%[1]s_id = d.%[1]s_id", lvl.entity)
 		tie = "io.internal_id ASC, " + tie
@@ -276,10 +277,10 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 	for _, row := range rows {
 		d := ResourceData{StudyID: row.StudyID, ResourceID: row.ResourceID, PatientID: row.PatientID, SampleID: row.SampleID}
 		if row.SampleID != "" {
-			d.UniqueSampleKey = uniqueKey(row.StudyID, row.SampleID)
+			d.UniqueSampleKey = core.UniqueKey(row.StudyID, row.SampleID)
 		}
 		if row.PatientID != "" {
-			d.UniquePatientKey = uniqueKey(row.StudyID, row.PatientID)
+			d.UniquePatientKey = core.UniqueKey(row.StudyID, row.PatientID)
 		}
 		url := row.URL
 		d.URL = &url
@@ -306,7 +307,7 @@ func (s *State) writeResourceData(w http.ResponseWriter, r *http.Request, levels
 	for _, lvl := range levels {
 		rows, err := s.fetchResourceData(r, lvl, studyID, "")
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		out = append(out, rows...)
@@ -320,14 +321,14 @@ func (s *State) writeResourceData(w http.ResponseWriter, r *http.Request, levels
 // reading. ResourceDataSortBy's ResourceId sorts by the resourceId field.
 func writeResourcePage(w http.ResponseWriter, r *http.Request, rows []ResourceData) {
 	id := projectionParam(r) == "ID"
-	keyed := claimKeyedPage(r)
+	keyed := core.ClaimKeyedPage(r)
 	if keyed == nil {
 		if id {
 			for i := range rows {
 				rows[i].URL = nil
 			}
 		}
-		writeJSON(w, rows)
+		core.WriteJSON(w, rows)
 		return
 	}
 	for _, d := range rows {
@@ -335,12 +336,12 @@ func writeResourcePage(w http.ResponseWriter, r *http.Request, rows []ResourceDa
 		if id {
 			d.URL = nil
 		}
-		if err := keyed.add(key, d); err != nil {
-			fail(w, r, err)
+		if err := keyed.Add(key, d); err != nil {
+			core.Fail(w, r, err)
 			return
 		}
 	}
-	writeJSON(w, keyed.rows())
+	core.WriteJSON(w, keyed.Rows())
 }
 
 // studyResourceData — GET /api/studies/{studyId}/resource-data (study-level resources).
@@ -361,9 +362,9 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := ch.Params{}
-	ok, err := s.existsIn("SELECT count() AS n FROM "+byPatient(studyID, patientID).from(paramsBinder(p), tPatient), p)
+	ok, err := s.existsIn("SELECT count() AS n FROM "+core.ByPatient(studyID, patientID).From(core.ParamsBinder(p), core.TPatient), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if !ok {
@@ -372,7 +373,7 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.fetchResourceData(r, patientResources, studyID, patientID)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	writeResourcePage(w, r, rows)
@@ -385,9 +386,9 @@ func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := ch.Params{}
-	ok, err := s.existsIn("SELECT count() AS n FROM "+bySample(studyID, sampleID).from(paramsBinder(p), tSample), p)
+	ok, err := s.existsIn("SELECT count() AS n FROM "+core.BySample(studyID, sampleID).From(core.ParamsBinder(p), core.TSample), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if !ok {
@@ -396,7 +397,7 @@ func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.fetchResourceData(r, sampleResources, studyID, sampleID)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	writeResourcePage(w, r, rows)

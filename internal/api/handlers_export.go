@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/databin"
 	"github.com/cbioportal/cbioportal-go/internal/transform"
@@ -43,12 +44,12 @@ func (s *State) routeExport(mux *http.ServeMux) {
 func (s *State) exportStudy(w http.ResponseWriter, r *http.Request) {
 	studyID, ok := strings.CutSuffix(r.PathValue("file"), ".zip")
 	if s.Props["feature.study.export"] != "true" || !ok || studyID == "" {
-		s.catchAll(w, r)
+		s.CatchAll(w, r)
 		return
 	}
 	meta, err := s.exportStudyMetadata(studyID)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if meta == nil {
@@ -65,7 +66,7 @@ func (s *State) exportStudy(w http.ResponseWriter, r *http.Request) {
 			// The zip is corrupted on purpose, as Java's
 			// ZipOutputStreamWriterService.fail does; the error itself goes
 			// to the server log only.
-			logServerError(r, "study export failed", err)
+			core.LogServerError(r, "study export failed", err)
 			bw.WriteString("ERROR: study export failed")
 			bw.Flush()
 			return
@@ -226,7 +227,7 @@ func (s *State) exportStudyMetadata(studyID string) (*exportStudyMeta, error) {
 }
 
 // hasRaw reports whether the raw staging database holds table.
-func (e *studyExport) hasRaw(table string) bool { return len(e.s.rawColumns(table)) > 0 }
+func (e *studyExport) hasRaw(table string) bool { return len(e.s.RawColumns(table)) > 0 }
 
 func (e *studyExport) loadCases() error {
 	if e.loaded {
@@ -248,19 +249,19 @@ func (e *studyExport) loadCases() error {
 	if e.hasRaw("clinical_sample") && e.hasRaw("clinical_patient") {
 		samples, err = ch.QueryP[sampleRow](e.s.CH,
 			"SELECT sample_id, patient_id FROM cbioportal_raw.clinical_sample WHERE study_id = {study:String} AND sample_id != '' ORDER BY "+
-				e.s.rawFileOrder("clinical_sample", ""), p)
+				e.s.RawFileOrder("clinical_sample", ""), p)
 		if err == nil {
 			patients, err = ch.QueryP[patientRow](e.s.CH,
 				"SELECT patient_id FROM cbioportal_raw.clinical_patient WHERE study_id = {study:String} AND patient_id != '' ORDER BY "+
-					e.s.rawFileOrder("clinical_patient", ""), p)
+					e.s.RawFileOrder("clinical_patient", ""), p)
 		}
 	} else {
-		sc := byStudy(e.studyID)
+		sc := core.ByStudy(e.studyID)
 		samples, err = ch.QueryP[sampleRow](e.s.CH,
-			"SELECT sample_id, patient_id FROM "+sc.from(paramsBinder(p), tSample)+" ORDER BY sample_id", p)
+			"SELECT sample_id, patient_id FROM "+sc.From(core.ParamsBinder(p), core.TSample)+" ORDER BY sample_id", p)
 		if err == nil {
 			patients, err = ch.QueryP[patientRow](e.s.CH,
-				"SELECT patient_id FROM "+sc.from(paramsBinder(p), tPatient)+" ORDER BY patient_id", p)
+				"SELECT patient_id FROM "+sc.From(core.ParamsBinder(p), core.TPatient)+" ORDER BY patient_id", p)
 		}
 	}
 	if err != nil {
@@ -322,7 +323,7 @@ func javaGroups(groups string) string {
 	if groups == "" {
 		return ""
 	}
-	parts := javaSplit(strings.ToUpper(groups), ";")
+	parts := core.JavaSplit(strings.ToUpper(groups), ";")
 	capacity := 16
 	if need := int(float32(len(parts))/0.75) + 1; need > capacity {
 		for capacity < need {
@@ -337,7 +338,7 @@ func javaGroups(groups string) string {
 			continue
 		}
 		seen[g] = true
-		i := javaSpread(javaStringHash(g)) & int32(capacity-1)
+		i := core.JavaSpread(core.JavaStringHash(g)) & int32(capacity-1)
 		buckets[i] = append(buckets[i], g)
 		n++
 	}
@@ -556,7 +557,7 @@ var fileNameUnsafe = regexp.MustCompile(`[ \\/:*?"<>|]`)
 // clinical-events attributes (timelineSelect), so a staged file's headers
 // come back as written.
 func (e *studyExport) clinicalTimeline() error {
-	cols := e.s.rawColumns("timeline")
+	cols := e.s.RawColumns("timeline")
 	if len(cols) == 0 {
 		return nil
 	}
@@ -565,7 +566,7 @@ func (e *studyExport) clinicalTimeline() error {
 	}
 	sel, order := e.s.timelineSelect()
 	if order == "" && slices.Contains(cols, "source_file") {
-		order = "source_file, " + e.s.rawFileOrder("timeline", "")
+		order = "source_file, " + e.s.RawFileOrder("timeline", "")
 	} else if order == "" {
 		order = "patientId, startDate, eventType"
 	}
@@ -701,7 +702,7 @@ func (e *studyExport) maf(alterationType, table string) error {
 	if err != nil || len(profiles) == 0 {
 		return err
 	}
-	cols := e.s.rawColumns(table)
+	cols := e.s.RawColumns(table)
 	has := make(map[string]bool, len(cols))
 	for _, c := range cols {
 		has[c] = true
@@ -737,9 +738,9 @@ func (e *studyExport) maf(alterationType, table string) error {
 			if !known[r["tumor_sample_barcode"]] {
 				continue
 			}
-			na := func(k string) string { return naString(r[k]) }
+			na := func(k string) string { return core.NAString(r[k]) }
 			count := func(k string) string {
-				if v := javaCount(r[k]); v != nil {
+				if v := core.JavaCount(r[k]); v != nil {
 					return strconv.FormatInt(*v, 10)
 				}
 				return ""
@@ -807,7 +808,7 @@ func (e *studyExport) structuralVariants() error {
 				"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 				"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 				"WHERE sv.study_id = {study:String} AND sv.profile_stable_id = {profile:String} ORDER BY sampleId, site1HugoSymbol, site2HugoSymbol",
-			strings.Join(cols, ", "), svSiteEntrezSQL, byStudy(e.studyID).samples(paramsBinder(params))), params)
+			strings.Join(cols, ", "), svSiteEntrezSQL, core.ByStudy(e.studyID).Samples(core.ParamsBinder(params))), params)
 		if err != nil {
 			return err
 		}
@@ -860,7 +861,7 @@ func stableSampleID(barcode string) string {
 	} else if strings.Contains(clean, "Normal") {
 		clean = strings.ReplaceAll(clean, "Normal", "11")
 	}
-	parts := javaSplit(clean, "-")
+	parts := core.JavaSplit(clean, "-")
 	if len(parts) < 4 {
 		return barcode + "-01"
 	}
@@ -899,7 +900,7 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 	for i := range profiles {
 		p := &profiles[i]
 		long := p.Datatype == "DISCRETE_LONG"
-		table := alterationTypeTable(alterationType)
+		table := core.AlterationTypeTable(alterationType)
 		if long {
 			table = "cna_discrete_long"
 		}
@@ -919,7 +920,7 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 				"ON gk.hugo_symbol = t.hugo_symbol AND gk.entrez_gene_id = t.entrez_gene_id "+
 				"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = gk.resolved_entrez_gene_id "+
 				"ORDER BY t.ord",
-			missingGeneKeyColumns(e.s.rawColumns(table)), e.s.rawFileOrder(table, ""), table, table),
+			missingGeneKeyColumns(e.s.RawColumns(table)), e.s.RawFileOrder(table, ""), table, table),
 			ch.Params{"study": e.studyID, "profile": p.StableID})
 		if err != nil {
 			return err
@@ -1024,7 +1025,7 @@ func (e *studyExport) matrixHeader(stableID string, known map[string]bool) ([]st
 	}
 	rows, err := ch.QueryP[row](e.s.CH,
 		"SELECT sample_id FROM cbioportal_raw.profile_sample WHERE study_id = {study:String} AND profile_stable_id = {profile:String} "+
-			"AND kind = 'header' ORDER BY "+e.s.rawFileOrder("profile_sample", ""), ch.Params{"study": e.studyID, "profile": stableID})
+			"AND kind = 'header' ORDER BY "+e.s.RawFileOrder("profile_sample", ""), ch.Params{"study": e.studyID, "profile": stableID})
 	if err != nil {
 		return nil, err
 	}
@@ -1089,7 +1090,7 @@ func (e *studyExport) copyNumberSegments() error {
 	}
 	rows, err := ch.QueryP[segRow](e.s.CH,
 		"SELECT id, chrom, loc_start, loc_end, num_mark, seg_mean FROM cbioportal_raw.cna_seg WHERE study_id = {study:String} ORDER BY "+
-			e.s.rawFileOrder("cna_seg", ""), ch.Params{"study": e.studyID})
+			e.s.RawFileOrder("cna_seg", ""), ch.Params{"study": e.studyID})
 	if err != nil {
 		return err
 	}
@@ -1218,10 +1219,10 @@ func (e *studyExport) caseLists() error {
 		SampleID    string `json:"sample_id"`
 	}
 	p := ch.Params{}
-	sc := byStudy(e.studyID)
+	sc := core.ByStudy(e.studyID)
 	rows, err := ch.QueryP[row](e.s.CH,
 		"SELECT DISTINCT sl.list_id AS list_id, sl.name AS name, sl.description AS description, sl.sample_id AS sample_id "+
-			"FROM "+sc.rows(paramsBinder(p), tSampleList)+" sl INNER JOIN "+sc.samples(paramsBinder(p))+
+			"FROM "+sc.Rows(core.ParamsBinder(p), core.TSampleList)+" sl INNER JOIN "+sc.Samples(core.ParamsBinder(p))+
 			" s ON s.study_id = sl.study_id AND s.sample_id = sl.sample_id ORDER BY list_id, sample_id", p)
 	if err != nil {
 		return err

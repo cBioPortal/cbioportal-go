@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 func TestJavaGroups(t *testing.T) {
@@ -56,7 +58,7 @@ func TestLongMatrixSamples(t *testing.T) {
 
 // Without feature.study.export the path is not an export endpoint.
 func TestExportDisabled(t *testing.T) {
-	s := &State{}
+	s := &State{State: &core.State{}}
 	mux := http.NewServeMux()
 	s.routes(mux)
 	w := httptest.NewRecorder()

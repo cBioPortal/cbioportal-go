@@ -4,47 +4,18 @@
 package api
 
 import (
-	"bufio"
-	"bytes"
-	"compress/gzip"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"html"
-	"io"
 	"log"
-	"log/slog"
-	"maps"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
+// State is the API's state: the handlers' core.State plus the login.
 type State struct {
-	CH           *ch.Client
-	sessions     sessionStore
-	sessionsOnce sync.Once
-	meta         metaCache
-	// frontend serves every non-API path — a built frontend (FRONTEND_DIR) or a
-	// proxied dev server (FRONTEND_URL) — so the portal UI and the API share one
-	// origin as in a cBioPortal deployment.
-	frontend http.Handler
-	// mux is the route table, consulted by the catch-all to tell an unknown
-	// path from a known one requested with an unsupported method.
-	mux *http.ServeMux
-	// Props are the portal properties (skin.*, priority_studies, …) the
-	// frontend configuration is built from. PropsReplaceDefaults is set when
-	// they come from a properties file, which replaces the stock defaults as
-	// a mounted application.properties does for the Java portal.
-	Props                map[string]string
-	PropsReplaceDefaults bool
+	*core.State
 	// login is the OAuth2 login (authenticate=oauth2 or optional_oauth2) and
 	// access its study authorization; nil login serves every study
 	// anonymously.
@@ -52,9 +23,16 @@ type State struct {
 	access accessPolicy
 	// dat serves and verifies data access tokens (dat.method=oauth2).
 	dat *datProvider
-	// llmsTxt caches the llms_txt.location file /llms.txt serves.
-	llmsTxt llmsTxtCache
 }
+
+// NewState returns the API state over ClickHouse client c; ConfigureAuth and
+// ConfigureSessions apply the portal properties.
+func NewState(c *ch.Client) *State {
+	return &State{State: core.NewState(c)}
+}
+
+// MetricsHandler serves the Prometheus metrics.
+func MetricsHandler() http.Handler { return core.MetricsHandler() }
 
 // ConfigureAuth sets up the login and study authorization the portal
 // properties ask for.
@@ -84,6 +62,7 @@ func (s *State) ConfigureAuth() error {
 		return err
 	}
 	s.login = newOAuth2Login(cfg, store)
+	s.AuthMethod = cfg.Method
 	s.access = newAccessPolicy(props)
 	s.access.anonymous = cfg.optional()
 	for _, reg := range cfg.Registrations {
@@ -105,18 +84,6 @@ func (s *State) ConfigureAuth() error {
 	return nil
 }
 
-// NewState returns the API state over ClickHouse client c; ConfigureAuth and
-// ConfigureSessions apply the portal properties.
-func NewState(c *ch.Client) *State {
-	s := &State{CH: c}
-	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
-		s.frontend = spaHandler(dir)
-	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {
-		s.frontend = httputil.NewSingleHostReverseProxy(u)
-	}
-	return s
-}
-
 // NewRouter builds the API handler with CORS, the OAuth2 login, data access
 // tokens and study authorization (authenticate=oauth2), optional HS256
 // bearer-token auth (disabled by default), Java's trailing-slash matching
@@ -129,441 +96,12 @@ func NewRouter(s *State) http.Handler {
 	if s.login != nil {
 		authCfg.DefaultUser = "" // users log in
 	}
-	h := auth(authCfg, s.studyAvailability(s.extraEndpoints(uninterceptedFetch(studyViewBodyErrors(s.javaContract(pageList(metaProjection(bodyErrors(mux)))))))))
+	h := auth(authCfg, s.StudyAvailability(core.ExtraEndpoints(s.studiesMeta, core.UninterceptedFetch(core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
 	if s.login != nil {
 		if s.login.cfg.MethodAuthorization {
 			h = s.studyAccess(s.access, h)
 		}
 		h = s.login.middleware(h)
 	}
-	return s.observe(javaFirewall(cors(gzipResponse(gunzipBody(s.trailingSlash(h))))))
+	return s.Observe(core.JavaFirewall(core.CORS(core.GzipResponse(core.GunzipBody(s.TrailingSlash(h))))))
 }
-
-// gunzipBody transparently decompresses gzip-encoded request bodies. The
-// frontend sends large POST bodies (e.g. patients/fetch with hundreds of
-// unique keys) gzip-compressed when enable_request_body_gzip_compression is on;
-// Spring decompresses these automatically, so we must too or the JSON decode
-// silently yields an empty filter.
-func gunzipBody(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil && strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
-			zr, err := gzip.NewReader(r.Body)
-			if err == nil {
-				r.Body = gzipBody{zr, r.Body}
-				r.Header.Del("Content-Encoding")
-				r.ContentLength = -1
-			}
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// gzipBody couples the gzip reader to the underlying body so both close.
-type gzipBody struct {
-	*gzip.Reader
-	orig io.ReadCloser
-}
-
-func (g gzipBody) Close() error {
-	g.Reader.Close()
-	return g.orig.Close()
-}
-
-// cors adds permissive CORS and answers preflight requests.
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "*")
-		h.Set("Access-Control-Expose-Headers", "*")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// ---- helpers ----
-
-func writeJSON(w http.ResponseWriter, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
-}
-
-// jsonArray writes a JSON array element by element, byte for byte as
-// writeJSON writes the whole slice. Nothing is sent before the first element,
-// so an error until then still answers as fail does.
-type jsonArray struct {
-	w   http.ResponseWriter
-	r   *http.Request
-	bw  *bufio.Writer
-	buf bytes.Buffer
-	enc *json.Encoder
-}
-
-func newJSONArray(w http.ResponseWriter, r *http.Request) *jsonArray {
-	a := &jsonArray{w: w, r: r}
-	a.enc = json.NewEncoder(&a.buf)
-	return a
-}
-
-func (a *jsonArray) add(v any) error {
-	a.buf.Reset()
-	if err := a.enc.Encode(v); err != nil {
-		return err
-	}
-	if a.bw == nil {
-		a.w.Header().Set("Content-Type", "application/json")
-		a.bw = bufio.NewWriterSize(a.w, 64<<10)
-		a.bw.WriteByte('[')
-	} else {
-		a.bw.WriteByte(',')
-	}
-	_, err := a.bw.Write(a.buf.Bytes()[:a.buf.Len()-1]) // without Encode's newline
-	return err
-}
-
-// finish ends the array, or reports err: as fail before the first element,
-// by aborting the response after it.
-func (a *jsonArray) finish(err error) {
-	switch {
-	case err != nil && a.bw == nil:
-		fail(a.w, a.r, err)
-	case err != nil:
-		logServerError(a.r, "streamed response aborted", err)
-		panic(http.ErrAbortHandler)
-	case a.bw == nil:
-		writeJSON(a.w, []struct{}{})
-	default:
-		a.bw.WriteString("]\n")
-		a.bw.Flush()
-	}
-}
-
-// fail answers an unexpected internal error as Java does, with Spring
-// Boot's generic 500: the error itself (SQL, database names, driver text)
-// goes to the server log only.
-func fail(w http.ResponseWriter, r *http.Request, err error) {
-	logServerError(r, "internal server error", err)
-	springError(w, r, http.StatusInternalServerError)
-}
-
-// logServerError logs an internal error of the request r.
-func logServerError(r *http.Request, msg string, err error) {
-	slog.Error(msg, slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
-}
-
-// sqlLit and inList write values into SQL text as escaped string literals,
-// for values chosen by code (database and table names, constant lists, column
-// headers of loaded files). Request values go to ClickHouse as query
-// parameters (sqlArgs, ch.QueryP, cachedQueryP).
-func sqlLit(s string) string { return ch.SQLLit(s) }
-
-func inList(values []string) string {
-	q := make([]string, len(values))
-	for i, v := range values {
-		q[i] = "'" + sqlLit(v) + "'"
-	}
-	return strings.Join(q, ", ")
-}
-
-// metaProjection implements projection=META for every list endpoint: the
-// handler's JSON array is replaced by a total-count header with its length.
-// Handlers that set total-count themselves are passed through.
-func metaProjection(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.EqualFold(r.URL.Query().Get("projection"), "META") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		rec := &metaCounter{header: http.Header{}, status: http.StatusOK}
-		defer rec.close()
-		next.ServeHTTP(rec, r)
-		n, samples, ok := rec.count()
-		if rec.err != nil {
-			fail(w, r, rec.err)
-			return
-		}
-		maps.Copy(w.Header(), rec.header)
-		if !ok {
-			w.WriteHeader(rec.status)
-			w.Write(rec.raw.Bytes())
-			return
-		}
-		w.Header().Del("Content-Type")
-		w.Header().Del("Content-Length")
-		w.Header().Set("total-count", fmt.Sprint(n))
-		// Mutation META also reports the distinct samples (MutationMeta);
-		// no other endpoint sets sample-count.
-		if strings.Contains(r.URL.Path, "/mutations") {
-			w.Header().Set("sample-count", fmt.Sprint(samples))
-		}
-		w.WriteHeader(http.StatusOK)
-	})
-}
-
-// writeMetaCount answers projection=META with the record count sql reads (a
-// row with n) as the total-count header, as metaProjection would count the
-// records. p holds sql's placeholder values.
-func writeMetaCount(w http.ResponseWriter, r *http.Request, c *ch.Client, sql string, p ch.Params) {
-	rows, err := ch.QueryP[struct {
-		N uint64 `json:"n"`
-	}](c, sql, p)
-	if err != nil {
-		fail(w, r, err)
-		return
-	}
-	var n uint64
-	if len(rows) > 0 {
-		n = rows[0].N
-	}
-	w.Header().Set("total-count", fmt.Sprint(n))
-	w.WriteHeader(http.StatusOK)
-}
-
-// metaCounter receives a handler's response for metaProjection. A successful
-// JSON array of objects without a total-count header is counted as it is
-// written (its elements and their distinct uniqueSampleKeys) and not kept, so
-// counting a large list costs no more memory than one element; any other
-// response is kept in raw to be passed on as it is.
-type metaCounter struct {
-	header   http.Header
-	status   int
-	raw      bytes.Buffer
-	counting bool
-	err      error // counting failed
-	pw       *io.PipeWriter
-	done     chan metaCount
-}
-
-type metaCount struct {
-	n, samples int
-	err        error
-}
-
-func (m *metaCounter) Header() http.Header { return m.header }
-
-func (m *metaCounter) WriteHeader(code int) {
-	if m.raw.Len() == 0 && !m.counting {
-		m.status = code
-	}
-}
-
-func (m *metaCounter) Write(p []byte) (int, error) {
-	if m.counting {
-		return m.pw.Write(p)
-	}
-	m.raw.Write(p)
-	if m.status == http.StatusOK && m.header.Get("total-count") == "" && objectArrayStart(m.raw.Bytes()) {
-		m.counting = true
-		pr, pw := io.Pipe()
-		m.pw, m.done = pw, make(chan metaCount, 1)
-		go countArray(pr, m.done)
-		_, err := pw.Write(m.raw.Bytes())
-		m.raw.Reset()
-		if err != nil {
-			return 0, err
-		}
-	}
-	return len(p), nil
-}
-
-// count reports the array's length and distinct sample keys; ok is false
-// when raw holds the response to pass on instead: a response that is no
-// array, or a counted array that failed to decode (no longer held, it
-// answers 500).
-func (m *metaCounter) count() (n, samples int, ok bool) {
-	if !m.counting {
-		if m.status != http.StatusOK || m.header.Get("total-count") != "" {
-			return 0, 0, false
-		}
-		var items []struct {
-			UniqueSampleKey string `json:"uniqueSampleKey"`
-		}
-		if json.Unmarshal(m.raw.Bytes(), &items) != nil {
-			return 0, 0, false
-		}
-		samples := map[string]bool{}
-		for _, it := range items {
-			if it.UniqueSampleKey != "" {
-				samples[it.UniqueSampleKey] = true
-			}
-		}
-		return len(items), len(samples), true
-	}
-	m.pw.Close()
-	c := <-m.done
-	if c.err != nil {
-		m.err = fmt.Errorf("projection=META: counting the response: %w", c.err)
-		return 0, 0, false
-	}
-	return c.n, c.samples, true
-}
-
-// close ends the counting of a handler that stopped writing early (an
-// aborted response).
-func (m *metaCounter) close() {
-	if m.pw != nil {
-		m.pw.Close()
-	}
-}
-
-// objectArrayStart reports whether b begins a JSON array whose first token
-// after '[' is an object or the closing bracket.
-func objectArrayStart(b []byte) bool {
-	b = bytes.TrimLeft(b, " \t\r\n")
-	if len(b) == 0 || b[0] != '[' {
-		return false
-	}
-	b = bytes.TrimLeft(b[1:], " \t\r\n")
-	return len(b) > 0 && (b[0] == '{' || b[0] == ']')
-}
-
-// countArray decodes a JSON array of objects from r element by element,
-// then drains r.
-func countArray(r *io.PipeReader, done chan<- metaCount) {
-	var c metaCount
-	defer func() {
-		io.Copy(io.Discard, r)
-		done <- c
-	}()
-	dec := json.NewDecoder(r)
-	if _, c.err = dec.Token(); c.err != nil {
-		return
-	}
-	samples := map[string]bool{}
-	for dec.More() {
-		var it struct {
-			UniqueSampleKey string `json:"uniqueSampleKey"`
-		}
-		if c.err = dec.Decode(&it); c.err != nil {
-			return
-		}
-		c.n++
-		if it.UniqueSampleKey != "" {
-			samples[it.UniqueSampleKey] = true
-		}
-	}
-	if _, c.err = dec.Token(); c.err != nil {
-		return
-	}
-	c.samples = len(samples)
-}
-
-type bufferedResponse struct {
-	header http.Header
-	body   bytes.Buffer
-	status int
-}
-
-func (b *bufferedResponse) Header() http.Header         { return b.header }
-func (b *bufferedResponse) Write(p []byte) (int, error) { return b.body.Write(p) }
-func (b *bufferedResponse) WriteHeader(code int)        { b.status = code }
-
-// spaHandler serves a built frontend: existing files as-is, every other path
-// (client-side routes such as /results or /patient) as index.html.
-func spaHandler(dir string) http.Handler {
-	files := newStaticFiles(dir)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			files.serve(w, r, p, st)
-			return
-		}
-		page, err := os.ReadFile(filepath.Join(dir, "index.html"))
-		if err != nil {
-			http.Error(w, "frontend index.html missing", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Write(withFrontendConfig(page, r.Host))
-	})
-}
-
-// withFrontendConfig sets window.frontendConfig in the frontend's index page
-// as the portal's index template does, pointing the app at this origin.
-func withFrontendConfig(page []byte, host string) []byte {
-	cfg, _ := json.Marshal(map[string]string{
-		"configurationServiceUrl": "//" + host + "/config_service",
-		"apiRoot":                 "//" + host + "/",
-		"baseUrl":                 host,
-		"basePath":                "",
-		"frontendUrl":             "//" + host + "/",
-	})
-	script := []byte("<script>window.frontendConfig = Object.assign(window.frontendConfig || {}, " + string(cfg) + ");</script>" + devModeScript)
-	if i := bytes.Index(page, []byte("</head>")); i >= 0 {
-		page = append(append(append([]byte{}, page[:i]...), script...), page[i:]...)
-	} else {
-		page = append(script, page...)
-	}
-	page = withSiteBanner(page, os.Getenv("SITE_BANNER"), os.Getenv("SITE_BANNER_LINK"))
-	// An element after #reactRoot keeps it from being the body's last child:
-	// otherwise every node the frontend appends to the body to measure text
-	// flips :last-child matching and restyles the whole app.
-	if i := bytes.Index(page, []byte("</body>")); i >= 0 {
-		page = append(append(append([]byte{}, page[:i]...), "<script></script>"...), page[i:]...)
-	}
-	return page
-}
-
-// withSiteBanner puts a notice bar (e.g. "experimental preview") at the top
-// of the page body, above the app, when text is set; link, if set, is
-// appended as a link. It is part of the document flow, so it never covers the
-// portal header.
-func withSiteBanner(page []byte, text, link string) []byte {
-	if text == "" {
-		return page
-	}
-	i := bytes.Index(page, []byte("<body"))
-	if i < 0 {
-		return page
-	}
-	j := bytes.IndexByte(page[i:], '>')
-	if j < 0 {
-		return page
-	}
-	at := i + j + 1
-	banner := `<div id="site-banner" style="background:#fcf8e3;border-bottom:1px solid #faebcc;color:#8a6d3b;` +
-		`padding:6px 12px;text-align:center;font-size:13px;line-height:1.4">` + html.EscapeString(text)
-	if link != "" {
-		banner += ` <a href="` + html.EscapeString(link) + `" style="color:#66512c;text-decoration:underline">` +
-			html.EscapeString(link) + `</a>`
-	}
-	banner += `</div>`
-	return append(append(append([]byte{}, page[:at]...), banner...), page[at:]...)
-}
-
-// devModeScript mirrors the Java portal page (index.html + load-frontend.js):
-// ?localdev=true / ?localdist=true are remembered in localStorage and, as in
-// dev mode there, a dismissible "dev mode" banner is added to the body. The
-// bundle is always served from this origin.
-const devModeScript = `<script>
-if (/localdev=true/.test(window.location.href)) { localStorage.setItem("localdev", "true"); }
-if (/localdist=true/.test(window.location.href)) { localStorage.setItem("localdist", "true"); }
-window.localdev = localStorage.localdev === "true";
-window.localdist = localStorage.localdist === "true";
-window.netlify = localStorage.netlify;
-if (window.localdev || window.localdist || window.netlify) {
-  localStorage.setItem("e2etest", "true");
-  window.clearDevState = function () {
-    localStorage.removeItem("localdev");
-    localStorage.removeItem("localdist");
-    localStorage.removeItem("netlify");
-    window.location.reload();
-  };
-  document.addEventListener("DOMContentLoaded", function () {
-    var d = document.createElement("div");
-    d.setAttribute("class", "local-dev-banner");
-    d.setAttribute("style", "position: fixed; z-index:100; top: 0; left: 0; width: 100%");
-    document.body.appendChild(d);
-    d.innerHTML = '<div style=""><div class="alert alert-warning">' +
-      '<button type="button" class="close" data-dismiss="alert">&times;</button>' +
-      'cbioportal-frontend dev mode, using ' + window.frontendConfig.frontendUrl +
-      '&nbsp;<a href="" onclick="javascript:clearDevState();window.location.reload()">clear</a></div></div>';
-    d.onclick = function () { document.body.removeChild(this); };
-  });
-}
-</script>`

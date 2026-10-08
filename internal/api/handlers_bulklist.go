@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -25,21 +26,6 @@ func (s *State) routeBulkList(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sample-lists/{sampleListId}/sample-ids", s.sampleListSampleIDs)
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}", s.sampleInStudy)
 	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/copy-number-segments", s.sampleCopyNumberSegments)
-
-	if s.dat != nil {
-		s.routeDataAccessTokens(mux, s.dat)
-		return
-	}
-	// Data-access tokens without dat.method=oauth2: placeholders.
-	mux.HandleFunc("GET /api/data-access-token", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
-	mux.HandleFunc("GET /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, []any{}) })
-	mux.HandleFunc("POST /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {
-		readBody(r, nil)
-		writeJSON(w, map[string]any{})
-	})
-	mux.HandleFunc("DELETE /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {})
-	mux.HandleFunc("GET /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, map[string]any{}) })
-	mux.HandleFunc("DELETE /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) {})
 }
 
 // ---------- Bulk samples ----------
@@ -60,24 +46,24 @@ func toFullSample(r sampleFullRow) Sample {
 	return Sample{
 		SampleID: r.SampleID, SampleType: r.SampleType, PatientID: r.PatientID, StudyID: r.StudyID,
 		Sequenced: r.SequencedFlag != 0, CopyNumberSegmentPresent: r.SegFlag != 0,
-		UniqueSampleKey: uniqueKey(r.StudyID, r.SampleID), UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
+		UniqueSampleKey: core.UniqueKey(r.StudyID, r.SampleID), UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID),
 	}
 }
 
 // sampleFullSelect builds the sample rows of the scope plus sampleType /
 // sequenced / seg flags, for the given WHERE predicate over alias `s`.
-func sampleFullSelect(b binder, sc scope, where string) string {
+func sampleFullSelect(b core.Binder, sc core.Scope, where string) string {
 	return sampleFullSelectFrom(b, sc, where) + " ORDER BY " + sampleDefaultOrder
 }
 
 const sampleDefaultOrder = "s.study_id, s.sample_id"
 
 // sampleFullSelectFrom is sampleFullSelect without its ORDER BY.
-func sampleFullSelectFrom(b binder, sc scope, where string) string {
+func sampleFullSelectFrom(b core.Binder, sc core.Scope, where string) string {
 	return "SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId, " +
 		"ifNull(sd.sample_type, '') AS sampleType, toUInt8(ifNull(sd.sequenced, 0)) AS sequencedFlag, " +
 		"toUInt8(ifNull(sd.copy_number_segment_present, 0)) AS segFlag " +
-		"FROM " + sc.samples(b) + " s LEFT JOIN " + sc.cases().rows(b, tSampleDerived) +
+		"FROM " + sc.Samples(b) + " s LEFT JOIN " + sc.Cases().Rows(b, core.TSampleDerived) +
 		" sd ON sd.cancer_study_identifier = s.study_id AND sd.sample_stable_id = s.sample_id " +
 		"WHERE " + where
 }
@@ -88,16 +74,16 @@ var sampleSortable = map[string]string{"sampleId": "sampleId", "sampleType": "sa
 
 // writeSampleRows streams the samples sql selects, or counts them for
 // projection=META.
-func (s *State) writeSampleRows(w http.ResponseWriter, r *http.Request, sql string, args *sqlArgs) {
-	if projectionOf(r) == "META" {
-		writeMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", args.params(sql))
+func (s *State) writeSampleRows(w http.ResponseWriter, r *http.Request, sql string, args *core.SQLArgs) {
+	if core.ProjectionOf(r) == "META" {
+		core.WriteMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", args.Params(sql))
 		return
 	}
-	out := newJSONArray(w, r)
-	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *sampleFullRow) error {
-		return out.add(toFullSample(*row))
+	out := core.NewJSONArray(w, r)
+	err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(row *sampleFullRow) error {
+		return out.Add(toFullSample(*row))
 	})
-	out.finish(err)
+	out.Finish(err)
 }
 
 // allSamples serves GET /api/samples (ClickhouseSampleMapper with a keyword):
@@ -105,34 +91,34 @@ func (s *State) writeSampleRows(w http.ResponseWriter, r *http.Request, sql stri
 // (ILIKE, so % and _ are wildcards), and matches whose id starts with the
 // whole keyword come first, each part ordered by sample id.
 func (s *State) allSamples(w http.ResponseWriter, r *http.Request) {
-	args := newArgs()
+	args := core.NewArgs()
 	conds := []string{"1"}
 	order := sampleDefaultOrder
 	if q := r.URL.Query(); q.Has("keyword") {
 		kw := q.Get("keyword")
 		for term := range strings.SplitSeq(strings.TrimSpace(kw), " ") {
-			conds = append(conds, fmt.Sprintf("s.sample_id ILIKE concat('%%', %s, '%%')", args.str(term)))
+			conds = append(conds, fmt.Sprintf("s.sample_id ILIKE concat('%%', %s, '%%')", args.Str(term)))
 		}
 		// A sample id in several studies: by study, which Java leaves
 		// unordered.
-		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id, s.study_id", args.str(kw))
+		order = fmt.Sprintf("if(s.sample_id ILIKE concat(%s, '%%'), 0, 1), s.sample_id, s.study_id", args.Str(kw))
 	}
-	s.writeSampleRows(w, r, sampleFullSelectFrom(args, acrossStudies, strings.Join(conds, " AND "))+sqlPageOrder(r, sampleSortable, order), args)
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, core.AcrossStudies, strings.Join(conds, " AND "))+core.SQLPageOrder(r, sampleSortable, order), args)
 }
 
 // sampleInStudy — GET /api/studies/{studyId}/samples/{sampleId}. Single Sample.
 func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 	p := ch.Params{}
-	rows, err := ch.QueryP[sampleFullRow](s.CH, sampleFullSelect(paramsBinder(p), bySample(r.PathValue("studyId"), r.PathValue("sampleId")), "1"), p)
+	rows, err := ch.QueryP[sampleFullRow](s.CH, sampleFullSelect(core.ParamsBinder(p), core.BySample(r.PathValue("studyId"), r.PathValue("sampleId")), "1"), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(rows) == 0 {
 		http.Error(w, "sample not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, toFullSample(rows[0]))
+	core.WriteJSON(w, toFullSample(rows[0]))
 }
 
 // ---------- Bulk patients ----------
@@ -146,30 +132,30 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 // keyword.
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	args := newArgs()
+	args := core.NewArgs()
 	if !q.Has("keyword") {
-		s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+acrossStudies.patients(args)+
-			sqlPageOrder(r, patientSortable, s.patientOrder(r)), nil)
+		s.writePatientRows(w, r, "SELECT study_id AS studyId, patient_id AS patientId FROM "+core.AcrossStudies.Patients(args)+
+			core.SQLPageOrder(r, patientSortable, s.patientOrder(r)), nil)
 		return
 	}
 	kw := q.Get("keyword")
 	var conds []string
 	for term := range strings.SplitSeq(kw, " ") {
-		t := args.str(term)
+		t := args.Str(term)
 		conds = append(conds, fmt.Sprintf("(p.patient_id LIKE concat('%%', %s, '%%') OR sm.sample_id LIKE concat('%%', %s, '%%'))", t, t))
 	}
 	// Equal patient ids (one per study) come in the patient table's import
 	// order, as ClickHouse returns production's rows.
 	ties := "p.study_id, sm.sample_id"
-	if s.importOrdered() {
+	if s.ImportOrdered() {
 		ties = "p.internal_id, sm.internal_id"
 	}
 	sql := fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM %s p "+
 		"JOIN %s sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s",
-		acrossStudies.patients(args), acrossStudies.samples(args), strings.Join(conds, " AND ")) +
-		sqlPageOrder(r, keywordPatientSortable,
-			fmt.Sprintf("if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, %s", args.str(kw), ties))
-	s.writePatientRows(w, r, sql, args.params(sql))
+		core.AcrossStudies.Patients(args), core.AcrossStudies.Samples(args), strings.Join(conds, " AND ")) +
+		core.SQLPageOrder(r, keywordPatientSortable,
+			fmt.Sprintf("if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, %s", args.Str(kw), ties))
+	s.writePatientRows(w, r, sql, args.Params(sql))
 }
 
 // keywordPatientSortable is patientSortable over allPatients' keyword join;
@@ -192,7 +178,7 @@ const defaultGenome = "hg19"
 // geneLocationJoin joins every gene (aliased g) to its cytoband and length,
 // the span from its start to its end, on the portal's reference genome
 // (ucsc.build). Genes without a location there have neither.
-func (s *State) geneLocationJoin(args *sqlArgs) string {
+func (s *State) geneLocationJoin(args *core.SQLArgs) string {
 	genome := strings.TrimSpace(s.Props["ucsc.build"])
 	if genome == "" {
 		genome = defaultGenome
@@ -200,12 +186,12 @@ func (s *State) geneLocationJoin(args *sqlArgs) string {
 	return " LEFT JOIN (SELECT rgg.entrez_gene_id AS entrez_gene_id, rgg.cytoband AS cytoband, " +
 		"rgg.end - rgg.start AS length FROM cbioportal_ref.reference_genome_gene rgg " +
 		"INNER JOIN cbioportal_ref.reference_genome rg ON rg.reference_genome_id = rgg.reference_genome_id " +
-		"WHERE lower(rg.name) = lower(" + args.str(genome) + ")) loc ON loc.entrez_gene_id = g.entrez_gene_id"
+		"WHERE lower(rg.name) = lower(" + args.Str(genome) + ")) loc ON loc.entrez_gene_id = g.entrez_gene_id"
 }
 
 // geneSelect selects geneRow's columns from the genes (aliased g), joined to
 // their location when sortBy needs it.
-func (s *State) geneSelect(args *sqlArgs, sortBy string) string {
+func (s *State) geneSelect(args *core.SQLArgs, sortBy string) string {
 	from := "cbioportal_ref.gene g"
 	if sortBy == "cytoband" || sortBy == "length" {
 		from += s.geneLocationJoin(args)
@@ -216,11 +202,11 @@ func (s *State) geneSelect(args *sqlArgs, sortBy string) string {
 // allGenes — GET /api/genes, with GeneMapper's keyword and alias matching.
 func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	args := newArgs()
+	args := core.NewArgs()
 	conds := []string{"1"}
 	if alias, ok := q["alias"]; ok {
 		conds = append(conds,
-			"g.entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = "+args.str(alias[0])+")")
+			"g.entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = "+args.Str(alias[0])+")")
 	}
 	// GeneMapper: every space-separated keyword term is a case-insensitive
 	// symbol prefix; matches of the whole keyword with its exact case come
@@ -229,29 +215,29 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	kw, keyword := q["keyword"]
 	if keyword {
 		for _, term := range strings.Split(kw[0], " ") {
-			conds = append(conds, fmt.Sprintf("g.hugo_gene_symbol ILIKE concat(%s, '%%')", args.str(term)))
+			conds = append(conds, fmt.Sprintf("g.hugo_gene_symbol ILIKE concat(%s, '%%')", args.Str(term)))
 		}
-		order = fmt.Sprintf("g.hugo_gene_symbol LIKE concat(%s, '%%') DESC, g.hugo_gene_symbol", args.str(kw[0]))
+		order = fmt.Sprintf("g.hugo_gene_symbol LIKE concat(%s, '%%') DESC, g.hugo_gene_symbol", args.Str(kw[0]))
 	}
 	sortBy := q.Get("sortBy")
 	sel := s.geneSelect(args, sortBy) + " WHERE " + strings.Join(conds, " AND ")
 	if !keyword {
-		rows, err := queryA[geneRow](s.CH, sel+sqlPageOrder(r, geneSortable, order), args)
+		rows, err := core.QueryA[geneRow](s.CH, sel+core.SQLPageOrder(r, geneSortable, order), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		if rows == nil {
 			rows = []geneRow{}
 		}
-		writeJSON(w, rows)
+		core.WriteJSON(w, rows)
 		return
 	}
 	// A keyword search is paged here (pageList leaves it alone), as
 	// GeneServiceImpl post-processes the mapper's page; META counts every
 	// match.
-	pageSize, limit := maxPageSize, ""
-	if projectionOf(r) != "META" {
+	pageSize, limit := core.MaxPageSize, ""
+	if core.ProjectionOf(r) != "META" {
 		if v, err := strconv.Atoi(strings.TrimSpace(q.Get("pageSize"))); err == nil {
 			pageSize = v
 		}
@@ -263,7 +249,7 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	if sorted {
 		order = geneSortOrder(expr, desc) + ", " + order
 	}
-	rows, err := queryA[geneRow](s.CH, fmt.Sprintf("%s ORDER BY %s%s", sel, order, limit), args)
+	rows, err := core.QueryA[geneRow](s.CH, fmt.Sprintf("%s ORDER BY %s%s", sel, order, limit), args)
 	if err == nil {
 		rows, err = s.keywordGenes(rows, kw[0], pageSize)
 	}
@@ -271,13 +257,13 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 		rows, err = s.sortGenes(rows, sortBy, desc)
 	}
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if rows == nil {
 		rows = []geneRow{}
 	}
-	writeJSON(w, rows)
+	core.WriteJSON(w, rows)
 }
 
 // geneSortOrder orders by a geneSortable expression, NULLS LAST in either
@@ -296,9 +282,9 @@ func (s *State) sortGenes(page []geneRow, sortBy string, desc bool) ([]geneRow, 
 	for i, g := range page {
 		ids[i] = g.EntrezGeneID
 	}
-	args := newArgs()
-	list := "[" + intListSQL(ids) + "]"
-	return queryA[geneRow](s.CH, fmt.Sprintf("%s WHERE g.entrez_gene_id IN %s ORDER BY %s, indexOf(%s, g.entrez_gene_id)",
+	args := core.NewArgs()
+	list := "[" + core.IntListSQL(ids) + "]"
+	return core.QueryA[geneRow](s.CH, fmt.Sprintf("%s WHERE g.entrez_gene_id IN %s ORDER BY %s, indexOf(%s, g.entrez_gene_id)",
 		s.geneSelect(args, sortBy), list, geneSortOrder(geneSortable[sortBy], desc), list), args)
 }
 
@@ -336,7 +322,7 @@ func (s *State) keywordGenes(page []geneRow, keyword string, pageSize int) ([]ge
 
 // allSampleLists — GET /api/sample-lists. Returns []SampleList across studies.
 func (s *State) allSampleLists(w http.ResponseWriter, r *http.Request) {
-	s.sampleListsQuery(w, r, acrossStudies, false)
+	s.sampleListsQuery(w, r, core.AcrossStudies, false)
 }
 
 // sampleListSampleIDs — GET /api/sample-lists/{sampleListId}/sample-ids.
@@ -346,21 +332,21 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 		SampleID string `json:"sampleId"`
 	}
 	order := "sample_id"
-	if s.importOrdered() {
+	if s.ImportOrdered() {
 		order = "internal_id, sample_id"
 	}
 	p := ch.Params{}
 	rows, err := ch.QueryP[row](s.CH,
-		"SELECT sample_id AS sampleId FROM "+s.bySampleList(r.PathValue("sampleListId")).from(paramsBinder(p), tSampleList)+sqlListOrder(r, nil, order), p)
+		"SELECT sample_id AS sampleId FROM "+s.BySampleList(r.PathValue("sampleListId")).From(core.ParamsBinder(p), core.TSampleList)+core.SQLListOrder(r, nil, order), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]string, len(rows))
 	for i, r := range rows {
 		out[i] = r.SampleID
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- Bulk clinical attributes ----------
@@ -368,16 +354,16 @@ func (s *State) sampleListSampleIDs(w http.ResponseWriter, r *http.Request) {
 // allClinicalAttributes — GET /api/clinical-attributes. Returns
 // []ClinicalAttribute across all studies from clinical_attribute_meta.
 func (s *State) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
-	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY clinical_attribute_id, "+s.studyOrder("study_id"))
+	rows, err := ch.Query[clinAttrRow](s.CH, clinAttrSelect+" ORDER BY clinical_attribute_id, "+s.StudyOrder("study_id"))
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]ClinicalAttribute, len(rows))
 	for i, r := range rows {
 		out[i] = toClinicalAttribute(r)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- Single-sample copy-number segments ----------
@@ -399,29 +385,29 @@ func (s *State) sampleCopyNumberSegments(w http.ResponseWriter, r *http.Request)
 			"toInt64OrZero(g.num_probes) AS numberOfProbes, toFloat64OrZero(g.segment_mean) AS segmentMean "+
 			"FROM seg g LEFT JOIN %s sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id "+
 			"WHERE g.study_id = {study:String} AND g.sample_id = {sample:String}%s ORDER BY %s",
-		bySample(study, sample).samples(paramsBinder(p)), chrom, s.segOrder("g.chrom, start")), p)
+		core.BySample(study, sample).Samples(core.ParamsBinder(p)), chrom, s.segOrder("g.chrom, start")), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]CopyNumberSeg, len(rows))
 	for i, r := range rows {
 		out[i] = CopyNumberSeg{
-			UniqueSampleKey:  uniqueKey(r.StudyID, r.SampleID),
-			UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
+			UniqueSampleKey:  core.UniqueKey(r.StudyID, r.SampleID),
+			UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID),
 			PatientID:        r.PatientID, SampleID: r.SampleID, StudyID: r.StudyID,
 			Chromosome: r.Chromosome, Start: r.Start, End: r.End,
 			NumberOfProbes: r.NumberOfProbes, SegmentMean: r.SegmentMean,
 			Genes: []any{},
 		}
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // writeSamples writes the samples of the scope matching a predicate over the
 // `sample` view (aliased s), with type, sequenced and segment flags. where
 // may hold placeholders bound in args. A page is read as sqlListOrder
 // orders it.
-func (s *State) writeSamples(w http.ResponseWriter, r *http.Request, sc scope, where string, args *sqlArgs) {
-	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+sqlListOrder(r, sampleSortable, sampleDefaultOrder), args)
+func (s *State) writeSamples(w http.ResponseWriter, r *http.Request, sc core.Scope, where string, args *core.SQLArgs) {
+	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+core.SQLListOrder(r, sampleSortable, sampleDefaultOrder), args)
 }

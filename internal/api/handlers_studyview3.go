@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -63,47 +64,47 @@ const (
 func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		Groups []struct {
-			Name              string       `json:"name"`
-			SampleIdentifiers []identifier `json:"sampleIdentifiers"`
+			Name              string            `json:"name"`
+			SampleIdentifiers []core.Identifier `json:"sampleIdentifiers"`
 		} `json:"groups"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	out := []ClinicalDataEnrichment{}
 	if len(f.Groups) < 2 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 
 	// Each group's samples as a predicate over the sample view. Every query
 	// below spells each group's sample list once (as the group_samples CTE) and
 	// resolves the groups' samples and patients inside ClickHouse.
-	args := newArgs()
+	args := core.NewArgs()
 	var groupSelects []string
 	studySet := map[string]bool{}
 	for gi, g := range f.Groups {
 		groupSelects = append(groupSelects, fmt.Sprintf(
 			"SELECT toUInt32(%d) AS grp, study_id, sample_id, patient_id FROM %s",
-			gi, identifiersFrom(args, tSample, g.SampleIdentifiers)))
+			gi, core.IdentifiersFrom(args, core.TSample, g.SampleIdentifiers)))
 		for _, id := range g.SampleIdentifiers {
 			studySet[id.StudyID] = true
 		}
 	}
 	// The groups' studies, the key range of the clinical tables they read.
-	groupStudies := byStudies(sortedKeys(studySet))
+	groupStudies := core.ByStudies(core.SortedKeys(studySet))
 	withGroups := "WITH group_samples AS (" + strings.Join(groupSelects, " UNION ALL ") + ") "
 
 	type groupRow struct {
 		Grp uint32 `json:"grp"`
 	}
-	present, err := queryA[groupRow](s.CH, withGroups+"SELECT DISTINCT grp FROM group_samples ORDER BY grp", args)
+	present, err := core.QueryA[groupRow](s.CH, withGroups+"SELECT DISTINCT grp FROM group_samples ORDER BY grp", args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	numGroups := len(present)
 	if numGroups < 2 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	testName := "Kruskal Wallis Test"
@@ -111,13 +112,13 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		testName = "Wilcoxon Test"
 	}
 
-	attrRows, err := queryA[clinAttrRow](s.CH, fmt.Sprintf(
+	attrRows, err := core.QueryA[clinAttrRow](s.CH, fmt.Sprintf(
 		"%sSELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta "+
 			"WHERE study_id IN (SELECT DISTINCT study_id FROM group_samples) ORDER BY study_id, clinical_attribute_id",
 		withGroups), args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	// Unique attributes by id + patient flag, and each id's level.
@@ -149,7 +150,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		return levelSample
 	}
 	var numeric, categorical []ClinicalAttribute
-	for _, key := range javaHashMapOrder(keys) {
+	for _, key := range core.JavaHashMapOrder(keys) {
 		switch a := attrs[key]; a.Datatype {
 		case "NUMBER":
 			numeric = append(numeric, a)
@@ -184,7 +185,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM group_samples g "+
 					"INNER JOIN %s c ON c.study_id = g.study_id AND c.sample_id = g.sample_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupStudies.rows(args, tClinicalSample), args.strs(sampleIDs), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupStudies.Rows(args, core.TClinicalSample), args.Strs(sampleIDs), cond("c.attr_value")))
 		}
 		groupPatients := "(SELECT DISTINCT grp, study_id, patient_id FROM group_samples)"
 		if p := ids[levelPatient]; len(p) > 0 {
@@ -192,7 +193,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 				"SELECT c.attr_id AS attr_id, g.grp AS grp, %s AS v FROM %s g "+
 					"INNER JOIN %s c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupPatients, groupStudies.rows(args, tClinicalPatient), args.strs(p), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupPatients, groupStudies.Rows(args, core.TClinicalPatient), args.Strs(p), cond("c.attr_value")))
 		}
 		if p := ids[levelConflicting]; len(p) > 0 {
 			parts = append(parts, fmt.Sprintf(
@@ -200,7 +201,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 					"INNER JOIN %s s ON s.study_id = g.study_id AND s.patient_id = g.patient_id "+
 					"INNER JOIN %s c ON c.study_id = g.study_id AND c.patient_id = g.patient_id "+
 					"WHERE c.attr_id IN %s AND %s",
-				valueOf("c.attr_value"), groupPatients, groupStudies.samples(args), groupStudies.rows(args, tClinicalPatient), args.strs(p), cond("c.attr_value")))
+				valueOf("c.attr_value"), groupPatients, groupStudies.Samples(args), groupStudies.Rows(args, core.TClinicalPatient), args.Strs(p), cond("c.attr_value")))
 		}
 		return strings.Join(parts, " UNION ALL ")
 	}
@@ -218,11 +219,11 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		catData[gi] = map[string]map[string]uint64{}
 	}
 	if len(categorical) > 0 {
-		rows, err := queryA[catRow](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[catRow](s.CH, fmt.Sprintf(
 			"%sSELECT attr_id, grp, v AS value, count() AS c FROM (%s) GROUP BY attr_id, grp, v ORDER BY attr_id, grp, v",
 			withGroups, groupValues(func(col string) string { return col }, naFilter, idsByLevel(categorical))), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for _, rw := range rows {
@@ -238,7 +239,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		var seen []string
 		catSet := map[string]bool{}
 		for gi := range f.Groups {
-			for _, v := range sortedKeys(catData[gi][id]) {
+			for _, v := range core.SortedKeys(catData[gi][id]) {
 				if !catSet[v] {
 					catSet[v] = true
 					seen = append(seen, v)
@@ -248,7 +249,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if len(catSet) < 2 {
 			continue
 		}
-		categories := javaHashMapOrder(seen)
+		categories := core.JavaHashMapOrder(seen)
 		var table [][]float64
 		for gi := range f.Groups {
 			row := make([]float64, len(categories))
@@ -285,15 +286,15 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	numRanks := map[string][]rankRow{}
 	if len(numeric) > 0 {
-		rows, err := queryA[rankRow](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[rankRow](s.CH, fmt.Sprintf(
 			"%sSELECT attr_id, grp, count() AS n, sum(r) AS rs, sum(t * t - 1) AS ts, any(nd) AS nd FROM ("+
 				"SELECT attr_id, grp, rank() OVER (PARTITION BY attr_id ORDER BY v) + (count() OVER (PARTITION BY attr_id, v) - 1) / 2 AS r, "+
 				"toFloat64(count() OVER (PARTITION BY attr_id, v)) AS t, uniqExact(v) OVER (PARTITION BY attr_id) AS nd FROM (%s)"+
 				") GROUP BY attr_id, grp ORDER BY attr_id, grp",
 			withGroups, groupValues(func(col string) string { return "toFloat64(" + col + ")" },
-				func(col string) string { return "match(" + col + ", " + args.str(decimalCreatable) + ")" }, idsByLevel(numeric))), args)
+				func(col string) string { return "match(" + col + ", " + args.Str(decimalCreatable) + ")" }, idsByLevel(numeric))), args)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		for _, rw := range rows {
@@ -324,7 +325,7 @@ func (s *State) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // decimalCreatable matches the decimal numbers NumberUtils.isCreatable
@@ -357,7 +358,7 @@ type sampleClinicalDataCollection struct {
 // attributes, samples without a value last), then paged.
 func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	q := r.URL.Query()
 	pageSize := 10000000
@@ -377,17 +378,17 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	empty := sampleClinicalDataCollection{ByUniqueSampleKey: map[string][]tableClinicalData{}}
 
-	args := newArgs()
-	inner := "SELECT study_id, sample_id, patient_id FROM " + s.sampleScopeFrom(args, f, tSample)
+	args := core.NewArgs()
+	inner := "SELECT study_id, sample_id, patient_id FROM " + s.sampleScopeFrom(args, f, core.TSample)
 	if strings.TrimSpace(searchTerm) != "" {
 		// ClinicalDataMapper.searchedAttributeData: a case-sensitive LIKE on
 		// the sample and patient ids and attribute values.
-		like := args.str("%" + searchTerm + "%")
+		like := args.Str("%" + searchTerm + "%")
 		inner += fmt.Sprintf(
 			" AND (sample_id LIKE %[1]s OR patient_id LIKE %[1]s"+
 				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM %[2]s AND attr_value LIKE %[1]s)"+
 				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM %[3]s AND attr_value LIKE %[1]s))",
-			like, f.scope().from(args, tClinicalSample), f.scope().from(args, tClinicalPatient))
+			like, f.scope().From(args, core.TClinicalSample), f.scope().From(args, core.TClinicalPatient))
 	}
 
 	// Total number of matching samples (before paging) -> total-count header.
@@ -395,12 +396,12 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		N uint64 `json:"n"`
 	}
 	total := uint64(0)
-	if cr, _ := queryA[countRow](s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s)", inner), args); len(cr) > 0 {
+	if cr, _ := core.QueryA[countRow](s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s)", inner), args); len(cr) > 0 {
 		total = cr[0].N
 	}
 	w.Header().Set("total-count", strconv.FormatUint(total, 10))
 	if total == 0 {
-		writeJSON(w, empty)
+		core.WriteJSON(w, empty)
 		return
 	}
 
@@ -432,16 +433,16 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 				"LEFT JOIN (SELECT study_id, %s, any(attr_value) AS sortval, 1 AS present FROM %s WHERE attr_id = %s GROUP BY study_id, %s) AS v "+
 				"ON s.study_id = v.study_id AND s.%s = v.%s "+
 				"ORDER BY if(v.present = 1, %s, NULL) %s NULLS LAST, sample_id ASC LIMIT %d OFFSET %d",
-			inner, keyCol, view, args.str(sortBy), keyCol, keyCol, keyCol, sortExpr, dir, pageSize, offset)
+			inner, keyCol, view, args.Str(sortBy), keyCol, keyCol, keyCol, sortExpr, dir, pageSize, offset)
 	}
 
-	pageRows, err := queryA[idRow](s.CH, pageSQL, args)
+	pageRows, err := core.QueryA[idRow](s.CH, pageSQL, args)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(pageRows) == 0 {
-		writeJSON(w, empty)
+		core.WriteJSON(w, empty)
 		return
 	}
 
@@ -471,7 +472,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, cr := range sampleData {
 		patientID := sampleToPatient[cr.StudyID+"\x00"+cr.ID]
-		key := uniqueKey(cr.StudyID, cr.ID)
+		key := core.UniqueKey(cr.StudyID, cr.ID)
 		byKey[key] = append(byKey[key], tableClinicalData{
 			ClinicalAttributeID: cr.ClinicalAttributeID, Value: cr.Value,
 			SampleID: cr.ID, PatientID: patientID, StudyID: cr.StudyID,
@@ -486,7 +487,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 			ch.Params{"ids": patientPairs})
 		for _, cr := range patientData {
 			for _, sm := range patientToSamples[cr.StudyID+"\x00"+cr.ID] {
-				key := uniqueKey(sm.StudyID, sm.SampleID)
+				key := core.UniqueKey(sm.StudyID, sm.SampleID)
 				byKey[key] = append(byKey[key], tableClinicalData{
 					ClinicalAttributeID: cr.ClinicalAttributeID, Value: cr.Value,
 					SampleID: sm.SampleID, PatientID: sm.PatientID, StudyID: sm.StudyID,
@@ -495,7 +496,7 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, sampleClinicalDataCollection{ByUniqueSampleKey: byKey})
+	core.WriteJSON(w, sampleClinicalDataCollection{ByUniqueSampleKey: byKey})
 }
 
 // attrIsPatientLevel reports whether a clinical attribute is patient-level in any
@@ -540,7 +541,7 @@ func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		} `json:"attributes"`
 		StudyViewFilter studyViewFilter `json:"studyViewFilter"`
 	}
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	svf := f.StudyViewFilter
 	if len(f.Attributes) == 1 {
 		svf = svf.withoutCustom(f.Attributes[0].AttributeID)
@@ -551,12 +552,12 @@ func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		SampleID  string `json:"sampleId"`
 		PatientID string `json:"patientId"`
 	}
-	args := newArgs()
-	samples, _ := queryA[sample](s.CH,
+	args := core.NewArgs()
+	samples, _ := core.QueryA[sample](s.CH,
 		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId, patient_stable_id AS patientId "+
 			"FROM "+s.filterFrom(args, svf), args)
 	if len(samples) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	filtered := map[string]bool{}
@@ -566,7 +567,7 @@ func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		patients[sm.StudyID+sm.PatientID] = true
 	}
 	for _, a := range f.Attributes {
-		raw, ok := s.sessionData("custom_data", a.AttributeID)
+		raw, ok := s.SessionData("custom_data", a.AttributeID)
 		if !ok {
 			continue
 		}
@@ -612,5 +613,5 @@ func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, item)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }

@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -46,7 +47,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 
 	// Optional body: a custom list of sample ids to restrict the correlation to.
 	var sampleIDs []string
-	readBody(r, &sampleIDs)
+	core.ReadBody(r, &sampleIDs)
 
 	gsvaProfile := r.URL.Query().Get("geneticProfileId")
 	sampleListID := r.URL.Query().Get("sampleListId")
@@ -57,13 +58,13 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		}
 	}
 
-	meta, ok := s.profileMeta(gsvaProfile)
+	meta, ok := s.ProfileMeta(gsvaProfile)
 	if !ok {
-		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(gsvaProfile))
+		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(gsvaProfile))
 		return
 	}
 	if !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
-		writeJSON(w, []GenesetCorrelation{})
+		core.WriteJSON(w, []GenesetCorrelation{})
 		return
 	}
 
@@ -79,7 +80,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 			"FROM molecular_profile WHERE study_id = {study:String} AND molecular_alteration_type = 'MRNA_EXPRESSION' "+
 			"ORDER BY molecular_profile_id", ch.Params{"study": meta.StudyID})
 	if len(exprRows) == 0 {
-		writeJSON(w, []GenesetCorrelation{})
+		core.WriteJSON(w, []GenesetCorrelation{})
 		return
 	}
 	expr := exprRows[0]
@@ -104,7 +105,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		sampleFilter = " AND sample_id IN {samples:Array(String)}"
 		p["samples"] = sampleIDs
 	} else if sampleListID != "" {
-		sampleFilter = " AND sample_id IN " + s.bySampleList(sampleListID).listMembers(paramsBinder(p))
+		sampleFilter = " AND sample_id IN " + s.BySampleList(sampleListID).ListMembers(core.ParamsBinder(p))
 	}
 
 	querySub := fmt.Sprintf(
@@ -126,10 +127,10 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 			"INNER JOIN (%s) AS q USING (sample_id) "+
 			"WHERE b.study_id = {study:String} AND b.profile_stable_id = {exprProfile:String} "+
 			"AND toFloat64OrNull(b.value) IS NOT NULL",
-		s.rawSource("mrna_expression_matrix", geneMatrixCols...), querySub),
+		s.RawSource("mrna_expression_matrix", geneMatrixCols...), querySub),
 		"1", threshold)+" ORDER BY sc DESC", p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 
@@ -149,7 +150,7 @@ func (s *State) genesetExpressionCorrelationFetch(w http.ResponseWriter, r *http
 		}
 		out = append(out, gc)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- 5. GET /api/genes/{geneId}/aliases ----------
@@ -160,7 +161,7 @@ func (s *State) geneAliases(w http.ResponseWriter, r *http.Request) {
 	geneID := r.PathValue("geneId")
 	entrez, _, ok := s.resolveRefGene(geneID)
 	if !ok {
-		writeJSON(w, []string{})
+		core.WriteJSON(w, []string{})
 		return
 	}
 	type aliasRow struct {
@@ -169,14 +170,14 @@ func (s *State) geneAliases(w http.ResponseWriter, r *http.Request) {
 	rows, err := ch.Query[aliasRow](s.CH, fmt.Sprintf(
 		"SELECT gene_alias AS alias FROM cbioportal_ref.gene_alias WHERE entrez_gene_id = %d ORDER BY gene_alias", entrez))
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, row.Alias)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // resolveRefGene resolves a gene identifier (Entrez id or Hugo symbol) to its
@@ -279,10 +280,10 @@ func (s *State) refGenomeGenes(genomeName, where string, p ch.Params) ([]Referen
 func (s *State) referenceGenomeGenes(w http.ResponseWriter, r *http.Request) {
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), "1", nil)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // referenceGenomeGeneGet handles GET /api/reference-genome-genes/{genomeName}/{geneId}.
@@ -295,14 +296,14 @@ func (s *State) referenceGenomeGeneGet(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), fmt.Sprintf("g.entrez_gene_id = %d", entrez), nil)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(out) == 0 {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	writeJSON(w, out[0])
+	core.WriteJSON(w, out[0])
 }
 
 // referenceGenomeGenesFetch handles POST /api/reference-genome-genes/{genomeName}/fetch.
@@ -311,9 +312,9 @@ func (s *State) referenceGenomeGeneGet(w http.ResponseWriter, r *http.Request) {
 // case; the list holds 1 to 100000 ids (@Size).
 func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request) {
 	var geneIDs []string
-	readBody(r, &geneIDs)
+	core.ReadBody(r, &geneIDs)
 	if len(geneIDs) == 0 || len(geneIDs) > 100000 {
-		writeError(w, http.StatusBadRequest, "geneIds size must be between 1 and 100000")
+		core.WriteError(w, http.StatusBadRequest, "geneIds size must be between 1 and 100000")
 		return
 	}
 	var where string
@@ -328,15 +329,15 @@ func (s *State) referenceGenomeGenesFetch(w http.ResponseWriter, r *http.Request
 			}
 			ids = append(ids, n)
 		}
-		where = fmt.Sprintf("g.entrez_gene_id IN (%s)", intListSQL(ids))
+		where = fmt.Sprintf("g.entrez_gene_id IN (%s)", core.IntListSQL(ids))
 	} else {
 		where = "g.hugo_gene_symbol IN {genes:Array(String)}"
 		p = ch.Params{"genes": geneIDs}
 	}
 	out, err := s.refGenomeGenes(r.PathValue("genomeName"), where, p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }

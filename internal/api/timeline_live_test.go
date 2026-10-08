@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/ingest"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
@@ -92,7 +93,7 @@ func importTimelineStudy(t *testing.T, base, refDB, suffix, dir string) *State {
 	}
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, refDB)
-	return &State{CH: c, Props: map[string]string{"feature.study.export": "true"}}
+	return &State{State: &core.State{CH: c, Props: map[string]string{"feature.study.export": "true"}}}
 }
 
 func serveTimeline(t *testing.T, s *State, path string) []byte {
@@ -262,7 +263,7 @@ func TestLiveTimelineFromProd(t *testing.T) {
 	}
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(rawDB, "")
-	s := &State{CH: c}
+	s := &State{State: &core.State{CH: c}}
 
 	var events []ClinicalEvent
 	body := serveTimeline(t, s, "/api/studies/tl_prod/patients/P1/clinical-events")

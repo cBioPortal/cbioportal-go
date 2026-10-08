@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
 )
@@ -105,21 +106,21 @@ type coExpressionFilter struct {
 // listed without a correlation.
 func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 	var f coExpressionFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	q := r.URL.Query()
 	profileA, profileB := q.Get("molecularProfileIdA"), q.Get("molecularProfileIdB")
 	threshold := 0.3
 	if t := q.Get("threshold"); t != "" {
 		v, err := strconv.ParseFloat(t, 64)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, `Request parameter type mismatch: java.lang.NumberFormatException: For input string: "`+t+`"`)
+			core.WriteError(w, http.StatusBadRequest, `Request parameter type mismatch: java.lang.NumberFormatException: For input string: "`+t+`"`)
 			return
 		}
 		threshold = v
 	}
 	out := []CoExpression{}
 	if f.EntrezGeneID == nil {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
 	sampleIDs := f.SampleIDs
@@ -128,9 +129,9 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 			SampleID string `json:"sampleId"`
 		}
 		p := ch.Params{}
-		rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM "+s.bySampleList(*f.SampleListID).from(paramsBinder(p), tSampleList), p)
+		rows, err := ch.QueryP[row](s.CH, "SELECT sample_id AS sampleId FROM "+s.BySampleList(*f.SampleListID).From(core.ParamsBinder(p), core.TSampleList), p)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		sampleIDs = sampleIDs[:0]
@@ -139,18 +140,18 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(sampleIDs) == 0 {
-		writeJSON(w, out)
+		core.WriteJSON(w, out)
 		return
 	}
-	metaA, ok := s.profileMeta(profileA)
+	metaA, ok := s.ProfileMeta(profileA)
 	if !ok {
-		writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(profileA))
+		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(profileA))
 		return
 	}
 	metaB := metaA
 	if profileB != profileA {
-		if metaB, ok = s.profileMeta(profileB); !ok {
-			writeError(w, http.StatusNotFound, msgMolecularProfileNotFound(profileB))
+		if metaB, ok = s.ProfileMeta(profileB); !ok {
+			core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(profileB))
 			return
 		}
 	}
@@ -160,11 +161,11 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 	genes, err := ch.Query[geneRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE entrez_gene_id = %d", *f.EntrezGeneID))
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	if len(genes) == 0 {
-		writeError(w, http.StatusNotFound, msgGeneNotFound(strconv.FormatInt(*f.EntrezGeneID, 10)))
+		core.WriteError(w, http.StatusNotFound, core.MsgGeneNotFound(strconv.FormatInt(*f.EntrezGeneID, 10)))
 		return
 	}
 	hugo := genes[0].Hugo
@@ -200,10 +201,10 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 			"FROM per_gene) "+
 			"SELECT entrezGeneId, if(validNumeric AND isFinite(corr), corr, NULL) AS corr, toInt64(numSamples) AS n FROM scored "+
 			"WHERE (validNumeric AND isFinite(corr) AND abs(corr) >= %v) OR (NOT validNumeric) ORDER BY entrezGeneId",
-		byStudy(metaA.StudyID).from(paramsBinder(p), tGeneticAlterationDerived),
-		byStudy(metaB.StudyID).rows(paramsBinder(p), tGeneticAlterationDerived), threshold), p)
+		core.ByStudy(metaA.StudyID).From(core.ParamsBinder(p), core.TGeneticAlterationDerived),
+		core.ByStudy(metaB.StudyID).Rows(core.ParamsBinder(p), core.TGeneticAlterationDerived), threshold), p)
 	if err != nil {
-		fail(w, r, err)
+		core.Fail(w, r, err)
 		return
 	}
 	for _, row := range rows {
@@ -214,7 +215,7 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, ce)
 	}
-	writeJSON(w, out)
+	core.WriteJSON(w, out)
 }
 
 // ---------- clinical value resolution (shared by density + violin) ----------
@@ -238,16 +239,16 @@ func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 	if attrA == "" || attrB == "" {
 		return nil
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	studyClause := ""
 	if studies := f.studyIDs(); len(studies) > 0 {
-		studyClause = " AND study_id IN " + args.strs(studies)
+		studyClause = " AND study_id IN " + args.Strs(studies)
 	}
 	attr := func(view, keyCol, attrID string) string {
 		return fmt.Sprintf("(SELECT study_id, %s, toNullable(attr_value) AS v FROM %s WHERE attr_id = %s%s)",
-			keyCol, view, args.str(attrID), studyClause)
+			keyCol, view, args.Str(attrID), studyClause)
 	}
-	rows, _ := queryA[scopedAttrRow](s.CH, fmt.Sprintf(
+	rows, _ := core.QueryA[scopedAttrRow](s.CH, fmt.Sprintf(
 		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, sa.v AS sa, pa.v AS pa, sb.v AS sb, pb.v AS pb "+
 			"FROM (SELECT study_id, sample_id, patient_id FROM %s) AS s "+
 			"LEFT JOIN %s AS sa ON sa.study_id = s.study_id AND sa.sample_id = s.sample_id "+
@@ -256,7 +257,7 @@ func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 			"LEFT JOIN %s AS pb ON pb.study_id = s.study_id AND pb.patient_id = s.patient_id "+
 			"WHERE (sa IS NOT NULL OR pa IS NOT NULL) AND (sb IS NOT NULL OR pb IS NOT NULL) "+
 			"ORDER BY studyId, sampleId",
-		s.sampleScopeFrom(args, f, tSample),
+		s.sampleScopeFrom(args, f, core.TSample),
 		attr("clinical_sample", "sample_id", attrA), attr("clinical_patient", "patient_id", attrA),
 		attr("clinical_sample", "sample_id", attrB), attr("clinical_patient", "patient_id", attrB)), args)
 	return rows
@@ -340,7 +341,7 @@ func queryIntDefault(r *http.Request, name string, def int) int {
 
 func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	xAttr := r.URL.Query().Get("xAxisAttributeId")
 	yAttr := r.URL.Query().Get("yAxisAttributeId")
@@ -361,7 +362,7 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if len(xs) == 0 {
-		writeJSON(w, result)
+		core.WriteJSON(w, result)
 		return
 	}
 
@@ -442,7 +443,7 @@ func (s *State) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 		pearsonCorr, spearmanCorr = jacksonDouble(pearson(xs, ys)), jacksonDouble(spearman(xs, ys))
 	}
 	result.PearsonCorr, result.SpearmanCorr = &pearsonCorr, &spearmanCorr
-	writeJSON(w, result)
+	core.WriteJSON(w, result)
 }
 
 // ---------- 3. clinical data violin plots ----------
@@ -481,7 +482,7 @@ const violinShowOnlyPointsThreshold = 7
 
 func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
 	numAttr := r.URL.Query().Get("numericalAttributeId")
 	catAttr := r.URL.Query().Get("categoricalAttributeId")
@@ -505,8 +506,8 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		K string `json:"k"`
 	}
 	inFilter := map[string]bool{}
-	args := newArgs()
-	keys, _ := queryA[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(args, f)+")", args)
+	args := core.NewArgs()
+	keys, _ := core.QueryA[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(args, f)+")", args)
 	for _, k := range keys {
 		inFilter[k.K] = true
 	}
@@ -536,7 +537,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	sort.Strings(sampleIDs)
 	byCategory := map[string][]point{}
 	var categoryOrder []string
-	for _, sid := range javaHashMapOrder(sampleIDs) {
+	for _, sid := range core.JavaHashMapOrder(sampleIDs) {
 		for _, i := range bySample[sid] {
 			row := pairs[i]
 			v, okV := clinicalNumber(row.SampleA, row.PatientA)
@@ -554,7 +555,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	axisEnd := math.Inf(-1)
 	if len(byCategory) == 0 {
 		result.AxisStart, result.AxisEnd = jacksonDouble(axisStart), jacksonDouble(axisEnd)
-		writeJSON(w, result)
+		core.WriteJSON(w, result)
 		return
 	}
 
@@ -565,7 +566,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	boxes := map[string]*catBox{}
 	// Rows follow the iteration order of the service's category HashMap.
-	categories := javaHashMapOrder(categoryOrder)
+	categories := core.JavaHashMapOrder(categoryOrder)
 
 	for _, cat := range categories {
 		data := byCategory[cat]
@@ -660,7 +661,7 @@ func (s *State) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 		}
 		result.Rows = append(result.Rows, row)
 	}
-	writeJSON(w, result)
+	core.WriteJSON(w, result)
 }
 
 // violinCurve is the kernel density of ViolinPlotServiceImpl: at each curve

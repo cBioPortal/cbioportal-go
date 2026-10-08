@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // The served API descriptions are the Java portal's (apidocs), with the
@@ -55,18 +57,18 @@ type swaggerParam struct {
 }
 
 // openAPIParams are the added paging parameters of a.
-func (a addedPaging) openAPIParams() []openAPIParam {
-	one, zero, maxSize := 1, 0, maxPageSize
+func openAPIParams(a core.AddedPaging) []openAPIParam {
+	one, zero, maxSize := 1, 0, core.MaxPageSize
 	ps := []openAPIParam{
 		{Name: "pageSize", In: "query", Description: addedPageSizeDoc,
 			Schema: openAPISchema{Type: "integer", Format: "int32", Maximum: &maxSize, Minimum: &one}},
 		{Name: "pageNumber", In: "query", Description: addedPageNumberDoc,
 			Schema: openAPISchema{Type: "integer", Format: "int32", Default: &zero, Minimum: &zero}},
 	}
-	if a.sorted() {
+	if a.Sorted() {
 		ps = append(ps,
 			openAPIParam{Name: "sortBy", In: "query", Description: addedSortByDoc,
-				Schema: openAPISchema{Type: "string", Enum: a.sort.values}},
+				Schema: openAPISchema{Type: "string", Enum: a.Sort.Values}},
 			openAPIParam{Name: "direction", In: "query", Description: addedDirectionDoc,
 				Schema: openAPISchema{Type: "string", Default: "ASC", Enum: []string{"ASC", "DESC"}}})
 	}
@@ -74,9 +76,9 @@ func (a addedPaging) openAPIParams() []openAPIParam {
 }
 
 // swaggerParams are openAPIParams in Swagger 2.0 form.
-func (a addedPaging) swaggerParams() []swaggerParam {
+func swaggerParams(a core.AddedPaging) []swaggerParam {
 	var out []swaggerParam
-	for _, p := range a.openAPIParams() {
+	for _, p := range openAPIParams(a) {
 		out = append(out, swaggerParam{Name: p.Name, In: p.In, Description: p.Description, Type: p.Schema.Type,
 			Default: p.Schema.Default, Maximum: p.Schema.Maximum, Minimum: p.Schema.Minimum, Format: p.Schema.Format,
 			Enum: p.Schema.Enum})
@@ -146,8 +148,8 @@ func overlayJSONDoc(doc []byte, swagger2 bool) ([]byte, error) {
 		text string
 	}
 	var inserts []insert
-	for _, a := range addedPagedEndpoints {
-		key := a.path
+	for _, a := range core.AddedPagedEndpoints {
+		key := a.Path
 		if swagger2 {
 			key = strings.TrimPrefix(key, "/api")
 		}
@@ -159,17 +161,17 @@ func overlayJSONDoc(doc []byte, swagger2 bool) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		op, ok := memberOf(ops, strings.ToLower(a.method))
+		op, ok := memberOf(ops, strings.ToLower(a.Method))
 		if !ok {
 			continue
 		}
 		var items []any
 		if swagger2 {
-			for _, x := range a.swaggerParams() {
+			for _, x := range swaggerParams(a) {
 				items = append(items, x)
 			}
 		} else {
-			for _, x := range a.openAPIParams() {
+			for _, x := range openAPIParams(a) {
 				items = append(items, x)
 			}
 		}
@@ -214,16 +216,16 @@ func overlayYAMLDoc(doc []byte) []byte {
 		text string
 	}
 	var inserts []insert
-	for _, a := range addedPagedEndpoints {
+	for _, a := range core.AddedPagedEndpoints {
 		pathAt := slices.IndexFunc(lines, func(l string) bool {
-			return l == "  "+a.path+":\n" || l == `  "`+a.path+`":`+"\n"
+			return l == "  "+a.Path+":\n" || l == `  "`+a.Path+`":`+"\n"
 		})
 		if pathAt < 0 {
 			continue
 		}
 		opAt := -1
 		for i := pathAt + 1; i < len(lines) && indent(lines[i]) > 2; i++ {
-			if lines[i] == "    "+strings.ToLower(a.method)+":\n" {
+			if lines[i] == "    "+strings.ToLower(a.Method)+":\n" {
 				opAt = i
 				break
 			}
@@ -269,9 +271,9 @@ func overlayYAMLDoc(doc []byte) []byte {
 
 // yamlParams are a's added parameters as springdoc writes parameters in
 // YAML.
-func yamlParams(a addedPaging) string {
+func yamlParams(a core.AddedPaging) string {
 	var b strings.Builder
-	for _, p := range a.openAPIParams() {
+	for _, p := range openAPIParams(a) {
 		desc, _ := json.Marshal(p.Description)
 		fmt.Fprintf(&b, "      - name: %s\n        in: query\n        description: %s\n        required: false\n        schema:\n          type: %s\n",
 			p.Name, desc, p.Schema.Type)

@@ -6,10 +6,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 func TestAuthorities(t *testing.T) {
-	u := User{Roles: []string{"ROLE_cbioportal:study_a", "cbioportal:Group1", "other:study_b", "study_c"}}
+	u := core.User{Roles: []string{"ROLE_cbioportal:study_a", "cbioportal:Group1", "other:study_b", "study_c"}}
 	byApp := accessPolicy{appName: "cbioportal", filterByAppName: true, alwaysShowGroup: "public"}
 	got := byApp.authorities(u)
 	for _, want := range []string{"STUDY_A", "GROUP1", "PUBLIC"} {

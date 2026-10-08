@@ -1,0 +1,804 @@
+package core
+
+import (
+	"bufio"
+	"bytes"
+	"cmp"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"maps"
+	"math"
+	"net/http"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// selfPagedPaths answer with their own paged envelope (not a bare JSON array),
+// so the generic paging below leaves their query params untouched.
+var selfPagedPaths = map[string]bool{
+	"/api/clinical-data-table/fetch": true,
+}
+
+// oneBasedPaths number their pages from 1: ColumnStoreStudyController
+// returns items pageSize*(pageNumber-1) onwards, treating pageNumber <= 0 (or
+// absent) as the first page. Their /api/legacy/ aliases are served by the
+// legacy controllers, which number pages from 0.
+var oneBasedPaths = map[string]bool{
+	"/api/studies": true,
+}
+
+// PagedEndpoints are the Java endpoints that take pageSize / pageNumber /
+// sortBy / direction (their controller methods declare them); every other
+// endpoint ignores those params, as Java does. The /api/legacy/ and
+// /api/not-ready-yet/ aliases reach pageList as the /api/ path that serves
+// them (extraEndpoints).
+var PagedEndpoints = []string{
+	"GET /api/cancer-types",
+	"GET /api/clinical-attributes",
+	"GET /api/gene-panels",
+	"POST /api/generic-assay-meta/fetch",
+	"GET /api/genes",
+	"GET /api/genesets",
+	"GET /api/molecular-profiles",
+	"GET /api/molecular-profiles/{}/mutations",
+	"POST /api/molecular-profiles/{}/mutations/fetch",
+	"POST /api/mutations/fetch",
+	"GET /api/patients",
+	"GET /api/sample-lists",
+	"GET /api/samples",
+	"GET /api/studies",
+	"GET /api/studies/{}/clinical-attributes",
+	"GET /api/studies/{}/clinical-data",
+	"GET /api/studies/{}/clinical-events",
+	"GET /api/studies/{}/molecular-profiles",
+	"GET /api/studies/{}/patients",
+	"GET /api/studies/{}/patients/{}/clinical-data",
+	"GET /api/studies/{}/patients/{}/clinical-events",
+	"GET /api/studies/{}/patients/{}/resource-data",
+	"GET /api/studies/{}/patients/{}/samples",
+	"GET /api/studies/{}/resource-data",
+	"GET /api/studies/{}/resource-data-all",
+	"GET /api/studies/{}/resource-definitions",
+	"GET /api/studies/{}/sample-lists",
+	"GET /api/studies/{}/samples",
+	"GET /api/studies/{}/samples/{}/clinical-data",
+	"GET /api/studies/{}/samples/{}/copy-number-segments",
+	"GET /api/studies/{}/samples/{}/resource-data",
+	"GET /api/studies/{}/significant-copy-number-regions",
+	"GET /api/studies/{}/significantly-mutated-genes",
+}
+
+// unsortedEndpoints are the paged endpoints whose Java controllers declare
+// no sortBy: it is ignored.
+var unsortedEndpoints = map[string]bool{
+	"POST /api/generic-assay-meta/fetch": true,
+	"GET /api/genesets":                  true,
+}
+
+// SortIgnored reports whether the request's sortBy is ignored: only on the
+// endpoints that declare none. Every other paged endpoint sorts by it, also
+// for a keyword search and for projection=ID.
+func SortIgnored(endpoint string) bool {
+	return unsortedEndpoints[endpoint]
+}
+
+// countedEndpoints take pageSize and pageNumber only together, else 400, and
+// send the number of all items in the total-count header of a page
+// (ColumnStoreGenericAssayController). Their /api/legacy/ aliases are served
+// by legacy controllers that declare no paging.
+var countedEndpoints = map[string]bool{
+	"POST /api/generic-assay-meta/fetch": true,
+}
+
+// pagedEndpoint reports whether the request is for one of pagedEndpoints
+// ({} matches one path segment).
+func pagedEndpoint(method, path string) bool {
+	return pagedEndpointOf(method, path) != ""
+}
+
+// pagedEndpointOf returns the pagedEndpoints entry the request is for, or "".
+func pagedEndpointOf(method, path string) string {
+	segs := strings.Split(strings.TrimSuffix(path, "/"), "/")
+	for _, e := range PagedEndpoints {
+		m, tmpl, _ := strings.Cut(e, " ")
+		if m != method {
+			continue
+		}
+		t := strings.Split(tmpl, "/")
+		if len(t) != len(segs) {
+			continue
+		}
+		match := true
+		for i := range t {
+			if t[i] != "{}" && t[i] != segs[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return e
+		}
+	}
+	return ""
+}
+
+// PageList implements the pageSize / pageNumber / sortBy / direction query
+// params of the Java list endpoints for every handler returning a JSON array:
+// the array is sorted by the sortBy field (ASC unless direction=DESC; see
+// page.before) and then sliced to the requested page. pageSize / pageNumber are
+// removed from the request before the handler runs so handlers return the
+// full list, which is never held: an unsorted page is cut from the array as
+// it is written, and a sorted one is read by the handler in SQL
+// (sqlPageOrder) or kept as the best items seen (topPage). META requests
+// pass through: their total-count covers all items.
+func PageList(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		endpoint := pagedEndpointOf(r.Method, r.URL.Path)
+		sortBy := q.Get("sortBy")
+		if sortBy != "" && SortIgnored(endpoint) {
+			sortBy = ""
+			q.Del("sortBy")
+		}
+		sizeParam, numberParam := q.Get("pageSize"), q.Get("pageNumber")
+		counted := countedEndpoints[endpoint]
+		if counted && aliasOf(r) != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if counted && (sizeParam == "") != (numberParam == "") {
+			ReadBody(r, nil)
+			SpringError(w, r, http.StatusBadRequest)
+			return
+		}
+		if (sizeParam == "" && numberParam == "" && sortBy == "") || selfPagedPaths[r.URL.Path] ||
+			endpoint == "" || strings.EqualFold(q.Get("projection"), "META") ||
+			(endpoint == "GET /api/genes" && q.Has("keyword")) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		size, sizeErr := strconv.Atoi(strings.TrimSpace(sizeParam))
+		number, _ := strconv.Atoi(strings.TrimSpace(numberParam))
+		if oneBasedPaths[r.URL.Path] && aliasOf(r) == "" {
+			number = max(number-1, 0)
+		}
+		q.Del("pageSize")
+		q.Del("pageNumber")
+		r2 := r.Clone(r.Context())
+		r2.URL.RawQuery = q.Encode()
+
+		pg := Page{SortBy: sortBy, Desc: strings.EqualFold(q.Get("direction"), "DESC"), Size: -1}
+		if sizeErr == nil && size >= 0 {
+			pg.Start, pg.Size = max(number, 0)*size, size
+		}
+		if a := addedPagingOf(endpoint); a != nil {
+			if pg.SortBy == "" {
+				pg.SortBy, pg.Desc = a.DefaultSort, false
+			}
+			pg.numeric = slices.Contains(a.numeric, pg.SortBy)
+		}
+		if counted {
+			rec := NewBufferedResponse()
+			next.ServeHTTP(rec, r2)
+			var items []json.RawMessage
+			if rec.Status == http.StatusOK && json.Unmarshal(rec.Body.Bytes(), &items) == nil {
+				rec.header.Set("total-count", strconv.Itoa(len(items)))
+			}
+			writePage(w, rec.header, rec.Status, rec.Body.Bytes(), pg)
+			return
+		}
+		sp := &SQLPage{Page: pg}
+		cw := &claimWriter{w: w, sp: sp, header: http.Header{}}
+		defer cw.close()
+		next.ServeHTTP(cw, r2.WithContext(context.WithValue(r2.Context(), SQLPageKey{}, sp)))
+		cw.finish()
+	})
+}
+
+// SQLPage is the sorted page pageList asks a handler for; claimed when the
+// handler reads it in SQL.
+type SQLPage struct {
+	Page
+	Claimed bool
+}
+
+// SQLPageKey is the request context key of the *SQLPage pageList asks a
+// handler for.
+type SQLPageKey struct{}
+
+// SQLPageOrder is the ORDER BY clause of a list query. When pageList asks
+// for a sorted page by one of the sortable fields (sortBy value -> SQL
+// expression; an empty expression leaves the order as it is), the handler
+// claims it: rows are sorted by that expression, NULLs last in either
+// direction as ClickHouse orders Java's ORDER BY "<sortBy>", ties in the
+// handler's own order def, and only the page is read (LIMIT / OFFSET).
+// Otherwise the clause orders by def, and pageList sorts what the handler
+// writes.
+func SQLPageOrder(r *http.Request, sortable map[string]string, def string) string {
+	sp, expr := claimSortedPage(r, sortable)
+	if sp == nil {
+		return " ORDER BY " + def
+	}
+	return sp.OrderLimit(expr, def)
+}
+
+// SQLStablePageQuery is the query base (a SELECT without ORDER BY) ordered
+// as sqlPageOrder orders it, for an order def that leaves ties: a sorted
+// page is cut from base ordered by def and numbered as read, so ties keep
+// the order the unsorted list gives them. sortable's expressions refer to
+// base's columns.
+func SQLStablePageQuery(r *http.Request, sortable map[string]string, base, def string) string {
+	sp, expr := claimSortedPage(r, sortable)
+	switch {
+	case sp == nil:
+		return base + " ORDER BY " + def
+	case expr == "":
+		return base + sp.OrderLimit("", def)
+	}
+	// The numbering needs the inner sort, which ClickHouse would otherwise
+	// drop as redundant under the outer one.
+	return "SELECT * EXCEPT (pageRank) FROM (SELECT *, rowNumberInAllBlocks() AS pageRank FROM (" +
+		base + " ORDER BY " + def + "))" + sp.OrderLimit(expr, "pageRank") +
+		" SETTINGS query_plan_remove_redundant_sorting = 0"
+}
+
+// claimSortedPage returns the sorted page pageList asks the request for and
+// the SQL expression of its sortBy, claiming it, or nil when there is none
+// or sortBy is not among sortable.
+func claimSortedPage(r *http.Request, sortable map[string]string) (*SQLPage, string) {
+	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
+	if sp == nil || sp.SortBy == "" {
+		return nil, ""
+	}
+	expr, ok := sortable[sp.SortBy]
+	if !ok {
+		return nil, ""
+	}
+	sp.Claimed = true
+	return sp, expr
+}
+
+// ClaimListPage claims the page pageList asks the request for, sorted or
+// not, and returns it with the SQL expression of its sortBy ("" for an
+// unsorted page), for a handler that reads it in SQL: ordered by the
+// expression (NULLS LAST), then by the handler's own stable order, and cut
+// with LIMIT / OFFSET (orderLimit). It returns nil when the request asks
+// for no page or its sortBy is not among sortable.
+func ClaimListPage(r *http.Request, sortable map[string]string) (*SQLPage, string) {
+	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
+	if sp == nil || sp.Claimed {
+		return nil, ""
+	}
+	expr := ""
+	if sp.SortBy != "" {
+		var ok bool
+		if expr, ok = sortable[sp.SortBy]; !ok {
+			return nil, ""
+		}
+	}
+	sp.Claimed = true
+	return sp, expr
+}
+
+// SQLListOrder is sqlPageOrder for a handler whose rows are the list's
+// items, one for one, in the order def: an unsorted page is read in SQL
+// too, in that order. def must be a stable order.
+func SQLListOrder(r *http.Request, sortable map[string]string, def string) string {
+	sp, expr := ClaimListPage(r, sortable)
+	if sp == nil {
+		return " ORDER BY " + def
+	}
+	return sp.OrderLimit(expr, def)
+}
+
+// PageAsked reports whether pageList asks the request for a page, sorted
+// or not, for handlers that make their order stable only then.
+func PageAsked(r *http.Request) bool {
+	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
+	return sp != nil
+}
+
+// KeyedPage is a sorted page a handler cuts itself, for rows it writes
+// without the sortBy field (the ID projection drops it): each row is added
+// with an object that has the field, and the rows are sorted as pageList
+// sorts them.
+type KeyedPage struct {
+	pg    Page
+	items []sortItem
+}
+
+// ClaimKeyedPage claims the sorted page pageList asks the request for, when
+// the handler has not read it in SQL, or returns nil.
+func ClaimKeyedPage(r *http.Request) *KeyedPage {
+	sp, _ := r.Context().Value(SQLPageKey{}).(*SQLPage)
+	if sp == nil || sp.Claimed || sp.SortBy == "" {
+		return nil
+	}
+	sp.Claimed = true
+	return &KeyedPage{pg: sp.Page}
+}
+
+// Add adds the row out, sorted by key's sortBy field.
+func (k *KeyedPage) Add(key, out any) error {
+	kb, err := json.Marshal(key)
+	if err != nil {
+		return err
+	}
+	it := k.pg.item(kb, len(k.items))
+	if it.raw, err = json.Marshal(out); err != nil {
+		return err
+	}
+	k.items = append(k.items, it)
+	return nil
+}
+
+// Rows returns the rows of the page in order.
+func (k *KeyedPage) Rows() []json.RawMessage {
+	slices.SortFunc(k.items, k.pg.compare)
+	items := k.items[min(k.pg.Start, len(k.items)):]
+	if k.pg.Size >= 0 {
+		items = items[:min(k.pg.Size, len(items))]
+	}
+	out := make([]json.RawMessage, len(items))
+	for i, it := range items {
+		out[i] = it.raw
+	}
+	return out
+}
+
+// OrderLimit is the ORDER BY and LIMIT clause of the page: by expr (unless
+// empty) then tie.
+func (sp *SQLPage) OrderLimit(expr, tie string) string {
+	clause := " ORDER BY " + tie
+	if expr != "" {
+		dir := "ASC"
+		if sp.Desc {
+			dir = "DESC"
+		}
+		clause = fmt.Sprintf(" ORDER BY %s %s NULLS LAST, %s", expr, dir, tie)
+	}
+	if sp.Size >= 0 {
+		clause += fmt.Sprintf(" LIMIT %d OFFSET %d", sp.Size, sp.Start)
+	}
+	return clause
+}
+
+// claimWriter passes a handler's response on as it is when the handler
+// claimed its page (sqlPageOrder, claimListPage), else to a topPage that
+// sorts it or, for an unsorted page, a pageWindow that cuts it. The choice
+// is made at the first write.
+type claimWriter struct {
+	w      http.ResponseWriter
+	sp     *SQLPage
+	header http.Header
+	out    http.ResponseWriter
+	top    *topPage
+	window *pageWindow
+}
+
+func (c *claimWriter) decide() {
+	if c.out != nil {
+		return
+	}
+	switch {
+	case c.sp.Claimed:
+		c.out = c.w
+	case c.sp.SortBy == "":
+		c.window = &pageWindow{w: c.w, header: http.Header{}, status: http.StatusOK, page: c.sp.Page}
+		c.out = c.window
+	default:
+		c.top = newTopPage(c.w, c.sp.Page)
+		c.out = c.top
+	}
+	maps.Copy(c.out.Header(), c.header)
+}
+
+func (c *claimWriter) Header() http.Header {
+	if c.out != nil {
+		return c.out.Header()
+	}
+	return c.header
+}
+
+func (c *claimWriter) WriteHeader(code int) {
+	c.decide()
+	c.out.WriteHeader(code)
+}
+
+func (c *claimWriter) Write(p []byte) (int, error) {
+	c.decide()
+	return c.out.Write(p)
+}
+
+func (c *claimWriter) finish() {
+	c.decide()
+	switch {
+	case c.top != nil:
+		c.top.finish()
+	case c.window != nil:
+		c.window.finish()
+	}
+}
+
+// close releases a pageWindow's stream when the handler ended early.
+func (c *claimWriter) close() {
+	if c.window != nil {
+		c.window.close()
+	}
+}
+
+// topPage sorts a handler's array as it is written, keeping only the items
+// of the page and those before it (all when the page is unbounded). Any
+// other response passes as it is.
+type topPage struct {
+	*ElementWriter
+	w     http.ResponseWriter
+	pg    Page
+	items []sortItem // a heap of the kept items, worst first, while bounded
+	n     int
+}
+
+func newTopPage(w http.ResponseWriter, pg Page) *topPage {
+	t := &topPage{w: w, pg: pg}
+	t.ElementWriter = NewElementWriter(func(http.Header) bool { return true }, t.add)
+	return t
+}
+
+// worse orders the heap: the item a page would drop first comes first.
+func (t *topPage) worse(i, j int) bool { return t.pg.before(t.items[j], t.items[i]) }
+
+func (t *topPage) add(el []byte) error {
+	it := t.pg.item(el, t.n)
+	t.n++
+	if t.pg.Size < 0 {
+		it.raw = bytes.Clone(el)
+		t.items = append(t.items, it)
+		return nil
+	}
+	keep := t.pg.Start + t.pg.Size
+	if keep == 0 {
+		return nil
+	}
+	if len(t.items) == keep {
+		// Later items lose ties, so only a strictly better one is kept.
+		if !t.pg.before(it, t.items[0]) {
+			return nil
+		}
+		it.raw = bytes.Clone(el)
+		t.items[0] = it
+		t.down(0)
+		return nil
+	}
+	it.raw = bytes.Clone(el)
+	t.items = append(t.items, it)
+	t.up(len(t.items) - 1)
+	return nil
+}
+
+func (t *topPage) up(i int) {
+	for i > 0 {
+		p := (i - 1) / 2
+		if !t.worse(i, p) {
+			return
+		}
+		t.items[i], t.items[p] = t.items[p], t.items[i]
+		i = p
+	}
+}
+
+func (t *topPage) down(i int) {
+	for {
+		l, m := 2*i+1, i
+		if l < len(t.items) && t.worse(l, m) {
+			m = l
+		}
+		if r := l + 1; r < len(t.items) && t.worse(r, m) {
+			m = r
+		}
+		if m == i {
+			return
+		}
+		t.items[i], t.items[m] = t.items[m], t.items[i]
+		i = m
+	}
+}
+
+// finish writes the page of a streamed array, or the response as it is.
+func (t *topPage) finish() {
+	if !t.ElementWriter.Finish() {
+		writePage(t.w, t.header, t.Status, t.Raw.Bytes(), t.pg)
+		return
+	}
+	slices.SortFunc(t.items, t.pg.compare)
+	items := t.items[min(t.pg.Start, len(t.items)):]
+	if t.pg.Size >= 0 {
+		items = items[:min(t.pg.Size, len(items))]
+	}
+	maps.Copy(t.w.Header(), t.header)
+	t.w.Header().Set("Content-Type", "application/json")
+	t.w.Header().Del("Content-Length")
+	t.w.WriteHeader(http.StatusOK)
+	bw := bufio.NewWriterSize(t.w, 64<<10)
+	bw.WriteByte('[')
+	for i, it := range items {
+		if i > 0 {
+			bw.WriteByte(',')
+		}
+		bw.Write(it.raw)
+	}
+	bw.WriteString("]\n")
+	bw.Flush()
+}
+
+// Page is the requested page of a list: sorted by sortBy (if set), from
+// start, size items (all when size < 0).
+type Page struct {
+	SortBy      string
+	Desc        bool
+	Start, Size int
+	// numeric compares sortBy values that are JSON strings as numbers; a
+	// string that is no number has no key.
+	numeric bool
+}
+
+// item is the list item raw at index, with its key for the page's sortBy.
+func (pg Page) item(raw []byte, index int) sortItem {
+	it := newSortItem(raw, pg.SortBy, index)
+	if pg.numeric && !it.null && it.num == nil {
+		f, err := strconv.ParseFloat(strings.TrimSpace(it.str), 64)
+		if err != nil || math.IsNaN(f) {
+			it.null = true
+		} else {
+			it.num = &f
+		}
+	}
+	return it
+}
+
+// writePage writes the page of a handler's whole response: an array of a
+// successful response is sorted and sliced, anything else passes as it is.
+func writePage(w http.ResponseWriter, header http.Header, status int, body []byte, pg Page) {
+	maps.Copy(w.Header(), header)
+	var items []json.RawMessage
+	if status != http.StatusOK || json.Unmarshal(body, &items) != nil {
+		w.WriteHeader(status)
+		w.Write(body)
+		return
+	}
+	if pg.SortBy != "" {
+		ks := make([]sortItem, len(items))
+		for i, it := range items {
+			ks[i] = pg.item(it, i)
+		}
+		slices.SortFunc(ks, pg.compare)
+		for i, k := range ks {
+			items[i] = k.raw
+		}
+	}
+	if pg.Size >= 0 {
+		start := min(pg.Start, len(items))
+		items = items[start:min(start+pg.Size, len(items))]
+	}
+	var buf bytes.Buffer
+	buf.WriteByte('[')
+	for i, it := range items {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.Write(it)
+	}
+	buf.WriteString("]\n")
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Del("Content-Length")
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf.Bytes())
+}
+
+// pageWindow receives an unsorted paged handler's response for pageList. A
+// successful JSON array is decoded element by element as the handler writes
+// it, and only the page's elements are written on: the list is never held.
+// Any other response is kept whole for writePage.
+type pageWindow struct {
+	w         http.ResponseWriter
+	header    http.Header
+	status    int
+	page      Page
+	raw       bytes.Buffer
+	streaming bool
+	pw        *io.PipeWriter
+	done      chan error
+	closed    bool
+	err       error
+}
+
+func (p *pageWindow) Header() http.Header { return p.header }
+
+func (p *pageWindow) WriteHeader(code int) {
+	if p.raw.Len() == 0 && !p.streaming {
+		p.status = code
+	}
+}
+
+func (p *pageWindow) Write(b []byte) (int, error) {
+	if p.streaming {
+		return p.pw.Write(b)
+	}
+	p.raw.Write(b)
+	if t := bytes.TrimLeft(p.raw.Bytes(), " \t\r\n"); p.status == http.StatusOK && len(t) > 0 && t[0] == '[' {
+		p.streaming = true
+		maps.Copy(p.w.Header(), p.header)
+		p.w.Header().Set("Content-Type", "application/json")
+		p.w.Header().Del("Content-Length")
+		p.w.WriteHeader(http.StatusOK)
+		pr, pw := io.Pipe()
+		p.pw, p.done = pw, make(chan error, 1)
+		go p.window(pr)
+		_, err := pw.Write(p.raw.Bytes())
+		p.raw.Reset()
+		if err != nil {
+			return 0, err
+		}
+	}
+	return len(b), nil
+}
+
+// window copies the page's elements of the array read from r to the
+// response, then drains r.
+func (p *pageWindow) window(r *io.PipeReader) {
+	var err error
+	defer func() {
+		io.Copy(io.Discard, r)
+		p.done <- err
+	}()
+	bw := bufio.NewWriterSize(p.w, 64<<10)
+	bw.WriteByte('[')
+	dec := json.NewDecoder(r)
+	if _, err = dec.Token(); err != nil {
+		return
+	}
+	n, written := 0, 0
+	for dec.More() {
+		if p.page.Size >= 0 && written == p.page.Size {
+			// The page is complete; the rest of the list is discarded unread.
+			break
+		}
+		var item json.RawMessage
+		if err = dec.Decode(&item); err != nil {
+			return
+		}
+		if n >= p.page.Start {
+			if written > 0 {
+				bw.WriteByte(',')
+			}
+			bw.Write(item)
+			written++
+		}
+		n++
+	}
+	if p.page.Size < 0 || written < p.page.Size {
+		if _, err = dec.Token(); err != nil {
+			return
+		}
+	}
+	bw.WriteString("]\n")
+	err = bw.Flush()
+}
+
+// finish ends the response: the streamed page, or the response kept whole.
+// A streamed array that fails to decode aborts the response.
+func (p *pageWindow) finish() {
+	if !p.streaming {
+		writePage(p.w, p.header, p.status, p.raw.Bytes(), p.page)
+		return
+	}
+	if err := p.close(); err != nil {
+		log.Printf("paged response aborted: %v", err)
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// close ends the stream and waits for its page to be written; it also
+// releases a handler that ended early (an aborted response).
+func (p *pageWindow) close() error {
+	if p.pw == nil || p.closed {
+		return p.err
+	}
+	p.closed = true
+	p.pw.Close()
+	p.err = <-p.done
+	return p.err
+}
+
+// sortItem is a list item with its key for sortBy: numbers compare
+// numerically, everything else as strings (the decoded string, or the raw
+// JSON of other values); a missing or null field, or an item that is no
+// object, has no key.
+type sortItem struct {
+	raw   []byte
+	null  bool
+	num   *float64
+	str   string
+	index int // position in the list
+}
+
+func newSortItem(raw []byte, field string, index int) sortItem {
+	it := sortItem{raw: raw, index: index, null: true}
+	fields, ok := objectFields(raw, nil)
+	if !ok {
+		return it
+	}
+	var v []byte
+	for _, f := range fields {
+		if string(f.key) == field {
+			v = f.val // the last of duplicate keys, as json.Unmarshal reads it
+		}
+	}
+	if v == nil || string(v) == "null" {
+		return it
+	}
+	it.null = false
+	var f float64
+	var s string
+	switch {
+	case json.Unmarshal(v, &f) == nil:
+		it.num = &f
+	case json.Unmarshal(v, &s) == nil:
+		it.str = s
+	default:
+		it.str = string(v)
+	}
+	return it
+}
+
+// before reports whether a precedes b in the sorted list: keyed items in
+// the page's direction, then the items without a key (ClickHouse's NULLS
+// LAST, either direction), ties in list order.
+func (pg Page) before(a, b sortItem) bool {
+	if a.null != b.null {
+		return b.null
+	}
+	if !a.null {
+		c := 0
+		if a.num != nil && b.num != nil {
+			c = cmp.Compare(*a.num, *b.num)
+		} else {
+			c = strings.Compare(a.str, b.str)
+		}
+		if pg.Desc {
+			c = -c
+		}
+		if c != 0 {
+			return c < 0
+		}
+	}
+	return a.index < b.index
+}
+
+// compare is before as a comparison function.
+func (pg Page) compare(a, b sortItem) int {
+	switch {
+	case a.index == b.index:
+		return 0
+	case pg.before(a, b):
+		return -1
+	}
+	return 1
+}
+
+// sortItems sorts JSON objects by one top-level field as page.before orders
+// them.
+func sortItems(items []json.RawMessage, field string, desc bool) {
+	pg := Page{SortBy: field, Desc: desc}
+	ks := make([]sortItem, len(items))
+	for i, it := range items {
+		ks[i] = newSortItem(it, field, i)
+	}
+	slices.SortFunc(ks, pg.compare)
+	for i, k := range ks {
+		items[i] = k.raw
+	}
+}

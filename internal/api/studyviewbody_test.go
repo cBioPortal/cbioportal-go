@@ -5,12 +5,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // TestStudyViewBodyErrors checks the answers production's Java gives to
 // study-view bodies without the fields its controllers dereference.
 func TestStudyViewBodyErrors(t *testing.T) {
-	h := NewRouter(&State{})
+	h := NewRouter(&State{State: &core.State{}})
 	for _, c := range []struct {
 		path, body string
 		status     int
@@ -23,16 +25,16 @@ func TestStudyViewBodyErrors(t *testing.T) {
 		{"/api/genomic-data-counts/fetch", `{"genomicDataFilters":[],"studyViewFilter":{"studyIds":["s"]}}`, 500, ""},
 		{"/api/clinical-data-counts/fetch", `{"attributes":[{"attributeId":"AGE"}]}`, 500, ""},
 		{"/api/clinical-data-counts/fetch", `{"attributes":[],"studyViewFilter":{"studyIds":["s"]}}`, 500, ""},
-		{"/api/clinical-data-counts/fetch", `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{}}`, 500, msgSQLException},
-		{"/api/clinical-data-bin-counts/fetch", `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{}}`, 500, msgSQLException},
+		{"/api/clinical-data-counts/fetch", `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{}}`, 500, core.MsgSQLException},
+		{"/api/clinical-data-bin-counts/fetch", `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{}}`, 500, core.MsgSQLException},
 		{"/api/clinical-data-bin-counts/fetch", `{"attributes":[]}`, 500, ""},
 		{"/api/clinical-data-bin-counts/fetch", `{"attributes":[],"studyViewFilter":{"studyIds":["s"]}}`, 500, ""},
-		{"/api/clinical-data-counts/fetch", `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{"studyIds":[]}}`, 500, msgSQLException},
+		{"/api/clinical-data-counts/fetch", `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{"studyIds":[]}}`, 500, core.MsgSQLException},
 		{"/api/genomic-data-bin-counts/fetch", `{"studyViewFilter":{"studyIds":["s"]}}`, 500, ""},
 		{"/api/generic-assay-data-bin-counts/fetch", `{}`, 500, ""},
 		{"/api/generic-assay-data-counts/fetch", `{"genericAssayDataFilters":[{"stableId":"x","profileType":"y"}]}`, 500, ""},
 		{"/api/generic-assay-data-counts/fetch", `{"genericAssayDataFilters":[]}`, 400, ""},
-		{"/api/mutation-data-counts/fetch", `{bad`, 400, msgBadJSON},
+		{"/api/mutation-data-counts/fetch", `{bad`, 400, core.MsgBadJSON},
 	} {
 		req := httptest.NewRequest(http.MethodPost, c.path, strings.NewReader(c.body))
 		req.Header.Set("Content-Type", "application/json")
@@ -40,22 +42,6 @@ func TestStudyViewBodyErrors(t *testing.T) {
 		h.ServeHTTP(w, req)
 		if w.Code != c.status || !strings.Contains(w.Body.String(), c.want) {
 			t.Errorf("POST %s %s: status %d body %q, want %d with %q", c.path, c.body, w.Code, w.Body.String(), c.status, c.want)
-		}
-	}
-}
-
-// TestStudyViewBodyComplete checks that complete bodies pass the check.
-func TestStudyViewBodyComplete(t *testing.T) {
-	for path, body := range map[string]string{
-		"/api/mutation-data-counts/fetch":          `{"genomicDataFilters":[],"studyViewFilter":{}}`,
-		"/api/genomic-data-counts/fetch":           `{"genomicDataFilters":[{"hugoGeneSymbol":"A","profileType":"gistic"}],"studyViewFilter":{}}`,
-		"/api/clinical-data-counts/fetch":          `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{"studyIds":["s"]}}`,
-		"/api/clinical-data-bin-counts/fetch":      `{"attributes":[{"attributeId":"AGE"}],"studyViewFilter":{"studyIds":[],"sampleIdentifiers":[{"sampleId":"a","studyId":"s"}]}}`,
-		"/api/genomic-data-bin-counts/fetch":       `{"genomicDataBinFilters":[]}`,
-		"/api/generic-assay-data-bin-counts/fetch": `{"genericAssayDataBinFilters":[]}`,
-	} {
-		if _, _, failed := studyViewBodies[path].check([]byte(body)); failed {
-			t.Errorf("%s %s: failed", path, body)
 		}
 	}
 }

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -20,6 +19,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // OAuth2 login, as the Java portal's Spring Security oauth2Login: an OpenID
@@ -413,10 +414,6 @@ func publicPath(p string) bool {
 	return false
 }
 
-func isAPIPath(p string) bool {
-	return strings.HasPrefix(p, "/api/") || p == "/webservice.do"
-}
-
 // middleware authenticates every request from its session cookie and routes
 // the login endpoints. With oauth2, unauthenticated requests outside the
 // public paths are refused (API) or sent to the login (pages); with
@@ -442,7 +439,7 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if o.dat != nil && isAPIPath(p) && r.Header.Get("Authorization") != "" {
+		if o.dat != nil && core.IsAPIPath(p) && r.Header.Get("Authorization") != "" {
 			o.dat.tokenAuth(w, r, next)
 			return
 		}
@@ -450,21 +447,21 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 		if err != nil {
 			log.Printf("oauth2: login session: %v", err)
 			if !o.cfg.optional() {
-				readBody(r, nil)
+				core.ReadBody(r, nil)
 				http.Error(w, "login sessions unavailable", http.StatusServiceUnavailable)
 				return
 			}
 		}
 		if sess != nil {
 			r = o.replay(r, sess, id)
-			next.ServeHTTP(w, withUser(r, User{Name: sess.User, Roles: sess.Roles}))
+			next.ServeHTTP(w, core.WithUser(r, core.User{Name: sess.User, Roles: sess.Roles}))
 			return
 		}
 		switch {
 		case o.cfg.optional(), publicPath(p):
 			next.ServeHTTP(w, r)
-		case isAPIPath(p):
-			readBody(r, nil)
+		case core.IsAPIPath(p):
+			core.ReadBody(r, nil)
 			w.WriteHeader(http.StatusUnauthorized)
 		default:
 			o.saveRequest(w, r)
@@ -541,7 +538,7 @@ func (o *oauth2Login) saveRequest(w http.ResponseWriter, r *http.Request) {
 			saved.Form, saved.Post = r.PostForm, true
 		}
 	} else {
-		readBody(r, nil)
+		core.ReadBody(r, nil)
 	}
 	id := randomToken()
 	if err := o.put(r.Context(), attemptKey(id), loginAttempt{Target: saved}, loginTimeout); err != nil {
@@ -624,7 +621,7 @@ func (o *oauth2Login) authorize(w http.ResponseWriter, r *http.Request, reg *oau
 // and starts the session.
 func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request, reg *oauth2Registration) {
 	fail := func(format string, args ...any) {
-		loginsTotal.Inc("failure")
+		core.LoginsTotal.Inc("failure")
 		log.Printf("oauth2: %s: login failed: "+format, append([]any{reg.ID}, args...)...)
 		http.Redirect(w, r, "/login?logout_failure", http.StatusFound)
 	}
@@ -680,15 +677,15 @@ func (o *oauth2Login) callback(w http.ResponseWriter, r *http.Request, reg *oaut
 		return
 	}
 	o.setCookie(w, r, sessionCookie, id, 0)
-	loginsTotal.Inc("success")
+	core.LoginsTotal.Inc("success")
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
 // exchange redeems an authorization code and returns the user it identifies.
-func (o *oauth2Login) exchange(r *http.Request, reg *oauth2Registration, code, nonce string) (User, string, error) {
+func (o *oauth2Login) exchange(r *http.Request, reg *oauth2Registration, code, nonce string) (core.User, string, error) {
 	meta, keys, err := o.provider(reg)
 	if err != nil {
-		return User{}, "", err
+		return core.User{}, "", err
 	}
 	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {o.redirectURI(r, reg)}}
 	if reg.ClientAuthPost {
@@ -703,7 +700,7 @@ func (o *oauth2Login) exchange(r *http.Request, reg *oauth2Registration, code, n
 	}
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return User{}, "", fmt.Errorf("token request: %w", err)
+		return core.User{}, "", fmt.Errorf("token request: %w", err)
 	}
 	defer resp.Body.Close()
 	var tok struct {
@@ -712,27 +709,27 @@ func (o *oauth2Login) exchange(r *http.Request, reg *oauth2Registration, code, n
 		Error       string `json:"error"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tok); err != nil || resp.StatusCode != http.StatusOK {
-		return User{}, "", fmt.Errorf("token request: HTTP %d %s", resp.StatusCode, tok.Error)
+		return core.User{}, "", fmt.Errorf("token request: HTTP %d %s", resp.StatusCode, tok.Error)
 	}
 	if tok.IDToken == "" {
-		return User{}, "", errors.New("token response has no id_token (scope must include openid)")
+		return core.User{}, "", errors.New("token response has no id_token (scope must include openid)")
 	}
 	claims, err := keys.verify(tok.IDToken)
 	if err != nil {
-		return User{}, "", err
+		return core.User{}, "", err
 	}
 	issuers := append([]string{meta.Issuer}, reg.Issuers...)
 	if err := checkIDToken(claims, issuers, reg.ClientID, nonce, time.Now()); err != nil {
-		return User{}, "", err
+		return core.User{}, "", err
 	}
 	var userinfo map[string]any
 	if meta.UserInfoEndpoint != "" && tok.AccessToken != "" {
 		userinfo, err = o.userInfo(r.Context(), meta.UserInfoEndpoint, tok.AccessToken)
 		if err != nil {
-			return User{}, "", err
+			return core.User{}, "", err
 		}
 		if sub, _ := userinfo["sub"].(string); sub != claims["sub"] {
-			return User{}, "", errors.New("userinfo subject does not match the ID token")
+			return core.User{}, "", errors.New("userinfo subject does not match the ID token")
 		}
 	}
 	return o.userFromClaims(reg, claims, userinfo), tok.IDToken, nil
@@ -790,7 +787,7 @@ func checkIDToken(claims map[string]any, issuers []string, clientID, nonce strin
 
 // userFromClaims names the user by the user-name-attribute claim and
 // collects the roles at the roles path of the userinfo and ID token claims.
-func (o *oauth2Login) userFromClaims(reg *oauth2Registration, idClaims, userinfo map[string]any) User {
+func (o *oauth2Login) userFromClaims(reg *oauth2Registration, idClaims, userinfo map[string]any) core.User {
 	attrs := map[string]any{}
 	for k, v := range idClaims {
 		attrs[k] = v
@@ -810,7 +807,7 @@ func (o *oauth2Login) userFromClaims(reg *oauth2Registration, idClaims, userinfo
 			}
 		}
 	}
-	return User{Name: name, Roles: roles}
+	return core.User{Name: name, Roles: roles}
 }
 
 // claimRoles walks path through the claims, as Java's
@@ -857,7 +854,7 @@ func (o *oauth2Login) logout(w http.ResponseWriter, r *http.Request) {
 	target := "/"
 	if reg := o.cfg.registration(sess.Registration); reg != nil && !o.cfg.optional() && sess.IDToken != "" {
 		if meta, _, err := o.provider(reg); err == nil && meta.EndSessionEndpoint != "" {
-			q := url.Values{"id_token_hint": {sess.IDToken}, "post_logout_redirect_uri": {baseURL(r)}}
+			q := url.Values{"id_token_hint": {sess.IDToken}, "post_logout_redirect_uri": {core.BaseURL(r)}}
 			target = meta.EndSessionEndpoint + "?" + q.Encode()
 		}
 	}
@@ -865,32 +862,13 @@ func (o *oauth2Login) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (o *oauth2Login) redirectURI(r *http.Request, reg *oauth2Registration) string {
-	return strings.NewReplacer("{baseUrl}", baseURL(r), "{action}", "login", "{registrationId}", reg.ID).Replace(reg.RedirectURI)
-}
-
-// baseURL is the portal's origin as the browser sees it: behind a
-// TLS-terminating proxy or ingress, from its X-Forwarded-Proto and
-// X-Forwarded-Host (or the Host it passes on).
-func baseURL(r *http.Request) string {
-	first := func(h string) string {
-		v, _, _ := strings.Cut(r.Header.Get(h), ",")
-		return strings.TrimSpace(v)
-	}
-	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(first("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	host := r.Host
-	if h := first("X-Forwarded-Host"); h != "" {
-		host = h
-	}
-	return scheme + "://" + host
+	return strings.NewReplacer("{baseUrl}", core.BaseURL(r), "{action}", "login", "{registrationId}", reg.ID).Replace(reg.RedirectURI)
 }
 
 func (o *oauth2Login) setCookie(w http.ResponseWriter, r *http.Request, name, value string, maxAge time.Duration) {
 	c := &http.Cookie{
 		Name: name, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: strings.HasPrefix(baseURL(r), "https:"),
+		Secure: strings.HasPrefix(core.BaseURL(r), "https:"),
 	}
 	switch {
 	case maxAge < 0:
@@ -907,15 +885,4 @@ func randomToken() string {
 		panic(err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-// bufferedBody reads a request body and puts it back for the handler.
-func bufferedBody(r *http.Request) []byte {
-	if r.Body == nil {
-		return nil
-	}
-	b, _ := io.ReadAll(r.Body)
-	r.Body.Close()
-	r.Body = io.NopCloser(bytes.NewReader(b))
-	return b
 }

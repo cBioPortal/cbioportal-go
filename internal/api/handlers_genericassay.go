@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -65,14 +66,14 @@ func (s *State) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 	// Samples sort by internal id (where the database carries them) unless
 	// requested by id, then by stable id and study.
 	sampleRank := "toUInt64(0)"
-	if samplesByStudy == nil && s.importOrdered() {
+	if samplesByStudy == nil && s.ImportOrdered() {
 		sampleRank = "toUInt64(s.internal_id)"
 	}
-	args := newArgs()
+	args := core.NewArgs()
 	patientLevel := map[string]bool{}
 	var parts []string
 	for _, mpid := range ids {
-		meta, ok := s.profileMeta(mpid)
+		meta, ok := s.ProfileMeta(mpid)
 		if !ok || !strings.EqualFold(meta.AlterationType, "GENERIC_ASSAY") {
 			continue
 		}
@@ -82,14 +83,14 @@ func (s *State) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 			if len(sampleIDs) == 0 {
 				continue
 			}
-			sampleCond = " AND s.sample_id IN " + args.strs(sampleIDs)
+			sampleCond = " AND s.sample_id IN " + args.Strs(sampleIDs)
 		}
-		sc := byStudy(meta.StudyID)
-		rest := " AND profile_stable_id = " + args.str(meta.StableID)
+		sc := core.ByStudy(meta.StudyID)
+		rest := " AND profile_stable_id = " + args.Str(meta.StableID)
 		if entityIDs != nil {
-			rest += " AND entity_stable_id IN " + args.strs(entityIDs)
+			rest += " AND entity_stable_id IN " + args.Strs(entityIDs)
 		}
-		matrix := rawMatrix("generic_assay_matrix")
+		matrix := core.RawMatrix("generic_assay_matrix")
 		join := "s.sample_id = m.sample_id"
 		if s.gaProfilePatientLevel(meta) {
 			join = "s.patient_id = m.sample_id"
@@ -101,9 +102,9 @@ func (s *State) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 				"FROM (SELECT * FROM %s WHERE %s) m JOIN %s s ON s.study_id = m.study_id AND %s%s "+
 				"JOIN (SELECT entity_stable_id AS e, min(%s) AS o FROM %s "+
 				"GROUP BY entity_stable_id) en ON en.e = m.entity_stable_id",
-			javaTruncatedValueSQL("m.value"), args.str(mpid), args.str(meta.StudyID), sampleRank,
-			genericAssaySource(s), sc.cond(args, matrix, "")+rest, sc.samples(args), join, sampleCond,
-			s.rawFileOrder("generic_assay_matrix", ""), sc.from(args, matrix)+rest))
+			core.JavaTruncatedValueSQL("m.value"), args.Str(mpid), args.Str(meta.StudyID), sampleRank,
+			genericAssaySource(s), sc.Cond(args, matrix, "")+rest, sc.Samples(args), join, sampleCond,
+			s.RawFileOrder("generic_assay_matrix", ""), sc.From(args, matrix)+rest))
 	}
 	if len(parts) == 0 {
 		return nil
@@ -113,21 +114,21 @@ func (s *State) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 	order := "sampleRank, sampleId, studyId, molecularProfileId, entityRank, stableId"
 	query := "SELECT sampleId, stableId, patientId, value, molecularProfileId, studyId FROM (" +
 		strings.Join(parts, " UNION ALL ") + ") ORDER BY " + order + " LIMIT 1 BY molecularProfileId, sampleId, stableId"
-	if sp, expr := claimListPage(r, genericAssayDataSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, genericAssayDataSortable); sp != nil {
 		tie := order
-		if sp.sortBy == "value" {
+		if sp.SortBy == "value" {
 			// Values that are no number (categories) follow, as text.
 			dir := " ASC, "
-			if sp.desc {
+			if sp.Desc {
 				dir = " DESC, "
 			}
 			tie = "value" + dir + order
 		}
 		// The page holds the cells with a value, which are the ones written.
 		query = "SELECT * FROM (SELECT * FROM (" + strings.Join(parts, " UNION ALL ") + ") ORDER BY " + order +
-			" LIMIT 1 BY molecularProfileId, sampleId, stableId) WHERE value NOT IN ('', 'NA')" + sp.orderLimit(expr, tie)
+			" LIMIT 1 BY molecularProfileId, sampleId, stableId) WHERE value NOT IN ('', 'NA')" + sp.OrderLimit(expr, tie)
 	}
-	return ch.QueryEachP(s.CH, query, args.params(query), func(r *genericAssayDataRow) error {
+	return ch.QueryEachP(s.CH, query, args.Params(query), func(r *genericAssayDataRow) error {
 		if r.Value == "" || r.Value == "NA" {
 			return nil
 		}
@@ -135,8 +136,8 @@ func (s *State) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 			GenericAssayStableID: r.StableID, MolecularProfileID: r.MolecularProfileID, PatientID: r.PatientID,
 			PatientLevel: patientLevel[r.MolecularProfileID], SampleID: r.SampleID, StableID: r.StableID,
 			StudyID: r.StudyID, Value: r.Value,
-			UniqueSampleKey:  uniqueKey(r.StudyID, r.SampleID),
-			UniquePatientKey: uniqueKey(r.StudyID, r.PatientID),
+			UniqueSampleKey:  core.UniqueKey(r.StudyID, r.SampleID),
+			UniquePatientKey: core.UniqueKey(r.StudyID, r.PatientID),
 		})
 	})
 }
@@ -151,9 +152,9 @@ var genericAssayDataSortable = map[string]string{
 
 // writeGenericAssayData streams genericAssayDataEach's records.
 func (s *State) writeGenericAssayData(w http.ResponseWriter, r *http.Request, profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) {
-	out := newJSONArray(w, r)
-	out.finish(s.genericAssayDataEach(r, profileIDs, samplesByStudy, entityIDs, func(d GenericAssayData) error {
-		return out.add(d)
+	out := core.NewJSONArray(w, r)
+	out.Finish(s.genericAssayDataEach(r, profileIDs, samplesByStudy, entityIDs, func(d GenericAssayData) error {
+		return out.Add(d)
 	}))
 }
 
@@ -162,9 +163,9 @@ func (s *State) writeGenericAssayData(w http.ResponseWriter, r *http.Request, pr
 func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("molecularProfileId")
 	var f genericAssayFilter
-	readBody(r, &f)
-	if noSamples(f.SampleIDs, f.SampleListID) {
-		writeJSON(w, []struct{}{})
+	core.ReadBody(r, &f)
+	if core.NoSamples(f.SampleIDs, f.SampleListID) {
+		core.WriteJSON(w, []struct{}{})
 		return
 	}
 	sampleIDs := f.SampleIDs
@@ -173,9 +174,9 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 			SampleID string `json:"sampleId"`
 		}
 		p := ch.Params{}
-		rows, err := ch.QueryP[idRow](s.CH, "SELECT sample_id AS sampleId FROM "+s.bySampleList(f.SampleListID).from(paramsBinder(p), tSampleList), p)
+		rows, err := ch.QueryP[idRow](s.CH, "SELECT sample_id AS sampleId FROM "+s.BySampleList(f.SampleListID).From(core.ParamsBinder(p), core.TSampleList), p)
 		if err != nil {
-			fail(w, r, err)
+			core.Fail(w, r, err)
 			return
 		}
 		sampleIDs = make([]string, len(rows))
@@ -183,13 +184,13 @@ func (s *State) genericAssayDataInProfileFetch(w http.ResponseWriter, r *http.Re
 			sampleIDs[i] = row.SampleID
 		}
 		if len(sampleIDs) == 0 {
-			writeJSON(w, []GenericAssayData{})
+			core.WriteJSON(w, []GenericAssayData{})
 			return
 		}
 	}
 	var byStudy map[string][]string
 	if sampleIDs != nil {
-		meta, _ := s.profileMeta(mpid)
+		meta, _ := s.ProfileMeta(mpid)
 		byStudy = map[string][]string{meta.StudyID: sampleIDs}
 	}
 	s.writeGenericAssayData(w, r, []string{mpid}, byStudy, f.GenericAssayStableIDs)
@@ -211,7 +212,7 @@ type genericAssayMultipleStudyFilter struct {
 // Exactly one of the two forms must be given (else 400 with no body).
 func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Request) {
 	var f genericAssayMultipleStudyFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 	if (len(f.MolecularProfileIDs) > 0) == (len(f.SampleMolecularIdentifiers) > 0) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -224,7 +225,7 @@ func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Req
 	byStudy := map[string][]string{}
 	for _, smi := range f.SampleMolecularIdentifiers {
 		profiles = append(profiles, smi.MolecularProfileID)
-		if meta, ok := s.profileMeta(smi.MolecularProfileID); ok {
+		if meta, ok := s.ProfileMeta(smi.MolecularProfileID); ok {
 			byStudy[meta.StudyID] = append(byStudy[meta.StudyID], smi.SampleID)
 		}
 	}
@@ -234,9 +235,9 @@ func (s *State) genericAssayDataMultipleFetch(w http.ResponseWriter, r *http.Req
 // ---------- Generic assay meta ----------
 
 type GenericAssayMeta struct {
-	StableID                    string        `json:"stableId"`
-	EntityType                  string        `json:"entityType"`
-	GenericEntityMetaProperties javaStringMap `json:"genericEntityMetaProperties"`
+	StableID                    string             `json:"stableId"`
+	EntityType                  string             `json:"entityType"`
+	GenericEntityMetaProperties core.JavaStringMap `json:"genericEntityMetaProperties"`
 }
 
 type genericAssayMetaFilter struct {
@@ -256,37 +257,37 @@ type genericAssayMetaRow struct {
 // and/or entity ids.
 func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	var f genericAssayMetaFilter
-	readBody(r, &f)
+	core.ReadBody(r, &f)
 
-	args := newArgs()
+	args := core.NewArgs()
 	var conds []string
 	if len(f.MolecularProfileIDs) > 0 {
 		var pairs [][2]string
 		for _, mpid := range f.MolecularProfileIDs {
-			if m, ok := s.profileMeta(mpid); ok && strings.EqualFold(m.AlterationType, "GENERIC_ASSAY") {
+			if m, ok := s.ProfileMeta(mpid); ok && strings.EqualFold(m.AlterationType, "GENERIC_ASSAY") {
 				pairs = append(pairs, [2]string{m.StudyID, m.StableID})
 			}
 		}
 		if len(pairs) == 0 {
-			writeJSON(w, []GenericAssayMeta{})
+			core.WriteJSON(w, []GenericAssayMeta{})
 			return
 		}
-		conds = append(conds, "(study_id, profile_stable_id) IN "+args.pairs(pairs))
+		conds = append(conds, "(study_id, profile_stable_id) IN "+args.Pairs(pairs))
 	}
 	if len(f.GenericAssayStableIDs) > 0 {
-		conds = append(conds, "entity_stable_id IN "+args.strs(f.GenericAssayStableIDs))
+		conds = append(conds, "entity_stable_id IN "+args.Strs(f.GenericAssayStableIDs))
 	}
 	if len(conds) == 0 {
-		writeJSON(w, []GenericAssayMeta{})
+		core.WriteJSON(w, []GenericAssayMeta{})
 		return
 	}
 	where := "1 = 1"
 	if len(conds) > 0 {
 		where = strings.Join(conds, " AND ")
 	}
-	out := newJSONArray(w, r)
-	out.finish(s.genericAssayMetaEach(where, args, func(m GenericAssayMeta) error {
-		return out.add(m)
+	out := core.NewJSONArray(w, r)
+	out.Finish(s.genericAssayMetaEach(where, args, func(m GenericAssayMeta) error {
+		return out.Add(m)
 	}))
 }
 
@@ -294,13 +295,13 @@ func (s *State) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 // genericAssayMetaList(genericAssayMetaProperties(where, args)), in that
 // order, building one record at a time: the requested profiles can have
 // hundreds of thousands of entities.
-func (s *State) genericAssayMetaEach(where string, args *sqlArgs, fn func(GenericAssayMeta) error) error {
+func (s *State) genericAssayMetaEach(where string, args *core.SQLArgs, fn func(GenericAssayMeta) error) error {
 	type entity struct {
 		id         string
 		keys, vals []string
 	}
 	var all []entity
-	if len(s.rawColumns("generic_assay_entity_meta")) > 0 {
+	if len(s.RawColumns("generic_assay_entity_meta")) > 0 {
 		type propRow struct {
 			StableID string   `json:"stableId"`
 			Keys     []string `json:"keys"`
@@ -310,7 +311,7 @@ func (s *State) genericAssayMetaEach(where string, args *sqlArgs, fn func(Generi
 			"SELECT entity_stable_id AS stableId, mapKeys(properties) AS keys, mapValues(properties) AS vals "+
 				"FROM cbioportal_raw.generic_assay_entity_meta "+
 				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where)
-		err := ch.QueryEachP(s.CH, sql, args.params(sql), func(r *propRow) error {
+		err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(r *propRow) error {
 			all = append(all, entity{r.StableID, r.Keys, r.Values})
 			return nil
 		})
@@ -321,7 +322,7 @@ func (s *State) genericAssayMetaEach(where string, args *sqlArgs, fn func(Generi
 		sql := fmt.Sprintf(
 			"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
 				"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where)
-		err := ch.QueryEachP(s.CH, sql, args.params(sql), func(r *genericAssayMetaRow) error {
+		err := ch.QueryEachP(s.CH, sql, args.Params(sql), func(r *genericAssayMetaRow) error {
 			all = append(all, entity{r.StableID, []string{"NAME", "DESCRIPTION", "URL"}, []string{r.Name, r.Description, r.URL}})
 			return nil
 		})
@@ -336,9 +337,9 @@ func (s *State) genericAssayMetaEach(where string, args *sqlArgs, fn func(Generi
 		if i+1 < len(all) && all[i+1].id == e.id {
 			continue
 		}
-		var m javaStringMap
+		var m core.JavaStringMap
 		for k, key := range e.keys {
-			m.set(key, e.vals[k])
+			m.Set(key, e.vals[k])
 		}
 		if err := fn(GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: e.id, GenericEntityMetaProperties: m}); err != nil {
 			return err
@@ -350,8 +351,8 @@ func (s *State) genericAssayMetaEach(where string, args *sqlArgs, fn func(Generi
 
 // genericAssayMetaList orders entity metadata as GenericAssayMapper does:
 // by the number an id starts with (0 without one), then by id.
-func genericAssayMetaList(props map[string]javaStringMap) []GenericAssayMeta {
-	ids := sortedKeys(props)
+func genericAssayMetaList(props map[string]core.JavaStringMap) []GenericAssayMeta {
+	ids := core.SortedKeys(props)
 	sort.SliceStable(ids, func(i, j int) bool { return entityLess(ids[i], ids[j]) })
 	out := make([]GenericAssayMeta, 0, len(ids))
 	for _, id := range ids {
@@ -367,42 +368,42 @@ func genericAssayMetaList(props map[string]javaStringMap) []GenericAssayMeta {
 // production clone, else the NAME / DESCRIPTION / URL columns of the staged
 // matrix. Properties keep their stored order (the importer's, by property
 // id), in which Java puts them into its HashMap.
-func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[string]javaStringMap, error) {
-	if len(s.rawColumns("generic_assay_entity_meta")) > 0 {
+func (s *State) genericAssayMetaProperties(where string, args *core.SQLArgs) (map[string]core.JavaStringMap, error) {
+	if len(s.RawColumns("generic_assay_entity_meta")) > 0 {
 		type propRow struct {
 			StableID string   `json:"stableId"`
 			Keys     []string `json:"keys"`
 			Values   []string `json:"vals"`
 		}
-		rows, err := queryA[propRow](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[propRow](s.CH, fmt.Sprintf(
 			"SELECT entity_stable_id AS stableId, mapKeys(properties) AS keys, mapValues(properties) AS vals "+
 				"FROM cbioportal_raw.generic_assay_entity_meta "+
 				"WHERE entity_stable_id IN (SELECT entity_stable_id FROM cbioportal_raw.generic_assay_profile_entity WHERE %s)", where), args)
 		if err != nil {
 			return nil, err
 		}
-		out := make(map[string]javaStringMap, len(rows))
+		out := make(map[string]core.JavaStringMap, len(rows))
 		for _, r := range rows {
-			var m javaStringMap
+			var m core.JavaStringMap
 			for i, k := range r.Keys {
-				m.set(k, r.Values[i])
+				m.Set(k, r.Values[i])
 			}
 			out[r.StableID] = m
 		}
 		return out, nil
 	}
-	rows, err := queryA[genericAssayMetaRow](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[genericAssayMetaRow](s.CH, fmt.Sprintf(
 		"SELECT entity_stable_id AS stableId, any(name) AS name, any(description) AS description, any(url) AS url "+
 			"FROM %s WHERE %s GROUP BY entity_stable_id", genericAssaySource(s), where), args)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]javaStringMap, len(rows))
+	out := make(map[string]core.JavaStringMap, len(rows))
 	for _, r := range rows {
-		var m javaStringMap
-		m.set("NAME", r.Name)
-		m.set("DESCRIPTION", r.Description)
-		m.set("URL", r.URL)
+		var m core.JavaStringMap
+		m.Set("NAME", r.Name)
+		m.Set("DESCRIPTION", r.Description)
+		m.Set("URL", r.URL)
 		out[r.StableID] = m
 	}
 	return out, nil
@@ -411,14 +412,14 @@ func (s *State) genericAssayMetaProperties(where string, args *sqlArgs) (map[str
 // summaryMetaProperties keeps the properties GenericAssayServiceImpl returns
 // for the SUMMARY projection (SUMMARY_META_PROPERTY_NAMES), as the enrichments
 // attach them.
-func summaryMetaProperties(props map[string]javaStringMap) map[string]javaStringMap {
-	out := make(map[string]javaStringMap, len(props))
+func summaryMetaProperties(props map[string]core.JavaStringMap) map[string]core.JavaStringMap {
+	out := make(map[string]core.JavaStringMap, len(props))
 	for id, m := range props {
-		var kept javaStringMap
-		for _, k := range m.keys {
+		var kept core.JavaStringMap
+		for _, k := range m.Keys {
 			switch k {
 			case "NAME", "DESCRIPTION", "URL":
-				kept.set(k, m.vals[k])
+				kept.Set(k, m.Vals[k])
 			}
 		}
 		out[id] = kept
@@ -446,13 +447,13 @@ func (s *State) routeGenericAssay(mux *http.ServeMux) {
 // genericAssaySource is the staged generic-assay matrix with every column the
 // handlers read (entity properties a file lacks read as empty).
 func genericAssaySource(s *State) string {
-	return s.rawSource("generic_assay_matrix",
+	return s.RawSource("generic_assay_matrix",
 		"study_id", "profile_stable_id", "entity_stable_id", "sample_id", "value", "name", "description", "url")
 }
 
 // genesetScoreSource is the staged GSVA score matrix.
 func genesetScoreSource(s *State) string {
-	return s.rawSource("geneset_score_matrix", "study_id", "profile_stable_id", "geneset_id", "sample_id", "value")
+	return s.RawSource("geneset_score_matrix", "study_id", "profile_stable_id", "geneset_id", "sample_id", "value")
 }
 
 // geneMatrixCols are the columns read from a staged per-gene matrix.

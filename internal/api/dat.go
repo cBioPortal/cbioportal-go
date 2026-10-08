@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -116,7 +117,7 @@ func loadDATConfig(props map[string]string) (*datConfig, error) {
 }
 
 type datEntry struct {
-	user    User
+	user    core.User
 	expires time.Time
 }
 
@@ -160,7 +161,7 @@ func bearerToken(header string) (string, bool) {
 }
 
 // authenticate returns the user an offline token stands for.
-func (d *datProvider) authenticate(ctx context.Context, offlineToken string) (User, error) {
+func (d *datProvider) authenticate(ctx context.Context, offlineToken string) (core.User, error) {
 	sum := sha256.Sum256([]byte(offlineToken))
 	key := hex.EncodeToString(sum[:])
 	d.mu.Lock()
@@ -171,23 +172,23 @@ func (d *datProvider) authenticate(ctx context.Context, offlineToken string) (Us
 	}
 	d.mu.Unlock()
 	if ok {
-		datChecks.Inc("cached")
+		core.DATChecks.Inc("cached")
 		return e.user, nil
 	}
 	v, err, _ := d.inflight.Do(key, func() (any, error) {
 		user, expires, err := d.refresh(context.WithoutCancel(ctx), offlineToken)
 		if err != nil {
-			datChecks.Inc("rejected")
-			return User{}, err
+			core.DATChecks.Inc("rejected")
+			return core.User{}, err
 		}
-		datChecks.Inc("refreshed")
+		core.DATChecks.Inc("refreshed")
 		d.store(key, datEntry{user: user, expires: expires.Add(-datCacheMargin)})
 		return user, nil
 	})
 	if err != nil {
-		return User{}, err
+		return core.User{}, err
 	}
-	return v.(User), nil
+	return v.(core.User), nil
 }
 
 // store caches an entry, making room by dropping expired entries and then
@@ -217,7 +218,7 @@ func (d *datProvider) store(key string, e datEntry) {
 
 // refresh trades the offline token for an access token and returns the
 // user it names, with the access token's expiry.
-func (d *datProvider) refresh(ctx context.Context, offlineToken string) (User, time.Time, error) {
+func (d *datProvider) refresh(ctx context.Context, offlineToken string) (core.User, time.Time, error) {
 	tok, err := d.tokenRequest(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
 		"client_id":     {d.cfg.ClientID},
@@ -225,28 +226,28 @@ func (d *datProvider) refresh(ctx context.Context, offlineToken string) (User, t
 		"refresh_token": {offlineToken},
 	})
 	if err != nil {
-		return User{}, time.Time{}, err
+		return core.User{}, time.Time{}, err
 	}
 	if tok.AccessToken == "" {
-		return User{}, time.Time{}, errors.New("authentication server did not return an access token")
+		return core.User{}, time.Time{}, errors.New("authentication server did not return an access token")
 	}
 	claims, err := d.keys.verify(tok.AccessToken)
 	if err != nil {
-		return User{}, time.Time{}, err
+		return core.User{}, time.Time{}, err
 	}
 	if iss, _ := claims["iss"].(string); iss != d.cfg.Issuer {
-		return User{}, time.Time{}, fmt.Errorf("access token issuer %q is not %q", iss, d.cfg.Issuer)
+		return core.User{}, time.Time{}, fmt.Errorf("access token issuer %q is not %q", iss, d.cfg.Issuer)
 	}
 	exp, ok := claims["exp"].(float64)
 	expires := time.Unix(int64(exp), 0)
 	if !ok || d.now().After(expires) {
-		return User{}, time.Time{}, errors.New("access token expired")
+		return core.User{}, time.Time{}, errors.New("access token expired")
 	}
 	sub, _ := claims["sub"].(string)
 	if sub == "" {
-		return User{}, time.Time{}, errors.New("user name could not be found in access token")
+		return core.User{}, time.Time{}, errors.New("user name could not be found in access token")
 	}
-	return User{Name: sub, Roles: claimRoles(claims, d.cfg.RolesPath)}, expires, nil
+	return core.User{Name: sub, Roles: claimRoles(claims, d.cfg.RolesPath)}, expires, nil
 }
 
 type tokenResponse struct {
@@ -319,7 +320,7 @@ func (d *datProvider) finish(w http.ResponseWriter, r *http.Request) bool {
 func setDATCookie(w http.ResponseWriter, r *http.Request, value string, maxAge time.Duration) {
 	c := &http.Cookie{
 		Name: datCookie, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: strings.HasPrefix(baseURL(r), "https:"), MaxAge: int(maxAge.Seconds()),
+		Secure: strings.HasPrefix(core.BaseURL(r), "https:"), MaxAge: int(maxAge.Seconds()),
 	}
 	if maxAge < 0 {
 		c.MaxAge = -1
@@ -332,8 +333,8 @@ func (s *State) routeDataAccessTokens(mux *http.ServeMux, d *datProvider) {
 	mux.HandleFunc("GET /api/data-access-token", d.download)
 	mux.HandleFunc("GET /api/data-access-token/oauth2", d.callback)
 	notImplemented := func(w http.ResponseWriter, r *http.Request) {
-		readBody(r, nil)
-		writeError(w, http.StatusNotImplemented, msgDATNotImplemented)
+		core.ReadBody(r, nil)
+		core.WriteError(w, http.StatusNotImplemented, msgDATNotImplemented)
 	}
 	for _, p := range []string{
 		"POST /api/data-access-tokens", "GET /api/data-access-tokens", "DELETE /api/data-access-tokens",
@@ -345,13 +346,13 @@ func (s *State) routeDataAccessTokens(mux *http.ServeMux, d *datProvider) {
 
 // download sends a user allowed data access tokens to the provider.
 func (d *datProvider) download(w http.ResponseWriter, r *http.Request) {
-	user, ok := GetUser(r.Context())
+	user, ok := core.GetUser(r.Context())
 	if !ok {
-		writeError(w, http.StatusUnauthorized, msgDATNoIdentity)
+		core.WriteError(w, http.StatusUnauthorized, msgDATNoIdentity)
 		return
 	}
 	if d.cfg.FilterUserRole != "" && !hasAuthority(user, d.cfg.FilterUserRole) {
-		writeError(w, http.StatusUnauthorized, msgDATProhibited)
+		core.WriteError(w, http.StatusUnauthorized, msgDATProhibited)
 		return
 	}
 	w.Header().Set("Location", d.authorizationURL(d.begin(w, r)))
@@ -360,7 +361,7 @@ func (d *datProvider) download(w http.ResponseWriter, r *http.Request) {
 
 // hasAuthority reports whether the user has a Spring authority: a role
 // prefixed ROLE_.
-func hasAuthority(u User, authority string) bool {
+func hasAuthority(u core.User, authority string) bool {
 	for _, role := range u.Roles {
 		if "ROLE_"+role == authority {
 			return true
@@ -403,16 +404,16 @@ func (d *datProvider) callback(w http.ResponseWriter, r *http.Request) {
 // not consulted, and a missing or refused token is a 401.
 func (d *datProvider) tokenAuth(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	tok, ok := bearerToken(r.Header.Get("Authorization"))
-	var user User
+	var user core.User
 	err := errors.New("no bearer token in the Authorization header")
 	if ok {
 		user, err = d.authenticate(r.Context(), tok)
 	}
 	if err != nil {
 		log.Printf("data access token refused for %s %s: %v", r.Method, r.URL.Path, err)
-		readBody(r, nil)
+		core.ReadBody(r, nil)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	next.ServeHTTP(w, withUser(r, user))
+	next.ServeHTTP(w, core.WithUser(r, user))
 }
