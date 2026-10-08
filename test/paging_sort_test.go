@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -56,7 +57,7 @@ var sortedLists = []sortedList{
 		[]string{"eventType", "startNumberOfDaysSinceDiagnosis", "endNumberOfDaysSinceDiagnosis"}},
 	{"GET", "/api/studies/lgg_ucsf_2014_test_generic_assay/clinical-events", "",
 		[]string{"eventType", "startNumberOfDaysSinceDiagnosis", "endNumberOfDaysSinceDiagnosis"}},
-	{"GET", "/api/genes?pageSize=40&pageNumber=2", "", []string{"entrezGeneId", "hugoGeneSymbol"}},
+	{"GET", "/api/genes?pageSize=40&pageNumber=2", "", []string{"entrezGeneId", "hugoGeneSymbol", "cytoband", "length"}},
 }
 
 // listOf requests a list and decodes it.
@@ -180,4 +181,76 @@ func TestPatientKeywordSortBy(t *testing.T) {
 	}
 	page := listOf(t, "GET", "/api/patients?keyword=P0&sortBy=patientId&direction=DESC&pageSize=2&pageNumber=1", "")
 	wantEq(t, fieldOf(page, "patientId"), ids[2:4])
+}
+
+// TestGeneKeywordSortBy pins that a gene keyword search honours sortBy and
+// direction: the page GeneServiceImpl completes (aliases, no symbols with
+// several Entrez ids) comes in sortBy order instead of by symbol.
+func TestGeneKeywordSortBy(t *testing.T) {
+	requireAPI(t)
+	asc := listOf(t, "GET", "/api/genes?keyword=TP&pageSize=1000", "")
+	desc := listOf(t, "GET", "/api/genes?keyword=TP&pageSize=1000&sortBy=hugoGeneSymbol&direction=DESC", "")
+	symbols := fieldOf(asc, "hugoGeneSymbol")
+	slices.Reverse(symbols)
+	wantEq(t, fieldOf(desc, "hugoGeneSymbol"), symbols)
+
+	byID := listOf(t, "GET", "/api/genes?keyword=TP&pageSize=1000&sortBy=entrezGeneId&direction=DESC", "")
+	var ids []float64
+	for _, g := range byID {
+		ids = append(ids, g["entrezGeneId"].(float64))
+	}
+	if len(ids) != len(asc) || !sort.SliceIsSorted(ids, func(i, j int) bool { return ids[i] > ids[j] }) {
+		t.Errorf("not %d genes in descending Entrez order: %v", len(asc), ids)
+	}
+}
+
+// TestGeneSortByLocation pins GET /api/genes?sortBy=cytoband|length (Java:
+// a 500): genes sorted by their hg19 cytoband or length (end - start), also
+// with a keyword.
+func TestGeneSortByLocation(t *testing.T) {
+	requireAPI(t)
+	type loc struct {
+		cytoband string
+		length   float64
+	}
+	locs := map[float64]loc{}
+	var cytobands []string
+	var lengths []float64
+	for _, g := range listOf(t, "GET", "/api/reference-genome-genes/hg19", "") {
+		l := loc{g["cytoband"].(string), g["end"].(float64) - g["start"].(float64)}
+		locs[g["entrezGeneId"].(float64)] = l
+		cytobands = append(cytobands, l.cytoband)
+		lengths = append(lengths, l.length)
+	}
+	sort.Strings(cytobands)
+	sort.Sort(sort.Reverse(sort.Float64Slice(lengths)))
+	if len(locs) < 1000 {
+		t.Fatalf("hg19: %d genes", len(locs))
+	}
+	page := func(query string) []loc {
+		var out []loc
+		for _, g := range listOf(t, "GET", "/api/genes?"+query, "") {
+			l, ok := locs[g["entrezGeneId"].(float64)]
+			if !ok {
+				t.Fatalf("%s: gene %v has no hg19 location", query, g)
+			}
+			out = append(out, l)
+		}
+		return out
+	}
+	var gotBands []string
+	for _, l := range page("sortBy=cytoband&pageSize=20&pageNumber=3") {
+		gotBands = append(gotBands, l.cytoband)
+	}
+	wantEq(t, gotBands, cytobands[60:80])
+	var gotLengths []float64
+	for _, l := range page("sortBy=length&direction=DESC&pageSize=20") {
+		gotLengths = append(gotLengths, l.length)
+	}
+	wantEq(t, gotLengths, lengths[:20])
+
+	kw := page("keyword=BRCA&sortBy=length&direction=DESC")
+	if len(kw) < 2 || !sort.SliceIsSorted(kw, func(i, j int) bool { return kw[i].length > kw[j].length }) {
+		t.Errorf("keyword BRCA by length: %v", kw)
+	}
 }

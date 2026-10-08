@@ -178,6 +178,41 @@ var keywordPatientSortable = map[string]string{"patientId": "p.patient_id"}
 
 // ---------- Bulk genes ----------
 
+// geneSortable are the GeneSortBy columns over allGenes' query. cytoband and
+// length come from geneLocationJoin.
+var geneSortable = map[string]string{
+	"entrezGeneId": "g.entrez_gene_id", "hugoGeneSymbol": "g.hugo_gene_symbol", "type": "g.type",
+	"cytoband": "loc.cytoband", "length": "loc.length",
+}
+
+// defaultGenome is the reference genome a portal uses unless its ucsc.build
+// property names another (ReferenceGenome.HOMO_SAPIENS_DEFAULT_GENOME_NAME).
+const defaultGenome = "hg19"
+
+// geneLocationJoin joins every gene (aliased g) to its cytoband and length,
+// the span from its start to its end, on the portal's reference genome
+// (ucsc.build). Genes without a location there have neither.
+func (s *State) geneLocationJoin(args *sqlArgs) string {
+	genome := strings.TrimSpace(s.Props["ucsc.build"])
+	if genome == "" {
+		genome = defaultGenome
+	}
+	return " LEFT JOIN (SELECT rgg.entrez_gene_id AS entrez_gene_id, rgg.cytoband AS cytoband, " +
+		"rgg.end - rgg.start AS length FROM cbioportal_ref.reference_genome_gene rgg " +
+		"INNER JOIN cbioportal_ref.reference_genome rg ON rg.reference_genome_id = rgg.reference_genome_id " +
+		"WHERE lower(rg.name) = lower(" + args.str(genome) + ")) loc ON loc.entrez_gene_id = g.entrez_gene_id"
+}
+
+// geneSelect selects geneRow's columns from the genes (aliased g), joined to
+// their location when sortBy needs it.
+func (s *State) geneSelect(args *sqlArgs, sortBy string) string {
+	from := "cbioportal_ref.gene g"
+	if sortBy == "cytoband" || sortBy == "length" {
+		from += s.geneLocationJoin(args)
+	}
+	return "SELECT g.entrez_gene_id AS entrezGeneId, g.hugo_gene_symbol AS hugoGeneSymbol, g.type AS type FROM " + from
+}
+
 // allGenes — GET /api/genes, with GeneMapper's keyword and alias matching.
 func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -185,45 +220,59 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	conds := []string{"1"}
 	if alias, ok := q["alias"]; ok {
 		conds = append(conds,
-			"entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = "+args.str(alias[0])+")")
+			"g.entrez_gene_id IN (SELECT entrez_gene_id FROM cbioportal_ref.gene_alias WHERE gene_alias = "+args.str(alias[0])+")")
 	}
 	// GeneMapper: every space-separated keyword term is a case-insensitive
 	// symbol prefix; matches of the whole keyword with its exact case come
 	// first. Without a keyword genes come in the gene table's entrez order.
-	order := "entrez_gene_id"
+	order := "g.entrez_gene_id"
 	kw, keyword := q["keyword"]
 	if keyword {
 		for _, term := range strings.Split(kw[0], " ") {
-			conds = append(conds, fmt.Sprintf("hugo_gene_symbol ILIKE concat(%s, '%%')", args.str(term)))
+			conds = append(conds, fmt.Sprintf("g.hugo_gene_symbol ILIKE concat(%s, '%%')", args.str(term)))
 		}
-		order = fmt.Sprintf("hugo_gene_symbol LIKE concat(%s, '%%') DESC, hugo_gene_symbol", args.str(kw[0]))
+		order = fmt.Sprintf("g.hugo_gene_symbol LIKE concat(%s, '%%') DESC, g.hugo_gene_symbol", args.str(kw[0]))
 	}
-	limit := ""
-	pageSize := maxPageSize
-	if keyword && projectionOf(r) != "META" {
-		// A keyword search is paged here (pageList leaves it alone), as
-		// GeneServiceImpl post-processes the mapper's page; META counts
-		// every match.
+	sortBy := q.Get("sortBy")
+	sel := s.geneSelect(args, sortBy) + " WHERE " + strings.Join(conds, " AND ")
+	if !keyword {
+		rows, err := queryA[geneRow](s.CH, sel+sqlPageOrder(r, geneSortable, order), args)
+		if err != nil {
+			fail(w, r, err)
+			return
+		}
+		if rows == nil {
+			rows = []geneRow{}
+		}
+		writeJSON(w, rows)
+		return
+	}
+	// A keyword search is paged here (pageList leaves it alone), as
+	// GeneServiceImpl post-processes the mapper's page; META counts every
+	// match.
+	pageSize, limit := maxPageSize, ""
+	if projectionOf(r) != "META" {
 		if v, err := strconv.Atoi(strings.TrimSpace(q.Get("pageSize"))); err == nil {
 			pageSize = v
 		}
 		number, _ := strconv.Atoi(strings.TrimSpace(q.Get("pageNumber")))
 		limit = fmt.Sprintf(" LIMIT %d OFFSET %d", pageSize, pageSize*number)
 	}
-	rows, err := queryA[geneRow](s.CH, fmt.Sprintf(
-		"SELECT entrez_gene_id AS entrezGeneId, hugo_gene_symbol AS hugoGeneSymbol, type, "+
-			"genetic_entity_id AS geneticEntityId FROM cbioportal_ref.gene WHERE %s ORDER BY %s%s",
-		strings.Join(conds, " AND "), order, limit), args)
+	desc := strings.EqualFold(q.Get("direction"), "DESC")
+	expr, sorted := geneSortable[sortBy]
+	if sorted {
+		order = geneSortOrder(expr, desc) + ", " + order
+	}
+	rows, err := queryA[geneRow](s.CH, fmt.Sprintf("%s ORDER BY %s%s", sel, order, limit), args)
+	if err == nil {
+		rows, err = s.keywordGenes(rows, kw[0], pageSize)
+	}
+	if err == nil && sorted && len(rows) > 1 && limit != "" {
+		rows, err = s.sortGenes(rows, sortBy, desc)
+	}
 	if err != nil {
 		fail(w, r, err)
 		return
-	}
-	if keyword {
-		rows, err = s.keywordGenes(rows, kw[0], pageSize)
-		if err != nil {
-			fail(w, r, err)
-			return
-		}
 	}
 	if rows == nil {
 		rows = []geneRow{}
@@ -231,10 +280,33 @@ func (s *State) allGenes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, rows)
 }
 
+// geneSortOrder orders by a geneSortable expression, NULLS LAST in either
+// direction as pageList sorts.
+func geneSortOrder(expr string, desc bool) string {
+	if desc {
+		return expr + " DESC NULLS LAST"
+	}
+	return expr + " ASC NULLS LAST"
+}
+
+// sortGenes sorts a keyword page by sortBy (a geneSortable key), ties in the
+// page's order.
+func (s *State) sortGenes(page []geneRow, sortBy string, desc bool) ([]geneRow, error) {
+	ids := make([]int64, len(page))
+	for i, g := range page {
+		ids[i] = g.EntrezGeneID
+	}
+	args := newArgs()
+	list := "[" + intListSQL(ids) + "]"
+	return queryA[geneRow](s.CH, fmt.Sprintf("%s WHERE g.entrez_gene_id IN %s ORDER BY %s, indexOf(%s, g.entrez_gene_id)",
+		s.geneSelect(args, sortBy), list, geneSortOrder(geneSortable[sortBy], desc), list), args)
+}
+
 // keywordGenes completes a page of a keyword search as GeneServiceImpl
 // .getAllGenes does: a page with room left gains the genes with an alias
 // equal to the keyword (ignoring case), then genes whose symbol occurs more
-// than once are dropped and the page is sorted by symbol.
+// than once are dropped and the page is sorted by symbol. A page with a
+// sortBy is sorted by it afterwards (sortGenes).
 func (s *State) keywordGenes(page []geneRow, keyword string, pageSize int) ([]geneRow, error) {
 	if len(page) < pageSize {
 		aliased, err := ch.QueryP[geneRow](s.CH,

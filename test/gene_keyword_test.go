@@ -3,8 +3,9 @@ package contract
 import "testing"
 
 // GeneServiceImpl completes a keyword page with the genes having the keyword
-// as an alias, drops symbols with several entrez ids and sorts the page by
-// symbol; META counts every match.
+// as an alias, drops symbols with several entrez ids and, without a sortBy,
+// sorts the page by symbol; META counts every match. With a sortBy, go
+// sorts the page by it (TestGeneKeywordSortBy).
 func TestOracleGeneKeywordSearch(t *testing.T) {
 	requireAPI(t)
 	var genes []struct {
@@ -25,11 +26,4 @@ func TestOracleGeneKeywordSearch(t *testing.T) {
 	get(t, "/api/genes?keyword=TP&pageSize=5", &genes)
 	wantEq(t, len(genes), 5)
 	wantEq(t, genes[0].HugoGeneSymbol, "TP53")
-
-	// The page is re-sorted by symbol whatever sortBy and direction say.
-	var desc []struct {
-		HugoGeneSymbol string `json:"hugoGeneSymbol"`
-	}
-	get(t, "/api/genes?keyword=TP&sortBy=hugoGeneSymbol&direction=DESC&pageSize=5", &desc)
-	wantEq(t, desc, genes)
 }
