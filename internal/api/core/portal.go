@@ -17,10 +17,10 @@ func (s *State) portal(w http.ResponseWriter, r *http.Request) {
 
 // CatchAll serves every path no route matches. An /api/ path gets Spring's
 // default error body, as Java answers it: 405 when the path is served for
-// other methods, else 404. Other paths go to the frontend, or, without one,
-// the portal at "/" and an empty list elsewhere.
+// other methods, else 404. Other paths are the portal's pages, redirects and
+// static resources (servePortal).
 func (s *State) CatchAll(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/api/") {
+	if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api" {
 		ReadBody(r, nil)
 		if allow := s.allowedMethods(r); len(allow) > 0 {
 			w.Header().Set("Allow", strings.Join(allow, ", "))
@@ -30,20 +30,7 @@ func (s *State) CatchAll(w http.ResponseWriter, r *http.Request) {
 		SpringNotFound(w, r)
 		return
 	}
-	if s.frontend != nil {
-		if r.Method == http.MethodPost && portalPages[r.URL.Path] {
-			s.postedPage(w, r)
-			return
-		}
-		s.frontend.ServeHTTP(w, r)
-		return
-	}
-	if r.URL.Path == "/" && r.Method == http.MethodGet {
-		s.portal(w, r)
-		return
-	}
-	ReadBody(r, nil)
-	WriteJSON(w, []any{})
+	s.servePortal(w, r)
 }
 
 // allowedMethods lists the methods a route serves r's path for.
@@ -62,9 +49,6 @@ func (s *State) allowedMethods(r *http.Request) []string {
 	return out
 }
 
-// portalPages are the pages that accept a posted query (IndexPageController).
-var portalPages = map[string]bool{"/": true, "/index": true, "/index.html": true, "/study/summary": true, "/results": true}
-
 // postedPage serves the portal page for a form POST with the posted parameters
 // exposed as window.postData, for queries too long for a URL.
 func (s *State) postedPage(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +66,7 @@ func (s *State) postedPage(w http.ResponseWriter, r *http.Request) {
 	get.Header.Del("Content-Type")
 	get.Header.Del("Accept-Encoding")
 	rec := NewBufferedResponse()
-	s.frontend.ServeHTTP(rec, get)
+	s.page(rec, get)
 	data, _ := json.Marshal(params)
 	script := "<script>var postData = " + string(data) + ";</script>"
 	page := rec.Body.String()

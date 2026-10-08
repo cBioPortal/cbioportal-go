@@ -11,6 +11,11 @@ import (
 	"testing"
 )
 
+// frontendState is a State serving the frontend build in dir.
+func frontendState(dir string) *State {
+	return &State{frontendDir: dir, frontendFiles: newStaticFiles(dir)}
+}
+
 func TestStaticFiles(t *testing.T) {
 	dir := t.TempDir()
 	js := strings.Repeat("console.log('cbioportal');\n", 500)
@@ -24,7 +29,7 @@ func TestStaticFiles(t *testing.T) {
 		os.MkdirAll(filepath.Dir(p), 0o755)
 		os.WriteFile(p, []byte(body), 0o644)
 	}
-	h := spaHandler(dir)
+	h := http.HandlerFunc(frontendState(dir).CatchAll)
 	get := func(path string, hdr map[string]string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
 		for k, v := range hdr {

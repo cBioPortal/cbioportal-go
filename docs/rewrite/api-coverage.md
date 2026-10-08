@@ -368,7 +368,7 @@ These long lists get no paging, on purpose:
 | GET | `/api/cacheStatistics` |  |  | implemented | yes | Answers 404, as Java does when no cache is set up. |
 | GET | `/export/study/{studyId}.zip` |  |  | implemented | yes | Needs `feature.study.export`. Protein-level and generic assay profiles and virtual studies are not exported. |
 | GET | `/api/getexternalpage.json` |  | sourceURL | missing |  | Lets anyone make the server fetch any URL, which is a security hole. Left out on purpose. |
-| ANY | `/` |  |  | implemented | yes | Serves the frontend (see `FRONTEND_DIR` and `FRONTEND_URL` in [Configuration](../configuration.md#cbioportal-api)). |
+| ANY | `/` |  |  | implemented | yes | The portal page, on the paths Java serves it on, and Java's redirects and static files. See [Website paths](../configuration.md#website-paths). |
 | ANY | `/index` |  |  | implemented |  | Serves the frontend. |
 | ANY | `/index.html` |  |  | implemented |  | Serves the frontend. |
 | ANY | `/study/summary` |  |  | implemented |  | Serves the frontend, also for POST. |

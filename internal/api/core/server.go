@@ -38,10 +38,17 @@ type State struct {
 	Sessions     sessionstore.Store
 	sessionsOnce sync.Once
 	meta         metaCache
-	// frontend serves every non-API path — a built frontend (FRONTEND_DIR) or a
-	// proxied dev server (FRONTEND_URL) — so the portal UI and the API share one
-	// origin as in a cBioPortal deployment.
-	frontend http.Handler
+	// The portal UI shares the API's origin as in a cBioPortal deployment:
+	// frontendDir is a built frontend (FRONTEND_DIR), whose index.html the
+	// portal pages serve and whose files frontendFiles serves under
+	// /reactapp/ and /images/; frontendProxy is a frontend dev server
+	// (FRONTEND_URL) that gets the pages and every unknown path instead.
+	frontendDir   string
+	frontendFiles *staticFiles
+	frontendProxy http.Handler
+	// PageConfig is the frontend configuration (the /config_service body) a
+	// portal page embeds as window.rawServerConfig; nil embeds none.
+	PageConfig func(*http.Request) map[string]any
 	// mux is the route table, consulted by the catch-all to tell an unknown
 	// path from a known one requested with an unsupported method.
 	mux *http.ServeMux
@@ -66,9 +73,9 @@ func (s *State) SetMux(mux *http.ServeMux) { s.mux = mux }
 func NewState(c *ch.Client) *State {
 	s := &State{CH: c, BulkCH: c.WithSettings(DefaultBulkLimits.Settings())}
 	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
-		s.frontend = spaHandler(dir)
+		s.frontendDir, s.frontendFiles = dir, newStaticFiles(dir)
 	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {
-		s.frontend = httputil.NewSingleHostReverseProxy(u)
+		s.frontendProxy = httputil.NewSingleHostReverseProxy(u)
 	}
 	return s
 }
@@ -413,30 +420,29 @@ func (b *bufferedResponse) Header() http.Header         { return b.header }
 func (b *bufferedResponse) Write(p []byte) (int, error) { return b.Body.Write(p) }
 func (b *bufferedResponse) WriteHeader(code int)        { b.Status = code }
 
-// spaHandler serves a built frontend: existing files as-is, every other path
-// (client-side routes such as /results or /patient) as index.html.
-func spaHandler(dir string) http.Handler {
-	files := newStaticFiles(dir)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := filepath.Join(dir, filepath.Clean("/"+r.URL.Path))
-		if st, err := os.Stat(p); err == nil && !st.IsDir() {
-			files.serve(w, r, p, st)
-			return
-		}
-		page, err := os.ReadFile(filepath.Join(dir, "index.html"))
-		if err != nil {
-			http.Error(w, "frontend index.html missing", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Write(withFrontendConfig(page, r.Host))
-	})
+// indexPage serves the built frontend's index.html as the portal page: with
+// window.frontendConfig pointing the app at this origin and the frontend
+// configuration as window.rawServerConfig, as the Java portal's index
+// template writes them.
+func (s *State) indexPage(w http.ResponseWriter, r *http.Request) {
+	page, err := os.ReadFile(filepath.Join(s.frontendDir, "index.html"))
+	if err != nil {
+		http.Error(w, "frontend index.html missing", http.StatusInternalServerError)
+		return
+	}
+	var raw []byte
+	if s.PageConfig != nil {
+		raw, _ = json.Marshal(s.PageConfig(r))
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(withFrontendConfig(page, r.Host, raw))
 }
 
 // withFrontendConfig sets window.frontendConfig in the frontend's index page
-// as the portal's index template does, pointing the app at this origin.
-func withFrontendConfig(page []byte, host string) []byte {
+// as the portal's index template does, pointing the app at this origin, and
+// window.rawServerConfig to rawConfig (JSON) when given, so the app starts
+// without requesting /config_service.
+func withFrontendConfig(page []byte, host string, rawConfig []byte) []byte {
 	cfg, _ := json.Marshal(map[string]string{
 		"configurationServiceUrl": "//" + host + "/config_service",
 		"apiRoot":                 "//" + host + "/",
@@ -444,7 +450,12 @@ func withFrontendConfig(page []byte, host string) []byte {
 		"basePath":                "",
 		"frontendUrl":             "//" + host + "/",
 	})
-	script := []byte("<script>window.frontendConfig = Object.assign(window.frontendConfig || {}, " + string(cfg) + ");</script>" + devModeScript)
+	js := "window.frontendConfig = Object.assign(window.frontendConfig || {}, " + string(cfg) + ");"
+	if len(rawConfig) > 0 {
+		// json.Marshal escapes <, > and &, so the configuration cannot end the script element.
+		js += "window.rawServerConfig = " + string(rawConfig) + ";"
+	}
+	script := []byte("<script>" + js + "</script>" + devModeScript)
 	if i := bytes.Index(page, []byte("</head>")); i >= 0 {
 		page = append(append(append([]byte{}, page[:i]...), script...), page[i:]...)
 	} else {

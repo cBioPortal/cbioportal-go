@@ -16,6 +16,12 @@ import (
 // skin_show_settings_menu drive the UI correctly. Runtime bits (auth, session)
 // are layered on top of the embedded defaults.
 func (s Server) ConfigService(w http.ResponseWriter, r *http.Request) {
+	core.WriteJSON(w, s.Config(r))
+}
+
+// Config is the frontend configuration for request r's user: the
+// /config_service body, which the portal page also embeds.
+func (s Server) Config(r *http.Request) map[string]any {
 	cfg := config.FrontendConfig("/", s.Props, s.PropsReplaceDefaults)
 	cfg["authenticationMethod"] = "noauthsessionservice"
 	if s.AuthMethod != "" {
@@ -27,7 +33,7 @@ func (s Server) ConfigService(w http.ResponseWriter, r *http.Request) {
 		cfg["user_display_name"] = u.Name
 		cfg["user_email_address"] = u.Name
 	}
-	core.WriteJSON(w, cfg)
+	return cfg
 }
 
 // customDriverAnnotationReport reports whether the given mutation profiles carry

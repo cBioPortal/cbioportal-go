@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 70 entries:
+**Summary.** The page has 73 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 40 | go does the same thing as Java, on purpose. |
+| Copied | 43 | go does the same thing as Java, on purpose. |
 | Fixed in go | 20 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 38 of the 40 copied entries. The two without a test are the
+A test checks 41 of the 43 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -145,6 +145,9 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | A multi-study filter body that Java cannot read gives an empty 200. | InvolvedCancerStudyExtractorInterceptor | Copied. | TestContractFilterValidation |
 | An empty text parameter still counts as given. So `sampleListId=` selects no samples. The same happens when a number is turned into a sample list name. | Spring / Jackson | Copied. | TestContractRequiredParams |
 | Paths with `;`, `//`, `.` or `..` segments, or with an encoded `.` or `%`, get a 400 before any endpoint sees them. | StrictHttpFirewall, Tomcat | Copied. | TestContractFirewall, TestJavaFirewall |
+| Only a fixed list of about 25 paths serves the portal page. Other paths outside `/api/` get a 404, even ones the frontend has a page for, such as `/about` and `/faq`. Those pages still work when you click your way to them. Paths are matched exactly as Spring does: `/patient/x` serves the page, but `/patient/x/` and `/restore/` do not. | WebAppConfig.addViewControllers, IndexPageController | Copied. | TestPortalRoutes, TestContractPortalRoutes |
+| `/installations`, `/tutorials`, `/oql` and `/donate` redirect to other websites, although the frontend has its own pages for them. | WebAppConfig.addViewControllers | Copied. | TestPortalRoutes, TestContractPortalRoutes |
+| Every answer carries Spring Security's default headers, including `Cache-Control: no-store`, so browsers cache nothing, not even images or the frontend's code. | Spring Security defaults | Copied, except that go lets browsers cache the frontend's code files, which are several MB. | TestSecurityHeaders, TestContractSecurityHeaders |
 | Java's request log records status 200 for a request that ends in a 500. It reads the status before the error page is written. | RequestLoggingFilter | Does not apply. go's access log records the real status. Lists of requests built from production's log may contain Java 500s marked as 200. | paritydiff `status` outcome |
 
 ## Studies

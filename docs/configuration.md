@@ -11,6 +11,7 @@ sessions, and monitoring.
 - [cbioportal-import](#cbioportal-import)
 - [cbioportal-api](#cbioportal-api)
   - [Limits on bulk requests](#limits-on-bulk-requests)
+  - [Website paths](#website-paths)
 - [Portal properties](#portal-properties)
 - [Login and study authorization](#login-and-study-authorization)
   - [Optional sign-in (optional_oauth2)](#optional-sign-in-optional_oauth2)
@@ -104,8 +105,8 @@ usually easier.
 | `-clickhouse-bulk-max-memory` | `CLICKHOUSE_BULK_MAX_MEMORY` | `10GiB` | The memory one ClickHouse query of a bulk endpoint may use. `0` means no limit. See [Limits on bulk requests](#limits-on-bulk-requests). |
 | `-clickhouse-bulk-max-time` | `CLICKHOUSE_BULK_MAX_TIME` | `10m` | How long one query of a bulk endpoint may run, including the time the client takes to read the answer. A number alone means seconds. `0` means no limit. |
 | `-clickhouse-bulk-sort-spill` | `CLICKHOUSE_BULK_SORT_SPILL` | `1GiB` | The memory a sort in a bulk query may use before ClickHouse continues it on disk. `0` keeps ClickHouse's own setting. |
-| `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend. The server serves it for every path outside `/api/`, so the website and the API share one address. |
-| `-frontend-url` | `FRONTEND_URL` | | The address of a frontend development server. The server passes every path outside `/api/` on to it. Use this instead of `-frontend-dir`. |
+| `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend, so the website and the API share one address. The server serves its `index.html` as the portal's pages and its files under `/reactapp/` and `/images/`. See [Website paths](#website-paths). |
+| `-frontend-url` | `FRONTEND_URL` | | The address of a frontend development server. The server passes the portal's pages, and every path it does not serve itself, on to it. Use this instead of `-frontend-dir`. |
 | `-oncokb-url` | `ONCOKB_URL` | `https://public.api.oncokb.org/api/v1` | The OncoKB API. The frontend reaches it through the server's `/proxy/...` path. |
 | `-site-banner`, `-site-banner-link` | `SITE_BANNER`, `SITE_BANNER_LINK` | | A notice (and an optional link) shown at the top of every page. This is useful for a preview site. |
 | `-session-store` | `SESSION_STORE_FILE` | | A JSON file to save sessions in (virtual studies, groups, custom data). If it is not set, sessions live in memory and are lost on restart. It is not used with a session service, see [Sessions](#sessions). |
@@ -122,7 +123,7 @@ environment variables:
 | Environment only | Meaning |
 |---|---|
 | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD` | The ClickHouse user name and password. If they are not set, ClickHouse's default user is used. `cbioportal-import` reads them too. |
-| `ONCOKB_TOKEN` | The OncoKB API token that the `/proxy/...` path sends to OncoKB. |
+| `ONCOKB_TOKEN` | The OncoKB API token that the `/proxy/...` path sends to OncoKB. The `oncokb.token` property sets it too, but the variable wins. With either one set, `/config_service` reports `oncoKbTokenDefined: true`. |
 | `AUTH_JWT_SECRET` | The HS256 secret used to check bearer tokens. |
 | `PUBLISHER_API_KEY` | The key needed to publish or unpublish a virtual study through `/api/public_virtual_studies`. The `session.endpoint.publisher-api-key` property sets it too. |
 | `SESSION_SERVICE_URL`, `SESSION_SERVICE_USER`, `SESSION_SERVICE_PASSWORD` | The address of a cBioPortal session service, and its user name and password. They are used when the `session.service.*` properties are not set. See [Sessions](#sessions). |
@@ -173,6 +174,28 @@ study) use 7–9 GiB, and none ran longer than 2 minutes. The two that went
 past 10 GiB were whole-profile pulls of 15 GiB. One of them pushed a 30 GiB
 ClickHouse server to its limit. With the sort on disk, the 15 GiB pull
 (124 million values) needs 1.3 GiB.
+
+### Website paths
+
+The server answers the paths outside `/api/` as the Java portal does:
+
+| Path | Answer |
+|---|---|
+| The portal's pages: `/`, `/index.html`, `/results/*`, `/study/*`, `/patient/*`, `/comparison/*`, `/mutation_mapper`, `/oncoprinter`, `/restore`, `/loading/*`, `/webAPI`, `/datasets`, `/news`, `/visualize`, `/ln`, `/encodedRedirect`, `/index.do`, `/case.do/*`, `/oncotree2genes` | The frontend's page. It includes the portal's configuration, so the browser does not have to ask `/config_service` for it. |
+| `/installations`, `/tutorials`, `/oql`, `/donate` | A redirect to the map of installations or to the documentation. |
+| `/reactapp/…` | The frontend's code and styles. |
+| `/images/…`, `/js/…` | The Java portal's images and scripts, which are built into the server. Other `/images/…` files come from the frontend. |
+| Anything else, such as `/about` or `/favicon.ico` | A 404 with Spring's error body. The frontend still shows its own pages, such as About, when you get there by clicking inside the website. |
+
+Every answer also carries the security headers that Spring Security adds in
+the Java portal. They tell the browser not to show the site inside a frame
+of another site (`X-Frame-Options: DENY`), not to guess file types
+(`X-Content-Type-Options: nosniff`), and not to cache answers
+(`Cache-Control: no-store`). The frontend's code files are the exception:
+browsers may cache them. A request that came in over HTTPS also gets
+`Strict-Transport-Security`, which tells the browser to always use HTTPS.
+Behind an ingress that ends HTTPS, the server learns this from the
+`X-Forwarded-Proto` header.
 
 ## Portal properties
 
