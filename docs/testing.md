@@ -9,7 +9,10 @@ Three tiers, fastest first:
    `CLICKHOUSE_TEST_URL=http://localhost:18123`, `internal/clickhouse` also
    round-trips query parameters (escaping, URL / form / external-table
    transport) through a live server and checks that the driver path decodes
-   every supported column type exactly as the JSONEachRow path does.
+   every supported column type exactly as the JSONEachRow path does, and
+   `internal/api` ingests, transforms and exports a small study whose
+   matrices have a single gene key column (reading genes from
+   `cbioportal_ref`, or `CLICKHOUSE_TEST_REF_DB`).
 2. **API contract tests** — `make contract` (`go test ./test/`, ~5s) against a
    running API (`API=http://host:port`, default `http://localhost:18090`;
    skipped when unreachable). They pin the exact endpoint behaviour the

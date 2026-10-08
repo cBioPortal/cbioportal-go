@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -929,12 +930,13 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 			"SELECT gk.resolved_entrez_gene_id AS entrez, ifNull(rg.genetic_entity_id, 0) AS entity_id, "+
 				"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, gk.resolved_hugo_gene_symbol) AS hugo, "+
 				"t.sample_id AS sample_id, trimBoth(t.value) AS value, concat(t.hugo_symbol, '\\t', t.entrez_gene_id) AS gene_key "+
-				"FROM (SELECT *, %s AS ord FROM cbioportal_raw.%s WHERE study_id = {study:String} AND profile_stable_id = {profile:String}) t "+
+				"FROM (SELECT *%s, %s AS ord FROM cbioportal_raw.%s WHERE study_id = {study:String} AND profile_stable_id = {profile:String}) t "+
 				"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%s' AND study_id = {study:String} AND profile_stable_id = {profile:String}) gk "+
 				"ON gk.hugo_symbol = t.hugo_symbol AND gk.entrez_gene_id = t.entrez_gene_id "+
 				"LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = gk.resolved_entrez_gene_id "+
 				"ORDER BY t.ord",
-			e.s.rawFileOrder(table, ""), table, table), ch.Params{"study": e.studyID, "profile": p.StableID})
+			missingGeneKeyColumns(e.s.rawColumns(table)), e.s.rawFileOrder(table, ""), table, table),
+			ch.Params{"study": e.studyID, "profile": p.StableID})
 		if err != nil {
 			return err
 		}
@@ -1014,6 +1016,20 @@ func (e *studyExport) geneMatrix(alterationType, datatype string) error {
 		}
 	}
 	return nil
+}
+
+// missingGeneKeyColumns selects, as empty strings, the gene key columns a
+// staged matrix lacks (have are its columns): a file may identify genes by
+// Hugo_Symbol or Entrez_Gene_Id alone, and gene_key_map keys such rows with
+// an empty string for the absent one. The result extends a SELECT * list.
+func missingGeneKeyColumns(have []string) string {
+	var b strings.Builder
+	for _, c := range []string{"hugo_symbol", "entrez_gene_id"} {
+		if !slices.Contains(have, c) {
+			b.WriteString(", '' AS " + c)
+		}
+	}
+	return b.String()
 }
 
 // matrixHeader is a wide matrix's sample columns: the file header's samples

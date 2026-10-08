@@ -65,3 +65,20 @@ func TestExportDisabled(t *testing.T) {
 		t.Fatalf("export served while disabled: %v", w.Header())
 	}
 }
+
+// A matrix staged from a file without Entrez_Gene_Id (or Hugo_Symbol) reads
+// the absent key column as an empty string.
+func TestMissingGeneKeyColumns(t *testing.T) {
+	for _, c := range []struct {
+		have []string
+		want string
+	}{
+		{[]string{"study_id", "hugo_symbol", "entrez_gene_id", "sample_id", "value"}, ""},
+		{[]string{"study_id", "hugo_symbol", "sample_id", "value"}, ", '' AS entrez_gene_id"},
+		{[]string{"study_id", "entrez_gene_id", "sample_id", "value"}, ", '' AS hugo_symbol"},
+	} {
+		if got := missingGeneKeyColumns(c.have); got != c.want {
+			t.Errorf("missingGeneKeyColumns(%v) = %q, want %q", c.have, got, c.want)
+		}
+	}
+}
