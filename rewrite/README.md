@@ -1,8 +1,8 @@
 # Rewrite tools
 
-This folder holds the tools used to move cBioPortal from its Java backend to
-go. They are only needed during the move. Each move has its own folder, so
-the tools for one move can be deleted in one step once it is finished.
+This folder holds the tools used to move cBioPortal from its Java backend
+(version 7) to go. They are only needed during the move, and can be deleted
+once go has replaced Java.
 
 The documentation for the move, including how these tools are used and what
 they found, is in [docs/rewrite](../docs/rewrite/).
