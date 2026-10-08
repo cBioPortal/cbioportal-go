@@ -52,8 +52,10 @@ type genericAssayDataRow struct {
 // carries the patient's value, as the importer links all of a patient's
 // samples to the profile. Values read as the Java mapper truncates them;
 // cells without a value (empty or NA) are left out, as the controllers
-// filter them. One query orders the profiles' cells so.
-func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[string][]string, entityIDs []string, fn func(GenericAssayData) error) error {
+// filter them. One query orders the profiles' cells so. A page the request
+// r asks for is read in SQL.
+func (s *State) genericAssayDataEach(r *http.Request, profileIDs []string, samplesByStudy map[string][]string, entityIDs []string,
+	fn func(GenericAssayData) error) error {
 	if entityIDs != nil && len(entityIDs) == 0 {
 		return nil
 	}
@@ -108,9 +110,23 @@ func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[str
 	}
 	// A matrix lists each entity of a sample once; LIMIT BY keeps one should
 	// it repeat.
+	order := "sampleRank, sampleId, studyId, molecularProfileId, entityRank, stableId"
 	query := "SELECT sampleId, stableId, patientId, value, molecularProfileId, studyId FROM (" +
-		strings.Join(parts, " UNION ALL ") + ") ORDER BY sampleRank, sampleId, studyId, molecularProfileId, entityRank, stableId " +
-		"LIMIT 1 BY molecularProfileId, sampleId, stableId"
+		strings.Join(parts, " UNION ALL ") + ") ORDER BY " + order + " LIMIT 1 BY molecularProfileId, sampleId, stableId"
+	if sp, expr := claimListPage(r, genericAssayDataSortable); sp != nil {
+		tie := order
+		if sp.sortBy == "value" {
+			// Values that are no number (categories) follow, as text.
+			dir := " ASC, "
+			if sp.desc {
+				dir = " DESC, "
+			}
+			tie = "value" + dir + order
+		}
+		// The page holds the cells with a value, which are the ones written.
+		query = "SELECT * FROM (SELECT * FROM (" + strings.Join(parts, " UNION ALL ") + ") ORDER BY " + order +
+			" LIMIT 1 BY molecularProfileId, sampleId, stableId) WHERE value NOT IN ('', 'NA')" + sp.orderLimit(expr, tie)
+	}
 	return ch.QueryEachP(s.CH, query, args.params(query), func(r *genericAssayDataRow) error {
 		if r.Value == "" || r.Value == "NA" {
 			return nil
@@ -125,10 +141,18 @@ func (s *State) genericAssayDataEach(profileIDs []string, samplesByStudy map[str
 	})
 }
 
+// genericAssayDataSortable are the sortBy fields of generic assay data
+// records over genericAssayDataEach's columns. value sorts as a number;
+// values that are not numbers come after them, as text.
+var genericAssayDataSortable = map[string]string{
+	"stableId": "stableId", "genericAssayStableId": "stableId", "sampleId": "sampleId", "patientId": "patientId",
+	"studyId": "studyId", "molecularProfileId": "molecularProfileId", "value": "toFloat64OrNull(value)",
+}
+
 // writeGenericAssayData streams genericAssayDataEach's records.
 func (s *State) writeGenericAssayData(w http.ResponseWriter, r *http.Request, profileIDs []string, samplesByStudy map[string][]string, entityIDs []string) {
 	out := newJSONArray(w, r)
-	out.finish(s.genericAssayDataEach(profileIDs, samplesByStudy, entityIDs, func(d GenericAssayData) error {
+	out.finish(s.genericAssayDataEach(r, profileIDs, samplesByStudy, entityIDs, func(d GenericAssayData) error {
 		return out.add(d)
 	}))
 }

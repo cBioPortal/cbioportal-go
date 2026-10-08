@@ -146,14 +146,13 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 		if !ok {
 			sel = "SELECT '' AS value WHERE 0"
 		}
-		sql := fmt.Sprintf("SELECT count() AS n FROM (%s) WHERE match(value, '^[+-]?0*[0-9]{1,10}$') AND "+
-			"toInt64OrNull(replaceRegexpOne(value, '^[+]', '')) IN (%s)", sel, intListSQL(alterations))
+		sql := fmt.Sprintf("SELECT count() AS n FROM (%s) WHERE %s", sel, cnaValueKept(alterations))
 		writeMetaCount(w, r, s.CH, sql, args.params(sql))
 		return
 	}
 	if !homdelOrAmpOnly(alterations) {
 		out := newJSONArray(w, r)
-		out.finish(s.discreteCopyNumberFromValues(mpid, meta, molecularDataFilter{
+		out.finish(s.discreteCopyNumberFromValues(r, mpid, meta, molecularDataFilter{
 			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, alterations, detailed, func(d DiscreteCopyNumberData) error {
 			return out.add(d)
 		}))
@@ -190,7 +189,8 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 	}
 	out := newJSONArray(w, r)
 	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
-	err := ch.QueryEachP(s.CH, sel+" ORDER BY entrezGeneId, alteration, c.sample_id", p,
+	query := sel + sqlListOrder(r, cnaEventSortable, "entrezGeneId, alteration, c.sample_id")
+	err := ch.QueryEachP(s.CH, query, p,
 		func(r *discreteCnaRow) error {
 			// CnaUtil reads the driver columns with getPartString: empty is "NA".
 			d := newDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, naString)
@@ -217,16 +217,40 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 	out.finish(err)
 }
 
+// cnaEventSortable are the sortBy fields of discrete copy-number records
+// read from the CNA events.
+var cnaEventSortable = map[string]string{
+	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId", "alteration": "alteration",
+}
+
+// cnaValueSortable are the sortBy fields of discrete copy-number records
+// read from the profile's values.
+var cnaValueSortable = map[string]string{
+	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId", "alteration": cnaValueSQL,
+}
+
+// cnaValueSQL is a profile value as the integer discreteCopyNumberFromValues
+// reads it.
+const cnaValueSQL = "toInt64OrNull(replaceRegexpOne(value, '^[+]', ''))"
+
+// cnaValueKept is the SQL predicate over a profile's value column of the
+// values discreteCopyNumberFromValues keeps: integers among the
+// alterations.
+func cnaValueKept(alterations []int64) string {
+	return fmt.Sprintf("match(value, '^[+-]?0*[0-9]{1,10}$') AND %s IN (%s)", cnaValueSQL, intListSQL(alterations))
+}
+
 // discreteCopyNumberFromValues is the molecular-data path of
 // DiscreteCopyNumberServiceImpl: it calls fn with the profile's per-sample
 // values whose integer value (Integer.parseInt) is one of the requested
-// alterations, in molecular-data order.
-func (s *State) discreteCopyNumberFromValues(mpid string, meta profileMeta, f molecularDataFilter, alterations []int64, detailed bool, fn func(DiscreteCopyNumberData) error) error {
+// alterations, in molecular-data order. A page r asks for is read in SQL.
+func (s *State) discreteCopyNumberFromValues(r *http.Request, mpid string, meta profileMeta, f molecularDataFilter, alterations []int64,
+	detailed bool, fn func(DiscreteCopyNumberData) error) error {
 	want := map[int64]bool{}
 	for _, a := range alterations {
 		want[a] = true
 	}
-	return s.molecularDataEach(mpid, f, func(d MolecularData) error {
+	return s.molecularDataPage(r, mpid, f, cnaValueSortable, cnaValueKept(alterations), func(d MolecularData) error {
 		v, err := strconv.ParseInt(d.Value, 10, 32)
 		if err != nil || !want[v] || d.EntrezGeneID == nil {
 			return nil

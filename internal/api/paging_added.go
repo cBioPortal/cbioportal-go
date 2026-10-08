@@ -69,6 +69,23 @@ var addedPagedEndpoints = []addedPaging{
 	{method: "GET", path: "/api/sample-lists/{sampleListId}/sample-ids", sort: noSort},
 	{method: "POST", path: "/api/clinical-attributes/fetch", sort: clinicalAttrSort},
 	{method: "POST", path: "/api/survival-data/fetch", sort: clinicalDataSort},
+
+	// Molecular data.
+	{method: "POST", path: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", sort: molecularDataSortParam},
+	{method: "GET", path: "/api/molecular-profiles/{molecularProfileId}/molecular-data", sort: molecularDataSortParam},
+	{method: "POST", path: "/api/molecular-data/fetch", sort: molecularDataSortParam},
+	{method: "POST", path: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number/fetch", sort: discreteCopyNumberSort},
+	{method: "GET", path: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number", sort: discreteCopyNumberSort},
+	{method: "POST", path: "/api/generic_assay_data/fetch", sort: genericAssayDataSort},
+	{method: "POST", path: "/api/generic_assay_data/{molecularProfileId}/fetch", sort: genericAssayDataSort},
+	{method: "GET", path: "/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", sort: genericAssayDataSort},
+	{method: "POST", path: "/api/gene-panel-data/fetch", sort: genePanelDataSort},
+	{method: "POST", path: "/api/molecular-profiles/{molecularProfileId}/gene-panel-data/fetch", sort: genePanelDataSort},
+	{method: "POST", path: "/api/copy-number-segments/fetch", sort: copyNumberSegmentSort},
+	{method: "POST", path: "/api/structural-variant/fetch", sort: structuralVariantSortParam},
+	{method: "POST", path: "/api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch", sort: genesetMolecularDataSort,
+		numeric: []string{"value"}},
+	{method: "POST", path: "/api/namespace-data/fetch", sort: namespaceDataSort},
 }
 
 // sorted reports whether the endpoint takes sortBy and direction.

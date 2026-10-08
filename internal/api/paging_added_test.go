@@ -49,7 +49,14 @@ func TestAddedSortables(t *testing.T) {
 		sort     param
 		sortable map[string]string
 	}{
+		{molecularDataSortParam, molecularDataSortable},
+		{molecularDataSortParam, molecularDataMultiSortable},
+		{discreteCopyNumberSort, cnaEventSortable},
+		{discreteCopyNumberSort, cnaValueSortable},
+		{genericAssayDataSort, genericAssayDataSortable},
 		{filteredSampleSort, filteredSampleSortable},
+		{structuralVariantSortParam, structuralVariantSortable},
+		{copyNumberSegmentSort, segmentSortable},
 		{clinicalDataSort, clinicalDataSortable},
 		{sampleSort, sampleSortable},
 		{patientSort, patientSortable},

@@ -18,6 +18,9 @@ type addedList struct {
 	numeric            []string
 }
 
+var es0Samples = `[{"sampleId":"FAKE_P001_S2","studyId":"ascn_test_study"},{"sampleId":"FAKE_P001_S3","studyId":"ascn_test_study"},` +
+	`{"sampleId":"FAKE_P001_S5","studyId":"ascn_test_study"}]`
+
 // addedLists cover every endpoint group of the added paging.
 var addedLists = []addedList{
 	// Clinical data, samples, patients.
@@ -39,6 +42,42 @@ var addedLists = []addedList{
 	{"GET", "/api/sample-lists/study_es_0_all/sample-ids", "", nil, nil},
 	{"POST", "/api/clinical-attributes/fetch", `["study_es_0","teststudy_genepanels"]`,
 		[]string{"clinicalAttributeId", "displayName", "datatype", "patientAttribute", "studyId"}, nil},
+
+	// Molecular data.
+	{"POST", "/api/molecular-profiles/study_es_0_gistic/molecular-data/fetch",
+		`{"entrezGeneIds":[7157,672,675,2064,3845,4609,238,673,2068,116983,5728,1956],"sampleListId":"study_es_0_all"}`,
+		[]string{"entrezGeneId", "sampleId", "patientId", "value"}, nil},
+	{"GET", "/api/molecular-profiles/study_es_0_gistic/molecular-data?sampleListId=study_es_0_all&entrezGeneId=116983", "",
+		[]string{"sampleId", "value"}, nil},
+	{"POST", "/api/molecular-data/fetch",
+		`{"entrezGeneIds":[116983,90993,4313,1956,2064],"molecularProfileIds":["study_es_0_gistic","study_es_0_mrna"]}`,
+		[]string{"entrezGeneId", "sampleId", "molecularProfileId", "value"}, nil},
+	// ALL reads the profile's values, the default event types the CNA events.
+	{"POST", "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number/fetch?discreteCopyNumberEventType=ALL",
+		`{"entrezGeneIds":[7157,672,675,2064,3845,4609,238,673,2068,116983,5728,1956],"sampleListId":"study_es_0_all"}`,
+		[]string{"entrezGeneId", "sampleId", "alteration"}, nil},
+	{"GET", "/api/molecular-profiles/ascn_test_study_cna/discrete-copy-number?sampleListId=ascn_test_study_all", "",
+		[]string{"entrezGeneId", "sampleId", "patientId", "alteration"}, nil},
+	{"POST", "/api/generic_assay_data/fetch",
+		`{"molecularProfileIds":["lgg_ucsf_2014_test_generic_assay_mutational_signature_contribution_SBS"]}`,
+		[]string{"stableId", "sampleId", "patientId", "value"}, []string{"value"}},
+	// HLA alleles are categories: value sorts them as text.
+	{"POST", "/api/generic_assay_data/lgg_ucsf_2014_test_generic_assay_hla/fetch",
+		`{"genericAssayStableIds":["HLA-A"],"sampleListId":"lgg_ucsf_2014_test_generic_assay_all"}`,
+		[]string{"sampleId", "value"}, nil},
+	{"GET", "/api/generic-assay-data/lgg_ucsf_2014_test_generic_assay_hla/generic-assay/HLA-A", "",
+		[]string{"sampleId", "patientId"}, nil},
+	{"POST", "/api/gene-panel-data/fetch", `{"molecularProfileIds":["study_es_0_mutations","study_es_0_gistic"]}`,
+		[]string{"molecularProfileId", "sampleId", "genePanelId", "profiled"}, nil},
+	{"POST", "/api/molecular-profiles/study_es_0_mutations/gene-panel-data/fetch", `{"sampleListId":"study_es_0_all"}`,
+		[]string{"sampleId", "genePanelId"}, nil},
+	{"POST", "/api/copy-number-segments/fetch", es0Samples,
+		[]string{"chromosome", "start", "end", "numberOfProbes", "segmentMean"}, nil},
+	{"POST", "/api/structural-variant/fetch", `{"molecularProfileIds":["study_es_0_structural_variants"]}`,
+		[]string{"sampleId", "site1HugoSymbol", "site2EntrezGeneId", "site1Position", "variantClass", "tumorReadCount"}, nil},
+	{"POST", "/api/genetic-profiles/study_es_0_gsva_scores/geneset-genetic-data/fetch",
+		`{"genesetIds":["GO_ANATOMICAL_STRUCTURE_FORMATION_INVOLVED_IN_MORPHOGENESIS","GO_ACYLGLYCEROL_HOMEOSTASIS"],"sampleListId":"study_es_0_all"}`,
+		[]string{"genesetId", "sampleId", "value"}, []string{"value"}},
 }
 
 // rawList requests a list and returns its items as raw JSON.

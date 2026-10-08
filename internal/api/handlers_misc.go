@@ -104,7 +104,7 @@ func (s *State) copyNumberSegmentsFetch(w http.ResponseWriter, r *http.Request) 
 	sql := "SELECT g.study_id, g.sample_id, ifNull(sp.patient_id, ''), g.chrom, toInt64OrZero(g.start) AS start, " +
 		"toInt64OrZero(g.end), toInt64OrZero(g.num_probes), toFloat64OrZero(g.segment_mean) " +
 		"FROM seg g LEFT JOIN " + byStudies(identifierStudies(f.SampleIdentifiers)).samples(args) + " sp ON g.study_id = sp.study_id AND g.sample_id = sp.sample_id " +
-		"WHERE " + where + " ORDER BY " + s.segOrder("g.study_id, g.sample_id, g.chrom, start")
+		"WHERE " + where + sqlListOrder(r, segmentSortable, s.segOrder("g.study_id, g.sample_id, g.chrom, start"))
 	body, err := s.CH.QueryStreamP(r.Context(), sql, "RowBinary", args.params(sql))
 	if err != nil {
 		fail(w, r, err)
@@ -127,6 +127,14 @@ func (s *State) segOrder(fallback string) string {
 		return "g.seg_id"
 	}
 	return fallback
+}
+
+// segmentSortable are CopyNumberSegmentSortBy's fields as SQL over the
+// fetched segments (alias g), sorted as the JSON values compare: the
+// chromosome as text, the others as numbers.
+var segmentSortable = map[string]string{
+	"chromosome": "g.chrom", "start": "start", "end": "toInt64OrZero(g.end)",
+	"numberOfProbes": "toInt64OrZero(g.num_probes)", "segmentMean": "toFloat64OrZero(g.segment_mean)",
 }
 
 // writeSegments encodes RowBinary segment rows (study, sample, patient,

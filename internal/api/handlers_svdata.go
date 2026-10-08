@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -184,19 +185,50 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cols := svSelectColumns(s.svViewColumns())
+	order := " ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId"
+	if sp, expr := claimListPage(r, structuralVariantSortable); sp != nil {
+		// Records of one gene pair in a sample tie in that order; a page
+		// breaks the ties by every field, so pages do not overlap.
+		tie := []string{"site1HugoSymbol", "site2HugoSymbol", "studyId", "sampleId"}
+		for _, c := range cols {
+			if _, alias, ok := strings.Cut(c, " AS "); ok && !slices.Contains(tie, alias) {
+				tie = append(tie, alias)
+			}
+		}
+		order = sp.orderLimit(expr, strings.Join(tie, ", "))
+	}
 	query := fmt.Sprintf(
 		"SELECT %s FROM (%s) sv "+
 			"LEFT JOIN %s sm ON sv.study_id = sm.study_id AND sv.sample_id = sm.sample_id "+
 			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
-			"WHERE %s ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId",
-		strings.Join(cols, ", "), svSiteEntrezSQL, byStudies(studies).samples(args), where)
+			"WHERE %s%s",
+		strings.Join(cols, ", "), svSiteEntrezSQL, byStudies(studies).samples(args), where, order)
 	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, query, args.params(query), func(r *map[string]any) error {
 		return out.add(toStructuralVariant(*r))
 	})
 	out.finish(err)
 }
+
+// structuralVariantSortable are the sortBy fields of structural variants
+// over svSelectColumns' aliases, as the records carry them: counts and
+// positions as numbers (-1 when empty), empty text as "NA".
+var structuralVariantSortable = map[string]string{
+	"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId", "molecularProfileId": "molecularProfileId",
+	"site1EntrezGeneId": "site1EntrezGeneId", "site1HugoSymbol": "site1HugoSymbol", "site1Chromosome": svNA("site1Chromosome"),
+	"site1Position":     svNum("site1Position"),
+	"site2EntrezGeneId": "site2EntrezGeneId", "site2HugoSymbol": "site2HugoSymbol", "site2Chromosome": svNA("site2Chromosome"),
+	"site2Position": svNum("site2Position"),
+	"variantClass":  svNA("variantClass"), "eventInfo": svNA("eventInfo"), "svStatus": "svStatus",
+	"tumorVariantCount": svNum("tumorVariantCount"), "tumorReadCount": svNum("tumorReadCount"),
+}
+
+// svNA is a text column as naString reads it.
+func svNA(col string) string { return fmt.Sprintf("if(%[1]s = '', 'NA', %[1]s)", col) }
+
+// svNum is a numeric column as javaPartInt reads it, for sorting.
+func svNum(col string) string { return fmt.Sprintf("ifNull(toFloat64OrNull(trimBoth(%s)), -1)", col) }
 
 // svTextColumns are the structural_variant view columns (left) a fetched SV
 // record carries, under the field names toStructuralVariant reads (right).
@@ -395,7 +427,12 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 			SampleID string `json:"sampleId"`
 		}
 		p := ch.Params{}
-		rows, _ := ch.QueryP[sr](s.CH, "SELECT sample_id AS sampleId FROM "+s.bySampleList(f.SampleListID).from(paramsBinder(p), tSampleList), p)
+		sql := "SELECT sample_id AS sampleId FROM " + s.bySampleList(f.SampleListID).from(paramsBinder(p), tSampleList)
+		if pageAsked(r) {
+			// Pages need a stable order.
+			sql += " ORDER BY sample_id"
+		}
+		rows, _ := ch.QueryP[sr](s.CH, sql, p)
 		for _, x := range rows {
 			samples = append(samples, x.SampleID)
 		}
@@ -608,9 +645,15 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	if len(f.EntrezGeneIDs) > 0 {
 		geneOrder = "indexOf([" + intListSQL(f.EntrezGeneIDs) + "], entrezGeneId), "
 	}
+	order := "sampleRank, sampleId, studyId, molecularProfileId, " + geneOrder + "entityRank, entrezGeneId"
 	query := "SELECT sampleId, patientId, entrezGeneId, hugoGeneSymbol, geneType, value, molecularProfileId, studyId FROM (" +
-		strings.Join(parts, " UNION ALL ") + ") ORDER BY sampleRank, sampleId, studyId, molecularProfileId, " +
-		geneOrder + "entityRank, entrezGeneId"
+		strings.Join(parts, " UNION ALL ") + ")"
+	// A page holds the records the numeric filter below keeps.
+	if sp, expr := claimListPage(r, molecularDataMultiSortable); sp != nil {
+		query += " WHERE " + javaNumericSQL("value") + sp.orderLimit(expr, order)
+	} else {
+		query += " ORDER BY " + order
+	}
 	projection := projectionOf(r)
 	err := ch.QueryEachP(s.CH, query, args.params(query), func(row *molecularDataMultiRow) error {
 		d := MolecularData{
@@ -625,6 +668,13 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 		return nil
 	})
 	out.finish(err)
+}
+
+// molecularDataMultiSortable are molecularDataSortable over the columns of
+// the multi-profile fetch.
+var molecularDataMultiSortable = map[string]string{
+	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId",
+	"studyId": "studyId", "molecularProfileId": "molecularProfileId", "value": "toFloat64OrNull(value)",
 }
 
 // molecularDataMultiRow is a molecularDataRow with its profile and study.

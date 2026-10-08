@@ -152,6 +152,16 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 	s.streamMolecularData(w, r, r.PathValue("id"), f)
 }
 
+// molecularDataSortable are the sortBy fields of molecular data records
+// (MolecularDataSortBy) as SQL expressions over molecularDataRow's columns,
+// plus the profile and study of the multi-profile fetch. value sorts as a
+// number. A field that is the same in every record leaves the order as it
+// is.
+var molecularDataSortable = map[string]string{
+	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId",
+	"studyId": "", "molecularProfileId": "", "value": "toFloat64OrNull(value)",
+}
+
 // streamMolecularData writes a profile's numeric records as they are read:
 // a whole profile can be millions of records.
 func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid string, f molecularDataFilter) {
@@ -167,7 +177,7 @@ func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid
 		return
 	}
 	out := newJSONArray(w, r)
-	err := s.molecularDataEach(mpid, f, func(d MolecularData) error {
+	err := s.molecularDataPage(r, mpid, f, molecularDataSortable, javaNumericSQL("value"), func(d MolecularData) error {
 		if rec, ok := numericRecord(d, projection); ok {
 			return out.add(rec)
 		}
@@ -199,16 +209,40 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 // molecularDataEach calls fn with each record of molecularData, in order,
 // without holding them.
 func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(MolecularData) error) error {
-	args := newArgs()
-	sel, meta, ok := s.molecularDataSelect(args, mpid, f, "")
-	if !ok {
-		return nil
+	return s.molecularDataPage(nil, mpid, f, nil, "", fn)
+}
+
+// molecularDataPage is molecularDataEach reading only the page the request
+// r asks for, when there is one and its sortBy is among sortable (sortBy ->
+// SQL expression over molecularDataRow's columns): the records whose value
+// passes keep (a SQL predicate over the value column, the records fn keeps
+// of all it is called with) are sorted and cut in SQL, ties in
+// molecularDataEach's order. r may be nil.
+func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataFilter, sortable map[string]string, keep string,
+	fn func(MolecularData) error) error {
+	var sp *sqlPage
+	var expr string
+	if r != nil {
+		sp, expr = claimListPage(r, sortable)
 	}
 	sampleOrder := s.sampleOrder("s", "m.sample_id")
 	if len(f.SampleIDs) > 0 || f.SampleListID != "" {
 		sampleOrder = "m.sample_id"
 	}
+	extra := ""
+	if sp != nil {
+		extra = fmt.Sprintf(", tuple(%s) AS pageSampleRank, rg.genetic_entity_id AS pageEntityRank", sampleOrder)
+	}
+	args := newArgs()
+	sel, meta, ok := s.molecularDataSelect(args, mpid, f, extra)
+	if !ok {
+		return nil
+	}
 	query := fmt.Sprintf("%s ORDER BY %s, rg.genetic_entity_id, m.entrez", sel, sampleOrder)
+	if sp != nil {
+		query = "SELECT * FROM (" + sel + ") WHERE " + keep +
+			sp.orderLimit(expr, "pageSampleRank, pageEntityRank, entrezGeneId")
+	}
 	return ch.QueryEachP(s.CH, query, args.params(query), func(r *molecularDataRow) error {
 		return fn(MolecularData{
 			MolecularProfileID: mpid, SampleID: r.SampleID, PatientID: r.PatientID, EntrezGeneID: r.EntrezGeneID,
