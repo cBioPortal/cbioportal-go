@@ -25,3 +25,21 @@ func TestRobotsLlmsTxtPointer(t *testing.T) {
 		}
 	}
 }
+
+// robots.disallow_all turns robots.txt into a disallow-all and hides the
+// sitemaps, with or without the sitemaps flag.
+func TestRobotsDisallowAll(t *testing.T) {
+	for _, sitemaps := range []string{"", "true"} {
+		s := New(&core.State{Props: map[string]string{"sitemaps": sitemaps, robotsDisallowAll: "true"}})
+		rec := httptest.NewRecorder()
+		s.robots(rec, httptest.NewRequest(http.MethodGet, "http://portal.example/robots.txt", nil))
+		if rec.Code != http.StatusOK || rec.Body.String() != "User-agent: *\nDisallow: /\n" {
+			t.Errorf("sitemaps=%q: robots %d %q", sitemaps, rec.Code, rec.Body.String())
+		}
+		rec = httptest.NewRecorder()
+		s.sitemapIndex(rec, httptest.NewRequest(http.MethodGet, "http://portal.example/sitemap_index.xml", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("sitemaps=%q: sitemap index %d", sitemaps, rec.Code)
+		}
+	}
+}

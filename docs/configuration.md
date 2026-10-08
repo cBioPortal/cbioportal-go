@@ -209,6 +209,7 @@ A few of the Java backend's server properties work here too:
 |---|---|
 | `cache.endpoint.enabled`, `cache.endpoint.api-key` | The `DELETE /api/cache` endpoint, which clears the metadata cache. |
 | `sitemaps`, `robots.disallow_paths`, `robots.crawl_delay`, `robots.disallow_user_agents` | `/robots.txt`, `/sitemap_index.xml` and `/sitemap_study.xml`. |
+| `robots.disallow_all` (go only) | When `true`, `/robots.txt` disallows every crawler and the sitemaps answer 404. Use it on preview sites. |
 | `llms_txt.location` | A file served as `/llms.txt`. It can start with `file:`. The server reads it again every 5 minutes. |
 | `feature.study.export` | Study downloads at `/export/study/<id>.zip`. |
 

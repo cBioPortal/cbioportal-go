@@ -96,10 +96,15 @@ func (s Server) clearCache(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Flushed all caches!!!"))
 }
 
-// sitemapsEnabled is the `sitemaps` flag (SitemapFeature); without it the
-// SEO endpoints answer 404 with an empty body.
+// robotsDisallowAll is a go-only property for preview deployments: robots.txt
+// asks every crawler to stay away and the sitemaps answer 404, whatever
+// `sitemaps` says.
+const robotsDisallowAll = "robots.disallow_all"
+
+// sitemapsEnabled is the `sitemaps` flag (SitemapFeature); without it, or
+// with robots.disallow_all, the SEO endpoints answer 404 with an empty body.
 func (s Server) sitemapsEnabled(w http.ResponseWriter) bool {
-	if s.Props["sitemaps"] == "true" {
+	if s.Props["sitemaps"] == "true" && s.Props[robotsDisallowAll] != "true" {
 		return true
 	}
 	w.WriteHeader(http.StatusNotFound)
@@ -133,8 +138,14 @@ func seoBaseURL(r *http.Request) string {
 
 // robots serves GET /robots.txt (RobotsController), tuned by
 // robots.disallow_user_agents, robots.disallow_paths and robots.crawl_delay,
-// and pointing to /llms.txt when llms_txt.location is set.
+// and pointing to /llms.txt when llms_txt.location is set. With
+// robots.disallow_all it disallows everything for every crawler.
 func (s Server) robots(w http.ResponseWriter, r *http.Request) {
+	if s.Props[robotsDisallowAll] == "true" {
+		w.Header().Set("Content-Type", "text/plain;charset=UTF-8")
+		w.Write([]byte("User-agent: *\nDisallow: /\n"))
+		return
+	}
 	if !s.sitemapsEnabled(w) {
 		return
 	}

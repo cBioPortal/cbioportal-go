@@ -120,6 +120,11 @@ endpoints, their sort fields and the endpoints left out are in
 [API coverage](api-coverage.md#paging-that-go-adds). The tests
 `TestAddedPaging` and `TestAddedPagingParams` pin them.
 
+go also adds the portal property `robots.disallow_all`, for preview sites
+that should stay out of search engines. When it is `true`, `/robots.txt`
+asks every crawler to stay away and the sitemaps answer 404, whatever
+`sitemaps` says. Java has no such setting. `TestRobotsDisallowAll` pins it.
+
 ## Request handling and errors
 
 | Behaviour | Java source | go | Pinned |
