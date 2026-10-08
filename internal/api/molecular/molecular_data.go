@@ -1,4 +1,4 @@
-package api
+package molecular
 
 import (
 	"encoding/json"
@@ -84,7 +84,7 @@ type molecularDataFilter struct {
 	SampleListID  string   `json:"sampleListId"`
 }
 
-func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) MolecularDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f molecularDataFilter
 	core.ReadBody(r, &f)
 	if core.NoSamples(f.SampleIDs, f.SampleListID) {
@@ -96,7 +96,7 @@ func (s *State) molecularDataFetch(w http.ResponseWriter, r *http.Request) {
 
 // molecularDataGet serves GET /api/molecular-profiles/{id}/molecular-data
 // (sampleListId and entrezGeneId query parameters).
-func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
+func (s Server) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 	if core.BlankSampleList(r.URL.Query()) {
 		core.WriteJSON(w, []NumericGeneMolecularData{})
 		return
@@ -105,19 +105,19 @@ func (s *State) molecularDataGet(w http.ResponseWriter, r *http.Request) {
 	s.streamMolecularData(w, r, r.PathValue("id"), f)
 }
 
-// molecularDataSortable are the sortBy fields of molecular data records
+// MolecularDataSortable are the sortBy fields of molecular data records
 // (MolecularDataSortBy) as SQL expressions over molecularDataRow's columns,
 // plus the profile and study of the multi-profile fetch. value sorts as a
 // number. A field that is the same in every record leaves the order as it
 // is.
-var molecularDataSortable = map[string]string{
+var MolecularDataSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId",
 	"studyId": "", "molecularProfileId": "", "value": "toFloat64OrNull(value)",
 }
 
 // streamMolecularData writes a profile's numeric records as they are read:
 // a whole profile can be millions of records.
-func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid string, f molecularDataFilter) {
+func (s Server) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid string, f molecularDataFilter) {
 	projection := core.ProjectionOf(r)
 	if projection == "META" {
 		args := core.NewArgs()
@@ -130,7 +130,7 @@ func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid
 		return
 	}
 	out := core.NewJSONArray(w, r)
-	err := s.molecularDataPage(r, mpid, f, molecularDataSortable, core.JavaNumericSQL("value"), func(d MolecularData) error {
+	err := s.molecularDataPage(r, mpid, f, MolecularDataSortable, core.JavaNumericSQL("value"), func(d MolecularData) error {
 		if rec, ok := numericRecord(d, projection); ok {
 			return out.Add(rec)
 		}
@@ -147,7 +147,7 @@ func (s *State) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid
 // in genetic entity id order, the primary key order of Java's
 // genetic_alteration rows. Records are limited to reference genes, as the
 // mapper joins the gene table.
-func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularData, error) {
+func (s Server) molecularData(mpid string, f molecularDataFilter) ([]MolecularData, error) {
 	out := []MolecularData{}
 	err := s.molecularDataEach(mpid, f, func(d MolecularData) error {
 		out = append(out, d)
@@ -161,7 +161,7 @@ func (s *State) molecularData(mpid string, f molecularDataFilter) ([]MolecularDa
 
 // molecularDataEach calls fn with each record of molecularData, in order,
 // without holding them.
-func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(MolecularData) error) error {
+func (s Server) molecularDataEach(mpid string, f molecularDataFilter, fn func(MolecularData) error) error {
 	return s.molecularDataPage(nil, mpid, f, nil, "", fn)
 }
 
@@ -171,7 +171,7 @@ func (s *State) molecularDataEach(mpid string, f molecularDataFilter, fn func(Mo
 // passes keep (a SQL predicate over the value column, the records fn keeps
 // of all it is called with) are sorted and cut in SQL, ties in
 // molecularDataEach's order. r may be nil.
-func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataFilter, sortable map[string]string, keep string,
+func (s Server) molecularDataPage(r *http.Request, mpid string, f molecularDataFilter, sortable map[string]string, keep string,
 	fn func(MolecularData) error) error {
 	var sp *core.SQLPage
 	var expr string
@@ -211,7 +211,7 @@ func (s *State) molecularDataPage(r *http.Request, mpid string, f molecularDataF
 // aliases m (the values), s (their sample) and rg (their reference gene),
 // plus extra columns if any. ok is false for a profile without gene-keyed
 // values. Values are bound in args.
-func (s *State) molecularDataSelect(args *core.SQLArgs, mpid string, f molecularDataFilter, extra string) (string, core.ProfileMeta, bool) {
+func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecularDataFilter, extra string) (string, core.ProfileMeta, bool) {
 	meta, ok := s.ProfileMeta(mpid)
 	if !ok {
 		return "", meta, false
@@ -258,7 +258,7 @@ var geneKeyMapSources = map[string]bool{
 // table: always for geneKeyMapSources, and for another table when
 // gene_key_map holds keys of it (a production clone maps its protein levels
 // there too, by the symbol its rows are stored under).
-func (s *State) geneKeyMapped(table string) bool {
+func (s Server) geneKeyMapped(table string) bool {
 	if geneKeyMapSources[table] {
 		return true
 	}

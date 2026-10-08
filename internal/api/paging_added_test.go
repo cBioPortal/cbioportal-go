@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 )
 
@@ -53,14 +54,14 @@ func TestAddedSortables(t *testing.T) {
 		sort     core.Param
 		sortable map[string]string
 	}{
-		{core.MolecularDataSortParam, molecularDataSortable},
-		{core.MolecularDataSortParam, molecularDataMultiSortable},
-		{core.DiscreteCopyNumberSort, cnaEventSortable},
-		{core.DiscreteCopyNumberSort, cnaValueSortable},
-		{core.GenericAssayDataSort, genericAssayDataSortable},
+		{core.MolecularDataSortParam, molecular.MolecularDataSortable},
+		{core.MolecularDataSortParam, molecular.MolecularDataMultiSortable},
+		{core.DiscreteCopyNumberSort, molecular.CNAEventSortable},
+		{core.DiscreteCopyNumberSort, molecular.CNAValueSortable},
+		{core.GenericAssayDataSort, molecular.GenericAssayDataSortable},
 		{core.FilteredSampleSort, filteredSampleSortable},
-		{core.StructuralVariantSortParam, structuralVariantSortable},
-		{core.CopyNumberSegmentSort, segmentSortable},
+		{core.StructuralVariantSortParam, molecular.StructuralVariantSortable},
+		{core.CopyNumberSegmentSort, molecular.SegmentSortable},
 		{core.ClinicalDataSort, studies.ClinicalDataSortable},
 		{core.SampleSort, studies.SampleSortable},
 		{core.PatientSort, studies.PatientSortable},

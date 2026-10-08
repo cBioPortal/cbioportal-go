@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
@@ -85,7 +86,6 @@ const (
 	portalVersion       = "go-0.1.0"
 	dbSchemaVersion     = "2.14.5"
 	derivedTableVersion = "1.0.11"
-	seedGenesetVersion  = "msigdb_v2025.1.Hs"
 	seedGeneTable       = "hgnc_v7_2025.10.7"
 	gitNotSet           = "not set"
 )
@@ -93,7 +93,7 @@ const (
 func (s *State) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
 		PortalVersion: portalVersion, DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
-		GenesetVersion: seedGenesetVersion, GeneTableVersion: seedGeneTable,
+		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,
 		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,
 		GitCommitMessageUserEmail: gitNotSet, GitCommitMessageUserName: gitNotSet,

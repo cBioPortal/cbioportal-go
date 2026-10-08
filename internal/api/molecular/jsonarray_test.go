@@ -1,4 +1,4 @@
-package api
+package molecular
 
 import (
 	"encoding/json"

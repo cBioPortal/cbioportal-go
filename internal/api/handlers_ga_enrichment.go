@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
@@ -120,7 +121,7 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 			cases[i] = append(cases[i], c.CaseID)
 		}
 	}
-	patientLevel := s.gaProfilePatientLevel(meta)
+	patientLevel := s.GAProfilePatientLevel(meta)
 	if patientLevel {
 		cases = s.gaOneCasePerPatient(meta.StudyID, cases)
 	}
@@ -139,19 +140,6 @@ func (s *State) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 		return nil
 	}
 	return in
-}
-
-// gaProfilePatientLevel reports whether the profile's meta file declares
-// patient_level: true (its matrix columns are then patient ids).
-func (s *State) gaProfilePatientLevel(meta core.ProfileMeta) bool {
-	type row struct {
-		P string `json:"p"`
-	}
-	rows, err := core.CachedQueryP[row](s.State,
-		"SELECT toString(patient_level) AS p FROM cbioportal_raw.genetic_profile "+
-			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} LIMIT 1",
-		ch.Params{"study": meta.StudyID, "profile": meta.StableID})
-	return err == nil && len(rows) > 0 && strings.EqualFold(strings.TrimSpace(rows[0].P), "true")
 }
 
 // gaOneCasePerPatient keeps, per group, the first case of every patient, as
@@ -292,9 +280,9 @@ func (s *State) gaValueSequences(meta core.ProfileMeta, keys [][]string) ([]stri
 // entities.
 func (s *State) gaMetaProperties(meta core.ProfileMeta) map[string]core.JavaStringMap {
 	args := core.NewArgs()
-	props, _ := s.genericAssayMetaProperties(fmt.Sprintf(
+	props, _ := s.GenericAssayMetaProperties(fmt.Sprintf(
 		"study_id = %s AND profile_stable_id = %s", args.Str(meta.StudyID), args.Str(meta.StableID)), args)
-	return summaryMetaProperties(props)
+	return molecular.SummaryMetaProperties(props)
 }
 
 func metaOrEmpty(props map[string]core.JavaStringMap, stableID string) core.JavaStringMap {

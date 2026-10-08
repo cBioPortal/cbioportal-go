@@ -1,4 +1,4 @@
-package api
+package molecular
 
 import (
 	"math"
@@ -10,9 +10,9 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// routeCompat registers endpoints that are thin views over others: the GET
+// RouteCompat registers endpoints that are thin views over others: the GET
 // molecular-data form and mRNA percentiles.
-func (s *State) routeCompat(mux *http.ServeMux) {
+func (s Server) RouteCompat(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/molecular-profiles/{id}/molecular-data", s.molecularDataGet)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/mrna-percentile/fetch", s.mrnaPercentileFetch)
 }
@@ -33,7 +33,7 @@ type MrnaPercentile struct {
 // profile's numeric values for that gene and reports rank/n as a percentile
 // rounded half up to two decimals, as Java's MrnaPercentileServiceImpl: tied
 // values all take the highest rank of their group (TiesStrategy.MAXIMUM).
-func (s *State) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) mrnaPercentileFetch(w http.ResponseWriter, r *http.Request) {
 	var entrez []int64
 	core.ReadBody(r, &entrez)
 	sampleID := r.URL.Query().Get("sampleId")

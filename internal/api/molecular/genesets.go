@@ -1,4 +1,4 @@
-package api
+package molecular
 
 import (
 	"bytes"
@@ -38,14 +38,14 @@ func msgGenesetNotFound(id string) string { return "Gene set not found: " + id }
 // hasGenesetRef reports whether the reference database has gene set tables:
 // those load-genesets writes, or a production clone's (whose version is in
 // the info table instead of geneset_info).
-func (s *State) hasGenesetRef() bool {
+func (s Server) hasGenesetRef() bool {
 	n, _ := s.genesetRefTables()
 	return n == 4
 }
 
 // genesetRefTables counts the reference database's gene set tables other
 // than the version's, and reports whether it has geneset_info.
-func (s *State) genesetRefTables() (n int, versionTable bool) {
+func (s Server) genesetRefTables() (n int, versionTable bool) {
 	if s.CH == nil {
 		return 0, false
 	}
@@ -81,14 +81,14 @@ func (r genesetRefRow) dto() Geneset {
 
 // refGenesets reads gene sets of the reference (GenesetMapper's select)
 // matching where, whose placeholders take their values from p.
-func (s *State) refGenesets(where string, p ch.Params, order string) ([]genesetRefRow, error) {
+func (s Server) refGenesets(where string, p ch.Params, order string) ([]genesetRefRow, error) {
 	return core.CachedQueryP[genesetRefRow](s.State, fmt.Sprintf(
 		"SELECT id, external_id AS genesetId, name, description, ifNull(ref_link, '') AS refLink FROM cbioportal_ref.geneset WHERE %s ORDER BY %s",
 		where, order), p)
 }
 
 // genesetsForIDs lists gene sets ordered by id, all or those named.
-func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
+func (s Server) genesetsForIDs(ids []string) ([]Geneset, error) {
 	if s.hasGenesetRef() {
 		where := "1"
 		var p ch.Params
@@ -116,7 +116,7 @@ func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
 		GenesetID string `json:"genesetId"`
 	}
 	rows, err := ch.QueryP[row](s.CH, fmt.Sprintf(
-		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s), where), p)
+		"SELECT DISTINCT geneset_id AS genesetId FROM %s WHERE %s ORDER BY geneset_id", genesetScoreSource(s.State), where), p)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +127,8 @@ func (s *State) genesetsForIDs(ids []string) ([]Geneset, error) {
 	return out, nil
 }
 
-// genesetsList serves GET /api/genesets: every gene set by id.
-func (s *State) genesetsList(w http.ResponseWriter, r *http.Request) {
+// GenesetsList serves GET /api/genesets: every gene set by id.
+func (s Server) GenesetsList(w http.ResponseWriter, r *http.Request) {
 	out, err := s.genesetsForIDs(nil)
 	if err != nil {
 		core.Fail(w, r, err)
@@ -138,7 +138,7 @@ func (s *State) genesetsList(w http.ResponseWriter, r *http.Request) {
 }
 
 // genesetsFetch serves POST /api/genesets/fetch: the named gene sets by id.
-func (s *State) genesetsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesetsFetch(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	if core.EmptyJSONArray(raw) {
 		core.WriteError(w, http.StatusBadRequest, core.MsgListSize("genesetIds"))
@@ -159,7 +159,7 @@ func (s *State) genesetsFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 // genesetGet serves GET /api/genesets/{genesetId}.
-func (s *State) genesetGet(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesetGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("genesetId")
 	rows, err := s.genesetsForIDs([]string{id})
 	if err != nil {
@@ -173,11 +173,15 @@ func (s *State) genesetGet(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, rows[0])
 }
 
-// genesetVersion serves GET /api/genesets/version (GenesetMapper
+// SeedGenesetVersion is the gene set version of the seed reference data,
+// reported when the reference database has none.
+const SeedGenesetVersion = "msigdb_v2025.1.Hs"
+
+// GenesetVersion serves GET /api/genesets/version (GenesetMapper
 // .getGenesetVersion, the info table's geneset_version): the version
 // load-genesets recorded, else that of a reference database with cBioPortal's
 // info table (a production clone), else the seed's.
-func (s *State) genesetVersion(w http.ResponseWriter, r *http.Request) {
+func (s Server) GenesetVersion(w http.ResponseWriter, r *http.Request) {
 	type row struct {
 		V string `json:"v"`
 	}
@@ -199,7 +203,7 @@ func (s *State) genesetVersion(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, rows[0].V)
 		return
 	}
-	core.WriteJSON(w, seedGenesetVersion)
+	core.WriteJSON(w, SeedGenesetVersion)
 }
 
 // ---------- Gene set scores ----------
@@ -216,7 +220,7 @@ type genesetScore struct {
 // samples (all, or those of sampleIds that exist in the study) by sample id,
 // and for each the values of every gene set (or those of genesetIds) in gene
 // set order.
-func (s *State) genesetScores(meta core.ProfileMeta, sampleIDs, genesetIDs []string) ([]genesetScore, error) {
+func (s Server) genesetScores(meta core.ProfileMeta, sampleIDs, genesetIDs []string) ([]genesetScore, error) {
 	where := "m.study_id = {study:String} AND m.profile_stable_id = {profile:String}"
 	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID}
 	if sampleIDs != nil {
@@ -238,7 +242,7 @@ func (s *State) genesetScores(meta core.ProfileMeta, sampleIDs, genesetIDs []str
 	return ch.QueryP[genesetScore](s.CH, fmt.Sprintf(
 		"SELECT m.geneset_id AS genesetId, m.sample_id AS sampleId, sm.patient_id AS patientId, "+core.JavaTruncatedValueSQL("m.value")+" AS value "+
 			"FROM %s m JOIN %s sm ON sm.study_id = m.study_id AND sm.sample_id = m.sample_id %s"+
-			"WHERE %s ORDER BY %s", genesetScoreSource(s), core.ByStudy(meta.StudyID).Samples(core.ParamsBinder(p)), join, where, order), p)
+			"WHERE %s ORDER BY %s", genesetScoreSource(s.State), core.ByStudy(meta.StudyID).Samples(core.ParamsBinder(p)), join, where, order), p)
 }
 
 // GenesetMolecularData is GenesetMolecularDataDTO as the controller fills it.
@@ -255,7 +259,7 @@ type GenesetMolecularData struct {
 // POST /api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch
 // (GenesetDataController): the scores of a sample list's samples (when
 // sampleListId is set) or of sampleIds (all the profile's samples without).
-func (s *State) genesetGeneticDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genesetGeneticDataFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("geneticProfileId")
 	var f struct {
 		GenesetIDs   []string `json:"genesetIds"`
@@ -296,7 +300,7 @@ func (s *State) genesetGeneticDataFetch(w http.ResponseWriter, r *http.Request) 
 
 // sampleListIDs returns the sample ids of a sample list, found false when the
 // list does not exist.
-func (s *State) sampleListIDs(listID string) ([]string, bool) {
+func (s Server) sampleListIDs(listID string) ([]string, bool) {
 	type row struct {
 		SampleID string `json:"sampleId"`
 	}
@@ -381,12 +385,12 @@ func hierarchyParam(w http.ResponseWriter, q map[string][]string, name, def stri
 	return x, true
 }
 
-// genesetHierarchyFetch serves POST /api/geneset-hierarchy/fetch
+// GenesetHierarchyFetch serves POST /api/geneset-hierarchy/fetch
 // (GenesetHierarchyController, GenesetHierarchyServiceImpl): the hierarchy
 // nodes leading to gene sets that the GSVA-SCORE profile scores and whose
 // representative score and p-value pass the thresholds, over the samples of
 // sampleListId, the body's sample ids, or the whole study.
-func (s *State) genesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) GenesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
 	var bodyIDs []string
 	core.ReadBody(r, &bodyIDs)
 	q := r.URL.Query()
@@ -460,7 +464,7 @@ func (s *State) genesetHierarchyFetch(w http.ResponseWriter, r *http.Request) {
 
 // genesetPvalueProfile is the P-VALUE gene set profile of the scores
 // profile's study (Java's profile linked to the scores profile).
-func (s *State) genesetPvalueProfile(scores core.ProfileMeta) (core.ProfileMeta, bool) {
+func (s Server) genesetPvalueProfile(scores core.ProfileMeta) (core.ProfileMeta, bool) {
 	type row struct {
 		ID string `json:"id"`
 	}
@@ -474,7 +478,7 @@ func (s *State) genesetPvalueProfile(scores core.ProfileMeta) (core.ProfileMeta,
 }
 
 // genesetHierarchy is GenesetHierarchyServiceImpl.getGenesetHierarchyItems.
-func (s *State) genesetHierarchy(scores, pvalues []genesetScore, percentile int, scoreThreshold, pvalueThreshold float64) ([]*GenesetHierarchyInfo, error) {
+func (s Server) genesetHierarchy(scores, pvalues []genesetScore, percentile int, scoreThreshold, pvalueThreshold float64) ([]*GenesetHierarchyInfo, error) {
 	type nodeRow struct {
 		NodeID   int64  `json:"nodeId"`
 		NodeName string `json:"nodeName"`
@@ -676,7 +680,7 @@ func javaNumber(s string) (float64, bool) {
 
 // genesetHierarchyFromScores lists, without a gene set reference, the
 // profile's scored gene sets under a single node.
-func (s *State) genesetHierarchyFromScores(w http.ResponseWriter, r *http.Request, meta core.ProfileMeta, sampleIDs []string) {
+func (s Server) genesetHierarchyFromScores(w http.ResponseWriter, r *http.Request, meta core.ProfileMeta, sampleIDs []string) {
 	if !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
 		core.WriteJSON(w, []GenesetHierarchyInfo{})
 		return
@@ -687,7 +691,7 @@ func (s *State) genesetHierarchyFromScores(w http.ResponseWriter, r *http.Reques
 	rows, err := ch.QueryP[row](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT geneset_id AS genesetId FROM %s "+
 			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND sample_id IN {samples:Array(String)} "+
-			"ORDER BY geneset_id", genesetScoreSource(s)),
+			"ORDER BY geneset_id", genesetScoreSource(s.State)),
 		ch.Params{"study": meta.StudyID, "profile": meta.StableID, "samples": sampleIDs})
 	if err != nil {
 		core.Fail(w, r, err)
@@ -706,7 +710,7 @@ func (s *State) genesetHierarchyFromScores(w http.ResponseWriter, r *http.Reques
 
 // genesetGenes lists the member genes of a gene set (entrez id, symbol) by
 // entrez id; found is false for an unknown gene set.
-func (s *State) genesetGenes(genesetID string) (genes []studies.GeneRow, found bool, err error) {
+func (s Server) genesetGenes(genesetID string) (genes []studies.GeneRow, found bool, err error) {
 	sets, err := s.refGenesets("external_id = {id:String}", ch.Params{"id": genesetID}, "id")
 	if err != nil || len(sets) == 0 {
 		return nil, false, err
@@ -724,7 +728,7 @@ func (s *State) genesetGenes(genesetID string) (genes []studies.GeneRow, found b
 // the body's, or the study's) where both are numbers; 0 with fewer than two
 // such samples. Genes below the threshold are dropped, the rest sorted by
 // correlation, descending.
-func (s *State) genesetMemberCorrelations(w http.ResponseWriter, r *http.Request, meta core.ProfileMeta, genesetID, sampleListID string,
+func (s Server) genesetMemberCorrelations(w http.ResponseWriter, r *http.Request, meta core.ProfileMeta, genesetID, sampleListID string,
 	bodyIDs []string, threshold float64, exprID, exprStableID, zscoreID string) {
 	var sampleIDs []string
 	switch {
@@ -801,7 +805,7 @@ func (s *State) genesetMemberCorrelations(w http.ResponseWriter, r *http.Request
 			}
 			corr := 0.0
 			if len(xs) >= 2 {
-				corr = spearman(xs, ys)
+				corr = Spearman(xs, ys)
 			}
 			if math.IsNaN(corr) || corr < threshold {
 				continue
@@ -811,5 +815,130 @@ func (s *State) genesetMemberCorrelations(w http.ResponseWriter, r *http.Request
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].CorrelationValue > out[j].CorrelationValue })
+	core.WriteJSON(w, out)
+}
+
+// ---------- 4. POST /api/genesets/{genesetId}/expression-correlation/fetch ----------
+
+type GenesetCorrelation struct {
+	CorrelationValue           float64 `json:"correlationValue"`
+	EntrezGeneID               int64   `json:"entrezGeneId"`
+	ExpressionGeneticProfileID string  `json:"expressionGeneticProfileId"`
+	HugoGeneSymbol             string  `json:"hugoGeneSymbol"`
+	ZScoreGeneticProfileID     string  `json:"zScoreGeneticProfileId"`
+}
+
+// GenesetExpressionCorrelationFetch computes, for the given geneset, the Spearman
+// correlation of its per-sample GSVA score against each gene's mRNA expression
+// (like co-expression). The correlation is pushed into ClickHouse (spearmanSQL) so
+// only genes above the threshold cross the wire. Shape: []GenesetCorrelation.
+func (s Server) GenesetExpressionCorrelationFetch(w http.ResponseWriter, r *http.Request) {
+	genesetID := r.PathValue("genesetId")
+
+	// Optional body: a custom list of sample ids to restrict the correlation to.
+	var sampleIDs []string
+	core.ReadBody(r, &sampleIDs)
+
+	gsvaProfile := r.URL.Query().Get("geneticProfileId")
+	sampleListID := r.URL.Query().Get("sampleListId")
+	threshold := 0.3
+	if t := r.URL.Query().Get("correlationThreshold"); t != "" {
+		if v, err := strconv.ParseFloat(t, 64); err == nil {
+			threshold = v
+		}
+	}
+
+	meta, ok := s.ProfileMeta(gsvaProfile)
+	if !ok {
+		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(gsvaProfile))
+		return
+	}
+	if !strings.EqualFold(meta.AlterationType, "GENESET_SCORE") {
+		core.WriteJSON(w, []GenesetCorrelation{})
+		return
+	}
+
+	// Resolve the study's mRNA expression profiles: prefer a continuous profile
+	// for the correlation and a z-score profile for the reported z-score id.
+	type exprProfile struct {
+		ID       string `json:"id"`
+		StableID string `json:"stableId"`
+		Datatype string `json:"datatype"`
+	}
+	exprRows, _ := ch.QueryP[exprProfile](s.CH,
+		"SELECT molecular_profile_id AS id, profile_stable_id AS stableId, datatype "+
+			"FROM molecular_profile WHERE study_id = {study:String} AND molecular_alteration_type = 'MRNA_EXPRESSION' "+
+			"ORDER BY molecular_profile_id", ch.Params{"study": meta.StudyID})
+	if len(exprRows) == 0 {
+		core.WriteJSON(w, []GenesetCorrelation{})
+		return
+	}
+	expr := exprRows[0]
+	zscore := exprRows[0]
+	for _, p := range exprRows {
+		if strings.Contains(strings.ToUpper(p.Datatype), "CONTINUOUS") {
+			expr = p
+		}
+		if strings.Contains(strings.ToUpper(p.Datatype), "Z-SCORE") {
+			zscore = p
+		}
+	}
+
+	if s.hasGenesetRef() {
+		s.genesetMemberCorrelations(w, r, meta, genesetID, sampleListID, sampleIDs, threshold, expr.ID, expr.StableID, zscore.ID)
+		return
+	}
+
+	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID, "geneset": genesetID, "exprProfile": expr.StableID}
+	sampleFilter := ""
+	if len(sampleIDs) > 0 {
+		sampleFilter = " AND sample_id IN {samples:Array(String)}"
+		p["samples"] = sampleIDs
+	} else if sampleListID != "" {
+		sampleFilter = " AND sample_id IN " + s.BySampleList(sampleListID).ListMembers(core.ParamsBinder(p))
+	}
+
+	querySub := fmt.Sprintf(
+		"SELECT sample_id, toFloat64OrZero(value) AS qval FROM %s "+
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND geneset_id = {geneset:String} "+
+			"AND toFloat64OrNull(value) IS NOT NULL%s",
+		genesetScoreSource(s.State), sampleFilter)
+
+	type corrRow struct {
+		Entrez *int64   `json:"entity"`
+		Hugo   string   `json:"hugo"`
+		N      int      `json:"n"`
+		SC     *float64 `json:"sc"`
+	}
+	rows, err := ch.QueryP[corrRow](s.CH, spearmanSQL(fmt.Sprintf(
+		"SELECT toInt64OrNull(b.entrez_gene_id) AS entity, b.hugo_symbol AS hugo, "+
+			"toFloat64OrZero(b.value) AS x, q.qval AS y "+
+			"FROM %s AS b "+
+			"INNER JOIN (%s) AS q USING (sample_id) "+
+			"WHERE b.study_id = {study:String} AND b.profile_stable_id = {exprProfile:String} "+
+			"AND toFloat64OrNull(b.value) IS NOT NULL",
+		s.RawSource("mrna_expression_matrix", geneMatrixCols...), querySub),
+		"1", threshold)+" ORDER BY sc DESC", p)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+
+	out := []GenesetCorrelation{}
+	for _, row := range rows {
+		if row.SC == nil {
+			continue
+		}
+		gc := GenesetCorrelation{
+			CorrelationValue:           *row.SC,
+			HugoGeneSymbol:             row.Hugo,
+			ExpressionGeneticProfileID: expr.ID,
+			ZScoreGeneticProfileID:     zscore.ID,
+		}
+		if row.Entrez != nil {
+			gc.EntrezGeneID = *row.Entrez
+		}
+		out = append(out, gc)
+	}
 	core.WriteJSON(w, out)
 }

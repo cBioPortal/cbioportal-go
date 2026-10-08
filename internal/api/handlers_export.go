@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/databin"
@@ -795,7 +796,7 @@ func (e *studyExport) structuralVariants() error {
 	if err != nil || len(profiles) == 0 {
 		return err
 	}
-	cols := svSelectColumns(e.s.svViewColumns())
+	cols := molecular.SVSelectColumns(e.s.SVViewColumns())
 	for i := range profiles {
 		p := &profiles[i]
 		metaFile, dataFile := profileFileNames("STRUCTURAL_VARIANT", "SV", p.stableSuffix(e.studyID))
@@ -809,7 +810,7 @@ func (e *studyExport) structuralVariants() error {
 				"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 				"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 				"WHERE sv.study_id = {study:String} AND sv.profile_stable_id = {profile:String} ORDER BY sampleId, site1HugoSymbol, site2HugoSymbol",
-			strings.Join(cols, ", "), svSiteEntrezSQL, core.ByStudy(e.studyID).Samples(core.ParamsBinder(params))), params)
+			strings.Join(cols, ", "), molecular.SVSiteEntrezSQL, core.ByStudy(e.studyID).Samples(core.ParamsBinder(params))), params)
 		if err != nil {
 			return err
 		}
@@ -826,7 +827,7 @@ func (e *studyExport) structuralVariants() error {
 		}
 		num := func(v int64) string { return strconv.FormatInt(v, 10) }
 		for _, r := range rows {
-			v := toStructuralVariant(r)
+			v := molecular.ToStructuralVariant(r)
 			t.line([]string{
 				v.SampleID, entrez(v.Site1EntrezGeneID), v.Site1HugoSymbol, v.Site1EnsemblTranscriptID,
 				num(v.Site1RegionNumber), v.Site1Chromosome, num(v.Site1Position), v.Site1Region, v.Site1Description,

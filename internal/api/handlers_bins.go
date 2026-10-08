@@ -310,7 +310,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 	}
 	unit := "sample_unique_id"
 	if len(f.GenericAssayDataBinFilters) > 0 {
-		unit = s.gaCountUnit(f.GenericAssayDataBinFilters[0].ProfileType)
+		unit = s.GACountUnit(f.GenericAssayDataBinFilters[0].ProfileType)
 	}
 	unfiltered, filtered := s.scopedValueCounts(core.TGenericAssayDataDerived, "entity_stable_id", "value",
 		isNASQL("value"), unit, keys, svf.partial(), svf)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/stats"
@@ -304,8 +305,8 @@ func (s *State) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 	props := map[string]core.JavaStringMap{}
 	if pairs := s.groupProfilePairs(groups); len(pairs) > 0 {
 		args := core.NewArgs()
-		props, _ = s.genericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.Pairs(pairs), args)
-		props = summaryMetaProperties(props)
+		props, _ = s.GenericAssayMetaProperties("(study_id, profile_stable_id) IN "+args.Pairs(pairs), args)
+		props = molecular.SummaryMetaProperties(props)
 	}
 	out := make([]GenericAssayEnrichment, len(results))
 	for i, res := range results {
@@ -385,7 +386,7 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(core.PairStudies(pairs)).From(core.ParamsBinder(p), core.TSample)+
 				" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id", p)
 		for _, r := range rows {
-			k := jkey(r.StudyID, r.PatientID)
+			k := molecular.JoinKey(r.StudyID, r.PatientID)
 			samplesOf[k] = append(samplesOf[k], r.SampleID)
 		}
 	}
@@ -393,7 +394,7 @@ func (s *State) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	for i, g := range groups {
 		out[i] = casesGroup{Name: g.Name}
 		for _, c := range g.MolecularProfileCaseIdentifiers {
-			for _, sid := range samplesOf[jkey(metaCache[c.MolecularProfileID].StudyID, c.CaseID)] {
+			for _, sid := range samplesOf[molecular.JoinKey(metaCache[c.MolecularProfileID].StudyID, c.CaseID)] {
 				out[i].MolecularProfileCaseIdentifiers = append(out[i].MolecularProfileCaseIdentifiers,
 					caseIdentifier{CaseID: sid, MolecularProfileID: c.MolecularProfileID})
 			}

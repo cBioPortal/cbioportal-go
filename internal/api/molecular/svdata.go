@@ -1,4 +1,4 @@
-package api
+package molecular
 
 import (
 	"encoding/json"
@@ -13,9 +13,9 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeSvData registers the structural-variant detail, gene-panel-data, and
+// RouteSvData registers the structural-variant detail, gene-panel-data, and
 // multi-study molecular-data endpoints.
-func (s *State) routeSvData(mux *http.ServeMux) {
+func (s Server) RouteSvData(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/structural-variant/fetch", s.structuralVariantFetch)
 	mux.HandleFunc("POST /api/gene-panel-data/fetch", s.genePanelDataFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/gene-panel-data/fetch", s.genePanelDataProfileFetch)
@@ -91,10 +91,10 @@ type svDataRow struct {
 	Site2EntrezGeneID *int64 `json:"site2EntrezGeneId"`
 }
 
-// svResolvedSQL is the structural_variant view with each site's missing entrez
+// SVResolvedSQL is the structural_variant view with each site's missing entrez
 // id resolved from its Hugo symbol through the reference genes, as the Java
 // importer does.
-const svResolvedSQL = "SELECT sv.study_id AS study_id, sv.sample_id AS sample_id, " +
+const SVResolvedSQL = "SELECT sv.study_id AS study_id, sv.sample_id AS sample_id, " +
 	"sv.site1_hugo_symbol AS site1_hugo_symbol, " +
 	"if(sv.site1_entrez_gene_id IS NULL AND g1.entrez_gene_id != 0, g1.entrez_gene_id, sv.site1_entrez_gene_id) AS site1_entrez_gene_id, " +
 	"sv.site2_hugo_symbol AS site2_hugo_symbol, " +
@@ -143,7 +143,7 @@ type svFilter struct {
 	} `json:"sampleMolecularIdentifiers"`
 }
 
-func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	var f svFilter
 	core.ReadBody(r, &f)
 
@@ -180,15 +180,15 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		geneOrs = append(geneOrs, fmt.Sprintf("sv.e1 IN (%s) OR sv.e2 IN (%s)", joined, joined))
 	}
 	for _, q := range f.StructuralVariantQueries {
-		geneOrs = append(geneOrs, "("+joinPreds(q.Gene1.clause("sv.e1"), q.Gene2.clause("sv.e2"))+")")
+		geneOrs = append(geneOrs, "("+JoinPreds(q.Gene1.clause("sv.e1"), q.Gene2.clause("sv.e2"))+")")
 	}
 	if len(geneOrs) > 0 {
 		where += " AND (" + strings.Join(geneOrs, " OR ") + ")"
 	}
 
-	cols := svSelectColumns(s.svViewColumns())
+	cols := SVSelectColumns(s.SVViewColumns())
 	order := " ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId"
-	if sp, expr := core.ClaimListPage(r, structuralVariantSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, StructuralVariantSortable); sp != nil {
 		// Records of one gene pair in a sample tie in that order; a page
 		// breaks the ties by every field, so pages do not overlap.
 		tie := []string{"site1HugoSymbol", "site2HugoSymbol", "studyId", "sampleId"}
@@ -205,18 +205,18 @@ func (s *State) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 			"LEFT JOIN cbioportal_ref.gene g1 ON g1.entrez_gene_id = sv.e1 "+
 			"LEFT JOIN cbioportal_ref.gene g2 ON g2.entrez_gene_id = sv.e2 "+
 			"WHERE %s%s",
-		strings.Join(cols, ", "), svSiteEntrezSQL, core.ByStudies(studies).Samples(args), where, order)
+		strings.Join(cols, ", "), SVSiteEntrezSQL, core.ByStudies(studies).Samples(args), where, order)
 	out := core.NewJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, query, args.Params(query), func(r *map[string]any) error {
-		return out.Add(toStructuralVariant(*r))
+		return out.Add(ToStructuralVariant(*r))
 	})
 	out.Finish(err)
 }
 
-// structuralVariantSortable are the sortBy fields of structural variants
+// StructuralVariantSortable are the sortBy fields of structural variants
 // over svSelectColumns' aliases, as the records carry them: counts and
 // positions as numbers (-1 when empty), empty text as "NA".
-var structuralVariantSortable = map[string]string{
+var StructuralVariantSortable = map[string]string{
 	"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId", "molecularProfileId": "molecularProfileId",
 	"site1EntrezGeneId": "site1EntrezGeneId", "site1HugoSymbol": "site1HugoSymbol", "site1Chromosome": svNA("site1Chromosome"),
 	"site1Position":     svNum("site1Position"),
@@ -254,10 +254,10 @@ var svTextColumns = [][2]string{
 	{"sv_status", "svStatus"}, {"namespace_columns", "namespaceColumns"},
 }
 
-// svSelectColumns selects a structural variant record over svSiteEntrezSQL
+// SVSelectColumns selects a structural variant record over svSiteEntrezSQL
 // (alias sv, sample alias sm, gene aliases g1 and g2) as toStructuralVariant
 // reads it; view columns missing from have read as empty.
-func svSelectColumns(have map[string]bool) []string {
+func SVSelectColumns(have map[string]bool) []string {
 	cols := []string{
 		"sv.study_id AS studyId", "sv.sample_id AS sampleId", "ifNull(sm.patient_id, '') AS patientId",
 		"sv.e1 AS site1EntrezGeneId", "g1.hugo_gene_symbol AS site1HugoSymbol",
@@ -274,19 +274,19 @@ func svSelectColumns(have map[string]bool) []string {
 	return cols
 }
 
-// svSiteEntrezSQL is the structural_variant view with each site's entrez id
+// SVSiteEntrezSQL is the structural_variant view with each site's entrez id
 // (e1, e2) resolved from its Hugo symbol when the file gave none, as the
 // importer does.
-const svSiteEntrezSQL = "SELECT sv0.*, " +
+const SVSiteEntrezSQL = "SELECT sv0.*, " +
 	"if(sv0.site1_entrez_gene_id IS NULL AND h1.entrez_gene_id != 0, h1.entrez_gene_id, sv0.site1_entrez_gene_id) AS e1, " +
 	"if(sv0.site2_entrez_gene_id IS NULL AND h2.entrez_gene_id != 0, h2.entrez_gene_id, sv0.site2_entrez_gene_id) AS e2 " +
 	"FROM structural_variant sv0 " +
 	"LEFT JOIN cbioportal_ref.gene h1 ON h1.hugo_gene_symbol = sv0.site1_hugo_symbol " +
 	"LEFT JOIN cbioportal_ref.gene h2 ON h2.hugo_gene_symbol = sv0.site2_hugo_symbol"
 
-// toStructuralVariant maps one fetched row (column alias -> value) to the
+// ToStructuralVariant maps one fetched row (column alias -> value) to the
 // Java record.
-func toStructuralVariant(r map[string]any) StructuralVariant {
+func ToStructuralVariant(r map[string]any) StructuralVariant {
 	str := func(k string) string {
 		v, _ := r[k].(string)
 		return v
@@ -361,7 +361,7 @@ type panelProfile struct {
 	StableID           string `json:"stableId"`
 }
 
-func (s *State) resolvePanelProfiles(ids []string) map[string]panelProfile {
+func (s Server) ResolvePanelProfiles(ids []string) map[string]panelProfile {
 	out := map[string]panelProfile{}
 	if len(ids) == 0 {
 		return out
@@ -375,9 +375,9 @@ func (s *State) resolvePanelProfiles(ids []string) map[string]panelProfile {
 	return out
 }
 
-func jkey(parts ...string) string { return strings.Join(parts, "\x00") }
+func JoinKey(parts ...string) string { return strings.Join(parts, "\x00") }
 
-func (s *State) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		MolecularProfileIDs        []string `json:"molecularProfileIds"`
 		SampleMolecularIdentifiers []struct {
@@ -394,7 +394,7 @@ func (s *State) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 			reqs = append(reqs, gpReq{profileID: id.MolecularProfileID, sampleID: id.SampleID})
 		}
 	case len(f.MolecularProfileIDs) > 0:
-		profs := s.resolvePanelProfiles(f.MolecularProfileIDs)
+		profs := s.ResolvePanelProfiles(f.MolecularProfileIDs)
 		for _, pid := range f.MolecularProfileIDs {
 			study := profs[pid].StudyID
 			if study == "" {
@@ -409,14 +409,14 @@ func (s *State) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeGenePanelData streams genePanelDataEach's records.
-func (s *State) writeGenePanelData(w http.ResponseWriter, r *http.Request, reqs []gpReq) {
+func (s Server) writeGenePanelData(w http.ResponseWriter, r *http.Request, reqs []gpReq) {
 	out := core.NewJSONArray(w, r)
 	out.Finish(s.genePanelDataEach(reqs, func(d GenePanelData) error {
 		return out.Add(d)
 	}))
 }
 
-func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	var f struct {
 		SampleIDs    []string `json:"sampleIds"`
@@ -447,7 +447,7 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 			samples = append(samples, x.SampleID)
 		}
 	default:
-		study := s.resolvePanelProfiles([]string{mpid})[mpid].StudyID
+		study := s.ResolvePanelProfiles([]string{mpid})[mpid].StudyID
 		if study != "" {
 			samples = s.studySampleIDs(study)
 		}
@@ -459,7 +459,7 @@ func (s *State) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 	s.writeGenePanelData(w, r, reqs)
 }
 
-func (s *State) studySampleIDs(study string) []string {
+func (s Server) studySampleIDs(study string) []string {
 	type sr struct {
 		SampleID string `json:"sampleId"`
 	}
@@ -478,7 +478,7 @@ func (s *State) studySampleIDs(study string) []string {
 // (none for whole-exome/genome). Mutation profiles also count members of the
 // study's _sequenced sample list as profiled. Samples not in the profile's
 // study are skipped.
-func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) error {
+func (s Server) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) error {
 	if len(reqs) == 0 {
 		return nil
 	}
@@ -487,7 +487,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 		profSet[q.profileID] = true
 	}
 	profIDs := core.SortedKeys(profSet)
-	profs := s.resolvePanelProfiles(profIDs)
+	profs := s.ResolvePanelProfiles(profIDs)
 	type typeRow struct {
 		ID   string `json:"id"`
 		Type string `json:"type"`
@@ -512,7 +512,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	ch.QueryEachP(s.CH,
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(studyIDs).From(core.ParamsBinder(sp), core.TSample), sp,
 		func(r *studies.IDRow) error {
-			patientOf[jkey(r.StudyID, r.SampleID)] = r.PatientID
+			patientOf[JoinKey(r.StudyID, r.SampleID)] = r.PatientID
 			return nil
 		})
 	type memberRow struct {
@@ -531,7 +531,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 			if m.Panel != nil {
 				panel = *m.Panel
 			}
-			member[jkey(m.Profile, m.SampleID)] = membership{panel}
+			member[JoinKey(m.Profile, m.SampleID)] = membership{panel}
 			return nil
 		})
 	sequenced := map[string]bool{}
@@ -543,20 +543,20 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	seqRows, _ := ch.QueryP[studies.IDRow](s.CH,
 		"SELECT study_id AS studyId, sample_id AS sampleId FROM "+s.BySampleLists(sequencedLists...).From(core.ParamsBinder(seqP), core.TSampleList), seqP)
 	for _, r := range seqRows {
-		sequenced[jkey(r.StudyID, r.SampleID)] = true
+		sequenced[JoinKey(r.StudyID, r.SampleID)] = true
 	}
 	for _, q := range reqs {
 		p, ok := profs[q.profileID]
 		if !ok {
 			continue
 		}
-		patient, ok := patientOf[jkey(p.StudyID, q.sampleID)]
+		patient, ok := patientOf[JoinKey(p.StudyID, q.sampleID)]
 		if !ok {
 			continue
 		}
-		m, profiled := member[jkey(q.profileID, q.sampleID)]
+		m, profiled := member[JoinKey(q.profileID, q.sampleID)]
 		if !profiled && isMutation[q.profileID] {
-			profiled = sequenced[jkey(p.StudyID, q.sampleID)]
+			profiled = sequenced[JoinKey(p.StudyID, q.sampleID)]
 		}
 		err := fn(GenePanelData{
 			GenePanelID:        m.panel,
@@ -583,7 +583,7 @@ func (s *State) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 // getSamplesByInternalIds does); for each sample every requested profile of
 // its study by stable id (getMolecularProfiles), then the genes in request
 // order. One query orders the profiles' records so, and they are streamed.
-func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.Request) {
 	var f struct {
 		EntrezGeneIDs              []int64  `json:"entrezGeneIds"`
 		MolecularProfileIDs        []string `json:"molecularProfileIds"`
@@ -664,7 +664,7 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	query := "SELECT sampleId, patientId, entrezGeneId, hugoGeneSymbol, geneType, value, molecularProfileId, studyId FROM (" +
 		strings.Join(parts, " UNION ALL ") + ")"
 	// A page holds the records the numeric filter below keeps.
-	if sp, expr := core.ClaimListPage(r, molecularDataMultiSortable); sp != nil {
+	if sp, expr := core.ClaimListPage(r, MolecularDataMultiSortable); sp != nil {
 		query += " WHERE " + core.JavaNumericSQL("value") + sp.OrderLimit(expr, order)
 	} else {
 		query += " ORDER BY " + order
@@ -685,9 +685,9 @@ func (s *State) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 	out.Finish(err)
 }
 
-// molecularDataMultiSortable are molecularDataSortable over the columns of
+// MolecularDataMultiSortable are molecularDataSortable over the columns of
 // the multi-profile fetch.
-var molecularDataMultiSortable = map[string]string{
+var MolecularDataMultiSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId",
 	"studyId": "studyId", "molecularProfileId": "molecularProfileId", "value": "toFloat64OrNull(value)",
 }
@@ -704,9 +704,9 @@ type molecularDataMultiRow struct {
 	StudyID            string `json:"studyId"`
 }
 
-// svViewColumns lists the columns of the structural_variant view (the staged
+// SVViewColumns lists the columns of the structural_variant view (the staged
 // detail columns vary by dataset).
-func (s *State) svViewColumns() map[string]bool {
+func (s Server) SVViewColumns() map[string]bool {
 	type col struct {
 		Name string `json:"name"`
 	}
@@ -716,4 +716,17 @@ func (s *State) svViewColumns() map[string]bool {
 		out[r.Name] = true
 	}
 	return out
+}
+
+func JoinPreds(preds ...string) string {
+	var out []string
+	for _, p := range preds {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return "1 = 1"
+	}
+	return strings.Join(out, " AND ")
 }

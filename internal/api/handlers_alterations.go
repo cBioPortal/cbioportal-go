@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
 	"github.com/cbioportal/cbioportal-go/internal/api/studies"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
@@ -189,19 +190,6 @@ func (a alterationSQL) cnaTypeClause() string {
 	return fmt.Sprintf("(cna_alteration IN (%s) OR cna_alteration IS NULL)", strings.Join(codes, ", "))
 }
 
-func joinPreds(preds ...string) string {
-	var out []string
-	for _, p := range preds {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	if len(out) == 0 {
-		return "1 = 1"
-	}
-	return strings.Join(out, " AND ")
-}
-
 func (s *State) alterationFilterOf(args *core.SQLArgs, f studyViewFilter) alterationSQL {
 	if f.AlterationFilter == nil {
 		return alterationSQL{args: args}
@@ -306,7 +294,7 @@ func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 				alteration = 2
 			}
 			k := key(r.Hugo, alteration)
-			q := importerFloat(r.QText, r.Q)
+			q := molecular.ImporterFloat(r.QText, r.Q)
 			if cur, ok := best[k]; !ok || q < cur {
 				best[k] = q
 			}
@@ -318,7 +306,7 @@ func (s *State) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 			return
 		}
 		for _, r := range rows {
-			best[key(r.Hugo, 0)] = importerFloat(r.QText, r.Q)
+			best[key(r.Hugo, 0)] = molecular.ImporterFloat(r.QText, r.Q)
 		}
 	}
 	for i := range counts {
@@ -417,7 +405,7 @@ func (s *State) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 	args := core.NewArgs()
 	a := s.alterationFilterOf(args, f)
 	out, err := s.geneCounts(args, f, "mutation", "MUTATION_EXTENDED",
-		joinPreds("mutation_status != 'UNCALLED'", a.mutationTypeClause(), a.driverClause(), a.statusClause()), false)
+		molecular.JoinPreds("mutation_status != 'UNCALLED'", a.mutationTypeClause(), a.driverClause(), a.statusClause()), false)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -430,7 +418,7 @@ func (s *State) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
 	a := s.alterationFilterOf(args, f)
-	out, err := s.geneCounts(args, f, "cna", "COPY_NUMBER_ALTERATION", joinPreds(a.cnaTypeClause(), a.driverClause()), true)
+	out, err := s.geneCounts(args, f, "cna", "COPY_NUMBER_ALTERATION", molecular.JoinPreds(a.cnaTypeClause(), a.driverClause()), true)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -443,7 +431,7 @@ func (s *State) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 	core.ReadBody(r, &f)
 	args := core.NewArgs()
 	a := s.alterationFilterOf(args, f)
-	out, err := s.geneCounts(args, f, "structural_variant", "STRUCTURAL_VARIANT", joinPreds(a.driverClause(), a.statusClause()), false)
+	out, err := s.geneCounts(args, f, "structural_variant", "STRUCTURAL_VARIANT", molecular.JoinPreds(a.driverClause(), a.statusClause()), false)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -512,7 +500,7 @@ func (a alterationSQL) enrichmentClause() string {
 	if a.af.StructuralVariants != nil && !*a.af.StructuralVariants {
 		preds = append(preds, "variant_type != 'structural_variant'")
 	}
-	return joinPreds(preds...)
+	return molecular.JoinPreds(preds...)
 }
 
 // StructuralVariantCount is one gene1::gene2 pair of the study-view
@@ -556,9 +544,9 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		"SELECT site1_entrez_gene_id AS entrez1, any(site1_hugo_symbol) AS hugo1, site2_entrez_gene_id AS entrez2, "+
 			"any(site2_hugo_symbol) AS hugo2, uniqExact(study_id, sample_id) AS altered, count() AS total FROM ("+
 			"SELECT *, cbp_driver AS driver_filter, cbp_driver_tiers AS driver_tiers_filter, sv_status AS mutation_status "+
-			"FROM ("+svResolvedSQL+")) WHERE %sconcat(study_id, '_', sample_id) IN (%s) AND %s "+
+			"FROM ("+molecular.SVResolvedSQL+")) WHERE %sconcat(study_id, '_', sample_id) IN (%s) AND %s "+
 			"GROUP BY site1_entrez_gene_id, site2_entrez_gene_id ORDER BY total DESC, hugo1, hugo2",
-		f.scope().Key(args, core.TStructuralVariant, ""), filtered, joinPreds(a.driverClause(), a.statusClause())), args)
+		f.scope().Key(args, core.TStructuralVariant, ""), filtered, molecular.JoinPreds(a.driverClause(), a.statusClause())), args)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -634,7 +622,7 @@ func (s *State) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 				profiled += n
 			}
 		}
-		e1, e2 := derefInt(r.Entrez1), derefInt(r.Entrez2)
+		e1, e2 := molecular.DerefInt(r.Entrez1), molecular.DerefInt(r.Entrez2)
 		out = append(out, StructuralVariantCount{
 			Gene1EntrezGeneID: e1, Gene1HugoGeneSymbol: r.Hugo1, Gene2EntrezGeneID: e2, Gene2HugoGeneSymbol: r.Hugo2,
 			NumberOfAlteredCases: r.Altered, NumberOfProfiledCases: profiled, TotalCount: r.Total,

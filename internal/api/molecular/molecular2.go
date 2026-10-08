@@ -1,4 +1,4 @@
-package api
+package molecular
 
 import (
 	"encoding/json"
@@ -11,18 +11,17 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeMolecular2 registers discrete copy-number, mutation-spectrum,
+// RouteMolecular2 registers discrete copy-number, mutation-spectrum,
 // variant-count, mutation-count-by-position and structural-variant-count
 // endpoints. All filtering/aggregation is pushed into ClickHouse; Go only maps
 // the final rows into the cBioPortal client JSON shapes.
-func (s *State) routeMolecular2(mux *http.ServeMux) {
+func (s Server) RouteMolecular2(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number/fetch", s.discreteCopyNumberFetch)
 	mux.HandleFunc("GET /api/molecular-profiles/{id}/discrete-copy-number", s.discreteCopyNumberGet)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number-counts/fetch", s.copyNumberCountsFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/mutation-spectrums/fetch", s.mutationSpectrumsFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/variant-counts/fetch", s.variantCountsFetch)
 	mux.HandleFunc("POST /api/mutation-counts-by-position/fetch", s.mutationCountsByPositionFetch)
-	mux.HandleFunc("POST /api/structuralvariant-counts/fetch", s.svCountsFetch)
 }
 
 // cnaEventAlterations maps a discreteCopyNumberEventType enum value to the set of
@@ -85,7 +84,7 @@ type discreteCnaRow struct {
 	DriverTiersFilterAnnotation string `json:"driverTiersFilterAnnotation"`
 }
 
-func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	var f struct {
 		EntrezGeneIDs []int64  `json:"entrezGeneIds"`
@@ -101,7 +100,7 @@ func (s *State) discreteCopyNumberFetch(w http.ResponseWriter, r *http.Request) 
 		r.URL.Query().Get("discreteCopyNumberEventType"), core.ProjectionOf(r))
 }
 
-func (s *State) discreteCopyNumberGet(w http.ResponseWriter, r *http.Request) {
+func (s Server) discreteCopyNumberGet(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	q := r.URL.Query()
 	if core.BlankSampleList(q) {
@@ -122,7 +121,7 @@ func homdelOrAmpOnly(alterations []int64) bool {
 	return true
 }
 
-func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, mpid string, entrez []int64, sampleIDs []string, sampleListID, eventType, projection string) {
+func (s Server) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, mpid string, entrez []int64, sampleIDs []string, sampleListID, eventType, projection string) {
 	meta, ok := s.ProfileMeta(mpid)
 	if !ok || !strings.EqualFold(meta.AlterationType, "COPY_NUMBER_ALTERATION") {
 		core.WriteJSON(w, []DiscreteCopyNumberData{})
@@ -182,14 +181,14 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 	}
 	out := core.NewJSONArray(w, r)
 	// DiscreteCopyNumberMapper: ORDER BY entrez_gene_id, alteration, sample stable id.
-	query := sel + core.SQLListOrder(r, cnaEventSortable, "entrezGeneId, alteration, c.sample_id")
+	query := sel + core.SQLListOrder(r, CNAEventSortable, "entrezGeneId, alteration, c.sample_id")
 	err := ch.QueryEachP(s.CH, query, p,
 		func(r *discreteCnaRow) error {
 			// CnaUtil reads the driver columns with getPartString: empty is "NA".
 			d := core.NewDriverAnnotation(r.DriverFilter, r.DriverFilterAnnotation, r.DriverTiersFilter, r.DriverTiersFilterAnnotation, core.NAString)
 			rec := DiscreteCopyNumberData{
-				Alteration:                  derefInt(r.Alteration),
-				EntrezGeneID:                derefInt(r.EntrezGeneID),
+				Alteration:                  DerefInt(r.Alteration),
+				EntrezGeneID:                DerefInt(r.EntrezGeneID),
 				MolecularProfileID:          mpid,
 				PatientID:                   r.PatientID,
 				SampleID:                    r.SampleID,
@@ -210,15 +209,15 @@ func (s *State) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 	out.Finish(err)
 }
 
-// cnaEventSortable are the sortBy fields of discrete copy-number records
+// CNAEventSortable are the sortBy fields of discrete copy-number records
 // read from the CNA events.
-var cnaEventSortable = map[string]string{
+var CNAEventSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId", "alteration": "alteration",
 }
 
-// cnaValueSortable are the sortBy fields of discrete copy-number records
+// CNAValueSortable are the sortBy fields of discrete copy-number records
 // read from the profile's values.
-var cnaValueSortable = map[string]string{
+var CNAValueSortable = map[string]string{
 	"entrezGeneId": "entrezGeneId", "sampleId": "sampleId", "patientId": "patientId", "alteration": cnaValueSQL,
 }
 
@@ -237,13 +236,13 @@ func cnaValueKept(alterations []int64) string {
 // DiscreteCopyNumberServiceImpl: it calls fn with the profile's per-sample
 // values whose integer value (Integer.parseInt) is one of the requested
 // alterations, in molecular-data order. A page r asks for is read in SQL.
-func (s *State) discreteCopyNumberFromValues(r *http.Request, mpid string, meta core.ProfileMeta, f molecularDataFilter, alterations []int64,
+func (s Server) discreteCopyNumberFromValues(r *http.Request, mpid string, meta core.ProfileMeta, f molecularDataFilter, alterations []int64,
 	detailed bool, fn func(DiscreteCopyNumberData) error) error {
 	want := map[int64]bool{}
 	for _, a := range alterations {
 		want[a] = true
 	}
-	return s.molecularDataPage(r, mpid, f, cnaValueSortable, cnaValueKept(alterations), func(d MolecularData) error {
+	return s.molecularDataPage(r, mpid, f, CNAValueSortable, cnaValueKept(alterations), func(d MolecularData) error {
 		v, err := strconv.ParseInt(d.Value, 10, 32)
 		if err != nil || !want[v] || d.EntrezGeneID == nil {
 			return nil
@@ -266,7 +265,7 @@ func (s *State) discreteCopyNumberFromValues(r *http.Request, mpid string, meta 
 // data file's sample columns that are samples of the study, or the samples of
 // a discrete-long file. A profile without such a list counts its profiled
 // samples.
-func (s *State) profileSampleCount(meta core.ProfileMeta, mpid string) int64 {
+func (s Server) profileSampleCount(meta core.ProfileMeta, mpid string) int64 {
 	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID, "mp": mpid}
 	inStudy := " AND sample_id IN (SELECT sample_id FROM " + core.ByStudy(meta.StudyID).From(core.ParamsBinder(p), core.TSample) + ")"
 	if len(s.RawColumns("profile_sample")) > 0 {
@@ -286,7 +285,7 @@ func (s *State) profileSampleCount(meta core.ProfileMeta, mpid string) int64 {
 // variantSampleCount is VariantCountServiceImpl.getNumberOfSamplesInMolecularProfile:
 // the size of the study's sequenced sample list, else the number of samples
 // with a mutation in the profile.
-func (s *State) variantSampleCount(meta core.ProfileMeta, mpid string) int64 {
+func (s Server) variantSampleCount(meta core.ProfileMeta, mpid string) int64 {
 	p := ch.Params{"study": meta.StudyID, "mp": mpid}
 	if n := s.countQuery("SELECT count() AS n FROM "+s.BySampleList(meta.StudyID+"_sequenced").From(core.ParamsBinder(p), core.TSampleList), p); n > 0 {
 		return n
@@ -295,7 +294,7 @@ func (s *State) variantSampleCount(meta core.ProfileMeta, mpid string) int64 {
 }
 
 // countQuery runs a query returning one count column n; 0 on error.
-func (s *State) countQuery(sql string, p ch.Params) int64 {
+func (s Server) countQuery(sql string, p ch.Params) int64 {
 	type c struct {
 		N int64 `json:"n"`
 	}
@@ -306,7 +305,7 @@ func (s *State) countQuery(sql string, p ch.Params) int64 {
 	return rows[0].N
 }
 
-func derefInt(p *int64) int64 {
+func DerefInt(p *int64) int64 {
 	if p == nil {
 		return 0
 	}
@@ -331,7 +330,7 @@ type cnCountRow struct {
 	N            int64  `json:"n"`
 }
 
-func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	var ids []struct {
 		EntrezGeneID int64 `json:"entrezGeneId"`
@@ -368,7 +367,7 @@ func (s *State) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	found := map[[2]int64]int64{}
 	for _, r := range rows {
-		found[[2]int64{derefInt(r.EntrezGeneID), derefInt(r.Alteration)}] = r.N
+		found[[2]int64{DerefInt(r.EntrezGeneID), DerefInt(r.Alteration)}] = r.N
 	}
 	out := make([]CopyNumberCount, 0, len(ids))
 	for _, id := range ids {
@@ -415,7 +414,7 @@ type spectrumRow struct {
 	TtoG      int64  `json:"TtoG"`
 }
 
-func (s *State) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	var f struct {
 		SampleIDs    []string `json:"sampleIds"`
@@ -491,7 +490,7 @@ type VariantCount struct {
 	NumberOfSamplesWithKeyword        int64  `json:"numberOfSamplesWithKeyword"`
 }
 
-func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
 	var ids []struct {
 		EntrezGeneID int64  `json:"entrezGeneId"`
@@ -533,7 +532,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 				"FROM mutation WHERE molecular_profile_id = {profile:String} AND toInt64OrNull(entrez_gene_id) IN (%s) "+
 				"GROUP BY entrezGeneId", core.IntListSQL(entrez)), ch.Params{"profile": mpid})
 		for _, r := range rows {
-			geneCount[derefInt(r.EntrezGeneID)] = r.N
+			geneCount[DerefInt(r.EntrezGeneID)] = r.N
 		}
 	}
 
@@ -562,7 +561,7 @@ func (s *State) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		samples := map[string]map[string]bool{}
 		for _, r := range rows {
 			kw := core.MutationKeyword(r.HugoGeneSymbol, r.ProteinChange, core.NAString(r.MutationType))
-			k := fmt.Sprintf("%d\x00%s", derefInt(r.EntrezGeneID), kw)
+			k := fmt.Sprintf("%d\x00%s", DerefInt(r.EntrezGeneID), kw)
 			if !wantKeyword[k] {
 				continue
 			}
@@ -610,7 +609,7 @@ type MutationCountByPosition struct {
 	Count           int64 `json:"count"`
 }
 
-func (s *State) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Request) {
+func (s Server) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Request) {
 	var ids []struct {
 		EntrezGeneID    int64 `json:"entrezGeneId"`
 		ProteinPosStart int64 `json:"proteinPosStart"`

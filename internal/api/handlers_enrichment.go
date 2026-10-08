@@ -228,7 +228,7 @@ func (s *State) profileStudies(groups []casesGroup) map[string]string {
 		}
 	}
 	out := map[string]string{}
-	for id, p := range s.resolvePanelProfiles(core.SortedKeys(set)) {
+	for id, p := range s.ResolvePanelProfiles(core.SortedKeys(set)) {
 		out[id] = p.StudyID
 	}
 	return out

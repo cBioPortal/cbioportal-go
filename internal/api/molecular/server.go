@@ -1,0 +1,10 @@
+// Package molecular serves the molecular profiles and their data: mutations,
+// copy-number alterations and segments, structural variants, generic assays,
+// gene sets, gene panels, significance results and co-expression.
+package molecular
+
+import "github.com/cbioportal/cbioportal-go/internal/api/studies"
+
+// Server serves the endpoints of this package; it embeds the studies
+// Server, whose lookups the molecular endpoints share.
+type Server struct{ studies.Server }
