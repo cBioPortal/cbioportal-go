@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -37,7 +38,24 @@ var (
 	isClinicalTable  = pathIs(`^/api/clinical-data-table/fetch$`)
 	isProfileSamples = pathIs(`^/api/molecular-profile-sample-counts/fetch$`)
 	isCaseListCounts = pathIs(`^/api/sample-lists-counts/fetch$`)
+	isListMutations  = pathIs(`^/api/molecular-profiles/[^/]+/mutations(/fetch)?/?$`)
+	isEntityList     = pathIs(`^/api/(studies/[^/]+/)?(samples|patients)/?$`)
+	isTreatmentRows  = pathIs(`^/api/treatments/(patient|sample)/?$`)
 )
+
+// paged reports a request for one page of a list.
+func paged(q url.Values) bool { return q.Has("pageSize") || q.Has("pageNumber") }
+
+// onlyStudyIDs reports a StudyViewFilter body that names studies and nothing
+// else.
+func onlyStudyIDs(body string) bool {
+	var f map[string]json.RawMessage
+	if json.Unmarshal([]byte(body), &f) != nil {
+		return false
+	}
+	_, ok := f["studyIds"]
+	return ok && len(f) == 1
+}
 
 // versionFields are /api/info's fields that describe the deployment.
 const versionFields = "gitBranch,gitCommitId,gitCommitIdAbbrev,gitCommitIdDescribe,gitCommitIdDescribeShort," +
@@ -101,6 +119,25 @@ var expectations = []expectation{
 			return m == "GET" && isStudyClinical(p) && q.Has("pageSize")
 		},
 		options: `known="Java orders by the sample's or patient's internal id only; which of the attributes of the entity at a page boundary fall on the page follows ClickHouse's unstable sort"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return isListMutations(p) && paged(q) && q.Get("sortBy") == ""
+		},
+		options: `known="Java orders a profile's mutations by profile, sample and gene only (MutationMapper); which of a sample's mutations in one gene fall on a page at its boundary follows ClickHouse's unstable sort"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "GET" && isEntityList(p) && paged(q) && q.Get("sortBy") == "" && !q.Has("keyword") &&
+				!strings.EqualFold(q.Get("projection"), "ID")
+		},
+		options: `known="without sortBy or keyword Java's SUMMARY and DETAILED sample and patient lists have no ORDER BY (ClickhouseSampleMapper, PatientMapper), so which entities fill a page is unspecified (production answers a different page on repeated calls)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isTreatmentRows(p) && onlyStudyIDs(b)
+		},
+		options: `known="for studies without treatment data Java's TreatmentServiceImpl filters every sample out, TreatmentMapper then builds no WHERE clause for the empty lists, and production lists the treatments of the whole portal"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return isProfileSamples(p) },

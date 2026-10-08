@@ -26,6 +26,20 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/clinical-data-table/fetch", "{}", ""},
 		{"POST", "/api/molecular-profile-sample-counts/fetch", "{}", "ignore=label"},
 		{"POST", "/api/sample-lists-counts/fetch", "{}", "ignore=label"},
+		{"POST", "/api/molecular-profiles/p/mutations/fetch?pageSize=1000&pageNumber=452&projection=DETAILED", `{"sampleListId":"l"}`, "known="},
+		{"POST", "/api/molecular-profiles/p/mutations/fetch?pageSize=1000&sortBy=keyword", `{"sampleListId":"l"}`, ""},
+		{"POST", "/api/molecular-profiles/p/mutations/fetch", `{"sampleListId":"l"}`, ""},
+		{"GET", "/api/molecular-profiles/p/mutations?sampleListId=l&entrezGeneId=1&pageSize=5", "", "known="},
+		{"GET", "/api/samples?pageSize=10&pageNumber=36761&projection=DETAILED", "", "known="},
+		{"GET", "/api/patients?pageSize=10&pageNumber=29059", "", "known="},
+		{"GET", "/api/studies/s/samples?pageSize=10", "", "known="},
+		{"GET", "/api/samples?pageSize=10&projection=ID", "", ""},
+		{"GET", "/api/samples?pageSize=10&sortBy=sampleId", "", ""},
+		{"GET", "/api/patients", "", ""},
+		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds": ["acbc_mskcc_2015"]}`, "known="},
+		{"POST", "/api/treatments/sample?tier=Agent", `{"studyIds": ["alk_msk_2026"]}`, "known="},
+		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds":["s"],"alterationFilter":{}}`, ""},
+		{"POST", "/api/treatments/patient-counts/fetch?tier=Agent", `{"studyIds":["s"]}`, ""},
 	} {
 		got, _ := expect(c.method, c.target, c.body)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
