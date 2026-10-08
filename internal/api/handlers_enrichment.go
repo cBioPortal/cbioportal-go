@@ -105,13 +105,15 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	// Altered counts first: only genes altered in some group are reported, so
 	// profiled counts are needed for those genes alone.
 	type groupScope struct {
-		entities, profiles string
-		altered            []geneRow
+		entities string
+		profiles scope
+		studies  []string
+		altered  []geneRow
 	}
 	scopes := make([]*groupScope, len(body.Groups))
 	alteredGenes := map[string]bool{}
 	for i, g := range body.Groups {
-		entitySet, profileSet := map[string]bool{}, map[string]bool{}
+		entitySet, profileSet, studySet := map[string]bool{}, map[string]bool{}, map[string]bool{}
 		for _, c := range g.MolecularProfileCaseIdentifiers {
 			st, ok := profileStudy[c.MolecularProfileID]
 			if !ok {
@@ -119,16 +121,17 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			}
 			entitySet[st+"_"+c.CaseID] = true
 			profileSet[c.MolecularProfileID] = true
+			studySet[st] = true
 		}
 		if len(entitySet) == 0 {
 			continue
 		}
-		sc := &groupScope{entities: args.strs(sortedKeys(entitySet)), profiles: args.strs(sortedKeys(profileSet))}
+		sc := &groupScope{entities: args.strs(sortedKeys(entitySet)), profiles: byProfiles(sortedKeys(profileSet)), studies: sortedKeys(studySet)}
 		altered, err := queryA[geneRow](s.CH, fmt.Sprintf(
 			"SELECT hugo_gene_symbol AS gene, any(toInt64OrNull(toString(entrez_gene_id))) AS entrez, toInt64(uniqExact(%[1]s)) AS n "+
-				"FROM genomic_event_derived WHERE mutation_status != 'UNCALLED' AND genetic_profile_stable_id IN %[2]s "+
+				"FROM %[2]s AND mutation_status != 'UNCALLED' "+
 				"AND %[1]s IN %[3]s AND %[4]s GROUP BY hugo_gene_symbol",
-			unit, sc.profiles, sc.entities, a.enrichmentClause()), args)
+			unit, sc.profiles.from(args, tGenomicEventDerived), sc.entities, a.enrichmentClause()), args)
 		if err != nil {
 			fail(w, r, err)
 			return
@@ -145,7 +148,7 @@ func (s *State) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		if sc == nil || len(alteredGenes) == 0 {
 			continue
 		}
-		profiled, err := s.profiledPerGene(args, unit, sc.profiles, sc.entities, geneList)
+		profiled, err := s.profiledPerGene(args, unit, sc.profiles, sc.studies, sc.entities, geneList)
 		if err != nil {
 			fail(w, r, err)
 			return
@@ -234,20 +237,20 @@ func (s *State) routeEnrichment(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/alteration-enrichments/fetch", s.alterationEnrichmentsFetch)
 }
 
-// profiledPerGene counts, per gene of genes, the entities with a panel
-// covering it: entities are grouped by their panel combination and each
-// combination's genes are expanded once. profiles, entities and genes are
-// array placeholders bound in args.
-func (s *State) profiledPerGene(args *sqlArgs, unit, profiles, entities, genes string) (map[string]int, error) {
+// profiledPerGene counts, per gene of genes, the entities (of studies) with a
+// panel of profiles covering it: entities are grouped by their panel
+// combination and each combination's genes are expanded once. entities and
+// genes are array placeholders bound in args.
+func (s *State) profiledPerGene(args *sqlArgs, unit string, profiles scope, studies []string, entities, genes string) (map[string]int, error) {
 	type combo struct {
 		Panels []string `json:"panels"`
 		N      int      `json:"n"`
 	}
 	combos, err := queryA[combo](s.CH, fmt.Sprintf(
 		"SELECT panels, toInt64(count()) AS n FROM (SELECT sd.%[1]s AS entity, arraySort(groupUniqArray(p.gene_panel_id)) AS panels "+
-			"FROM sample_to_gene_panel_derived p JOIN sample_derived sd ON sd.sample_unique_id = p.sample_unique_id "+
-			"WHERE p.genetic_profile_id IN %[2]s AND sd.%[1]s IN %[3]s GROUP BY entity) GROUP BY panels",
-		unit, profiles, entities), args)
+			"FROM %[2]s p JOIN %[4]s sd ON sd.sample_unique_id = p.sample_unique_id "+
+			"WHERE sd.%[1]s IN %[3]s GROUP BY entity) GROUP BY panels",
+		unit, profiles.rows(args, tSampleToGenePanelDerived), entities, byStudies(studies).rows(args, tSampleDerived)), args)
 	if err != nil {
 		return nil, err
 	}

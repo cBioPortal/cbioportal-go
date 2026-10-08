@@ -77,7 +77,7 @@ func sampleFullSelectFrom(b binder, sc scope, where string) string {
 	return "SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId, " +
 		"ifNull(sd.sample_type, '') AS sampleType, toUInt8(ifNull(sd.sequenced, 0)) AS sequencedFlag, " +
 		"toUInt8(ifNull(sd.copy_number_segment_present, 0)) AS segFlag " +
-		"FROM " + sc.samples(b) + " s LEFT JOIN " + sc.studiesOnly().rows(b, tSampleDerived) +
+		"FROM " + sc.samples(b) + " s LEFT JOIN " + sc.cases().rows(b, tSampleDerived) +
 		" sd ON sd.cancer_study_identifier = s.study_id AND sd.sample_stable_id = s.sample_id " +
 		"WHERE " + where
 }

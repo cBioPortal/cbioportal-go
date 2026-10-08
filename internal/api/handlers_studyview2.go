@@ -68,15 +68,15 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		}
 		rows, err := queryA[countsRow](s.CH, fmt.Sprintf(
 			"WITH scope AS (%[1]s) SELECT gene, sum(m) AS mutated, sum(p) AS profiled FROM ("+
-				"SELECT hugo_gene_symbol AS gene, uniqExact(sample_unique_id) AS m, toUInt64(0) AS p FROM genomic_event_derived "+
-				"WHERE %[3]ssample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN %[2]s "+
+				"SELECT hugo_gene_symbol AS gene, uniqExact(sample_unique_id) AS m, toUInt64(0) AS p FROM %[3]s "+
+				"AND sample_unique_id IN (SELECT sample_unique_id FROM scope) AND hugo_gene_symbol IN %[2]s "+
 				"AND variant_type = 'mutation' GROUP BY gene "+
-				"UNION ALL SELECT gpg.gene AS gene, toUInt64(0) AS m, uniqExact(sgp.sample_unique_id) AS p FROM sample_to_gene_panel_derived sgp "+
+				"UNION ALL SELECT gpg.gene AS gene, toUInt64(0) AS m, uniqExact(sgp.sample_unique_id) AS p FROM %[4]s sgp "+
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
 				"WHERE sgp.sample_unique_id IN (SELECT sample_unique_id FROM scope) AND gpg.gene IN %[2]s "+
 				"AND sgp.alteration_type = 'MUTATION_EXTENDED' GROUP BY gene"+
 				") GROUP BY gene",
-			filtered, args.strs(genes), svf.studyKey(args, "cancer_study_identifier")), args)
+			filtered, args.strs(genes), svf.scope().from(args, tGenomicEventDerived), svf.scope().rows(args, tSampleToGenePanelDerived)), args)
 		if err != nil {
 			fail(w, r, err)
 			return
@@ -125,10 +125,10 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, _ := queryA[typeRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
-			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM genomic_event_derived "+
-			"WHERE %ssample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
+			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM %s "+
+			"AND sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
-		svf.studyKey(args, "cancer_study_identifier"), filtered, args.strs(genes)), args)
+		svf.scope().from(args, tGenomicEventDerived), filtered, args.strs(genes)), args)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	for _, r := range rows {
@@ -154,15 +154,16 @@ func (s *State) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			IDs string `json:"ids"`
 		}
 		profiled := fmt.Sprintf(
-			"SELECT DISTINCT sgp.sample_unique_id FROM sample_to_gene_panel_derived sgp "+
+			"SELECT DISTINCT sgp.sample_unique_id FROM %s sgp "+
 				"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
-				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'", filtered, gene)
+				"WHERE sgp.sample_unique_id IN (%s) AND gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'",
+			svf.scope().rows(args, tSampleToGenePanelDerived), filtered, gene)
 		mutated := fmt.Sprintf(
-			"SELECT sample_unique_id FROM genomic_event_derived WHERE %ssample_unique_id IN (%s) "+
-				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", svf.studyKey(args, "cancer_study_identifier"), filtered, gene)
+			"SELECT sample_unique_id FROM %s AND sample_unique_id IN (%s) "+
+				"AND variant_type = 'mutation' AND hugo_gene_symbol = %s", svf.scope().from(args, tGenomicEventDerived), filtered, gene)
 		extra := []struct{ label, value, sql string }{
 			{"Not Mutated", "NOT_MUTATED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM (%s) WHERE sample_unique_id NOT IN (%s)", profiled, mutated)},
-			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM sample_derived WHERE cancer_study_identifier IN %s AND sample_unique_id NOT IN (%s)", args.strs(svf.studyIDs()), profiled)},
+			{"Not Profiled", "NOT_PROFILED", fmt.Sprintf("SELECT count() AS n, arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS ids FROM %s AND sample_unique_id NOT IN (%s)", byStudies(svf.studyIDs()).from(args, tSampleDerived), profiled)},
 		}
 		// The mapper's result map groups rows by gene and profile type: the
 		// not-mutated and not-profiled rows (always present, counts possibly
@@ -215,10 +216,10 @@ func (s *State) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	args := newArgs()
 	rows, _ := queryA[row](s.CH, fmt.Sprintf(
-		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM genetic_alteration_derived "+
-			"WHERE %sNOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
+		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM %s "+
+			"AND NOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, alteration_value ORDER BY hugo_gene_symbol, alteration_value",
-		svf.studyKey(args, "cancer_study_identifier"), isNASQL("assumeNotNull(alteration_value)"), args.str(profileType),
+		svf.scope().from(args, tGeneticAlterationDerived), isNASQL("assumeNotNull(alteration_value)"), args.str(profileType),
 		s.filterSQL(args, svf), args.strs(genes)), args)
 	total := s.scopeSampleCount(svf)
 	byGene := map[string]*GenomicDataCountItem{}
@@ -299,10 +300,9 @@ func (s *State) sampleListsCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	readBody(r, &f)
 	args := newArgs()
-	scope := s.sampleScope(args, f)
 	rows, err := queryA[CaseListDataCount](s.CH, fmt.Sprintf(
 		"SELECT replaceAll(list_id, concat(study_id, '_'), '') AS value, any(name) AS label, count() AS count "+
-			"FROM sample_list WHERE %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", scope), args)
+			"FROM %s AND name != '' GROUP BY study_id, list_id ORDER BY study_id, list_id", s.sampleScopeFrom(args, f, tSampleList)), args)
 	if err != nil {
 		fail(w, r, err)
 		return

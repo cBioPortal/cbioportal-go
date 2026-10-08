@@ -239,8 +239,8 @@ func (s *State) namespaceDataCountsFetch(w http.ResponseWriter, r *http.Request)
 	}
 	args := newArgs()
 	samples, err := queryA[sample](s.CH, fmt.Sprintf(
-		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM sample_derived WHERE %s "+
-			"ORDER BY cancer_study_identifier, sample_stable_id", s.filterWhere(args, f.StudyViewFilter.studyViewFilter)), args)
+		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM %s "+
+			"ORDER BY cancer_study_identifier, sample_stable_id", s.filterFrom(args, f.StudyViewFilter.studyViewFilter)), args)
 	if err != nil {
 		fail(w, r, err)
 		return

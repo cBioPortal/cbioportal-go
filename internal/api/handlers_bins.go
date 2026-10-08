@@ -148,12 +148,12 @@ func (s *State) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 }
 
 // scopedValueCounts counts, for each (entity, profile type) key, the non-NA
-// values of table over two study-view scopes in one query, and adds each
+// values of table t over two study-view scopes in one query, and adds each
 // scope's remaining cases as NA.
 // keyCol names the entity column and valueCol the value column; naSQL is the
 // predicate that marks a value as NA; unit is the case column counted
 // (sample_unique_id, or patient_unique_id for a patient-level profile).
-func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, keys [][2]string,
+func (s *State) scopedValueCounts(t keyedTable, keyCol, valueCol, naSQL, unit string, keys [][2]string,
 	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value) {
 	unfiltered, filtered = map[[2]string][]databin.Value{}, map[[2]string][]databin.Value{}
 	if len(keys) == 0 {
@@ -162,14 +162,17 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 	args := newArgs()
 	scopes := fmt.Sprintf("WITH unfiltered AS (%s), filtered AS (%s) ",
 		s.filterSQL(args, unfilteredScope), s.filterSQL(args, filteredScope))
+	// Both scopes' samples belong to their studies, the key range read.
+	both := studyViewFilter{StudyIDs: append(unfilteredScope.scopeStudies(), filteredScope.scopeStudies()...)}.scope()
 	type totalRow struct {
 		U uint64 `json:"u"`
 		F uint64 `json:"f"`
 	}
 	total := "SELECT (SELECT count() FROM unfiltered) AS u, (SELECT count() FROM filtered) AS f"
 	if unit == "patient_unique_id" {
-		total = "SELECT (SELECT uniqExact(patient_unique_id) FROM sample_derived WHERE sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, " +
-			"(SELECT uniqExact(patient_unique_id) FROM sample_derived WHERE sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f"
+		samples := both.from(args, tSampleDerived)
+		total = "SELECT (SELECT uniqExact(patient_unique_id) FROM " + samples + " AND sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, " +
+			"(SELECT uniqExact(patient_unique_id) FROM " + samples + " AND sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f"
 	}
 	totals, _ := queryA[totalRow](s.CH, scopes+total, args)
 	var totalU, totalF uint64
@@ -188,20 +191,20 @@ func (s *State) scopedValueCounts(table, keyCol, valueCol, naSQL, unit string, k
 	if unit == "patient_unique_id" {
 		countIf = "uniqExactIf(patient_unique_id, "
 	}
-	// genetic_alteration_derived leads its key with the study.
-	key := ""
-	if table == "genetic_alteration_derived" {
-		studies := studyViewFilter{StudyIDs: append(unfilteredScope.scopeStudies(), filteredScope.scopeStudies()...)}
-		key = studies.studyKey(args, "cancer_study_identifier")
+	// Tables with a study column read the scopes' studies; the others
+	// (generic_assay_data_derived) lead their key with the keys' columns.
+	from := t.name + " WHERE 1"
+	if t.study != "" {
+		from = both.from(args, t)
 	}
 	rows, _ := queryA[row](s.CH, fmt.Sprintf(scopes+
 		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
-		"FROM %[3]s WHERE %[7]s(%[1]s, profile_type) IN %[4]s AND NOT %[5]s "+
+		"FROM %[3]s AND (%[1]s, profile_type) IN %[4]s AND NOT %[5]s "+
 		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
 		"GROUP BY key, profileType, value",
-		keyCol, valueCol, table, args.pairs(keys), naSQL, countIf, key), args)
+		keyCol, valueCol, from, args.pairs(keys), naSQL, countIf), args)
 	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
 		k := [2]string{r.Key, r.ProfileType}
@@ -258,7 +261,7 @@ func (s *State) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 	for i, g := range f.GenomicDataBinFilters {
 		keys[i] = [2]string{g.HugoGeneSymbol, g.ProfileType}
 	}
-	unfiltered, filtered := s.scopedValueCounts("genetic_alteration_derived", "hugo_gene_symbol", "alteration_value",
+	unfiltered, filtered := s.scopedValueCounts(tGeneticAlterationDerived, "hugo_gene_symbol", "alteration_value",
 		isNASQL("assumeNotNull(alteration_value)"), "sample_unique_id", keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenomicDataBin{}
@@ -308,7 +311,7 @@ func (s *State) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 	if len(f.GenericAssayDataBinFilters) > 0 {
 		unit = s.gaCountUnit(f.GenericAssayDataBinFilters[0].ProfileType)
 	}
-	unfiltered, filtered := s.scopedValueCounts("generic_assay_data_derived", "entity_stable_id", "value",
+	unfiltered, filtered := s.scopedValueCounts(tGenericAssayDataDerived, "entity_stable_id", "value",
 		isNASQL("value"), unit, keys, svf.partial(), svf)
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenericAssayDataBin{}
@@ -349,8 +352,7 @@ func (s *State) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 	inScope := func(scope studyViewFilter) map[string]bool {
 		args := newArgs()
 		rows, _ := queryA[sample](s.CH,
-			"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM sample_derived WHERE "+
-				s.filterWhere(args, scope), args)
+			"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM "+s.filterFrom(args, scope), args)
 		m := map[string]bool{}
 		for _, r := range rows {
 			m[r.StudyID+"\x00"+r.SampleID] = true

@@ -26,9 +26,9 @@ func (s *State) filteredSamplesFetch(w http.ResponseWriter, r *http.Request) {
 	readBody(r, &f)
 	args := newArgs()
 	rows, err := queryA[idRow](s.CH, fmt.Sprintf(
-		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, s.patient_id AS patientId FROM sample s "+
-			"WHERE s.study_id IN %s AND concat(s.study_id, '_', s.sample_id) IN (%s) ORDER BY s.sample_id, s.study_id",
-		args.strs(f.scopeStudies()), s.filterSQL(args, f)), args)
+		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM %s "+
+			"AND concat(study_id, '_', sample_id) IN (%s) ORDER BY sample_id, study_id",
+		f.scope().from(args, tSample), s.filterSQL(args, f)), args)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -113,8 +113,7 @@ func (s *State) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 		Samples  uint64 `json:"samples"`
 		Patients uint64 `json:"patients"`
 	}
-	n, _ := queryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM sample_derived WHERE "+
-		s.filterWhere(args, f), args)
+	n, _ := queryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM "+s.filterFrom(args, f), args)
 	var total c
 	if len(n) > 0 {
 		total = n[0]
@@ -167,7 +166,8 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 	}
 	filtered := s.filterSQL(args, f)
 	notNA := "NOT " + isNASQL("attribute_value")
-	key := f.studyKey(args, "cancer_study_identifier")
+	sc := f.scope()
+	clinical, samples := sc.from(args, tClinicalDataDerived), sc.from(args, tSampleDerived)
 	type countRow struct {
 		AttrID string `json:"attrId"`
 		Value  string `json:"value"`
@@ -176,27 +176,27 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 	var queries []string
 	if len(sampleAttrs) > 0 {
 		queries = append(queries, fmt.Sprintf(
-			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM clinical_data_derived "+
-				"WHERE %stype = 'sample' AND %s AND sample_unique_id IN (%s) AND attribute_name IN %s GROUP BY attribute_name, attribute_value",
-			key, notNA, filtered, args.strs(sampleAttrs)))
+			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM %s "+
+				"AND type = 'sample' AND %s AND sample_unique_id IN (%s) AND attribute_name IN %s GROUP BY attribute_name, attribute_value",
+			clinical, notNA, filtered, args.strs(sampleAttrs)))
 	}
 	if len(patientAttrs) > 0 {
 		queries = append(queries, fmt.Sprintf(
-			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM clinical_data_derived "+
-				"WHERE %[1]stype = 'patient' AND %[2]s AND patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %[1]ssample_unique_id IN (%[3]s)) "+
+			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM %[1]s "+
+				"AND type = 'patient' AND %[2]s AND patient_unique_id IN (SELECT patient_unique_id FROM %[5]s AND sample_unique_id IN (%[3]s)) "+
 				"AND attribute_name IN %[4]s GROUP BY attribute_name, attribute_value",
-			key, notNA, filtered, args.strs(patientAttrs)))
+			clinical, notNA, filtered, args.strs(patientAttrs), samples))
 	}
 	if len(conflicting) > 0 {
 		queries = append(queries, fmt.Sprintf(
 			"SELECT attribute_name AS attrId, attribute_value AS value, count() AS c FROM ("+
-				"SELECT attribute_name, attribute_value, sample_unique_id FROM clinical_data_derived "+
-				"WHERE %[4]stype = 'sample' AND %[1]s AND sample_unique_id IN (%[2]s) AND attribute_name IN %[3]s "+
-				"UNION ALL SELECT cdd.attribute_name, cdd.attribute_value, sd.sample_unique_id FROM (SELECT * FROM clinical_data_derived WHERE %[4]s1) cdd "+
-				"JOIN (SELECT * FROM sample_derived WHERE %[4]s1) sd ON cdd.patient_unique_id = sd.patient_unique_id "+
+				"SELECT attribute_name, attribute_value, sample_unique_id FROM %[4]s "+
+				"AND type = 'sample' AND %[1]s AND sample_unique_id IN (%[2]s) AND attribute_name IN %[3]s "+
+				"UNION ALL SELECT cdd.attribute_name, cdd.attribute_value, sd.sample_unique_id FROM %[5]s cdd "+
+				"JOIN %[6]s sd ON cdd.patient_unique_id = sd.patient_unique_id "+
 				"WHERE cdd.type = 'patient' AND %[1]s AND sd.sample_unique_id IN (%[2]s) AND cdd.attribute_name IN %[3]s"+
 				") GROUP BY attribute_name, attribute_value",
-			notNA, filtered, args.strs(conflicting), key))
+			notNA, filtered, args.strs(conflicting), clinical, sc.rows(args, tClinicalDataDerived), sc.rows(args, tSampleDerived)))
 	}
 	counts := map[string]map[string]*ClinicalDataCount{}
 	sums := map[string]uint64{}
@@ -230,7 +230,7 @@ func (s *State) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 			N uint64 `json:"n"`
 		}
 		rows, _ := queryA[c](s.CH, fmt.Sprintf(
-			"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE %ssample_unique_id IN (%s)", key, filtered), args)
+			"SELECT uniqExact(patient_unique_id) AS n FROM %s AND sample_unique_id IN (%s)", samples, filtered), args)
 		if len(rows) > 0 {
 			nPatients = rows[0].N
 		}

@@ -272,14 +272,17 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 
 	scopeFilter := studyViewFilter{}
 	args := newArgs()
-	var sampleScope string
-	// studyCond holds the clinical rows to the scope's studies, a key range.
-	var studyCond string
+	// sc holds the clinical rows to the selected samples' studies, a key
+	// range; sampleScope selects the samples over (study_id, sample_id) and
+	// samples is their sample rows.
+	var sc scope
+	var sampleScope, samples string
 	switch {
 	case f.SampleListID != "":
-		sc := s.bySampleList(f.SampleListID)
-		studyCond = sc.key(args, tSample, "")
-		sampleScope = studyCond + "(study_id, sample_id) IN (SELECT study_id, sample_id FROM " + sc.from(args, tSampleList) + ")"
+		sc = s.bySampleList(f.SampleListID)
+		inList := "(study_id, sample_id) IN (SELECT study_id, sample_id FROM " + sc.from(args, tSampleList) + ")"
+		sampleScope = sc.key(args, tClinicalSample, "") + inList
+		samples = sc.from(args, tSample) + " AND " + inList
 	case len(f.SampleIdentifiers) > 0:
 		scopeFilter.SampleIdentifiers = f.SampleIdentifiers
 	case len(f.StudyViewFilter.SampleIdentifiers) > 0 || len(f.StudyViewFilter.StudyIDs) > 0:
@@ -291,8 +294,9 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if sampleScope == "" {
-		studyCond = scopeFilter.studyKey(args, "study_id")
+		sc = scopeFilter.scope()
 		sampleScope = s.sampleScope(args, scopeFilter)
+		samples = s.sampleScopeFrom(args, scopeFilter, tSample)
 	}
 	type countRow struct {
 		AttrID string `json:"attr_id"`
@@ -305,8 +309,8 @@ func (s *State) clinicalAttributeCountsFetch(w http.ResponseWriter, r *http.Requ
 	queries := []string{
 		fmt.Sprintf("SELECT attr_id, count() AS c FROM clinical_sample WHERE %s GROUP BY attr_id ORDER BY attr_id", sampleScope),
 		fmt.Sprintf("SELECT cp.attr_id AS attr_id, count() AS c FROM (SELECT * FROM clinical_patient WHERE %s1) cp "+
-			"JOIN (SELECT study_id, patient_id FROM sample WHERE %s) sm ON sm.study_id = cp.study_id AND sm.patient_id = cp.patient_id "+
-			"GROUP BY cp.attr_id ORDER BY attr_id", studyCond, sampleScope),
+			"JOIN (SELECT study_id, patient_id FROM %s) sm ON sm.study_id = cp.study_id AND sm.patient_id = cp.patient_id "+
+			"GROUP BY cp.attr_id ORDER BY attr_id", sc.key(args, tClinicalPatient, ""), samples),
 	}
 	for _, q := range queries {
 		rows, err := queryA[countRow](s.CH, q, args)

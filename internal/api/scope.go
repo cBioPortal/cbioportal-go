@@ -47,8 +47,8 @@ var (
 	tPatient = keyedTable{name: "patient", key: []string{"study_id", "patient_id"},
 		study: "study_id", patient: "patient_id"}
 
-	tSampleDerived = keyedTable{name: "sample_derived",
-		key: []string{"cancer_study_identifier", "sample_unique_id"}, study: "cancer_study_identifier"}
+	tSampleDerived = keyedTable{name: "sample_derived", key: []string{"cancer_study_identifier", "sample_unique_id"},
+		study: "cancer_study_identifier", sample: "sample_stable_id"}
 	tClinicalDataDerived = keyedTable{name: "clinical_data_derived",
 		key: []string{"cancer_study_identifier", "type", "attribute_name", "sample_unique_id"}, study: "cancer_study_identifier"}
 	tClinicalEventDataDerived = keyedTable{name: "clinical_event_data_derived",
@@ -76,7 +76,9 @@ var (
 		study: "study_id", patient: "patient_id"}
 	tSampleProfile = keyedTable{name: "sample_profile", key: []string{"study_id", "profile_stable_id", "sample_id"},
 		study: "study_id", profile: "molecular_profile_id", sample: "sample_id"}
-	tSeg = keyedTable{name: "seg", key: []string{"study_id", "sample_id"}, study: "study_id", sample: "sample_id"}
+	tSeg               = keyedTable{name: "seg", key: []string{"study_id", "sample_id"}, study: "study_id", sample: "sample_id"}
+	tStructuralVariant = keyedTable{name: "structural_variant", key: []string{"study_id", "profile_stable_id", "sample_id"},
+		study: "study_id", sample: "sample_id"}
 )
 
 // keyedTables are the tables only a scope may name in internal/api SQL
@@ -236,10 +238,6 @@ func (s *State) bySampleLists(ids ...string) scope {
 	return sc
 }
 
-// studiesOnly is the scope's study restriction alone, for the tables a read
-// joins.
-func (sc scope) studiesOnly() scope { return scope{study: sc.study} }
-
 // cond is the scope's predicate over t's key columns, qualified by alias if
 // any; empty when the scope restricts none of them.
 func (sc scope) cond(b binder, t keyedTable, alias string) string {
@@ -294,9 +292,13 @@ func (sc scope) rows(b binder, t keyedTable) string {
 
 // samples is a subquery of the sample rows of the scope's studies (and of
 // its samples or patients, if it names them).
-func (sc scope) samples(b binder) string {
-	return scope{study: sc.study, sample: sc.sample, patient: sc.patient}.rows(b, tSample)
-}
+func (sc scope) samples(b binder) string { return sc.cases().rows(b, tSample) }
+
+// cases is the scope's study, sample and patient restrictions, those every
+// sample-keyed table carries. A read joining a scoped subquery restricts it
+// by all of them: a filter the outer query puts on the join key does not
+// reach into the subquery.
+func (sc scope) cases() scope { return scope{study: sc.study, sample: sc.sample, patient: sc.patient} }
 
 // patients is a subquery of the patient rows of the scope's studies (and of
 // its patients, if it names them).
@@ -307,6 +309,29 @@ func (sc scope) patients(b binder) string {
 // listMembers is a subquery of the sample ids of the scope's sample lists.
 func (sc scope) listMembers(b binder) string {
 	return "(SELECT sample_id FROM " + sc.from(b, tSampleList) + ")"
+}
+
+// scope holds a read of the filtered samples' rows to their studies
+// (scopeStudies), the leading key of the study tables and *_derived views.
+func (f studyViewFilter) scope() scope { return byStudies(f.scopeStudies()) }
+
+// filterFrom is the sample_derived rows of the samples a study-view filter
+// selects, as a FROM source: filterWhere leads with the filter's studies.
+func (s *State) filterFrom(a *sqlArgs, f studyViewFilter) string {
+	return tSampleDerived.name + " WHERE " + s.filterWhere(a, f)
+}
+
+// filterSQL compiles the filter to a SELECT of the matching sample_unique_ids.
+func (s *State) filterSQL(a *sqlArgs, f studyViewFilter) string {
+	return "SELECT sample_unique_id FROM " + s.filterFrom(a, f)
+}
+
+// sampleScopeFrom is the rows of t (sample, sample_list, clinical_sample:
+// a table with study_id and sample_id columns) of the samples a study-view
+// filter selects, as a FROM source: sampleScope names their studies or
+// samples.
+func (s *State) sampleScopeFrom(a *sqlArgs, f studyViewFilter, t keyedTable) string {
+	return t.name + " WHERE " + s.sampleScope(a, f)
 }
 
 // binder binds request values as query parameters, returning the

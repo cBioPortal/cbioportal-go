@@ -50,10 +50,11 @@ func (s *State) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, report)
 		return
 	}
+	p := ch.Params{}
 	rows, _ := ch.QueryP[row](s.CH,
 		"SELECT toUInt8(countIf(driver_filter IN ('Putative_Driver', 'Putative_Passenger')) > 0) AS hasBinary, "+
 			"arraySort(groupUniqArrayIf(driver_tiers_filter, driver_tiers_filter NOT IN ('', 'NA'))) AS tiers "+
-			"FROM genomic_event_derived WHERE genetic_profile_stable_id IN {ids:Array(String)}", ch.Params{"ids": ids})
+			"FROM "+byProfiles(ids).from(paramsBinder(p), tGenomicEventDerived), p)
 	if len(rows) > 0 {
 		report["hasBinary"] = rows[0].HasBinary == 1
 		if len(rows[0].Tiers) > 0 {

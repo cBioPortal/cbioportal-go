@@ -97,7 +97,7 @@ func (s *State) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 				N uint64 `json:"n"`
 			}
 			t, _ := queryA[c](s.CH,
-				"SELECT uniqExact(patient_unique_id) AS n FROM sample_derived WHERE "+s.filterWhere(args, svf), args)
+				"SELECT uniqExact(patient_unique_id) AS n FROM "+s.filterFrom(args, svf), args)
 			if len(t) > 0 {
 				total = t[0].N
 			}

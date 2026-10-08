@@ -179,18 +179,19 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 		Corr         *float64 `json:"corr"`
 		N            int      `json:"n"`
 	}
+	p := ch.Params{"typeA": typeA, "hugo": hugo, "samples": uniqueIDs, "typeB": typeB}
 	rows, err := ch.QueryP[coexpRow](s.CH, fmt.Sprintf(
 		"WITH ref_values AS ("+
-			"SELECT sample_unique_id, toFloat64OrNull(alteration_value) AS ref_val FROM genetic_alteration_derived "+
-			"WHERE cancer_study_identifier = {studyA:String} AND profile_type = {typeA:String} AND hugo_gene_symbol = {hugo:String} "+
+			"SELECT sample_unique_id, toFloat64OrNull(alteration_value) AS ref_val FROM %s "+
+			"AND profile_type = {typeA:String} AND hugo_gene_symbol = {hugo:String} "+
 			"AND alteration_value != '' AND alteration_value != 'NA' AND toFloat64OrNull(alteration_value) IS NOT NULL "+
 			"AND sample_unique_id IN {samples:Array(String)}), "+
 			"per_gene AS (SELECT g.entrez_gene_id AS entrezGeneId, count(*) AS numSamples, "+
 			"uniqExact(toFloat64OrNull(d.alteration_value)) AS exactDistinct, uniq(toFloat64OrNull(d.alteration_value)) AS approxDistinct, "+
 			"groupArray(r.ref_val) AS refValues, groupArray(toFloat64OrNull(d.alteration_value)) AS geneValues "+
-			"FROM genetic_alteration_derived d INNER JOIN ref_values r ON d.sample_unique_id = r.sample_unique_id "+
+			"FROM %s d INNER JOIN ref_values r ON d.sample_unique_id = r.sample_unique_id "+
 			"INNER JOIN cbioportal_ref.gene g ON d.hugo_gene_symbol = g.hugo_gene_symbol "+
-			"WHERE d.cancer_study_identifier = {studyB:String} AND d.profile_type = {typeB:String} AND d.hugo_gene_symbol != {hugo:String} "+
+			"WHERE d.profile_type = {typeB:String} AND d.hugo_gene_symbol != {hugo:String} "+
 			"AND d.alteration_value != '' AND d.alteration_value != 'NA' AND toFloat64OrNull(d.alteration_value) IS NOT NULL "+
 			"GROUP BY g.entrez_gene_id), "+
 			"scored AS (SELECT entrezGeneId, numSamples, "+
@@ -199,8 +200,8 @@ func (s *State) coExpressionsFetch(w http.ResponseWriter, r *http.Request) {
 			"FROM per_gene) "+
 			"SELECT entrezGeneId, if(validNumeric AND isFinite(corr), corr, NULL) AS corr, toInt64(numSamples) AS n FROM scored "+
 			"WHERE (validNumeric AND isFinite(corr) AND abs(corr) >= %v) OR (NOT validNumeric) ORDER BY entrezGeneId",
-		threshold), ch.Params{"studyA": metaA.StudyID, "typeA": typeA, "hugo": hugo, "samples": uniqueIDs,
-		"studyB": metaB.StudyID, "typeB": typeB})
+		byStudy(metaA.StudyID).from(paramsBinder(p), tGeneticAlterationDerived),
+		byStudy(metaB.StudyID).rows(paramsBinder(p), tGeneticAlterationDerived), threshold), p)
 	if err != nil {
 		fail(w, r, err)
 		return
@@ -248,14 +249,14 @@ func (s *State) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 	}
 	rows, _ := queryA[scopedAttrRow](s.CH, fmt.Sprintf(
 		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, sa.v AS sa, pa.v AS pa, sb.v AS sb, pb.v AS pb "+
-			"FROM (SELECT study_id, sample_id, patient_id FROM sample WHERE %s) AS s "+
+			"FROM (SELECT study_id, sample_id, patient_id FROM %s) AS s "+
 			"LEFT JOIN %s AS sa ON sa.study_id = s.study_id AND sa.sample_id = s.sample_id "+
 			"LEFT JOIN %s AS pa ON pa.study_id = s.study_id AND pa.patient_id = s.patient_id "+
 			"LEFT JOIN %s AS sb ON sb.study_id = s.study_id AND sb.sample_id = s.sample_id "+
 			"LEFT JOIN %s AS pb ON pb.study_id = s.study_id AND pb.patient_id = s.patient_id "+
 			"WHERE (sa IS NOT NULL OR pa IS NOT NULL) AND (sb IS NOT NULL OR pb IS NOT NULL) "+
 			"ORDER BY studyId, sampleId",
-		s.sampleScope(args, f),
+		s.sampleScopeFrom(args, f, tSample),
 		attr("clinical_sample", "sample_id", attrA), attr("clinical_patient", "patient_id", attrA),
 		attr("clinical_sample", "sample_id", attrB), attr("clinical_patient", "patient_id", attrB)), args)
 	return rows

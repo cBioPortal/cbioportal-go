@@ -145,13 +145,6 @@ func (f studyViewFilter) scopeStudies() []string {
 	return slices.Compact(out)
 }
 
-// studyKey is "<col> IN <scopeStudies> AND ": it holds a read of the
-// filtered samples' rows to their studies, the leading key of the study
-// tables and *_derived views.
-func (f studyViewFilter) studyKey(a *sqlArgs, col string) string {
-	return col + " IN " + a.strs(f.scopeStudies()) + " AND "
-}
-
 // hasSubFilters reports whether anything beyond the study/sample scope narrows
 // the selection.
 func (f studyViewFilter) hasSubFilters() bool {
@@ -170,17 +163,12 @@ func (f studyViewFilter) baseScope(a *sqlArgs) string {
 		for i, id := range f.SampleIdentifiers {
 			ids[i] = id.StudyID + "_" + id.id()
 		}
-		return f.studyKey(a, "cancer_study_identifier") + "sample_unique_id IN " + a.strs(ids)
+		return f.scope().key(a, tSampleDerived, "") + "sample_unique_id IN " + a.strs(ids)
 	}
 	if len(f.StudyIDs) > 0 {
-		return "cancer_study_identifier IN " + a.strs(f.StudyIDs)
+		return byStudies(f.StudyIDs).cond(a, tSampleDerived, "")
 	}
 	return falseClause
-}
-
-// filterSQL compiles the filter to a SELECT of the matching sample_unique_ids.
-func (s *State) filterSQL(a *sqlArgs, f studyViewFilter) string {
-	return "SELECT sample_unique_id FROM sample_derived WHERE " + s.filterWhere(a, f)
 }
 
 // filterWhere compiles the filter to a predicate over sample_derived columns
@@ -191,7 +179,7 @@ func (s *State) filterWhere(a *sqlArgs, f studyViewFilter) string {
 		return preds[0]
 	}
 	studies := f.studyIDs()
-	c := filterCompiler{s: s, a: a, studies: studies, studyIn: a.strs(studies)}
+	c := filterCompiler{s: s, a: a, studies: studies, studyIn: a.strs(studies), sc: byStudies(studies)}
 	preds = append(preds, c.caseLists(f.CaseLists)...)
 	preds = append(preds, c.genomicProfiles(f.GenomicProfiles)...)
 	preds = append(preds, c.customData(f.CustomDataFilters)...)
@@ -220,20 +208,21 @@ func (s *State) filterWhere(a *sqlArgs, f studyViewFilter) string {
 			}
 		}
 		preds = append(preds, fmt.Sprintf(
-			"patient_unique_id IN (SELECT patient_unique_id FROM clinical_event_data_derived "+
-				"WHERE cancer_study_identifier IN %s AND event_type IN %s)", c.studyIn, a.strs(types)))
+			"patient_unique_id IN (SELECT patient_unique_id FROM %s AND event_type IN %s)",
+			c.sc.from(a, tClinicalEventDataDerived), a.strs(types)))
 	}
 	preds = append(preds, c.patientTreatments(f.PatientTreatmentFilters)...)
 	return "(" + strings.Join(preds, ") AND (") + ")"
 }
 
 // filterCompiler builds the predicates of one filter; studyIn is the bound
-// array of its study ids.
+// array of its study ids, sc the scope of those studies.
 type filterCompiler struct {
 	s       *State
 	a       *sqlArgs
 	studies []string
 	studyIn string
+	sc      scope
 }
 
 func (c filterCompiler) caseLists(groups [][]string) []string {
@@ -247,8 +236,8 @@ func (c filterCompiler) caseLists(groups [][]string) []string {
 			continue
 		}
 		out = append(out, fmt.Sprintf(
-			"sample_unique_id IN (SELECT concat(study_id, '_', sample_id) FROM sample_list "+
-				"WHERE study_id IN %s AND (%s))", c.studyIn, strings.Join(ors, " OR ")))
+			"sample_unique_id IN (SELECT concat(study_id, '_', sample_id) FROM %s AND (%s))",
+			c.sc.from(c.a, tSampleList), strings.Join(ors, " OR ")))
 	}
 	return out
 }
@@ -263,8 +252,7 @@ func (c filterCompiler) genomicProfiles(groups [][]string) []string {
 			}
 		}
 		out = append(out, fmt.Sprintf(
-			"sample_unique_id IN (SELECT sample_unique_id FROM sample_to_gene_panel_derived "+
-				"WHERE genetic_profile_id IN %s)", c.a.strs(ids)))
+			"sample_unique_id IN (SELECT sample_unique_id FROM %s)", byProfiles(ids).from(c.a, tSampleToGenePanelDerived)))
 	}
 	return out
 }
@@ -291,9 +279,8 @@ func (c filterCompiler) geneFilters(filters []svGeneFilter) []string {
 				continue
 			}
 			out = append(out, fmt.Sprintf(
-				"sample_unique_id IN (SELECT sample_unique_id FROM genomic_event_derived "+
-					"WHERE genetic_profile_stable_id IN %s AND (%s))",
-				c.a.strs(g.MolecularProfileIDs), strings.Join(ors, " OR ")))
+				"sample_unique_id IN (SELECT sample_unique_id FROM %s AND (%s))",
+				byProfiles(g.MolecularProfileIDs).from(c.a, tGenomicEventDerived), strings.Join(ors, " OR ")))
 		}
 	}
 	return out
@@ -302,8 +289,8 @@ func (c filterCompiler) geneFilters(filters []svGeneFilter) []string {
 func (c filterCompiler) mutationData(m mutationDataFilter) string {
 	gene := c.a.str(m.HugoGeneSymbol)
 	mutated := fmt.Sprintf(
-		"SELECT sample_unique_id FROM genomic_event_derived WHERE cancer_study_identifier IN %s "+
-			"AND hugo_gene_symbol = %s AND variant_type = 'mutation'", c.studyIn, gene)
+		"SELECT sample_unique_id FROM %s "+
+			"AND hugo_gene_symbol = %s AND variant_type = 'mutation'", c.sc.from(c.a, tGenomicEventDerived), gene)
 	if m.Categorization == "MUTATION_TYPE" {
 		var ands []string
 		for _, group := range m.Values {
@@ -321,10 +308,10 @@ func (c filterCompiler) mutationData(m mutationDataFilter) string {
 		return strings.Join(ands, " AND ")
 	}
 	profiled := fmt.Sprintf(
-		"SELECT sgp.sample_unique_id FROM sample_to_gene_panel_derived sgp "+
+		"SELECT sgp.sample_unique_id FROM %s sgp "+
 			"JOIN gene_panel_to_gene_derived gpg ON sgp.gene_panel_id = gpg.gene_panel_id "+
-			"WHERE sgp.cancer_study_identifier IN %s AND gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'",
-		c.studyIn, gene)
+			"WHERE gpg.gene = %s AND sgp.alteration_type = 'MUTATION_EXTENDED'",
+		c.sc.rows(c.a, tSampleToGenePanelDerived), gene)
 	var ors []string
 	if len(m.Values) > 0 {
 		for _, v := range m.Values[0] {
@@ -358,9 +345,9 @@ func (c filterCompiler) patientTreatments(f *andedTreatmentFilters) []string {
 			treatments = append(treatments, t.Treatment)
 		}
 		out = append(out, fmt.Sprintf(
-			"patient_unique_id IN (SELECT patient_unique_id FROM clinical_event_data_derived "+
-				"WHERE cancer_study_identifier IN %s AND lower(event_type) = 'treatment' AND key = 'AGENT' AND value IN %s)",
-			c.studyIn, c.a.strs(treatments)))
+			"patient_unique_id IN (SELECT patient_unique_id FROM %s "+
+				"AND lower(event_type) = 'treatment' AND key = 'AGENT' AND value IN %s)",
+			c.sc.from(c.a, tClinicalEventDataDerived), c.a.strs(treatments)))
 	}
 	return out
 }
@@ -388,14 +375,14 @@ func (c filterCompiler) sampleTreatments(f *andedTreatmentFilters) []string {
 		out = append(out, fmt.Sprintf(
 			"sample_unique_id IN (SELECT concat(cedd.cancer_study_identifier, '_', cedd.sample_id) FROM ("+
 				"SELECT value AS sample_id, patient_unique_id, min(start_date) AS time_taken, cancer_study_identifier "+
-				"FROM clinical_event_data_derived WHERE cancer_study_identifier IN %[1]s "+
+				"FROM %[1]s "+
 				"AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN') AND key = 'SAMPLE_ID' "+
 				"GROUP BY patient_unique_id, value, cancer_study_identifier) cedd "+
 				"INNER JOIN (SELECT patient_unique_id, value AS treatment, min(start_date) AS treatment_time_taken "+
-				"FROM clinical_event_data_derived WHERE cancer_study_identifier IN %[1]s "+
+				"FROM %[1]s "+
 				"AND lower(event_type) = 'treatment' AND key = 'AGENT' GROUP BY patient_unique_id, value) cedd_inner "+
 				"ON cedd_inner.patient_unique_id = cedd.patient_unique_id WHERE %[2]s)",
-			c.studyIn, strings.Join(ors, " OR ")))
+			c.sc.from(c.a, tClinicalEventDataDerived), strings.Join(ors, " OR ")))
 	}
 	return out
 }
@@ -540,9 +527,8 @@ func (c filterCompiler) clinicalData(f clinicalDataFilter) string {
 
 func (c filterCompiler) genomicData(g genomicDataFilter) string {
 	src := fmt.Sprintf(
-		"SELECT sample_unique_id FROM genetic_alteration_derived WHERE profile_type = %s "+
-			"AND hugo_gene_symbol = %s AND cancer_study_identifier IN %s",
-		c.a.str(g.ProfileType), c.a.str(g.HugoGeneSymbol), c.studyIn)
+		"SELECT sample_unique_id FROM %s AND profile_type = %s AND hugo_gene_symbol = %s",
+		c.sc.from(c.a, tGeneticAlterationDerived), c.a.str(g.ProfileType), c.a.str(g.HugoGeneSymbol))
 	na, rest := splitNA(g.Values)
 	var ors []string
 	if na {
@@ -637,8 +623,8 @@ func (c filterCompiler) genericAssaySelection(g genericAssaySelectionFilter) []s
 		}
 		out = append(out, fmt.Sprintf(
 			"%s IN (SELECT %s FROM generic_assay_data_derived WHERE profile_type = %s AND datatype != 'LIMIT-VALUE' "+
-				"AND sample_unique_id IN (SELECT sample_unique_id FROM sample_derived WHERE cancer_study_identifier IN %s) AND (%s))",
-			col, col, c.a.str(g.ProfileType), c.studyIn, strings.Join(ors, " OR ")))
+				"AND sample_unique_id IN (SELECT sample_unique_id FROM %s) AND (%s))",
+			col, col, c.a.str(g.ProfileType), c.sc.from(c.a, tSampleDerived), strings.Join(ors, " OR ")))
 	}
 	return out
 }
@@ -973,7 +959,7 @@ func (s *State) sampleScope(a *sqlArgs, f studyViewFilter) string {
 		}
 		return falseClause
 	}
-	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.studyKey(a, "study_id"), s.filterSQL(a, f))
+	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.scope().key(a, tSample, ""), s.filterSQL(a, f))
 }
 
 // sampleDerivedScope is the filter as a predicate over a *_derived view's
@@ -981,12 +967,12 @@ func (s *State) sampleScope(a *sqlArgs, f studyViewFilter) string {
 func (s *State) sampleDerivedScope(a *sqlArgs, f studyViewFilter, uniqueCol string) string {
 	if !f.hasSubFilters() && len(f.SampleIdentifiers) == 0 {
 		if len(f.StudyIDs) > 0 {
-			return "cancer_study_identifier IN " + a.strs(f.StudyIDs)
+			return byStudies(f.StudyIDs).cond(a, tSampleDerived, "")
 		}
 		return falseClause
 	}
 	if uniqueCol == "patient_unique_id" {
-		return fmt.Sprintf("patient_unique_id IN (SELECT patient_unique_id FROM sample_derived WHERE %s)", s.filterWhere(a, f))
+		return fmt.Sprintf("patient_unique_id IN (SELECT patient_unique_id FROM %s)", s.filterFrom(a, f))
 	}
 	return fmt.Sprintf("%s IN (%s)", uniqueCol, s.filterSQL(a, f))
 }
@@ -996,7 +982,7 @@ func (s *State) scopeSampleCount(f studyViewFilter) uint64 {
 		N uint64 `json:"n"`
 	}
 	a := newArgs()
-	rows, _ := queryA[c](s.CH, "SELECT count() AS n FROM sample_derived WHERE "+s.filterWhere(a, f), a)
+	rows, _ := queryA[c](s.CH, "SELECT count() AS n FROM "+s.filterFrom(a, f), a)
 	if len(rows) > 0 {
 		return rows[0].N
 	}

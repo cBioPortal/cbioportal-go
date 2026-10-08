@@ -378,16 +378,16 @@ func (s *State) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	empty := sampleClinicalDataCollection{ByUniqueSampleKey: map[string][]tableClinicalData{}}
 
 	args := newArgs()
-	inner := fmt.Sprintf("SELECT study_id, sample_id, patient_id FROM sample WHERE %s", s.sampleScope(args, f))
+	inner := "SELECT study_id, sample_id, patient_id FROM " + s.sampleScopeFrom(args, f, tSample)
 	if strings.TrimSpace(searchTerm) != "" {
 		// ClinicalDataMapper.searchedAttributeData: a case-sensitive LIKE on
 		// the sample and patient ids and attribute values.
 		like := args.str("%" + searchTerm + "%")
 		inner += fmt.Sprintf(
 			" AND (sample_id LIKE %[1]s OR patient_id LIKE %[1]s"+
-				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM clinical_sample WHERE %[2]sattr_value LIKE %[1]s)"+
-				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM clinical_patient WHERE %[2]sattr_value LIKE %[1]s))",
-			like, f.studyKey(args, "study_id"))
+				" OR (study_id, sample_id) IN (SELECT study_id, sample_id FROM %[2]s AND attr_value LIKE %[1]s)"+
+				" OR (study_id, patient_id) IN (SELECT study_id, patient_id FROM %[3]s AND attr_value LIKE %[1]s))",
+			like, f.scope().from(args, tClinicalSample), f.scope().from(args, tClinicalPatient))
 	}
 
 	// Total number of matching samples (before paging) -> total-count header.
@@ -554,7 +554,7 @@ func (s *State) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	args := newArgs()
 	samples, _ := queryA[sample](s.CH,
 		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId, patient_stable_id AS patientId "+
-			"FROM sample_derived WHERE "+s.filterWhere(args, svf), args)
+			"FROM "+s.filterFrom(args, svf), args)
 	if len(samples) == 0 {
 		writeJSON(w, out)
 		return

@@ -15,68 +15,26 @@ import (
 // scopeAllowlist names the functions that may name a keyed table in SQL
 // without a scope ("file:function:table"), each with the reason.
 var scopeAllowlist = map[string]string{
-	"availability.go:State.unavailableStudyIdentifiers:sample_list":                          "cached index of the lists of unavailable studies, keyed by a study subquery",
-	"handlers_alterations.go:State.geneCounts:genomic_event_derived":                         unmigrated,
-	"handlers_alterations.go:State.populateProfiled:sample_to_gene_panel_derived":            unmigrated,
-	"handlers_alterations.go:State.populateQValues:sample_derived":                           unmigrated,
-	"handlers_alterations.go:State.svCountsFetch:sample_to_gene_panel_derived":               unmigrated,
-	"handlers_bins.go:State.customDataBinCountsFetch:sample_derived":                         unmigrated,
-	"handlers_bins.go:State.scopedValueCounts:sample_derived":                                unmigrated,
-	"handlers_coexpression.go:State.coExpressionsFetch:genetic_alteration_derived":           unmigrated,
-	"handlers_coexpression.go:State.scopedAttrPairs:sample":                                  unmigrated,
-	"handlers_config.go:State.customDriverAnnotationReport:genomic_event_derived":            unmigrated,
-	"handlers_core.go:studyCountJoins:clinical_event_data_derived":                           unmigrated,
-	"handlers_core.go:studyCountJoins:genomic_event_derived":                                 unmigrated,
-	"handlers_core.go:studyCountJoins:sample_list":                                           unmigrated,
-	"handlers_enrichment.go:State.alterationEnrichmentsFetch:genomic_event_derived":          unmigrated,
-	"handlers_enrichment.go:State.profiledPerGene:sample_derived":                            unmigrated,
-	"handlers_enrichment.go:State.profiledPerGene:sample_to_gene_panel_derived":              unmigrated,
-	"handlers_genericassay2.go:State.genericAssayDataCountsFetch:generic_assay_data_derived": unmigrated,
-	"handlers_genericassay2.go:State.genericAssayDataCountsFetch:sample_derived":             unmigrated,
-	"handlers_misc.go:State.clinicalAttributeCountsFetch:sample":                             unmigrated,
-	"handlers_namespace.go:State.namespaceDataCountsFetch:sample_derived":                    unmigrated,
-	"handlers_studyview.go:State.clinicalDataCounts:clinical_data_derived":                   unmigrated,
-	"handlers_studyview.go:State.clinicalDataCounts:sample_derived":                          unmigrated,
-	"handlers_studyview.go:State.clinicalDataCountsWithMissing:sample_derived":               unmigrated,
-	"handlers_studyview.go:State.filteredSamplesFetch:sample":                                unmigrated,
-	"handlers_studyview2.go:State.genomicDataCountsFetch:genetic_alteration_derived":         unmigrated,
-	"handlers_studyview2.go:State.mutationDataCountsFetch:genomic_event_derived":             unmigrated,
-	"handlers_studyview2.go:State.mutationDataCountsFetch:sample_derived":                    unmigrated,
-	"handlers_studyview2.go:State.mutationDataCountsFetch:sample_to_gene_panel_derived":      unmigrated,
-	"handlers_studyview2.go:State.sampleListsCountsFetch:sample_list":                        unmigrated,
-	"handlers_studyview3.go:State.clinicalDataTableFetch:sample":                             unmigrated,
-	"handlers_studyview3.go:State.customDataCountsFetch:sample_derived":                      unmigrated,
-	"handlers_survival.go:State.clinicalEventsMetaFetch:clinical_event_data_derived":         unmigrated,
-	"handlers_survival.go:State.survivalSpans:clinical_event_data_derived":                   unmigrated,
-	"handlers_treatments.go:State.clinicalEventTypeCountsFetch:clinical_event_data_derived":  unmigrated,
-	"handlers_treatments.go:State.clinicalEventTypeCountsFetch:sample_derived":               unmigrated,
-	"handlers_treatments.go:State.sampleTreatmentCountsFetch:clinical_event_data_derived":    unmigrated,
-	"handlers_treatments.go:State.sampleTreatmentRows:clinical_event_data_derived":           unmigrated,
-	"handlers_treatments.go:State.studiesWithTreatments:clinical_event_data_derived":         unmigrated,
-	"handlers_treatments.go:State.treatmentEventsByTier:clinical_event_data_derived":         unmigrated,
-	"handlers_treatments.go:State.treatmentEventsByTier:sample_derived":                      unmigrated,
-	"handlers_treatments.go:State.treatmentsDisplaySample:clinical_event_data_derived":       unmigrated,
-	"handlers_treatments.go:State.treatmentsPatient:sample_derived":                          unmigrated,
-	"studyviewfilter.go:State.filterSQL:sample_derived":                                      unmigrated,
-	"studyviewfilter.go:State.filterWhere:clinical_event_data_derived":                       unmigrated,
-	"studyviewfilter.go:State.sampleDerivedScope:sample_derived":                             unmigrated,
-	"studyviewfilter.go:State.scopeSampleCount:sample_derived":                               unmigrated,
-	"studyviewfilter.go:filterCompiler.caseLists:sample_list":                                unmigrated,
-	"studyviewfilter.go:filterCompiler.clinicalData:clinical_data_derived":                   unmigrated,
-	"studyviewfilter.go:filterCompiler.geneFilters:genomic_event_derived":                    unmigrated,
-	"studyviewfilter.go:filterCompiler.genericAssayData:generic_assay_data_derived":          unmigrated,
-	"studyviewfilter.go:filterCompiler.genericAssaySelection:generic_assay_data_derived":     unmigrated,
-	"studyviewfilter.go:filterCompiler.genericAssaySelection:sample_derived":                 unmigrated,
-	"studyviewfilter.go:filterCompiler.genomicData:genetic_alteration_derived":               unmigrated,
-	"studyviewfilter.go:filterCompiler.genomicProfiles:sample_to_gene_panel_derived":         unmigrated,
-	"studyviewfilter.go:filterCompiler.mutationData:genomic_event_derived":                   unmigrated,
-	"studyviewfilter.go:filterCompiler.mutationData:sample_to_gene_panel_derived":            unmigrated,
-	"studyviewfilter.go:filterCompiler.patientTreatments:clinical_event_data_derived":        unmigrated,
-	"studyviewfilter.go:filterCompiler.sampleTreatments:clinical_event_data_derived":         unmigrated,
-}
+	// Indexes and listings over every study.
+	"availability.go:State.unavailableStudyIdentifiers:sample_list": "cached index of the unavailable studies' lists, keyed by a study subquery",
+	"handlers_core.go:studyCountJoins:sample_list":                  "per-study counts of the study listing, aggregated over every study (cached)",
+	"handlers_core.go:studyCountJoins:clinical_event_data_derived":  "per-study counts of the study listing, aggregated over every study (cached)",
+	"handlers_core.go:studyCountJoins:genomic_event_derived":        "per-study counts of the study listing, aggregated over every study (cached)",
 
-// unmigrated marks reads that predate the scope layer.
-const unmigrated = "not yet read through a scope"
+	// sample_to_gene_panel_derived is sorted by panel, alteration type and
+	// profile, without the study.
+	"handlers_alterations.go:State.populateProfiled:sample_to_gene_panel_derived": "reads name the profiles, the WES panel or the alteration type its key holds",
+	"handlers_alterations.go:State.svCountsFetch:sample_to_gene_panel_derived":    "reads name the profiles or the WES panel its key holds",
+
+	// generic_assay_data_derived has no study column; its key leads with the
+	// profile type and entity.
+	"handlers_genericassay2.go:State.genericAssayDataCountsFetch:generic_assay_data_derived": "reads name the profile type its key leads with",
+	"studyviewfilter.go:filterCompiler.genericAssayData:generic_assay_data_derived":          "reads name the profile type and entity its key leads with",
+	"studyviewfilter.go:filterCompiler.genericAssaySelection:generic_assay_data_derived":     "reads name the profile type its key leads with",
+
+	// The studies are a subquery: those of the filter defining the attribute.
+	"studyviewfilter.go:filterCompiler.clinicalData:clinical_data_derived": "keyed by the filter's studies that define the attribute (a subquery)",
+}
 
 // TestKeyedTablesReadThroughScope fails when SQL in internal/api names a
 // keyedTable (FROM or JOIN it) outside scope.go, so every read of the big
@@ -201,6 +159,26 @@ func TestScopeRendering(t *testing.T) {
 	a = newArgs()
 	if got, want := bySamples("s1", []string{"a", "b"}).cond(a, tSample, "s"), "s.study_id = {a0:String} AND s.sample_id IN {a1:Array(String)}"; got != want {
 		t.Errorf("bySamples cond = %q, want %q", got, want)
+	}
+	// A joined table carries the scope's samples, not only its study.
+	a = newArgs()
+	if got, want := bySample("s1", "a").cases().rows(a, tSampleDerived),
+		"(SELECT * FROM sample_derived WHERE cancer_study_identifier = {a0:String} AND sample_stable_id = {a1:String})"; got != want {
+		t.Errorf("bySample derived rows = %q, want %q", got, want)
+	}
+	a = newArgs()
+	if got, want := byProfiles([]string{"s1_mutations"}).from(a, tGenomicEventDerived),
+		"genomic_event_derived WHERE genetic_profile_stable_id IN {a0:Array(String)}"; got != want {
+		t.Errorf("byProfiles from = %q, want %q", got, want)
+	}
+	a = newArgs()
+	ids := []identifier{{StudyID: "s2", SampleID: "x"}, {StudyID: "s1", SampleID: "y"}, {StudyID: "s2", SampleID: "z"}}
+	if got, want := identifiersCond(a, tSeg, "g", ids),
+		"((g.study_id = {a0:String} AND g.sample_id IN {a1:Array(String)}) OR (g.study_id = {a2:String} AND g.sample_id IN {a3:Array(String)}))"; got != want {
+		t.Errorf("identifiersCond = %q, want %q", got, want)
+	}
+	if got := identifiersCond(newArgs(), tSample, "", nil); got != falseClause {
+		t.Errorf("identifiersCond of none = %q", got)
 	}
 	p := paramsBinder{"k0": "taken"}
 	if got, want := byStudy("s1").cond(p, tPatient, ""), "study_id = {k1:String}"; got != want || p["k1"] != "s1" {

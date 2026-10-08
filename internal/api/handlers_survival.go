@@ -45,17 +45,14 @@ func patientIdentifierPairs(ids []identifier) [][2]string {
 	return pairs
 }
 
-// patientEventScope is the clinical_event_data_derived predicate selecting the
-// given patients.
-func patientEventScope(a *sqlArgs, pairs [][2]string) string {
+// patientEvents is the clinical_event_data_derived rows of the given
+// patients, as a FROM source.
+func patientEvents(a *sqlArgs, pairs [][2]string) string {
 	keys := make([]string, len(pairs))
-	studies := map[string]bool{}
 	for i, p := range pairs {
 		keys[i] = p[0] + "_" + p[1]
-		studies[p[0]] = true
 	}
-	return fmt.Sprintf("cancer_study_identifier IN %s AND patient_unique_id IN %s",
-		a.strs(sortedKeys(studies)), a.strs(keys))
+	return byStudies(pairStudies(pairs)).from(a, tClinicalEventDataDerived) + " AND patient_unique_id IN " + a.strs(keys)
 }
 
 // eventRequestsSQL renders event requests as an OR over event type (and, with
@@ -140,9 +137,9 @@ func (s *State) survivalSpans(pairs [][2]string, startReqs, endReqs, censorReqs 
 	sc, ec, cc := cond(startReqs), cond(endReqs), cond(censorReqs)
 	rows, err := queryA[row](s.CH, fmt.Sprintf(
 		"SELECT cancer_study_identifier AS studyId, substring(patient_unique_id, length(cancer_study_identifier) + 2) AS patientId, "+
-			"%s, %s, %s FROM clinical_event_data_derived WHERE %s AND ((%s) OR (%s) OR (%s)) "+
+			"%s, %s, %s FROM %s AND ((%s) OR (%s) OR (%s)) "+
 			"GROUP BY cancer_study_identifier, patient_unique_id HAVING startN > 0 ORDER BY studyId, patientId",
-		span("start", sc), span("end", ec), span("censor", cc), patientEventScope(args, pairs), sc, ec, cc), args)
+		span("start", sc), span("end", ec), span("censor", cc), patientEvents(args, pairs), sc, ec, cc), args)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -369,8 +366,8 @@ func (s *State) clinicalEventsMetaFetch(w http.ResponseWriter, r *http.Request) 
 	args := newArgs()
 	rows, err := queryA[metaRow](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT lower(event_type) AS eventType, lower(key) AS attrKey, lower(value) AS attrValue "+
-			"FROM clinical_event_data_derived WHERE %s%s ORDER BY eventType, attrKey, attrValue",
-		patientEventScope(args, patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(args, req.ClinicalEventRequests, false)), args)
+			"FROM %s%s ORDER BY eventType, attrKey, attrValue",
+		patientEvents(args, patientIdentifierPairs(req.PatientIdentifiers)), eventRequestsSQL(args, req.ClinicalEventRequests, false)), args)
 	if err != nil {
 		fail(w, r, err)
 		return
