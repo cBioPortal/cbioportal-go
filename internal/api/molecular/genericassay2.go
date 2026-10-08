@@ -14,7 +14,7 @@ import (
 // single-entity metadata / data GETs.
 func (s Server) routeGenericAssay2(mux *http.ServeMux) {
 	// Single-entity data + metadata GETs.
-	mux.HandleFunc("GET /api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", s.genericAssayDataInProfileGet)
+	mux.HandleFunc("GET /api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", s.Bulk().genericAssayDataInProfileGet)
 	mux.HandleFunc("GET /api/generic-assay-meta/generic-assay/{genericAssayStableId}", s.genericAssayMetaByStableIdGet)
 	mux.HandleFunc("GET /api/generic-assay-meta/{molecularProfileId}", s.genericAssayMetaByIDGet)
 }

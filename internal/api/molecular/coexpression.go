@@ -15,7 +15,7 @@ import (
 
 // routeCoexpression registers the co-expression endpoint.
 func (s Server) routeCoexpression(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/molecular-profiles/co-expressions/fetch", s.coExpressionsFetch)
+	mux.HandleFunc("POST /api/molecular-profiles/co-expressions/fetch", s.Bulk().coExpressionsFetch)
 }
 
 // ---------- shared numeric helpers ----------

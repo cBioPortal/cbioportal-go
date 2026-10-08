@@ -10,6 +10,7 @@ sessions, and monitoring.
 
 - [cbioportal-import](#cbioportal-import)
 - [cbioportal-api](#cbioportal-api)
+  - [Limits on bulk requests](#limits-on-bulk-requests)
 - [Portal properties](#portal-properties)
 - [Login and study authorization](#login-and-study-authorization)
   - [Optional sign-in (optional_oauth2)](#optional-sign-in-optional_oauth2)
@@ -100,6 +101,9 @@ usually easier.
 | `-db` | `CBIOPORTAL_DB` | `cbioportal` | The portal database, built by `transform`. |
 | `-raw-db` | `CBIOPORTAL_RAW_DB` | `cbioportal_raw` | The staging database, written by `ingest`. |
 | `-ref-db` | `CBIOPORTAL_REF_DB` | `cbioportal_ref` | The reference database, written by `load-reference`. |
+| `-clickhouse-bulk-max-memory` | `CLICKHOUSE_BULK_MAX_MEMORY` | `10GiB` | The memory one ClickHouse query of a bulk endpoint may use. `0` means no limit. See [Limits on bulk requests](#limits-on-bulk-requests). |
+| `-clickhouse-bulk-max-time` | `CLICKHOUSE_BULK_MAX_TIME` | `10m` | How long one query of a bulk endpoint may run, including the time the client takes to read the answer. A number alone means seconds. `0` means no limit. |
+| `-clickhouse-bulk-sort-spill` | `CLICKHOUSE_BULK_SORT_SPILL` | `1GiB` | The memory a sort in a bulk query may use before ClickHouse continues it on disk. `0` keeps ClickHouse's own setting. |
 | `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend. The server serves it for every path outside `/api/`, so the website and the API share one address. |
 | `-frontend-url` | `FRONTEND_URL` | | The address of a frontend development server. The server passes every path outside `/api/` on to it. Use this instead of `-frontend-dir`. |
 | `-oncokb-url` | `ONCOKB_URL` | `https://public.api.oncokb.org/api/v1` | The OncoKB API. The frontend reaches it through the server's `/proxy/...` path. |
@@ -138,6 +142,37 @@ sessions: session service http://session-service:5000/api/sessions/my_portal/
 cbioportal-api 6b38ed6 (2026-10-02T09:15:00Z) listening on 0.0.0.0:8080 (clickhouse http://localhost:18123, db cbioportal, raw-db cbioportal_raw, ref-db cbioportal_ref)
 portal properties: 5 used (authenticate, quick_search.enabled, session.service.url, skin.blurb, skin.title), 3 ignored (not used by this server: db.user, spring.datasource.password, spring.datasource.url)
 ```
+
+### Limits on bulk requests
+
+Some endpoints can return a whole profile of data at once: molecular data,
+discrete copy number, generic assay data, gene panel data, mutations,
+copy-number segments, co-expression, the expression and generic assay
+enrichments, and the study download. go streams these answers, so the
+server's own memory stays small. The cost lands on ClickHouse, which may be
+shared with other services. So each query of these endpoints runs with
+limits:
+
+| Limit | ClickHouse setting | What happens |
+|---|---|---|
+| Memory (`10GiB`) | `max_memory_usage` | ClickHouse stops a query that needs more. Grouping (`GROUP BY`) moves to disk at half of it (`max_bytes_before_external_group_by`). |
+| Time (`10m`) | `max_execution_time` | ClickHouse stops a query that runs longer. |
+| Sort memory (`1GiB`) | `max_bytes_before_external_sort` | A larger sort continues on disk. The answer is the same, only slower. |
+
+If a query stops before any data is sent, the client gets a 400 with a
+message, as Java formats errors: `{"message": "This request needs more
+database memory than one request may use. Ask for less data at a time: name
+the genes (entrezGeneIds) or fewer samples, or page through the result with
+pageSize and pageNumber."}`. If it stops after the answer has started, the
+server breaks off the connection, so the client sees a broken transfer, not
+a shorter list.
+
+The defaults come from a week of the public portal mirror's query log. The
+largest everyday queries (one gene across all profiles of a pan-cancer
+study) use 7–9 GiB, and none ran longer than 2 minutes. The two that went
+past 10 GiB were whole-profile pulls of 15 GiB. One of them pushed a 30 GiB
+ClickHouse server to its limit. With the sort on disk, the 15 GiB pull
+(124 million values) needs 1.3 GiB.
 
 ## Portal properties
 

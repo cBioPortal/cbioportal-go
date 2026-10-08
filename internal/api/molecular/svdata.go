@@ -17,9 +17,9 @@ import (
 // multi-study molecular-data endpoints.
 func (s Server) routeSvData(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/structural-variant/fetch", s.structuralVariantFetch)
-	mux.HandleFunc("POST /api/gene-panel-data/fetch", s.genePanelDataFetch)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/gene-panel-data/fetch", s.genePanelDataProfileFetch)
-	mux.HandleFunc("POST /api/molecular-data/fetch", s.molecularDataMultipleStudyFetch)
+	mux.HandleFunc("POST /api/gene-panel-data/fetch", s.Bulk().genePanelDataFetch)
+	mux.HandleFunc("POST /api/molecular-profiles/{id}/gene-panel-data/fetch", s.Bulk().genePanelDataProfileFetch)
+	mux.HandleFunc("POST /api/molecular-data/fetch", s.Bulk().molecularDataMultipleStudyFetch)
 }
 
 // ---------- Structural variants (detail rows) ----------

@@ -16,8 +16,8 @@ import (
 // endpoints. All filtering/aggregation is pushed into ClickHouse; Go only maps
 // the final rows into the cBioPortal client JSON shapes.
 func (s Server) routeMolecular2(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number/fetch", s.discreteCopyNumberFetch)
-	mux.HandleFunc("GET /api/molecular-profiles/{id}/discrete-copy-number", s.discreteCopyNumberGet)
+	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number/fetch", s.Bulk().discreteCopyNumberFetch)
+	mux.HandleFunc("GET /api/molecular-profiles/{id}/discrete-copy-number", s.Bulk().discreteCopyNumberGet)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number-counts/fetch", s.copyNumberCountsFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/mutation-spectrums/fetch", s.mutationSpectrumsFetch)
 	mux.HandleFunc("POST /api/molecular-profiles/{id}/variant-counts/fetch", s.variantCountsFetch)

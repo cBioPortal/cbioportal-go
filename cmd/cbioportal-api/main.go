@@ -59,7 +59,13 @@ func main() {
 	v := cfg.values
 	client := ch.New(v["clickhouse-url"], v["db"])
 	client.SetDatabaseAliases(v["raw-db"], v["ref-db"])
+	limits, err := bulkLimits(v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s: %v\nRun '%s -h' for usage.\n", name, err, name)
+		os.Exit(2)
+	}
 	state := api.NewState(client)
+	state.SetBulkLimits(limits)
 	state.Props = props
 	state.PropsReplaceDefaults = cfg.values["portal-properties"] != ""
 	if err := state.ConfigureAuth(); err != nil {

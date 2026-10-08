@@ -29,6 +29,10 @@ import (
 // properties and the shared caches.
 type State struct {
 	CH *ch.Client
+	// BulkCH is CH with the per-query limits of the bulk endpoints (whole
+	// profiles of data, enrichments, the study export): their queries spill
+	// large sorts to disk and stop at a memory and a time limit.
+	BulkCH *ch.Client
 	// Sessions is the session store: ConfigureSessions sets it, and a nil
 	// one is the built-in store (SESSION_STORE_FILE) on first use.
 	Sessions     sessionstore.Store
@@ -60,7 +64,7 @@ func (s *State) SetMux(mux *http.ServeMux) { s.mux = mux }
 // NewState returns the API state over ClickHouse client c; ConfigureAuth and
 // ConfigureSessions apply the portal properties.
 func NewState(c *ch.Client) *State {
-	s := &State{CH: c}
+	s := &State{CH: c, BulkCH: c.WithSettings(DefaultBulkLimits.Settings())}
 	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
 		s.frontend = spaHandler(dir)
 	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {
@@ -178,7 +182,15 @@ func (a *jsonArray) Finish(err error) {
 // Fail answers an unexpected internal error as Java does, with Spring
 // Boot's generic 500: the error itself (SQL, database names, driver text)
 // goes to the server log only.
+//
+// A query stopped at its memory or time limit (BulkSettings) is answered
+// 400 with a message that says how to ask for less.
 func Fail(w http.ResponseWriter, r *http.Request, err error) {
+	if limit := ch.LimitExceeded(err); limit != "" {
+		slog.Warn("query limit", slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
+		WriteError(w, http.StatusBadRequest, MsgQueryLimit(limit))
+		return
+	}
 	LogServerError(r, "internal server error", err)
 	SpringError(w, r, http.StatusInternalServerError)
 }

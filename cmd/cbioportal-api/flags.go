@@ -4,7 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 // option is one server setting: a flag whose default comes from an
@@ -36,6 +41,9 @@ var sections = []section{
 		{name: "db", arg: "name", env: "CBIOPORTAL_DB", def: "cbioportal", usage: "database built by `cbioportal-import transform`"},
 		{name: "raw-db", arg: "name", env: "CBIOPORTAL_RAW_DB", def: "cbioportal_raw", usage: "staging database written by `cbioportal-import ingest`"},
 		{name: "ref-db", arg: "name", env: "CBIOPORTAL_REF_DB", def: "cbioportal_ref", usage: "reference database written by `cbioportal-import load-reference`"},
+		{name: "clickhouse-bulk-max-memory", arg: "size", env: "CLICKHOUSE_BULK_MAX_MEMORY", def: "10GiB", usage: "memory one query of a bulk endpoint (whole profiles of data, enrichments, export) may use; 0 for no limit"},
+		{name: "clickhouse-bulk-max-time", arg: "duration", env: "CLICKHOUSE_BULK_MAX_TIME", def: "10m", usage: "time one query of a bulk endpoint may run, streaming its result included; 0 for no limit"},
+		{name: "clickhouse-bulk-sort-spill", arg: "size", env: "CLICKHOUSE_BULK_SORT_SPILL", def: "1GiB", usage: "memory a sort of a bulk endpoint may use before it sorts on disk; 0 keeps the server's setting"},
 	}},
 	{"Frontend", []option{
 		{name: "frontend-dir", arg: "dir", env: "FRONTEND_DIR", usage: "serve this frontend build for every non-/api/ path (single origin)", export: true},
@@ -216,4 +224,49 @@ func printUsage(w io.Writer) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprint(w, usageFooter)
+}
+
+// bulkLimits reads the bulk endpoints' query limits from the settings.
+func bulkLimits(v map[string]string) (core.BulkLimits, error) {
+	var l core.BulkLimits
+	var err error
+	if l.MaxMemory, err = parseSize(v["clickhouse-bulk-max-memory"]); err != nil {
+		return l, fmt.Errorf("-clickhouse-bulk-max-memory: %w", err)
+	}
+	if l.SortSpill, err = parseSize(v["clickhouse-bulk-sort-spill"]); err != nil {
+		return l, fmt.Errorf("-clickhouse-bulk-sort-spill: %w", err)
+	}
+	if l.MaxTime, err = parseSeconds(v["clickhouse-bulk-max-time"]); err != nil {
+		return l, fmt.Errorf("-clickhouse-bulk-max-time: %w", err)
+	}
+	return l, nil
+}
+
+// parseSize reads a byte count: a number of bytes, or one with a KiB, MiB,
+// GiB or TiB suffix (K, M, G, T, KB, MB, GB and TB mean the same).
+func parseSize(s string) (int64, error) {
+	t := strings.TrimSpace(s)
+	num := strings.TrimRightFunc(t, func(r rune) bool { return r < '0' || r > '9' })
+	unit := strings.ToUpper(strings.TrimSpace(t[len(num):]))
+	shift, ok := map[string]uint{"": 0, "B": 0, "K": 10, "KB": 10, "KIB": 10, "M": 20, "MB": 20, "MIB": 20,
+		"G": 30, "GB": 30, "GIB": 30, "T": 40, "TB": 40, "TIB": 40}[unit]
+	n, err := strconv.ParseInt(num, 10, 64)
+	if !ok || err != nil || n < 0 || n > math.MaxInt64>>shift {
+		return 0, fmt.Errorf("invalid size %q (e.g. 10GiB, 512MiB, or bytes)", s)
+	}
+	return n << shift, nil
+}
+
+// parseSeconds reads a duration: a Go duration (10m, 90s) or a number of
+// seconds.
+func parseSeconds(s string) (time.Duration, error) {
+	t := strings.TrimSpace(s)
+	if n, err := strconv.ParseInt(t, 10, 64); err == nil && n >= 0 {
+		return time.Duration(n) * time.Second, nil
+	}
+	d, err := time.ParseDuration(t)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("invalid duration %q (e.g. 10m, or seconds)", s)
+	}
+	return d, nil
 }

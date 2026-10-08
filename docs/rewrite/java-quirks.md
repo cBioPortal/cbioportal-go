@@ -120,6 +120,15 @@ endpoints, their sort fields and the endpoints left out are in
 [API coverage](api-coverage.md#paging-that-go-adds). The tests
 `TestAddedPaging` and `TestAddedPagingParams` pin them.
 
+go also limits what one query of a bulk endpoint may cost ClickHouse:
+memory, time, and the memory a sort may use before it moves to disk.
+Java has no such limits. A request that hits one before any data is sent
+gets a 400 with a `message` that suggests naming genes, fewer samples, or
+paging. One that hits it later is broken off, never cut short silently.
+Normal requests stay far below the limits. See
+[Limits on bulk requests](../configuration.md#limits-on-bulk-requests).
+The tests `TestLiveBulkLimits` and `TestLiveBulkLimitTrips` pin them.
+
 go also adds the portal property `robots.disallow_all`, for preview sites
 that should stay out of search engines. When it is `true`, `/robots.txt`
 asks every crawler to stay away and the sitemaps answer 404, whatever

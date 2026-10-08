@@ -430,8 +430,8 @@ func SummaryMetaProperties(props map[string]core.JavaStringMap) map[string]core.
 // routeGenericAssay registers the generic-assay and geneset (GSVA) endpoints.
 func (s Server) routeGenericAssay(mux *http.ServeMux) {
 	// Generic assay data.
-	mux.HandleFunc("POST /api/generic_assay_data/{molecularProfileId}/fetch", s.genericAssayDataInProfileFetch)
-	mux.HandleFunc("POST /api/generic_assay_data/fetch", s.genericAssayDataMultipleFetch)
+	mux.HandleFunc("POST /api/generic_assay_data/{molecularProfileId}/fetch", s.Bulk().genericAssayDataInProfileFetch)
+	mux.HandleFunc("POST /api/generic_assay_data/fetch", s.Bulk().genericAssayDataMultipleFetch)
 
 	// Generic assay meta.
 	mux.HandleFunc("POST /api/generic-assay-meta/fetch", s.genericAssayMetaFetch)

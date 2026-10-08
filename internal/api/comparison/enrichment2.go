@@ -404,8 +404,8 @@ func (s Server) patientCasesToSamples(groups []casesGroup) []casesGroup {
 }
 
 func (s Server) routeEnrichment2(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/expression-enrichments/fetch", s.expressionEnrichmentsFetch)
-	mux.HandleFunc("POST /api/generic-assay-enrichments/fetch", s.genericAssayEnrichmentsFetch)
-	mux.HandleFunc("POST /api/generic-assay-binary-enrichments/fetch", s.genericAssayBinaryEnrichmentsFetch)
-	mux.HandleFunc("POST /api/generic-assay-categorical-enrichments/fetch", s.genericAssayCategoricalEnrichmentsFetch)
+	mux.HandleFunc("POST /api/expression-enrichments/fetch", s.Bulk().expressionEnrichmentsFetch)
+	mux.HandleFunc("POST /api/generic-assay-enrichments/fetch", s.Bulk().genericAssayEnrichmentsFetch)
+	mux.HandleFunc("POST /api/generic-assay-binary-enrichments/fetch", s.Bulk().genericAssayBinaryEnrichmentsFetch)
+	mux.HandleFunc("POST /api/generic-assay-categorical-enrichments/fetch", s.Bulk().genericAssayCategoricalEnrichmentsFetch)
 }

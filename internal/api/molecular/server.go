@@ -14,3 +14,6 @@ type Server struct{ studies.Server }
 
 // New returns the Server over s.
 func New(s *core.State) Server { return Server{studies.New(s)} }
+
+// Bulk returns the Server for the bulk endpoints (studies.Server.Bulk).
+func (s Server) Bulk() Server { return Server{s.Server.Bulk()} }
