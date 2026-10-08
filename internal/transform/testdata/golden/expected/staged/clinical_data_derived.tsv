@@ -33,6 +33,7 @@ SAMPLE_COUNT	1	golden_b	5	golden_b_GB-P1		patient
 SAMPLE_COUNT	1	golden_b	6	golden_b_GB-P2		patient
 SAMPLE_COUNT	1	golden_c	7	golden_c_GC-P1		patient
 SAMPLE_COUNT	1	golden_c	8	golden_c_GC-P2		patient
+SAMPLE_COUNT	1	golden_c	9	golden_c_GC-P3		patient
 SAMPLE_COUNT	2	golden_a	1	golden_a_GA-P1		patient
 SAMPLE_TYPE	Metastasis	golden_a	2	golden_a_GA-P1	golden_a_GA-P1-02	sample
 SAMPLE_TYPE	Primary	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample

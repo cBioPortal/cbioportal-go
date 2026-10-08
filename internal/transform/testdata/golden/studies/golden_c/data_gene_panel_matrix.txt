@@ -1,0 +1,2 @@
+SAMPLE_ID	mutations
+GC-P3-01	GOLDEN_PANEL1

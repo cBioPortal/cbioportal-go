@@ -8,3 +8,4 @@ golden_b	0	5	5	GB-P1	golden_b_GB-P1	R0ItUDE=	GB-P1-01	Primary Solid Tumor	golden
 golden_b	0	6	6	GB-P2	golden_b_GB-P2	R0ItUDI=	GB-P2-01	Primary Solid Tumor	golden_b_GB-P2-01	R0ItUDItMDE=	0
 golden_c	0	7	7	GC-P1	golden_c_GC-P1	R0MtUDE=	GC-P1-01	Primary Solid Tumor	golden_c_GC-P1-01	R0MtUDEtMDE=	0
 golden_c	0	8	8	GC-P2	golden_c_GC-P2	R0MtUDI=	GC-P2-01	Primary Solid Tumor	golden_c_GC-P2-01	R0MtUDItMDE=	0
+golden_c	0	9	9	GC-P3	golden_c_GC-P3	R0MtUDM=	GC-P3-01	Primary Solid Tumor	golden_c_GC-P3-01	R0MtUDMtMDE=	0

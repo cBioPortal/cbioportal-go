@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 73 entries:
+**Summary.** The page has 76 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 43 | go does the same thing as Java, on purpose. |
+| Copied | 46 | go does the same thing as Java, on purpose. |
 | Fixed in go | 20 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 41 of the 43 copied entries. The two without a test are the
+A test checks 44 of the 46 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -238,6 +238,9 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | A copy-number segment whose start is not below its end (a single-base segment) is skipped with a warning. | ImportCopyNumberSegmentData | Fixed in go. go keeps it. | import benchmark row counts |
 | Timeline rows for a patient not in the study, or with more fields than the header, are dropped. | ImportTimelineData | Fixed in go. go keeps them. | — |
 | A protein file keyed by `Composite.Element.REF` (an RPPA file, with values like `AKT1 AKT2 AKT3\|Akt_pS473`) is stored once for each gene named before the `\|`. When the antibody after the `\|` names a phosphorylation site such as `pS473`, the line is stored under a phosphoprotein gene such as `AKT1_PS473` instead. The importer adds that gene to the gene table when it is missing, with the next unused negative Entrez id. A line is skipped when it repeats an earlier line's antibody. | ImportTabDelimData (`parseRPPAGenes`) | Copied. The negative ids follow the order in which studies add phosphoproteins, so they can differ from production's ids for the same gene. | golden `staged/gene_key_map`, `staged_ref/gene` |
+| An empty `Center`, `Mutation_Status` or `Validation_Status` in a mutation file is stored as the text `NA`, not left empty. The study view's filter for an unknown mutation status looks for `NA`. | MafUtil (`getPartString`) | Copied. | golden `staged/mutation` |
+| A mutation listed more than once for the same sample (for example once per sequencing center) is stored once. The importer keeps the record with a blood normal, else the validated one, else the germline or somatic one, and joins the centers with `;`. | ImportExtendedMutationData (`mergeMutationData`) | Copied. | golden `staged/mutation_merge` |
+| `MUTATION_COUNT` is computed while the mutation file loads. A sample that only a gene panel matrix adds to the mutation profile gets no count at all, not 0. | DaoMutation (`createMutationCountClinicalData`) | Copied. | golden `staged/clinical_sample_computed` |
 
 ## Nondeterminism
 

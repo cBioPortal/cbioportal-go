@@ -22,6 +22,7 @@ MRNA_EXPRESSION	0	CONTINUOUS	\N	golden_a_mrna	mrna	GA-P1-01	golden_a
 MRNA_EXPRESSION	0	CONTINUOUS	\N	golden_a_mrna	mrna	GA-P1-02	golden_a
 MRNA_EXPRESSION	0	CONTINUOUS	\N	golden_a_mrna	mrna	GA-P2-01	golden_a
 MUTATION_EXTENDED	0	MAF	GOLDEN_PANEL1	golden_a_mutations	mutations	GA-P1-01	golden_a
+MUTATION_EXTENDED	0	MAF	GOLDEN_PANEL1	golden_c_mutations	mutations	GC-P3-01	golden_c
 MUTATION_EXTENDED	0	MAF	GOLDEN_PANEL2	golden_a_mutations	mutations	GA-P1-02	golden_a
 MUTATION_EXTENDED	0	MAF	\N	golden_a_mutations	mutations	GA-P2-01	golden_a
 MUTATION_EXTENDED	0	MAF	\N	golden_a_mutations	mutations	GA-P3-01	golden_a
