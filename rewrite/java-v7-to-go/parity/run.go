@@ -28,6 +28,7 @@ type runOptions struct {
 	issueRepo      string
 	issue          string // PARITY_ISSUE
 	memoryMax      string
+	memoryAS       string // address-space cap where no systemd scope can be had
 	goMemLimit     string
 	regen, dry     bool
 	stdout, stderr io.Writer
@@ -76,9 +77,14 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 		return false, die("cannot create %s: %v", run, err)
 	}
 
+	capPrefix, capHow, err := memoryCap(o.memoryMax, o.memoryAS)
+	if err != nil {
+		return false, die("refusing to run paritydiff without a hard memory cap: %v", err)
+	}
+	fmt.Fprintf(o.stderr, "paritydiff memory cap: %s\n", capHow)
 	versionA, versionB := version(o.a, o.ua), version(o.b, o.ua)
 	start := time.Now()
-	runParitydiff(o, filepath.Join(bin, "paritydiff"), corpusPath, run)
+	runParitydiff(o, capPrefix, filepath.Join(bin, "paritydiff"), corpusPath, run)
 	minutes := int((time.Since(start) + time.Minute - time.Second) / time.Minute)
 
 	data, err := os.ReadFile(filepath.Join(run, "results.json"))
@@ -187,15 +193,17 @@ func alertIssue(o runOptions, run, text string, bad int, day string, c Counts, s
 	return nil
 }
 
-// runParitydiff replays the corpus, B twice, in a memory-capped systemd
-// scope where systemd allows one, so a runaway comparison ends only itself.
-func runParitydiff(o runOptions, bin, corpus, run string) {
-	args := []string{bin, "-corpus", corpus, "-a", o.a, "-b", o.b, "-ua", o.ua, "-rate", o.rate,
+// runParitydiff replays the corpus, B twice, under the memory cap of
+// capPrefix (memoryCap), so a runaway comparison ends only itself.
+func runParitydiff(o runOptions, capPrefix []string, bin, corpus, run string) {
+	args := append(append([]string{}, capPrefix...), bin, "-corpus", corpus, "-a", o.a, "-b", o.b, "-ua", o.ua, "-rate", o.rate,
 		"-cache", "", "-retry", "2m", "-self-check", "-q", "-json", filepath.Join(run, "results.json"),
-		"-dump", filepath.Join(run, "dump"), "-dump-unexplained", "-dump-max", "1000000"}
-	if exec.Command("systemd-run", "--user", "--scope", "-q", "true").Run() == nil {
-		args = append([]string{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax=" + o.memoryMax, "-p", "MemorySwapMax=0"}, args...)
+		"-dump", filepath.Join(run, "dump"), "-dump-unexplained", "-dump-max", "1000000",
+		"-spool", filepath.Join(run, "spool"))
+	if err := os.MkdirAll(filepath.Join(run, "spool"), 0o755); err != nil {
+		return
 	}
+	defer os.RemoveAll(filepath.Join(run, "spool"))
 	out, err := os.Create(filepath.Join(run, "output.txt"))
 	if err != nil {
 		return

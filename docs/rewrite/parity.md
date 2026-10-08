@@ -126,6 +126,13 @@ answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent
 once more after 2 minutes, so a server restart is not reported as a bug.
 
+**Memory.** paritydiff holds one request at a time, keeps bodies over 1 MB
+in files, and compares large arrays element by element with an external
+sort, so its memory does not grow with response size. It still runs under a
+hard cap, `PARITY_MEMORY_MAX` (2G): a systemd user scope, found from cron too
+via `/run/user/UID`, else `prlimit --as`. With neither, the run stops rather
+than run uncapped.
+
 **The report.** Each run writes `runs/<date>/report.md` with:
 
 - both servers' versions from `/api/info`, the window, traffic per host and
@@ -155,8 +162,10 @@ report as a comment, and closes it after the first clean night.
 **Where it runs.** On the parity host, cron starts it at 15:17 UTC, after the
 mirror is rebuilt at 14:00:
 
-```
-17 15 * * * cd ~/projects/cbioportal-go && go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity nightly
+```bash
+go build -o ~/.local/bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrite-test
+# crontab -e
+17 15 * * * $HOME/.local/bin/cbioportal-rewrite-test java-v7-to-go parity nightly
 ```
 
 `parity nightly` works in `~/.local/share/cbioportal-go-parity` (`-home`). It

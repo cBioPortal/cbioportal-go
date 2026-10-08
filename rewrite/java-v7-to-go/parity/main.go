@@ -47,7 +47,12 @@ Environment of run:
   UA             User-Agent (cbioportal-go-parity; api.cbioportal.org refuses browsers)
   ISSUE_REPO     repository of the alert issue (cBioPortal/cbioportal-go)
   PARITY_ISSUE   the alert issue's number, instead of looking it up
-  PARITY_MEMORY_MAX  memory cap of paritydiff's systemd scope (2G);
+  PARITY_MEMORY_MAX  hard memory cap of paritydiff (2G): MemoryMax of a
+                 systemd user scope (found without a login session too, via
+                 /run/user/UID), checked to be in force; where there is none,
+                 an address-space limit (prlimit --as) of PARITY_MEMORY_AS
+                 (twice PARITY_MEMORY_MAX, as Go reserves address space
+                 ahead). With neither, run refuses to start paritydiff.
                  GOMEMLIMIT (1500MiB) is its collector's soft limit
 Environment of corpus: CORPUS_N (5000), CORPUS_MIN (3), CORPUS_SEED (the ISO
   week), CORPUS_SINCE, CORPUS_UNTIL, CORPUS_API_SHARE (0.25); ClickHouse from
@@ -93,7 +98,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			a: env("A", "https://go.cbioportal.org"), b: env("B", "https://api.cbioportal.org"),
 			rate: env("RATE", "4"), ua: env("UA", "cbioportal-go-parity"),
 			issueRepo: env("ISSUE_REPO", "cBioPortal/cbioportal-go"), issue: os.Getenv("PARITY_ISSUE"),
-			memoryMax: env("PARITY_MEMORY_MAX", "2G"), goMemLimit: env("GOMEMLIMIT", "1500MiB"),
+			memoryMax: env("PARITY_MEMORY_MAX", "2G"), memoryAS: os.Getenv("PARITY_MEMORY_AS"), goMemLimit: env("GOMEMLIMIT", "1500MiB"),
 			regen: *regen, dry: *dry, stdout: stdout, stderr: stderr,
 		})
 		if err != nil {

@@ -93,8 +93,10 @@ func cronNightly(o nightlyOptions) int {
 		log("checkout %s failed", ref)
 		return 2
 	}
-	short, _ := exec.Command("git", "-C", src, "rev-parse", "--short", "HEAD").Output()
-	log("src %s (%s)", strings.TrimSpace(string(short)), ref)
+	// The commit date shows a stale checkout: go.cbioportal.org runs what is
+	// deployed, but the known differences and the tools come from here.
+	head, _ := exec.Command("git", "-C", src, "log", "-1", "--format=%h, committed %cI", "HEAD").Output()
+	log("src %s (%s)", strings.TrimSpace(string(head)), ref)
 
 	args := []string{"run", "./rewrite/cmd/cbioportal-rewrite-test", "java-v7-to-go", "parity", "run"}
 	if now.Weekday() == time.Sunday {
