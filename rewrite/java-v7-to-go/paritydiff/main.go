@@ -22,14 +22,16 @@
 // and the result records the B/B' differences either way. Both B requests
 // count toward -rate.
 //
-// Memory is bounded by one request's bodies: requests are compared one at a
-// time, A's body is released before B is asked again, and top-level arrays
-// larger than -stream-above are compared element by element (compareStream)
-// instead of decoded whole. Without GOMEMLIMIT the collector's soft limit is
-// 1 GiB.
+// Memory does not grow with response size: requests are compared one at a
+// time, bodies over -spool-above are kept in temporary files (-spool),
+// top-level arrays larger than -stream-above are compared element by element
+// with an external sort of their element records (compareStream, within
+// -sort-budget), and other bodies larger than -decode-above are compared
+// byte for byte. Without GOMEMLIMIT the collector's soft limit is 1 GiB.
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -52,9 +54,99 @@ import (
 // (-ua).
 var userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
+// response is a status and body. Bodies up to spoolAbove bytes are held in
+// Body; larger ones are spooled to a file, so memory does not grow with them.
 type response struct {
 	Status int
 	Body   []byte
+	spool  *os.File // the body, when spooled
+	off    int64    // where the body starts in spool
+	size   int64    // the spooled body's size
+	temp   bool     // spool is a temporary file, removed by release
+}
+
+// spoolAbove is the body size in bytes above which a body is kept in a file.
+var spoolAbove = 1 << 20
+
+// Size is the body's size in bytes.
+func (r response) Size() int64 {
+	if r.spool != nil {
+		return r.size
+	}
+	return int64(len(r.Body))
+}
+
+// reader reads the body.
+func (r response) reader() *io.SectionReader {
+	if r.spool != nil {
+		return io.NewSectionReader(r.spool, r.off, r.size)
+	}
+	return io.NewSectionReader(bytes.NewReader(r.Body), 0, int64(len(r.Body)))
+}
+
+// head is the start of the body, at most n bytes.
+func (r response) head(n int) []byte {
+	if r.spool == nil {
+		return cut(r.Body, n)
+	}
+	b := make([]byte, min(int64(n), r.size))
+	k, _ := r.spool.ReadAt(b, r.off)
+	return b[:k]
+}
+
+// bytes is the whole body in memory.
+func (r response) bytes() ([]byte, error) {
+	if r.spool == nil {
+		return r.Body, nil
+	}
+	b := make([]byte, r.size)
+	_, err := r.spool.ReadAt(b, r.off)
+	return b, err
+}
+
+// writeBody writes at most max bytes of the body (0: whole) to w.
+func (r response) writeBody(w io.Writer, max int64) error {
+	var src io.Reader = r.reader()
+	if max > 0 {
+		src = io.LimitReader(src, max)
+	}
+	_, err := io.Copy(w, src)
+	return err
+}
+
+// release closes a spooled body, removing a temporary one.
+func (r response) release() {
+	if r.spool == nil {
+		return
+	}
+	r.spool.Close()
+	if r.temp {
+		os.Remove(r.spool.Name())
+	}
+}
+
+// readBody reads a body, spooling it to a temporary file past spoolAbove.
+func readBody(status int, src io.Reader) (response, error) {
+	var buf bytes.Buffer
+	n, err := io.CopyN(&buf, src, int64(spoolAbove)+1)
+	if err != nil && err != io.EOF {
+		return response{}, err
+	}
+	if n <= int64(spoolAbove) {
+		return response{Status: status, Body: buf.Bytes()}, nil
+	}
+	f, err := os.CreateTemp(spoolDir, "paritydiff-body-*")
+	if err != nil {
+		return response{}, err
+	}
+	r := response{Status: status, spool: f, temp: true}
+	k, err := io.Copy(f, io.MultiReader(&buf, src))
+	if err != nil {
+		r.release()
+		return response{}, err
+	}
+	r.size = k
+	return r, nil
 }
 
 // cacheHeader is the first line of a cache file; the response body follows
@@ -68,19 +160,43 @@ type cacheHeader struct {
 	Body    string `json:"body,omitempty"`
 }
 
-// readCache reads a cache file without copying its body.
+// readCache reads a cache file; a body past spoolAbove is read from the
+// file as needed.
 func readCache(path string) (response, bool) {
-	b, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return response{}, false
 	}
-	line, body, split := bytes.Cut(b, []byte("\n"))
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return response{}, false
+	}
+	br := bufio.NewReader(f)
+	line, err := br.ReadBytes('\n')
+	split := err == nil
+	if err != nil && err != io.EOF {
+		f.Close()
+		return response{}, false
+	}
 	var h cacheHeader
-	if json.Unmarshal(line, &h) != nil {
+	if json.Unmarshal(bytes.TrimSuffix(line, []byte("\n")), &h) != nil {
+		f.Close()
 		return response{}, false
 	}
 	if !split {
-		body = []byte(h.Body)
+		f.Close()
+		return response{Status: h.Status, Body: []byte(h.Body)}, true
+	}
+	offset := int64(len(line))
+	if size := st.Size() - offset; size > int64(spoolAbove) {
+		// The body stays in the cache file, read where it starts.
+		return response{Status: h.Status, spool: f, size: size, off: offset}, true
+	}
+	defer f.Close()
+	body, err := io.ReadAll(br)
+	if err != nil {
+		return response{}, false
 	}
 	return response{Status: h.Status, Body: body}, true
 }
@@ -100,7 +216,7 @@ func writeCache(path string, rq request, r response) {
 	}
 	_, err = f.Write(append(line, '\n'))
 	if err == nil {
-		_, err = f.Write(r.Body)
+		err = r.writeBody(f, 0)
 	}
 	if f.Close() != nil || err != nil {
 		_ = os.Remove(path)
@@ -157,15 +273,11 @@ func (f *fetcher) get(rq request) (response, error) {
 		return response{}, err
 	}
 	defer resp.Body.Close()
-	var buf bytes.Buffer
-	if resp.ContentLength > 0 {
-		buf.Grow(int(resp.ContentLength))
-	}
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
+	r, err := readBody(resp.StatusCode, resp.Body)
+	if err != nil {
 		return response{}, err
 	}
 	f.fetched++
-	r := response{Status: resp.StatusCode, Body: buf.Bytes()}
 	// Server errors and throttling are not cached, so a rerun retries them.
 	if path != "" && r.Status < 500 && r.Status != 429 {
 		writeCache(path, rq, r)
@@ -250,7 +362,7 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		if rq.Opts.Known != "" {
 			res.Outcome, res.Known = known, rq.Opts.Known
 		}
-		res.Diffs = []string{fmt.Sprintf("a: %.200s", oneLine(head(ra.Body))), fmt.Sprintf("b: %.200s", oneLine(head(rb.Body)))}
+		res.Diffs = []string{fmt.Sprintf("a: %.200s", oneLine(head(ra))), fmt.Sprintf("b: %.200s", oneLine(head(rb)))}
 		return res
 	}
 	if rq.Opts.StatusOnly || ra.Status >= 300 {
@@ -263,17 +375,34 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	opts.UnorderedKeys = setOf(rq.Opts.UnorderedKeys)
 	opts.Ties = rq.Opts.Ties
 	d, streamed := diffResult{}, false
-	if len(ra.Body)+len(rb.Body) > streamAbove {
-		d, streamed = compareStream(ra.Body, rb.Body, opts)
+	total := ra.Size() + rb.Size()
+	if total > int64(streamAbove) {
+		d, streamed = compareStream(ra.reader(), rb.reader(), opts)
 	}
-	if !streamed {
-		ja, errA := decodeJSON(ra.Body)
-		jb, errB := decodeJSON(rb.Body)
+	switch {
+	case streamed:
+	case total > int64(decodeAbove):
+		// Too large to decode whole: only byte-identical bodies are equal.
+		if same, err := sameBytes(ra.reader(), rb.reader()); err != nil {
+			d.add(&opts, "", "comparison failed: %v", err)
+		} else if !same {
+			d.add(&opts, "", "bodies of %d and %d bytes differ; not arrays, and too large to compare as JSON (-decode-above): a=%.80q b=%.80q",
+				ra.Size(), rb.Size(), head(ra), head(rb))
+		}
+	default:
+		ba, errA := ra.bytes()
+		bb, errB := rb.bytes()
+		if errA != nil || errB != nil {
+			d.add(&opts, "", "reading the bodies failed: %v %v", errA, errB)
+			break
+		}
+		ja, errA := decodeJSON(ba)
+		jb, errB := decodeJSON(bb)
 		switch {
 		case errA == nil && errB == nil:
 			d = compareJSON(ja, jb, opts)
-		case !bytes.Equal(bytes.TrimSpace(ra.Body), bytes.TrimSpace(rb.Body)):
-			d.add(&opts, "", "non-JSON bodies differ: a=%.80q b=%.80q", head(ra.Body), head(rb.Body))
+		case !bytes.Equal(bytes.TrimSpace(ba), bytes.TrimSpace(bb)):
+			d.add(&opts, "", "non-JSON bodies differ: a=%.80q b=%.80q", head(ra), head(rb))
 		}
 	}
 	res.Count, res.Diffs = d.Count, d.Diffs
@@ -300,12 +429,36 @@ func setOf(keys []string) map[string]bool {
 // arrays are compared element by element (compareStream).
 var streamAbove = 8 << 20
 
+// decodeAbove is the combined size of two bodies above which bodies that are
+// not arrays are only compared byte for byte, as decoding them whole would
+// take about ten times their size.
+var decodeAbove = 32 << 20
+
 // head is the start of a body, for messages.
-func head(b []byte) string {
-	if len(b) > 4096 {
-		b = b[:4096]
+func head(r response) string { return string(r.head(4096)) }
+
+// sameBytes reports whether two bodies are byte for byte the same.
+func sameBytes(a, b *io.SectionReader) (bool, error) {
+	if a.Size() != b.Size() {
+		return false, nil
 	}
-	return string(b)
+	ba, bb := make([]byte, 1<<20), make([]byte, 1<<20)
+	for {
+		n, errA := io.ReadFull(a, ba)
+		m, errB := io.ReadFull(b, bb)
+		if !bytes.Equal(ba[:n], bb[:m]) {
+			return false, nil
+		}
+		if errA == io.EOF || errA == io.ErrUnexpectedEOF {
+			return errB == io.EOF || errB == io.ErrUnexpectedEOF, nil
+		}
+		if errA != nil {
+			return false, errA
+		}
+		if errB != nil {
+			return false, errB
+		}
+	}
 }
 
 // cut returns s cut to max bytes (0: whole).
@@ -337,6 +490,10 @@ func main() {
 	retry := flag.Duration("retry", -1, "send requests that failed in transport or with 502/503/504 once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
 	flag.IntVar(&streamAbove, "stream-above", streamAbove, "compare top-level arrays element by element when the two bodies together exceed this many bytes, to bound memory")
+	flag.IntVar(&decodeAbove, "decode-above", decodeAbove, "compare bodies that are not arrays only byte for byte when the two together exceed this many bytes")
+	flag.IntVar(&spoolAbove, "spool-above", spoolAbove, "keep response bodies larger than this many bytes in temporary files instead of memory")
+	flag.IntVar(&sortBudget, "sort-budget", sortBudget, "memory in bytes one sort of a large array's element records may use before it spills to disk")
+	flag.StringVar(&spoolDir, "spool", "", "directory of spooled bodies and sort runs (default: the system's temporary directory)")
 	flag.Parse()
 	if os.Getenv("GOMEMLIMIT") == "" {
 		// A soft limit: the collector works harder near it, so the garbage
@@ -390,15 +547,17 @@ func main() {
 				if err := os.MkdirAll(*dump, 0o755); err != nil {
 					fatal(err)
 				}
-				_ = os.WriteFile(pathA, cut(ra.Body, *dumpMax), 0o644)
-				_ = os.WriteFile(pathB, cut(rb.Body, *dumpMax), 0o644)
+				dumpBody(pathA, ra, int64(*dumpMax))
+				dumpBody(pathB, rb, int64(*dumpMax))
 			}
 		}
-		ra = response{}
+		ra.release()
 		if res.Outcome != failed && *selfCheckB {
 			rb2, errB2 := fb.get(rq)
 			res = selfCheck(res, rq, rb, rb2, errB2, opts)
+			rb2.release()
 		}
+		rb.release()
 		res.Request = rq.Method + " " + rq.Path
 		res.Body = rq.Body
 		if len(res.Body) > 200 {
@@ -466,6 +625,16 @@ func main() {
 	if counts[differs]+counts[status]+counts[failed] > 0 {
 		os.Exit(1)
 	}
+}
+
+// dumpBody writes at most max bytes of a body (0: whole) to path.
+func dumpBody(path string, r response, max int64) {
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	r.writeBody(f, max)
+	f.Close()
 }
 
 func printResult(w io.Writer, r result, quiet bool) {

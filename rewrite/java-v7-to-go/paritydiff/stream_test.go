@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"reflect"
@@ -41,19 +42,30 @@ func TestCompareStreamMatchesWhole(t *testing.T) {
 		{"float tolerance", `[0.30000000000000004, 1e-20]`, `[0.3, 0]`, defaultOptions()},
 		{"scalars", `[1,"a",null,true]`, `[1,"b",null,false]`, defaultOptions()},
 		{"empty", `[]`, `[ ]`, defaultOptions()},
+		{"repeats", `[1,1,1,2,3]`, `[3,1,2,2]`, defaultOptions()},
+		{"repeats unordered", `[{"id":1},{"id":1},{"id":2}]`, `[{"id":2},{"id":2}]`, unordered},
+		{"more only than shown", `[9,8,7,6,5,4,3,2,1,0]`, `[0,10,11,12,13,14,15]`, defaultOptions()},
+		{"more only than shown unordered", `[9,8,7,6,5,4,3,2,1,0]`, `[0,10,11,12,13,14,15]`, unordered},
+		{"ties with scalars", `[1,{"g":1,"p":"x"},2,{"g":1,"p":"y"}]`, `[1,{"g":1,"p":"x"},2,{"g":1,"p":"y"}]`, ties},
 	} {
 		whole := diff(t, c.a, c.b, c.o)
-		got, ok := compareStream([]byte(c.a), []byte(c.b), c.o)
-		if !ok {
-			t.Errorf("%s: not streamed", c.name)
-			continue
-		}
-		if got.Count != whole.Count || !reflect.DeepEqual(got.Diffs, whole.Diffs) {
-			t.Errorf("%s: streamed %d %q, whole %d %q", c.name, got.Count, got.Diffs, whole.Count, whole.Diffs)
+		// In memory, and spilling every record to disk.
+		for _, budget := range []int{sortBudget, 1} {
+			prev := sortBudget
+			sortBudget = budget
+			got, ok := compareStream(bytes.NewReader([]byte(c.a)), bytes.NewReader([]byte(c.b)), c.o)
+			sortBudget = prev
+			if !ok {
+				t.Errorf("%s: not streamed", c.name)
+				continue
+			}
+			if got.Count != whole.Count || !reflect.DeepEqual(got.Diffs, whole.Diffs) {
+				t.Errorf("%s (sort budget %d): streamed %d %q, whole %d %q", c.name, budget, got.Count, got.Diffs, whole.Count, whole.Diffs)
+			}
 		}
 	}
 	for _, body := range []string{`{"a":1}`, `[1]x`, `[1`, `"s"`} {
-		if _, ok := compareStream([]byte(body), []byte(`[1]`), defaultOptions()); ok {
+		if _, ok := compareStream(bytes.NewReader([]byte(body)), bytes.NewReader([]byte(`[1]`)), defaultOptions()); ok {
 			t.Errorf("%s: streamed", body)
 		}
 	}
@@ -64,10 +76,28 @@ func TestCacheRoundTrip(t *testing.T) {
 	path := dir + "/x/r.json"
 	rq := request{Method: "POST", Path: "/api/x", Body: `{"a":1}`}
 	body := []byte("[1,\n2]")
-	writeCache(path, rq, response{200, body})
+	writeCache(path, rq, response{Status: 200, Body: body})
 	r, ok := readCache(path)
 	if !ok || r.Status != 200 || string(r.Body) != string(body) {
 		t.Fatalf("read %v %d %q", ok, r.Status, r.Body)
+	}
+	// A body past spoolAbove is read from the cache file, and written again
+	// from it.
+	prev := spoolAbove
+	spoolAbove = 3
+	r, ok = readCache(path)
+	spoolAbove = prev
+	if b, err := r.bytes(); !ok || r.spool == nil || err != nil || string(b) != string(body) || string(r.head(2)) != "[1" {
+		t.Fatalf("spooled read %v %v %q %v", ok, r.spool != nil, b, err)
+	}
+	copied := dir + "/copy.json"
+	writeCache(copied, rq, r)
+	r.release()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("release removed the cache file: %v", err)
+	}
+	if r, ok := readCache(copied); !ok || string(r.Body) != string(body) {
+		t.Fatalf("copy %v %q", ok, r.Body)
 	}
 	old := dir + "/old.json"
 	if err := os.WriteFile(old, []byte(`{"Method":"GET","status":404,"body":"{\"m\":1}"}`), 0o644); err != nil {
@@ -99,7 +129,7 @@ func TestCompareResponsesStreams(t *testing.T) {
 	a.WriteString("]")
 	b.WriteString("]")
 	rq := request{Name: "big", Opts: requestOptions{Unordered: true}}
-	ra, rb := response{200, []byte(a.String())}, response{200, []byte(b.String())}
+	ra, rb := response{Status: 200, Body: []byte(a.String())}, response{Status: 200, Body: []byte(b.String())}
 	prev := streamAbove
 	defer func() { streamAbove = prev }()
 	streamAbove = 1 << 30

@@ -203,14 +203,14 @@ POST /api/mutations/fetch
 func TestCompareResponsesOutcomes(t *testing.T) {
 	o := defaultOptions()
 	rq := request{Name: "x"}
-	if r := compareResponses(rq, response{200, []byte(`{"a":1}`)}, response{200, []byte(`{"a":1}`)}, o); r.Outcome != identical {
+	if r := compareResponses(rq, response{Status: 200, Body: []byte(`{"a":1}`)}, response{Status: 200, Body: []byte(`{"a":1}`)}, o); r.Outcome != identical {
 		t.Fatalf("got %+v", r)
 	}
-	if r := compareResponses(rq, response{200, []byte(`{}`)}, response{400, []byte(`{}`)}, o); r.Outcome != status {
+	if r := compareResponses(rq, response{Status: 200, Body: []byte(`{}`)}, response{Status: 400, Body: []byte(`{}`)}, o); r.Outcome != status {
 		t.Fatalf("got %+v", r)
 	}
 	rq.Opts.Known = "reason"
-	if r := compareResponses(rq, response{200, []byte(`{"a":1}`)}, response{200, []byte(`{"a":2}`)}, o); r.Outcome != known {
+	if r := compareResponses(rq, response{Status: 200, Body: []byte(`{"a":1}`)}, response{Status: 200, Body: []byte(`{"a":2}`)}, o); r.Outcome != known {
 		t.Fatalf("got %+v", r)
 	}
 }
