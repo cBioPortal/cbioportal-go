@@ -22,6 +22,9 @@ traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-p
 - **Cost:** the 20 Java backend pods across both AWS accounts take ≈ $1,280/month
   of nodes (≈ $1,500 with their Redis caches); go would need ≈ $160 ([estimate](#cost-estimate)). www and api,
   which go can replace today, are ≈ $500 of that.
+- **Import:** go loads a study 2.6–3.6× faster than Java's importer (50k
+  MSK-IMPACT: 80 vs 289 s with derived tables) at 0.2 vs 3.9 GB peak RSS
+  ([Import](#import)).
 - **Parity:** 613 of 618 logged requests identical, 0 unexplained; the
   nightly job's first run had 65 unexplained of 5,009, being fixed.
 
@@ -36,6 +39,7 @@ traffic mirrored 10% to go; details in [Mirrored production traffic](#mirrored-p
 - [Parity](#parity)
 - [Frontend e2e run](#frontend-e2e-run)
 - [Cost estimate](#cost-estimate)
+- [Import](#import)
 - [Code size](#code-size)
 
 ## Mirrored production traffic
@@ -204,6 +208,32 @@ Most of these portals need features go does not have yet: SAML login (GENIE
 private, MSK, private), `authorization=true` with users from the database and
 `dat.method=uuid` tokens (GENIE public). What go can replace today is www and
 api, about $500/month of the total.
+
+## Import
+
+Method: `scripts/import-benchmark.sh`, 2026-10-08, one local ClickHouse 25.3;
+each run into empty databases with genes, cancer types and gene panels
+preloaded; Java is cbioportal-core from `cbioportal/cbioportal:v7.1.2`
+(`cbioportalImporter.py`, `-Xmx6g`, container capped at 8 GiB) then
+`populate_derived_tables.sql`, go is `ingest` then `transform` (4 GiB cap);
+peak RSS is GNU time's, the largest process. Two runs each, both shown.
+
+| Study (rows, MB) | Importer | Import time | Derived/transform time | Peak RSS |
+|---|---|---|---|---|
+| msk_chord_2024 (21.5M, 346) | Java | 109 / 110 s | 26 / 26 s | 2.9 GB |
+| | go | 18 / 18 s | 34 / 35 s | 37 MB |
+| msk_impact_50k_2026 (48.7M, 487) | Java | 248 / 250 s | 41 / 41 s | 3.9 / 4.0 GB |
+| | go | 33 / 33 s | 46 / 49 s | 214 MB |
+
+go's importer streams each file into ClickHouse in batches, as is, and builds
+the model and the study-view `*_derived` tables as SQL inside ClickHouse, so
+its own memory stays small; Java parses every record in the JVM, one JVM per
+file. Java's validator, which go does not have, adds 53 s (0.6 GB) and 118 s
+(1.2 GB) and is not counted. Both produced the same samples, patients,
+clinical, mutation, structural-variant, alteration and generic-assay rows;
+Java's `clinical_data_derived` also keeps a row for each empty value. On
+ClickHouse Cloud's replicated tables go now adds a file's new staging columns
+in one `ALTER` per table instead of one per column (07a5caa).
 
 ## Code size
 
