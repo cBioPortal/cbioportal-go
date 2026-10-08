@@ -154,21 +154,64 @@ func TestSQLPageOrder(t *testing.T) {
 	}
 }
 
+// TestSortIgnored pins that pageList asks handlers for a sorted page also
+// for keyword searches and projection=ID, and drops sortBy only where Java
+// declares none.
 func TestSortIgnored(t *testing.T) {
-	for _, c := range []struct {
-		endpoint, query string
-		want            bool
-	}{
-		{"GET /api/studies/{}/clinical-data", "projection=ID", true},
-		{"GET /api/studies/{}/clinical-data", "projection=SUMMARY", false},
-		{"GET /api/studies", "projection=ID", false},
-		{"GET /api/patients", "keyword=x", true},
-		{"GET /api/samples", "keyword=x", false},
-		{"GET /api/genesets", "", true},
+	for target, want := range map[string]string{
+		"GET /api/studies/s/clinical-data?projection=ID&sortBy=value":         "value",
+		"GET /api/studies/s/clinical-data?projection=SUMMARY&sortBy=value":    "value",
+		"GET /api/samples?projection=ID&sortBy=sampleType":                    "sampleType",
+		"GET /api/patients?keyword=x&sortBy=patientId":                        "patientId",
+		"GET /api/genesets?sortBy=name&pageSize=1":                            "",
+		"POST /api/generic-assay-meta/fetch?sortBy=x&pageSize=1&pageNumber=0": "",
 	} {
-		q, _ := url.ParseQuery(c.query)
-		if got := sortIgnored(c.endpoint, q); got != c.want {
-			t.Errorf("%s ?%s: %v", c.endpoint, c.query, got)
+		method, path, _ := strings.Cut(target, " ")
+		seen := "unset"
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seen = r.URL.Query().Get("sortBy")
+			if sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage); (sp != nil) != (want != "") {
+				t.Errorf("%s: sorted page %v", target, sp)
+			}
+			writeJSON(w, []int{})
+		})
+		pageList(handler).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, path, nil))
+		if seen != want {
+			t.Errorf("%s: handler saw sortBy %q, want %q", target, seen, want)
+		}
+	}
+}
+
+// TestKeyedPage pins the page a handler sorts itself for ID rows: sorted by
+// the key objects' field as pageList sorts (nulls last either way, ties in
+// list order), then cut.
+func TestKeyedPage(t *testing.T) {
+	type key struct {
+		K *int `json:"k"`
+	}
+	n := func(v int) *int { return &v }
+	keys := []key{{n(2)}, {nil}, {n(1)}, {n(2)}, {n(3)}}
+	for _, c := range []struct {
+		query, want string
+	}{
+		{"sortBy=k", "[2,0,3,4,1]"},
+		{"sortBy=k&direction=DESC", "[4,0,3,2,1]"},
+		{"sortBy=k&pageSize=2&pageNumber=1", "[3,4]"},
+	} {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			kp := claimKeyedPage(r)
+			if kp == nil {
+				t.Fatalf("%s: no page to claim", c.query)
+			}
+			for i, k := range keys {
+				kp.add(k, i)
+			}
+			writeJSON(w, kp.rows())
+		})
+		got := httptest.NewRecorder()
+		pageList(handler).ServeHTTP(got, httptest.NewRequest("GET", "/api/cancer-types?"+c.query, nil))
+		if strings.TrimSpace(got.Body.String()) != c.want {
+			t.Errorf("%s: %s, want %s", c.query, got.Body.String(), c.want)
 		}
 	}
 }

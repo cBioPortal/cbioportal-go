@@ -220,8 +220,6 @@ type resourceDataRow struct {
 	DefResourceID string `json:"def_resource_id"`
 }
 
-var resourceDataSort = map[string]string{"ResourceId": "d.resource_id", "url": "d.url"}
-
 // resourceDataLevel describes one of the resource_{study,patient,sample} views.
 type resourceDataLevel struct {
 	view       string
@@ -237,8 +235,10 @@ var (
 	sampleResources  = resourceDataLevel{view: "resource_sample", idCols: "d.patient_id AS patient_id, d.sample_id AS sample_id", idFilter: "sample_id", tieBreaker: "d.sample_id", entity: "sample"}
 )
 
-// fetchResourceData queries one resource level of a study. id (optional)
-// restricts to one patient/sample; resourceID (optional) to one resource.
+// fetchResourceData queries one resource level of a study, in
+// ResourceDataMapper's default order. id (optional) restricts to one
+// patient/sample; resourceID (optional) to one resource. The rows keep
+// their url in every projection, for writeResourcePage to sort by.
 func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyID, id string) ([]ResourceData, error) {
 	projection := projectionParam(r)
 	where := []string{"d.study_id = {study:String}"}
@@ -266,9 +266,8 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 			"rd.resource_type AS resource_type, rd.open_by_default AS open_by_default, rd.priority AS priority, "+
 			"rd.custom_metadata AS custom_metadata "+
 			"FROM %s d LEFT JOIN resource_definition rd ON d.study_id = rd.study_id AND d.resource_id = rd.resource_id%s "+
-			"WHERE %s%s",
-		lvl.idCols, lvl.view, join, strings.Join(where, " AND "),
-		pagingClause(r, resourceDataSort, "d.resource_id ASC, "+tie))
+			"WHERE %s ORDER BY d.resource_id ASC, %s",
+		lvl.idCols, lvl.view, join, strings.Join(where, " AND "), tie)
 	rows, err := queryView[resourceDataRow](s.CH, sql, p)
 	if err != nil {
 		return nil, err
@@ -282,10 +281,8 @@ func (s *State) fetchResourceData(r *http.Request, lvl resourceDataLevel, studyI
 		if row.PatientID != "" {
 			d.UniquePatientKey = uniqueKey(row.StudyID, row.PatientID)
 		}
-		if projection != "ID" {
-			url := row.URL
-			d.URL = &url
-		}
+		url := row.URL
+		d.URL = &url
 		if projection == "DETAILED" {
 			if row.DefResourceID == "" {
 				continue // DETAILED inner-joins the definition
@@ -314,7 +311,36 @@ func (s *State) writeResourceData(w http.ResponseWriter, r *http.Request, levels
 		}
 		out = append(out, rows...)
 	}
-	writeJSON(w, out)
+	writeResourcePage(w, r, out)
+}
+
+// writeResourcePage writes resource data rows in the requested projection.
+// A sorted page is sorted and cut here, over all the rows: resource-data-all
+// reads its levels apart, and DETAILED drops rows without a definition after
+// reading. ResourceDataSortBy's ResourceId sorts by the resourceId field.
+func writeResourcePage(w http.ResponseWriter, r *http.Request, rows []ResourceData) {
+	id := projectionParam(r) == "ID"
+	keyed := claimKeyedPage(r)
+	if keyed == nil {
+		if id {
+			for i := range rows {
+				rows[i].URL = nil
+			}
+		}
+		writeJSON(w, rows)
+		return
+	}
+	for _, d := range rows {
+		key := map[string]any{"ResourceId": d.ResourceID, "url": d.URL}
+		if id {
+			d.URL = nil
+		}
+		if err := keyed.add(key, d); err != nil {
+			fail(w, r, err)
+			return
+		}
+	}
+	writeJSON(w, keyed.rows())
 }
 
 // studyResourceData — GET /api/studies/{studyId}/resource-data (study-level resources).
@@ -349,7 +375,7 @@ func (s *State) patientResourceData(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	writeJSON(w, rows)
+	writeResourcePage(w, r, rows)
 }
 
 // sampleResourceData — GET /api/studies/{studyId}/samples/{sampleId}/resource-data.
@@ -373,5 +399,5 @@ func (s *State) sampleResourceData(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, err)
 		return
 	}
-	writeJSON(w, rows)
+	writeResourcePage(w, r, rows)
 }

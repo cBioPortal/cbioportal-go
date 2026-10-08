@@ -11,7 +11,6 @@ import (
 	"log"
 	"maps"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,27 +80,11 @@ var unsortedEndpoints = map[string]bool{
 	"GET /api/genesets":                  true,
 }
 
-// keywordUnsortedEndpoints order a keyword search by how well ids match it
-// (PatientMapper, GeneMapper, StudyMapper), ignoring sortBy.
-var keywordUnsortedEndpoints = map[string]bool{
-	"GET /api/patients":       true,
-	"GET /api/genes":          true,
-	"GET /api/legacy/studies": true,
-}
-
-// sortIgnored reports whether Java ignores the request's sortBy: on
-// endpoints without one, for keyword searches that order by match, and for
-// projection=ID, which every legacy mapper (and ClickhouseSampleMapper)
-// leaves in its default order. ColumnStoreStudyController sorts any
-// projection.
-func sortIgnored(endpoint string, q url.Values) bool {
-	switch {
-	case unsortedEndpoints[endpoint]:
-		return true
-	case keywordUnsortedEndpoints[endpoint] && q.Has("keyword"):
-		return true
-	}
-	return endpoint != "GET /api/studies" && strings.EqualFold(strings.TrimSpace(q.Get("projection")), "ID")
+// sortIgnored reports whether the request's sortBy is ignored: only on the
+// endpoints that declare none. Every other paged endpoint sorts by it, also
+// for a keyword search and for projection=ID.
+func sortIgnored(endpoint string) bool {
+	return unsortedEndpoints[endpoint]
 }
 
 // pagedEndpoint reports whether the request is for one of pagedEndpoints
@@ -150,7 +133,7 @@ func pageList(next http.Handler) http.Handler {
 		q := r.URL.Query()
 		endpoint := pagedEndpointOf(r.Method, r.URL.Path)
 		sortBy := q.Get("sortBy")
-		if sortBy != "" && sortIgnored(endpoint, q) {
+		if sortBy != "" && sortIgnored(endpoint) {
 			sortBy = ""
 			q.Del("sortBy")
 		}
@@ -248,6 +231,54 @@ func claimSortedPage(r *http.Request, sortable map[string]string) (*sqlPage, str
 	}
 	sp.claimed = true
 	return sp, expr
+}
+
+// keyedPage is a sorted page a handler cuts itself, for rows it writes
+// without the sortBy field (the ID projection drops it): each row is added
+// with an object that has the field, and the rows are sorted as pageList
+// sorts them.
+type keyedPage struct {
+	pg    page
+	items []sortItem
+}
+
+// claimKeyedPage claims the sorted page pageList asks the request for, when
+// the handler has not read it in SQL, or returns nil.
+func claimKeyedPage(r *http.Request) *keyedPage {
+	sp, _ := r.Context().Value(sqlPageKey{}).(*sqlPage)
+	if sp == nil || sp.claimed {
+		return nil
+	}
+	sp.claimed = true
+	return &keyedPage{pg: sp.page}
+}
+
+// add adds the row out, sorted by key's sortBy field.
+func (k *keyedPage) add(key, out any) error {
+	kb, err := json.Marshal(key)
+	if err != nil {
+		return err
+	}
+	it := newSortItem(kb, k.pg.sortBy, len(k.items))
+	if it.raw, err = json.Marshal(out); err != nil {
+		return err
+	}
+	k.items = append(k.items, it)
+	return nil
+}
+
+// rows returns the rows of the page in order.
+func (k *keyedPage) rows() []json.RawMessage {
+	slices.SortFunc(k.items, k.pg.compare)
+	items := k.items[min(k.pg.start, len(k.items)):]
+	if k.pg.size >= 0 {
+		items = items[:min(k.pg.size, len(items))]
+	}
+	out := make([]json.RawMessage, len(items))
+	for i, it := range items {
+		out[i] = it.raw
+	}
+	return out
 }
 
 // orderLimit is the ORDER BY and LIMIT clause of the page: by expr (unless

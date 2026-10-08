@@ -401,15 +401,32 @@ func (s *State) mutationsWhere(w http.ResponseWriter, r *http.Request, where str
 		sql = sqlStablePageQuery(r, mutationSortable, sel+" WHERE "+where, mutationOrder)
 	}
 	projection := projectionOf(r)
+	// An ID page sorted by a field SQL does not compute (keyword, the
+	// protein positions) is sorted here, by the full records.
+	var keyed *keyedPage
+	if projection == "ID" {
+		keyed = claimKeyedPage(r)
+	}
 	out := newJSONArray(w, r)
 	err := ch.QueryEachP(s.CH, sql, args.params(sql), func(row *mutationRow) error {
 		if projection == "ID" {
 			m := toMutation(*row, false)
-			return out.add(MutationID{MolecularProfileID: m.MolecularProfileID, SampleID: m.SampleID, PatientID: m.PatientID,
-				EntrezGeneID: m.EntrezGeneID, StudyID: m.StudyID, UniqueSampleKey: m.UniqueSampleKey, UniquePatientKey: m.UniquePatientKey})
+			id := MutationID{MolecularProfileID: m.MolecularProfileID, SampleID: m.SampleID, PatientID: m.PatientID,
+				EntrezGeneID: m.EntrezGeneID, StudyID: m.StudyID, UniqueSampleKey: m.UniqueSampleKey, UniquePatientKey: m.UniquePatientKey}
+			if keyed != nil {
+				return keyed.add(m, id)
+			}
+			return out.add(id)
 		}
 		return out.add(toMutation(*row, projection == "DETAILED"))
 	})
+	if keyed != nil && err == nil {
+		for _, row := range keyed.rows() {
+			if err = out.add(row); err != nil {
+				break
+			}
+		}
+	}
 	out.finish(err)
 }
 

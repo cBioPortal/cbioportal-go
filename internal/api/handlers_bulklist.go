@@ -142,6 +142,8 @@ func (s *State) sampleInStudy(w http.ResponseWriter, r *http.Request) {
 // term must occur (LIKE: case-sensitive on ClickHouse, % and _ wildcards) in
 // the patient or the sample id; a patient is listed once per matching sample,
 // patients whose id starts with the whole keyword first, then by patient id.
+// sortBy and direction order the matches as they order a list without a
+// keyword.
 func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	args := newArgs()
@@ -163,11 +165,16 @@ func (s *State) allPatients(w http.ResponseWriter, r *http.Request) {
 		ties = "p.internal_id, sm.internal_id"
 	}
 	sql := fmt.Sprintf("SELECT p.study_id AS studyId, p.patient_id AS patientId FROM %s p "+
-		"JOIN %s sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s "+
-		"ORDER BY if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, %s",
-		acrossStudies.patients(args), acrossStudies.samples(args), strings.Join(conds, " AND "), args.str(kw), ties)
+		"JOIN %s sm ON sm.study_id = p.study_id AND sm.patient_id = p.patient_id WHERE %s",
+		acrossStudies.patients(args), acrossStudies.samples(args), strings.Join(conds, " AND ")) +
+		sqlPageOrder(r, keywordPatientSortable,
+			fmt.Sprintf("if(p.patient_id LIKE concat(%s, '%%'), 0, 1), p.patient_id, %s", args.str(kw), ties))
 	s.writePatientRows(w, r, sql, args.params(sql))
 }
+
+// keywordPatientSortable is patientSortable over allPatients' keyword join;
+// a sorted page keeps the match order for ties.
+var keywordPatientSortable = map[string]string{"patientId": "p.patient_id"}
 
 // ---------- Bulk genes ----------
 
