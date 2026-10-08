@@ -422,10 +422,11 @@ func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 		}
 		return def + " AS " + alias
 	}
-	// A merged record's centers are those of every record merged into it.
-	center := "''"
+	// A merged record's centers are those of every record merged into it;
+	// an empty center, like an empty status, reads "NA" (getPartString).
+	center := "'NA'"
 	if has["center"] {
-		center = "m.center"
+		center = mafPartSQL("m.center")
 	}
 	extras := strings.Join([]string{
 		"concat(m.study_id, '_', m.profile_stable_id) AS molecular_profile_id",
@@ -454,8 +455,8 @@ func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 			"%s AS entrez_gene_id, "+normalizedChrSQL("m.chromosome")+" AS chromosome, "+mafPositionSQL("m.start_position")+" AS start_position, "+
 			mafPositionSQL("m.end_position")+" AS end_position, "+mafPartSQL("m.reference_allele")+" AS reference_allele, "+
 			tumorSeqAlleleSQL("m")+" AS tumor_seq_allele2, "+
-			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, m.mutation_status AS mutation_status, "+
-			"m.validation_status AS validation_status, "+
+			"m.variant_classification AS variant_classification, m.variant_type AS variant_type, "+mafPartSQL("m.mutation_status")+" AS mutation_status, "+
+			mafPartSQL("m.validation_status")+" AS validation_status, "+
 			proteinChangeSQL(has)+" AS protein_change, "+
 			"m.t_alt_count AS t_alt_count, m.t_ref_count AS t_ref_count, "+drivers+", "+nsCol+" AS namespace_columns, "+extras+" "+
 			"FROM `%s`.%s m%s "+

@@ -41,7 +41,7 @@ func genomicEventDerivedSQL(c *client, rawDB, refDB, targetDB string, hasGenomeG
   'mutation' AS variant_type,
   %[8]s AS mutation_variant,
   m.variant_classification AS mutation_type,
-  m.mutation_status AS mutation_status,
+  if(m.mutation_status = '', 'NA', m.mutation_status) AS mutation_status,
   %[2]s AS driver_filter,
   m.cbp_driver_annotation AS driver_filter_annotation,
   %[3]s AS driver_tiers_filter,
