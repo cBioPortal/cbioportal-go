@@ -18,12 +18,12 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 68 entries:
+**Summary.** The page has 70 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 40 | go does the same thing as Java, on purpose. |
-| Fixed in go | 18 | Java gives an error or wrong data, and go gives the right answer. |
+| Fixed in go | 20 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
@@ -78,7 +78,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 18 fixes in one place. It shows what a client gets
+This table collects all 20 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -89,7 +89,9 @@ stores less where Java stores empty rows.
 | `studies/fetch` | Java reports `allSampleCount: 1`. | go reports the number of samples in the study's `_all` sample list. |
 | Study list, `resourceCounts` | Java also counts resources of other studies that share a resource id. | go counts only this study's resources. |
 | Genes pages | Java sorts every page by gene symbol and drops symbols that have more than one Entrez id. | go returns the page in the order `sortBy` asks for. |
-| Genes `sortBy=cytoband` or `length` | Java fails with a 500. | go answers 200 with the genes in the default order. |
+| Genes `sortBy=cytoband` or `length` | Java fails with a 500. | go sorts the genes by their cytoband or length on the portal's reference genome. |
+| Keyword searches with `sortBy` | Java ignores `sortBy` and `direction` when searching genes, patients or `/api/legacy/studies` by keyword. | go sorts the matches as asked. |
+| `projection=ID` with `sortBy` | About 30 list endpoints ignore `sortBy` and `direction` when only ids are asked for. | go sorts the ids as it sorts the full records. |
 | Clinical table, unknown `sortBy` | Java fails with a 500. | go answers with the table. |
 | `clinical-events-meta`, `survival-data` | Java fails with a 500, because a method it calls does not exist. | go answers with the data. |
 | `treatments/*` for a study without treatment data | Java returns the treatments of every study in the portal. | go returns an empty list. |
@@ -122,6 +124,7 @@ stores less where Java stores empty rows.
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
 | `GET /api/studies` numbers its pages from 1. `pageNumber=0` also gives the first page. | ColumnStoreStudyController | Copied. | TestContractPagingSlicesGetLists |
+| `GET /api/legacy/studies` numbers its pages from 0, like every other list. | legacy StudyController | Copied. | TestLegacyStudiesPaging, TestPageListLegacyStudies |
 | `GET /api/studies?projection=ID` returns an empty list. | ColumnStoreStudyController | Copied. | TestContractStudyProjections |
 | `GET /api/studies?projection=META` returns `[]` with no newline, plus the total count. | ColumnStoreStudyController | Copied. | TestOracleProjectionBehaviour, TestContractStudiesMeta |
 | `readPermission` ignores whether the study is public and ignores the PUBLIC group. | ColumnStoreStudyController.getAllStudies | Copied. | TestStudyReadable |
@@ -133,10 +136,11 @@ stores less where Java stores empty rows.
 
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
-| A gene search by keyword also matches gene aliases. It drops symbols that have more than one Entrez id. It sorts the page by symbol and ignores `sortBy` and `direction`, so a descending request comes back in ascending order. | GeneServiceImpl.getAllGenes | Copied. | TestOracleGeneKeywordSearch |
+| A gene search by keyword also matches gene aliases. It drops symbols that have more than one Entrez id, and it sorts the page by symbol. | GeneServiceImpl.getAllGenes | Copied. With `sortBy`, go sorts the page by it instead (see the keyword row below). | TestOracleGeneKeywordSearch |
 | Every other gene page is also sorted by symbol and also drops symbols with more than one Entrez id. So `sortBy` only decides which genes land on the page, not their order. | GeneServiceImpl.filterGenesWithMultipleEntrezIds | Fixed in go. go returns the page in `sortBy` order, which is Entrez id by default. | — |
-| Keyword searches (genes, patients, older study endpoints) and `projection=ID` ignore `sortBy`. | GeneMapper, PatientMapper, StudyMapper, the legacy ID selects | Copied. | TestSortIgnored |
-| `sortBy=cytoband` or `sortBy=length` fails with a 500. Java allows these values, but the gene table has no such columns. | GeneMapper; www and fixtures | Fixed in go. go answers 200 in the default order. | — |
+| Keyword searches ignore `sortBy` and `direction`. This happens for genes, patients and `/api/legacy/studies`. | GeneMapper, PatientMapper, StudyMapper | Fixed in go. go sorts the matches by `sortBy`. Without it, they keep the keyword order. | TestGeneKeywordSortBy, TestPatientKeywordSortBy, TestLegacyStudiesPaging |
+| `projection=ID` ignores `sortBy` and `direction` on about 30 list endpoints. These are every legacy list endpoint and the three sample endpoints. | the legacy mappers, ClickhouseSampleMapper | Fixed in go. The ids come in the order the full records would. | TestSortedIDProjection, TestSortIgnored |
+| `sortBy=cytoband` or `sortBy=length` fails with a 500. Java allows these values, but the gene table has no such columns. | GeneMapper; www and fixtures | Fixed in go. go sorts by the gene's cytoband, or by its length (end minus start), on the portal's reference genome. That is the `ucsc.build` property, which is hg19 unless set. Genes without a location there come last. | TestGeneSortByLocation |
 
 ## Samples, patients and clinical data
 

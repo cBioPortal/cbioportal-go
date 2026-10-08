@@ -19,5 +19,7 @@ switch was made.
 - **Nightly parity.** The nightly job must report no unexplained difference
   for seven nights in a row. Its results are in the GitHub issue labelled
   `parity`.
-- **Paging and sorting.** go will honour every paging and sorting parameter
-  an endpoint accepts, including where Java ignores it. This is in progress.
+- **Paging and sorting.** go honours every paging and sorting parameter an
+  endpoint accepts, including where Java ignores it. The fixes are listed in
+  [Java quirks](java-quirks.md#what-go-fixes). This is done. Endpoints that
+  take no paging parameters still return whole lists.

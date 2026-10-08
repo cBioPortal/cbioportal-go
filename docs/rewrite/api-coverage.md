@@ -53,7 +53,9 @@ take paging or sorting parameters.
 Java also has 33 extra paths that start with `/api/legacy/` or
 `/api/not-ready-yet/`. Each one is a second name for an `/api/…` endpoint of
 the same name. go answers them with the same code, and they are not counted
-above.
+above. Two of them page differently, as in Java. `/api/legacy/studies`
+numbers its pages from 0, while `/api/studies` numbers them from 1.
+`/api/legacy/generic_assay_meta/fetch` takes no paging parameters.
 
 Each table below has these columns:
 
@@ -157,7 +159,7 @@ in [Java quirks](java-quirks.md).
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/api/generic-assay-meta/fetch` | GenericAssayMetaFilter | projection, paging, searchTerm | implemented | yes |  |
+| POST | `/api/generic-assay-meta/fetch` | GenericAssayMetaFilter | projection, paging, searchTerm | implemented | yes | `pageSize` and `pageNumber` must come together. A page has a `total-count` header. go does not use `searchTerm` yet. |
 | GET | `/api/generic-assay-meta/{molecularProfileId}` |  | projection | implemented | yes |  |
 | GET | `/api/generic-assay-meta/generic-assay/{genericAssayStableId}` |  | projection | implemented | yes |  |
 | GET | `/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}` |  | projection | implemented | yes |  |
@@ -168,7 +170,7 @@ in [Java quirks](java-quirks.md).
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/api/genes` |  | projection, paging, sort, alias, keyword | implemented | yes |  |
+| GET | `/api/genes` |  | projection, paging, sort, alias, keyword | implemented | yes | `sortBy=cytoband` and `length` use the portal's reference genome. |
 | GET | `/api/genes/{geneId}` |  |  | implemented | yes |  |
 | GET | `/api/genes/{geneId}/aliases` |  |  | implemented |  |  |
 | POST | `/api/genes/fetch` | List&lt;String&gt; | projection, geneIdType | implemented | yes |  |
