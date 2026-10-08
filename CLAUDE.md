@@ -63,6 +63,26 @@ Statistics stay hand-ported: exact Java parity requires it. CI runs
 Repo: <https://github.com/cBioPortal/cbioportal-go> (`origin`, default
 branch `main`). Commit directly to `main`.
 
+## Writing docs
+
+Docs are for people: new contributors, the cBioPortal team, and users who
+are not Go or ClickHouse experts. Write so an 8th grader could follow.
+
+- Plain words, short sentences, one idea per sentence. Say what something
+  does before how it does it.
+- Explain a term or acronym the first time it appears, or link to where
+  it is explained. Prefer the everyday word ("copy", "check", "list") over
+  jargon ("materialize", "assert", "enumerate").
+- Full sentences with verbs and articles. No telegraphic fragments
+  ("deviates: kept"), arrows, or semicolon chains.
+- Start long docs with a few sentences on what the page is for, then a
+  table of contents.
+- Tables for lists of facts; prose for reasons. Give an example when an
+  idea is abstract.
+- Current state only. History is in git, not in the docs.
+- No commit hashes, internal ids or file paths in running text unless the
+  reader needs them to act.
+
 ## No "prior state" comments in code
 
 Comments describe current intent only, not what was changed from.
