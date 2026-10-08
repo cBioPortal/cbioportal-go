@@ -77,6 +77,11 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		targetDB, variantClassificationFilterSQL(c, rawDB))); err != nil {
 		return nil, fmt.Errorf("creating table variant_classification_filter: %w", err)
 	}
+	if _, err := c.Execute(fmt.Sprintf(
+		"CREATE OR REPLACE TABLE `%s`.mutation_merge ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, file_num, row_num) AS %s",
+		targetDB, mutationMergeSQL(c, rawDB, targetDB))); err != nil {
+		return nil, fmt.Errorf("creating table mutation_merge: %w", err)
+	}
 
 	var created []string
 	engineOf := func(name string) string {
@@ -417,10 +422,15 @@ func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 		}
 		return def + " AS " + alias
 	}
+	// A merged record's centers are those of every record merged into it.
+	center := "''"
+	if has["center"] {
+		center = "m.center"
+	}
 	extras := strings.Join([]string{
 		"concat(m.study_id, '_', m.profile_stable_id) AS molecular_profile_id",
 		"ifNull(sp.patient_id, '') AS patient_id",
-		col("center", "center", "''"),
+		"if(mm.keep = 1, mm.center, " + center + ") AS center",
 		col("n_alt_count", "n_alt_count", "''"),
 		col("n_ref_count", "n_ref_count", "''"),
 		col("amino_acid_change", "amino_acid_change", "''"),
@@ -451,6 +461,8 @@ func mutationTableSQL(c *client, rawDB, targetDB, table string) string {
 			"FROM `%s`.%s m%s "+
 			"LEFT JOIN (SELECT DISTINCT study_id, sample_id, patient_id FROM `"+rawDB+"`.clinical_sample) sp "+
 			"ON sp.study_id = m.study_id AND sp.sample_id = m.tumor_sample_barcode "+
+			"LEFT JOIN `"+targetDB+"`.mutation_merge mm ON mm.study_id = m.study_id AND mm.profile_stable_id = m.profile_stable_id "+
+			"AND mm.file_num = m.file_num AND mm.row_num = m.row_num "+
 			"WHERE "+mutationFilterSQL("m", "gk.resolved_entrez_gene_id", targetDB),
 		entrez, rawDB, table, join)
 }

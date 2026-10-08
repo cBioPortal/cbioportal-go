@@ -18,7 +18,17 @@ import (
 // Silent, Intron, 3'UTR, 3'Flank, 5'UTR and IGR, and 5'Flank except in the
 // promoter whitelist (TERT = 7015). The default filter and the statuses
 // match by case-insensitive prefix, as MutationFilter.safeStringTest does.
+// Of the records the importer merges into one (mutation_merge), only the
+// one it keeps passes.
 func mutationFilterSQL(a, entrez, targetDB string) string {
+	return acceptedMutationSQL(a, entrez, targetDB) + fmt.Sprintf(
+		" AND (%[1]s.study_id, %[1]s.profile_stable_id, %[1]s.file_num, %[1]s.row_num) NOT IN "+
+			"(SELECT study_id, profile_stable_id, file_num, row_num FROM `%[2]s`.mutation_merge WHERE keep = 0)", a, targetDB)
+}
+
+// acceptedMutationSQL is mutationFilterSQL before merging: every record
+// the MutationFilter accepts.
+func acceptedMutationSQL(a, entrez, targetDB string) string {
 	prefix := func(col string, values ...string) string {
 		var or []string
 		for _, v := range values {

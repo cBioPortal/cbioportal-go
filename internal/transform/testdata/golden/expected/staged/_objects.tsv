@@ -18,6 +18,7 @@ gistic	View
 gistic_to_gene	View
 molecular_profile	View
 mutation	MergeTree
+mutation_merge	MergeTree
 mutsig	View
 patient	MergeTree
 resource_definition	View

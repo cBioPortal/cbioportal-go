@@ -1,21 +1,31 @@
-Hugo_Symbol	Entrez_Gene_Id	Chromosome	Start_Position	End_Position	Variant_Classification	Variant_Type	Reference_Allele	Tumor_Seq_Allele1	Tumor_Seq_Allele2	Tumor_Sample_Barcode	Mutation_Status	Validation_Status	HGVSp_Short
-TP53	7157	17	7577120	7577120	Nonsense_Mutation	SNP	C	C	T	GC-P1-01	Somatic		p.R213*
-KRAS	3845	12	25398284	25398284	Intron	SNP	C	C	T	GC-P1-01	Somatic		
-PTEN	5728	10	89692905	89692905	Silent	SNP	C	C	T	GC-P1-01	Somatic		p.R130R
-EGFR	1956	7	55249071	55249071	5'Flank	SNP	C	C	T	GC-P2-01	Somatic		
-ERBB2	2064	17	37880000	37880000	IGR	SNP	C	C	T	GC-P2-01	Somatic		
-BRCA1	672	17	41244000	41244000	intron	SNP	C	C	T	GC-P2-01	Somatic		
-ALK	238	2	29443000	29443000	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic		p.F1174L
-BRCA2	675	13	32890000	32890000	RNA	SNP	C	C	T	GC-P1-01	Somatic		
-PIK3CA	5290	3	178936091	178936091	Missense_Mutation	SNP	C	C	T	GC-P2-01	LOH		p.E545K
-EML4	27436	2	42500000	42500000	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic	Redacted	p.A1V
-TP53	7157	17	100	100	Missense_Mutation	SNP	C	T	C	GC-P2-01	Somatic		p.A2V
-TP53	7157	17	101	101	Missense_Mutation	SNP	C			GC-P2-01	Somatic		p.A3V
-TP53	7157	17	102	103	Missense_Mutation	SNP	-	-	A	GC-P2-01	Somatic		p.A4fs
-TP53	7157	17	104	104	Missense_Mutation	SNP	C	A	G	GC-P2-01	Somatic		p.A5V
-TP53	7157	17	105	106	Frame_Shift_Del	SNP	AT	-	G	GC-P2-01	Somatic		p.A6fs
-TP53	7157	17	107	107	Missense_Mutation	SNP		NA	T	GC-P2-01	Somatic		p.A8V
-TP53	7157	17	108	108	Missense_Mutation	SNP	C	na	T	GC-P2-01	Somatic		p.A9V
-TP53	7157	17	109	109	Frame_Shift_Del	SNP	C	G	-	GC-P2-01	Somatic		p.A10V
-TP53	7157	17	110	110	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic	wildtype	p.A11V
-TP53	7157	17	-5	-3	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic	Wildtype_x	p.A12V
+Hugo_Symbol	Entrez_Gene_Id	Chromosome	Start_Position	End_Position	Variant_Classification	Variant_Type	Reference_Allele	Tumor_Seq_Allele1	Tumor_Seq_Allele2	Tumor_Sample_Barcode	Mutation_Status	Validation_Status	HGVSp_Short	Center	Matched_Norm_Sample_Barcode
+TP53	7157	17	7577120	7577120	Nonsense_Mutation	SNP	C	C	T	GC-P1-01	Somatic		p.R213*		
+KRAS	3845	12	25398284	25398284	Intron	SNP	C	C	T	GC-P1-01	Somatic				
+PTEN	5728	10	89692905	89692905	Silent	SNP	C	C	T	GC-P1-01	Somatic		p.R130R		
+EGFR	1956	7	55249071	55249071	5'Flank	SNP	C	C	T	GC-P2-01	Somatic				
+ERBB2	2064	17	37880000	37880000	IGR	SNP	C	C	T	GC-P2-01	Somatic				
+BRCA1	672	17	41244000	41244000	intron	SNP	C	C	T	GC-P2-01	Somatic				
+ALK	238	2	29443000	29443000	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic		p.F1174L		
+BRCA2	675	13	32890000	32890000	RNA	SNP	C	C	T	GC-P1-01	Somatic				
+PIK3CA	5290	3	178936091	178936091	Missense_Mutation	SNP	C	C	T	GC-P2-01	LOH		p.E545K		
+EML4	27436	2	42500000	42500000	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic	Redacted	p.A1V		
+TP53	7157	17	100	100	Missense_Mutation	SNP	C	T	C	GC-P2-01	Somatic		p.A2V		
+TP53	7157	17	101	101	Missense_Mutation	SNP	C			GC-P2-01	Somatic		p.A3V		
+TP53	7157	17	102	103	Missense_Mutation	SNP	-	-	A	GC-P2-01	Somatic		p.A4fs		
+TP53	7157	17	104	104	Missense_Mutation	SNP	C	A	G	GC-P2-01	Somatic		p.A5V		
+TP53	7157	17	105	106	Frame_Shift_Del	SNP	AT	-	G	GC-P2-01	Somatic		p.A6fs		
+TP53	7157	17	107	107	Missense_Mutation	SNP		NA	T	GC-P2-01	Somatic		p.A8V		
+TP53	7157	17	108	108	Missense_Mutation	SNP	C	na	T	GC-P2-01	Somatic		p.A9V		
+TP53	7157	17	109	109	Frame_Shift_Del	SNP	C	G	-	GC-P2-01	Somatic		p.A10V		
+TP53	7157	17	110	110	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic	wildtype	p.A11V		
+TP53	7157	17	-5	-3	Missense_Mutation	SNP	C	C	T	GC-P2-01	Somatic	Wildtype_x	p.A12V		
+EGFR	1956	7	300	300	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Unknown	p.L858R	BI	TCGA-AA-0001-11A
+EGFR	1956	7	300	300	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Valid	p.L858R	WUSM	TCGA-AA-0001-11A
+PTEN	5728	7	400	400	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Valid	p.R130*	BI	TCGA-AA-0001-11A
+PTEN	5728	7	400	400	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Unknown	p.R130*	BCM	TCGA-AA-0001-10A
+BRCA1	672	7	500	500	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Valid	p.Q100*		N1
+BRCA1	672	7	500	500	Missense_Mutation	SNP	C	C	T	GC-P1-01	Germline	Valid	p.Q100*	BCM	N1
+BRCA1	672	7	500	500	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Valid	p.Q100*	BCM	N1
+ALK	238	7	600	600	Missense_Mutation	SNP	C	C	T	GC-P1-01	Unknown	Valid	p.F1174L	A;C	N1
+ALK	238	7	600	600	Missense_Mutation	SNP	C	C	T	GC-P1-01	SOMATIC	Valid	p.F1174L	B	N1
+ALK	238	7	600	600	Missense_Mutation	SNP	C	C	T	GC-P1-01	Somatic	Valid	p.F1174V	C	N1

@@ -150,7 +150,8 @@ func (c *client) executeUnstaged(sql string) (string, error) {
 
 // mafColumns are the MAF columns the transform reads from the mutation
 // staging tables (MUTATION_EXTENDED and MUTATION_UNCALLED profiles).
-var mafColumns = strCols("study_id", "profile_stable_id", "tumor_sample_barcode", "hugo_symbol", "entrez_gene_id",
+var mafColumns = append(strCols("study_id", "profile_stable_id", "tumor_sample_barcode", "hugo_symbol", "entrez_gene_id",
 	"chromosome", "start_position", "end_position", "reference_allele", "tumor_seq_allele1", "tumor_seq_allele2",
 	"variant_classification", "variant_type", "mutation_status", "validation_status", "t_alt_count", "t_ref_count",
-	"hgvsp_short", "cbp_driver", "cbp_driver_annotation", "cbp_driver_tiers", "cbp_driver_tiers_annotation")
+	"hgvsp_short", "cbp_driver", "cbp_driver_annotation", "cbp_driver_tiers", "cbp_driver_tiers_annotation"),
+	sourceColumn{"file_num", "UInt32"}, sourceColumn{"row_num", "UInt64"})

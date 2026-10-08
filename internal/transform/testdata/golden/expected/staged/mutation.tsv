@@ -17,6 +17,11 @@ String	String	String	String	String	String	String	String	String	String	String	Str
 														2	29443000	238	ALK	golden_c_mutations	Somatic			{}		GC-P2	F1174L		C		GC-P2-01	29443000	golden_c			T		Missense_Mutation	SNP
 														2	29443000	238	ALK	golden_c_mutations_uncalled	UNCALLED			{}		GC-P1	F1174L		C		GC-P1-01	29443000	golden_c	0	40	T		Missense_Mutation	SNP
 														7	55249071	1956	EGFR	golden_c_mutations	Somatic			{}		GC-P2	Promoter		C		GC-P2-01	55249071	golden_c			T		5\'Flank	SNP
+													A;B;C	7	600	238	ALK	golden_c_mutations	SOMATIC			{}		GC-P1	F1174L		C		GC-P1-01	600	golden_c			T	Valid	Missense_Mutation	SNP
+													BCM	7	500	672	BRCA1	golden_c_mutations	Germline			{}		GC-P1	Q100*		C		GC-P1-01	500	golden_c			T	Valid	Missense_Mutation	SNP
+													BCM;BI	7	400	5728	PTEN	golden_c_mutations	Somatic			{}		GC-P1	R130*		C		GC-P1-01	400	golden_c			T	Unknown	Missense_Mutation	SNP
+													BI;WUSM	7	300	1956	EGFR	golden_c_mutations	Somatic			{}		GC-P1	L858R		C		GC-P1-01	300	golden_c			T	Valid	Missense_Mutation	SNP
+													C	7	600	238	ALK	golden_c_mutations	Somatic			{}		GC-P1	F1174V		C		GC-P1-01	600	golden_c			T	Valid	Missense_Mutation	SNP
 													golden	12	25398284	3845	KRAS	golden_a_mutations	Somatic			{"Zygosity":{}}	GRCh37	GA-P1	G12D	12/189	C		GA-P1-01	25398284	golden_a	10	30	T		Missense_Mutation	SNP
 													golden	3	178952085	5290	PIK3CA	golden_a_mutations	Germline			{"Zygosity":{}}	GRCh37	GA-P3	H1047R	1047/1068	A		GA-P3-01	178952085	golden_a	12	12	G		Missense_Mutation	SNP
 									Putative_Passenger				golden	7	55242479	1956	EGFR	golden_a_mutations	Somatic			{"Zygosity":{"code":0.5,"status":"Heterozygous"}}	GRCh37	GA-P2	E746_A750del	746-750/1210	GGAATTAAGAGAAGC		GA-P2-01	55242465	golden_a	25	60	-	Valid	In_Frame_Del	DEL
