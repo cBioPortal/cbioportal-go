@@ -111,7 +111,16 @@ statistics and errors.
 | `internal/datahub` | Checking out datahub studies with their large (LFS) files (`fetch-datahub`). |
 | `internal/reference` | Loading genes, aliases, cancer types and reference-genome genes from the seed file. |
 | `internal/transform` | The SQL that builds the normalized model and the `*_derived` tables. |
-| `internal/api` | The HTTP handlers, one per API endpoint. |
+| `internal/api` | The API server: it puts the packages below together into one router. |
+| `internal/api/core` | What every handler uses: the server state, Java's error answers and parameter checks, paging, streaming JSON, the queries that read the big study tables, and the metadata cache. |
+| `internal/api/studies` | Studies, samples, patients, clinical data, sample lists, genes, cancer types, resources and study tags. |
+| `internal/api/molecular` | Molecular profiles and their data: mutations, copy number, structural variants, generic assays, gene sets, gene panels, co-expression. |
+| `internal/api/studyview` | The study view: its filter, counts, bins, charts, the clinical data table and treatments. |
+| `internal/api/comparison` | Group comparison: enrichments, survival and clinical events. |
+| `internal/api/session`, `internal/api/sessionstore` | Saved sessions and virtual studies, and where they are stored. |
+| `internal/api/export` | Downloading a study as study files. |
+| `internal/api/auth` | Logging in, who may read which study, and data access tokens. |
+| `internal/api/portal`, `internal/api/apidocs` | The portal's own pages (frontend settings, status, sitemaps) and the API descriptions. |
 | `internal/databin`, `internal/stats` | Copies of the Java portal's chart binning and statistics code, rewritten in Go. |
 | `internal/javaorder` | Code that reproduces the order in which Java collections list their items, where that order shows up in answers. |
 | `internal/config` | Reading settings, including an existing `portal.properties`. |
@@ -150,8 +159,8 @@ requests.
 **Passing values safely.** Values that come from a request are never pasted
 into the SQL text. They are sent as ClickHouse query parameters instead. The
 SQL contains placeholders such as `{name:Type}`, and ClickHouse fills them
-in. `ch.QueryP` does this. Inside `internal/api`, `sqlArgs` collects the
-values while a statement is put together.
+in. `ch.QueryP` does this. Inside `internal/api`, `core.SQLArgs` collects
+the values while a statement is put together.
 
 - Small parameters are sent in the URL.
 - Larger ones are sent in a multipart/form-data request body.
@@ -159,10 +168,10 @@ values while a statement is put together.
   `http_max_field_value_size`, 128 KiB) is sent as a temporary "external
   table", and the placeholder selects from it.
 
-`sqlLit` and `inList` still write values straight into the SQL. Use them
+`core.SQLLit` and `core.InList` still write values straight into the SQL. Use them
 only for values chosen by the code, never for values from a request.
 
-**Cache.** In `internal/api`, a small cache (`cachedQueryP`) keeps answers to
+**Cache.** In `internal/api/core`, a small cache (`CachedQueryP`) keeps answers to
 metadata queries.
 Each entry is stored under its SQL text plus its parameter values.
 

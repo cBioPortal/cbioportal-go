@@ -36,5 +36,5 @@ done
 # The API serves these files with the paging parameters go adds laid over
 # them (internal/api/apidocs/overlay.go); the snapshots stay as fetched.
 # Check the overlay still finds its endpoints in the new snapshots.
-(cd "$D/../../.." && go test ./internal/api -run 'TestAPIDocsOverlay' -count=1)
+(cd "$D/../../.." && go test ./internal/api/apidocs -run 'TestAPIDocsOverlay' -count=1)
 echo "refreshed $D from $SRC"

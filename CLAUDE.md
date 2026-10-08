@@ -37,7 +37,15 @@ for invalid requests) still matches Java. Every fix is listed in
   `fetch-datahub` checks out datahub studies with their LFS files.
 - `cmd/cbioportal-api` — the REST API plus the frontend build (single origin),
   `net/http` with Go 1.22 routing.
-- `internal/api` handlers; `internal/transform` the SQL model;
+- `internal/api` the API: `core` the shared request machinery (the
+  `State`, Java error and parameter contract, paging, JSON streaming, the
+  scoped query layer and its cache, middleware); handler packages by area,
+  each a `Server` with a `Routes` method: `studies`, `molecular`,
+  `studyview`, `comparison` (each embedding the one before), `session`,
+  `export`, `portal`, `apidocs`; `auth` the login and study authorization;
+  `sessionstore` the session stores. `internal/api` itself only wires them
+  into the router.
+- `internal/transform` the SQL model;
   `internal/databin`, `internal/stats` ports of Java's binning and statistics;
   `internal/clickhouse` HTTP client; `internal/studyimport`,
   `internal/datahub` the import lock/flow and datahub checkouts.

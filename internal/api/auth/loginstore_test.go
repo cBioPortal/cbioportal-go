@@ -324,7 +324,7 @@ func TestLoginStoreDown(t *testing.T) {
 // TestRedisLoginStoreLive runs the store against a real Redis:
 //
 //	docker run -d --name cbioportal-go-redis -p 16379:6379 redis:7 --requirepass pw
-//	REDIS_TEST_ADDR=localhost:16379 REDIS_TEST_PASSWORD=pw go test -run RedisLoginStoreLive ./internal/api
+//	REDIS_TEST_ADDR=localhost:16379 REDIS_TEST_PASSWORD=pw go test -run RedisLoginStoreLive ./internal/api/auth
 func TestRedisLoginStoreLive(t *testing.T) {
 	addr := os.Getenv("REDIS_TEST_ADDR")
 	if addr == "" {

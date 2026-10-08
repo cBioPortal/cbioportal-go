@@ -170,7 +170,7 @@ OPTIONAL_KEYCLOAK=1 API=http://localhost:18096 go test -run OptionalOAuth2Keyclo
 ```
 
 The Redis session store has its own live test:
-`REDIS_TEST_ADDR=… go test -run RedisLoginStoreLive ./internal/api`.
+`REDIS_TEST_ADDR=… go test -run RedisLoginStoreLive ./internal/api/auth`.
 
 ## CI
 
