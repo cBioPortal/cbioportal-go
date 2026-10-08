@@ -1,4 +1,4 @@
-package api
+package auth
 
 import (
 	"bufio"
@@ -112,7 +112,7 @@ type studyIndex struct {
 	lists    map[string]string // sample list id -> study id
 }
 
-func (s *State) studyIndex() (studyIndex, error) {
+func (s Server) studyIndex() (studyIndex, error) {
 	type pair struct {
 		K string `json:"k"`
 		V string `json:"v"`
@@ -168,7 +168,7 @@ var filteredLists = map[string]bool{
 }
 
 // studyAccess enforces the policy on API requests of logged-in users.
-func (s *State) studyAccess(policy accessPolicy, next http.Handler) http.Handler {
+func (s Server) studyAccess(policy accessPolicy, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := core.GetUser(r.Context())
 		if (!ok && !policy.anonymous) || !core.IsAPIPath(r.URL.Path) {

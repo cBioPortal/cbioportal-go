@@ -1,4 +1,4 @@
-package api
+package auth
 
 import (
 	"context"
@@ -329,7 +329,7 @@ func setDATCookie(w http.ResponseWriter, r *http.Request, value string, maxAge t
 }
 
 // routeDataAccessTokens registers the dat.method=oauth2 endpoints.
-func (s *State) routeDataAccessTokens(mux *http.ServeMux, d *datProvider) {
+func (s Server) routeDataAccessTokens(mux *http.ServeMux, d *datProvider) {
 	mux.HandleFunc("GET /api/data-access-token", d.download)
 	mux.HandleFunc("GET /api/data-access-token/oauth2", d.callback)
 	notImplemented := func(w http.ResponseWriter, r *http.Request) {

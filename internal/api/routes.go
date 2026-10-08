@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/apidocs"
-	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/export"
 	"github.com/cbioportal/cbioportal-go/internal/api/portal"
 	"github.com/cbioportal/cbioportal-go/internal/api/session"
@@ -123,24 +122,5 @@ func (s *State) routes(mux *http.ServeMux) {
 	s.RouteCompat(mux)
 	s.routeProxy(mux)
 	export.New(s.State).RouteExport(mux)
-	s.routeDATs(mux)
-}
-
-// routeDATs serves the data-access-token endpoints: dat.method=oauth2's, or
-// placeholders without it.
-func (s *State) routeDATs(mux *http.ServeMux) {
-	if s.dat != nil {
-		s.routeDataAccessTokens(mux, s.dat)
-		return
-	}
-	// Data-access tokens without dat.method=oauth2: placeholders.
-	mux.HandleFunc("GET /api/data-access-token", func(w http.ResponseWriter, r *http.Request) { core.WriteJSON(w, map[string]any{}) })
-	mux.HandleFunc("GET /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) { core.WriteJSON(w, []any{}) })
-	mux.HandleFunc("POST /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {
-		core.ReadBody(r, nil)
-		core.WriteJSON(w, map[string]any{})
-	})
-	mux.HandleFunc("DELETE /api/data-access-tokens", func(w http.ResponseWriter, r *http.Request) {})
-	mux.HandleFunc("GET /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) { core.WriteJSON(w, map[string]any{}) })
-	mux.HandleFunc("DELETE /api/data-access-tokens/{token}", func(w http.ResponseWriter, r *http.Request) {})
+	s.auth.RouteDataAccessTokens(s.State, mux)
 }
