@@ -16,7 +16,7 @@
 # genes, cancer types) and the shared gene panels are loaded into an empty
 # hub first.
 #
-# Environment:
+# Environment (and datahub-lib.sh's):
 #   PR_NUMBER            datahub pull request (required)
 #   HEAD_SHA             the commit this Job is for; a Job whose commit is no
 #                        longer the PR head stops without importing
@@ -47,31 +47,13 @@ WORKDIR=${WORKDIR:-/tmp/hub-import}
 LOCK_WAIT=${LOCK_WAIT:-7200}
 LOCK_STALE=${LOCK_STALE:-600}
 LOCK_POLL=${LOCK_POLL:-30}
-GITHUB_API=${GITHUB_API:-https://api.github.com}
-DATAHUB=cBioPortal/datahub
-DATAHUB_GIT=${DATAHUB_GIT:-https://github.com/$DATAHUB.git}
-# datahub's LFS objects live behind this endpoint (its .lfsconfig), also for
-# PRs from forks.
-DATAHUB_LFS_URL=${DATAHUB_LFS_URL:-https://nsssw8k94d.execute-api.us-east-1.amazonaws.com/}
-GH_APP_KEY=${GH_APP_KEY:-/etc/gh-app/key.pem}
-IMPORT=${CBIOPORTAL_IMPORT:-cbioportal-import}
 LOG_URL=${LOG_URL:-$HUB_BASE}
 OWNER="pr-$PR_NUMBER-${HEAD_SHA:0:7}-$(hostname)-$$"
 LOCK_TABLE="\`$RAW_DB\`.\`_hub_import_lock\`"
 IMPORT_LOG="\`$RAW_DB\`.\`_hub_import_log\`"
-
-log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
-
-# ---- ClickHouse ----
-# Credentials travel as headers, so they stay out of URLs and process lists.
-ch() {
-  local auth=()
-  if [ -n "${CLICKHOUSE_USER:-}" ]; then
-    auth=(-H "X-ClickHouse-User: $CLICKHOUSE_USER" -H "X-ClickHouse-Key: ${CLICKHOUSE_PASSWORD:-}")
-  fi
-  curl -sS --fail-with-body "${auth[@]}" "${CLICKHOUSE_URL:-http://localhost:18123}/" --data-binary "$1"
-}
-sql_lit() { printf '%s' "$1" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g"; }
+REPO="$WORKDIR/datahub"
+# shellcheck source=datahub-lib.sh
+. "$(dirname "$0")/datahub-lib.sh"
 
 # ---- Import lock ----
 # The lock is a table in the raw database: CREATE TABLE succeeds for one
@@ -128,39 +110,6 @@ lock_release() {
   fi
 }
 
-# ---- GitHub ----
-# Reads use the App token when there is one (higher rate limit), else go
-# anonymous; writes need the App.
-gh_token() {
-  if [ ! -f "$GH_APP_KEY" ] || [ -z "${GH_CLIENT_ID:-}" ] || [ -z "${GH_INSTALLATION_ID:-}" ]; then return 1; fi
-  if [ -s "$WORKDIR/.gh-token" ] && [ "$(($(date +%s) - $(stat -c %Y "$WORKDIR/.gh-token")))" -lt 3000 ]; then
-    cat "$WORKDIR/.gh-token"; return 0
-  fi
-  local b64url='openssl base64 -A | tr -d = | tr /+ _-'
-  local now h p sig tok
-  now=$(date +%s)
-  h=$(printf '%s' '{"alg":"RS256","typ":"JWT"}' | eval "$b64url")
-  p=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$GH_CLIENT_ID" | eval "$b64url")
-  sig=$(printf '%s.%s' "$h" "$p" | openssl dgst -sha256 -sign "$GH_APP_KEY" -binary | eval "$b64url")
-  tok=$(curl -sf -X POST -H "Authorization: Bearer $h.$p.$sig" -H "Accept: application/vnd.github+json" \
-    "$GITHUB_API/app/installations/$GH_INSTALLATION_ID/access_tokens" | jq -r '.token // empty')
-  [ -n "$tok" ] || return 1
-  (umask 077; printf '%s' "$tok" > "$WORKDIR/.gh-token")
-  printf '%s' "$tok"
-}
-gh_api() {
-  local method=$1 path=$2 tok
-  shift 2
-  tok=$(gh_token) || return 1
-  curl -sf -X "$method" -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" -H "Content-Type: application/json" "$GITHUB_API$path" "$@"
-}
-gh_get() {
-  local path=$1 tok auth=()
-  if tok=$(gh_token); then auth=(-H "Authorization: Bearer $tok"); fi
-  curl -sf "${auth[@]}" -H "Accept: application/vnd.github+json" "$GITHUB_API$path"
-}
-
 CHECK_ID="" DEPLOY_ID=""
 SUCCESSES=0 FAILURES=0 STUDY_COUNT=0
 SUMMARY="$WORKDIR/summary.md"
@@ -212,22 +161,13 @@ PR_HEAD=$(jq -r '.head.sha' <<<"$PR_INFO")
 HEAD_SHA=${HEAD_SHA:-$PR_HEAD}
 log "PR #$PR_NUMBER head $PR_HEAD, Job for $HEAD_SHA"
 
-CHANGED=""
-for page in $(seq 1 30); do
-  files=$(gh_get "/repos/$DATAHUB/pulls/$PR_NUMBER/files?per_page=100&page=$page" | jq -r '.[].filename') \
-    || { log "cannot list the PR's files"; exit 1; }
-  [ -n "$files" ] || break
-  CHANGED+="$files"$'\n'
-done
-STUDIES=$( { grep -E '^public/[^/]+/' <<<"$CHANGED" | cut -d/ -f1-2
-             grep -E '^crdc/gdc/[^/]+/' <<<"$CHANGED" | cut -d/ -f1-3; } | sort -u)
+CHANGED=$(datahub_pr_files "$PR_NUMBER") || { log "cannot list the PR's files"; exit 1; }
+STUDIES=$(study_dirs <<<"$CHANGED")
 PANELS_CHANGED=$(grep -c '^reference_data/gene_panels/' <<<"$CHANGED")
 
 # `hub-import-only:` followed by "- <path>" lines restricts the import to
 # those of the changed studies.
-ONLY=$(jq -r '.body // ""' <<<"$PR_INFO" | tr -d '\r' | awk '
-  /^hub-import-only:/ {found=1; next}
-  found { if ($0 ~ /^-[[:space:]]/) { sub(/^-[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); if (length($0)) print } else exit }')
+ONLY=$(jq -r '.body // ""' <<<"$PR_INFO" | body_list hub-import-only)
 if [ -n "$ONLY" ]; then
   log "hub-import-only: $(tr '\n' ' ' <<<"$ONLY")"
   STUDIES=$(comm -12 <(sort -u <<<"$STUDIES") <(sort -u <<<"$ONLY"))
@@ -262,51 +202,17 @@ fi
 [ -n "$CHECK_ID" ] && log "posted check run $CHECK_ID, deployment $DEPLOY_ID"
 
 # ---- Checkout (LFS files are pulled per study, just before its ingest) ----
-REPO="$WORKDIR/datahub"
-rm -rf "$REPO"
-git init -q "$REPO" || exit 1
-git -C "$REPO" config lfs.url "$DATAHUB_LFS_URL"
-# datahub's .lfsconfig excludes every path from LFS downloads by default.
-git -C "$REPO" config lfs.fetchexclude ""
-git -C "$REPO" remote add origin "$DATAHUB_GIT"
-# The studies, the shared gene panels and the seed dump (not its archives).
-{ sed 's|.*|/&/|' <<<"$STUDIES"; echo /reference_data/gene_panels/; echo '/seedDB/seed-cbioportal_hg19_hg38_*.sql.gz'; } \
-  | grep -v '^//$' | git -C "$REPO" sparse-checkout set --no-cone --stdin
-if ! GIT_LFS_SKIP_SMUDGE=1 git -C "$REPO" fetch -q --depth=1 --filter=blob:none origin "pull/$PR_NUMBER/head"; then
+if ! datahub_fetch "pull/$PR_NUMBER/head" <<<"$STUDIES"; then
   printf -- '- :x: could not fetch the PR head\n' >> "$SUMMARY"
   finish failure "Could not fetch the PR"
 fi
-FETCHED=$(git -C "$REPO" rev-parse FETCH_HEAD)
 if [ "$FETCHED" != "$HEAD_SHA" ]; then
   printf -- '- superseded by %s\n' "$FETCHED" >> "$SUMMARY"
   finish skipped "Superseded by a newer commit"
 fi
-GIT_LFS_SKIP_SMUDGE=1 git -C "$REPO" -c advice.ignoredHook=false checkout -q FETCH_HEAD || finish failure "Could not check out the PR"
-# lfs_pull replaces the LFS pointer files under a directory by their
-# content. Each file is smudged on its own: `git lfs pull` lists the whole
-# tree with sizes, which in this blobless clone downloads every blob. An
-# object missing from datahub's LFS store is fetched from the GitHub LFS of
-# the PR's head repository, where a contributor may have pushed it.
+datahub_checkout || finish failure "Could not check out the PR"
 HEAD_LFS_URL="$(jq -r '.head.repo.clone_url // empty' <<<"$PR_INFO")"
 HEAD_LFS_URL="${HEAD_LFS_URL:-$DATAHUB_GIT}/info/lfs"
-is_pointer() { head -c 100 "$1" | grep -q '^version https://git-lfs'; }
-lfs_pull() {
-  local f n=0
-  while IFS= read -r -d '' f; do
-    is_pointer "$f" || continue
-    if ! git -C "$REPO" -c lfs.transfer.maxretries=1 lfs smudge -- "${f#"$REPO"/}" < "$f" > "$f.lfs" 2>"$WORKDIR/lfs.err" || is_pointer "$f.lfs"; then
-      log "  ${f#"$REPO"/}: not in datahub's LFS store, trying $HEAD_LFS_URL"
-      if ! git -C "$REPO" -c lfs.url="$HEAD_LFS_URL" lfs smudge -- "${f#"$REPO"/}" < "$f" > "$f.lfs" || is_pointer "$f.lfs"; then
-        log "  LFS download failed: ${f#"$REPO"/}"
-        rm -f "$f.lfs"
-        return 1
-      fi
-    fi
-    mv "$f.lfs" "$f"
-    n=$((n + 1))
-  done < <(find "$REPO/$1" -type f -size -2k -print0)
-  log "  $n LFS files downloaded"
-}
 
 # ---- Import, one at a time across Jobs ----
 lock_acquire || { printf -- '- :x: could not take the hub import lock (see logs)\n' >> "$SUMMARY"; finish failure "Could not take the hub import lock"; }
@@ -319,16 +225,14 @@ fi
 genes=$(ch "SELECT count() FROM system.tables WHERE database = '$(sql_lit "$REF_DB")' AND name = 'gene' FORMAT TSV")
 [ "$genes" = 1 ] && genes=$(ch "SELECT count() FROM \`$REF_DB\`.gene FORMAT TSV")
 if [ "${genes:-0}" = 0 ]; then
-  seed=$(ls "$REPO"/seedDB/seed-cbioportal_hg19_hg38_*.sql.gz 2>/dev/null | sort -V | tail -1)
-  log "loading reference data from ${seed:-?}"
-  [ -n "$seed" ] && "$IMPORT" load-reference "$seed" --db "$REF_DB" \
+  load_seed "$REF_DB" \
     || { printf -- '- :x: loading the reference data failed\n' >> "$SUMMARY"; finish failure "Loading the reference data failed"; }
 fi
 shared=$(ch "SELECT count() FROM system.tables WHERE database = '$(sql_lit "$RAW_DB")' AND name = 'gene_panel' FORMAT TSV")
 [ "$shared" = 1 ] && shared=$(ch "SELECT count() FROM \`$RAW_DB\`.gene_panel WHERE study_id = '' FORMAT TSV")
 if [ "${shared:-0}" = 0 ] || [ "$PANELS_CHANGED" -gt 0 ]; then
   log "loading the shared gene panels"
-  if lfs_pull reference_data/gene_panels && "$IMPORT" load-gene-panels "$REPO/reference_data/gene_panels" --db "$RAW_DB"; then
+  if load_gene_panels "$RAW_DB"; then
     if [ "$PANELS_CHANGED" -gt 0 ]; then
       printf -- '- :white_check_mark: reference gene panels\n' >> "$SUMMARY"
       SUCCESSES=$((SUCCESSES + 1))
@@ -350,16 +254,16 @@ for dir in $STUDIES; do
     RESULT[$dir]="- :heavy_minus_sign: \`$dir\` — no meta_study.txt in the PR, skipped"
     continue
   fi
-  study_id=$(sed -n 's/^cancer_study_identifier:[[:space:]]*//p' "$REPO/$dir/meta_study.txt" | tr -d '\r' | sed 's/[[:space:]]*$//')
+  sid=$(study_id "$dir")
   start=$(date +%s)
   if lfs_pull "$dir" && "$IMPORT" ingest "$REPO/$dir" --db "$RAW_DB"; then
-    IMPORTED+=("$study_id")
-    RESULT[$dir]="- :white_check_mark: [$study_id]($HUB_BASE/study/summary?id=$study_id) ($(($(date +%s) - start))s)"
+    IMPORTED+=("$sid")
+    RESULT[$dir]="- :white_check_mark: [$sid]($HUB_BASE/study/summary?id=$sid) ($(($(date +%s) - start))s)"
   else
-    log "  ingest failed; removing ${study_id:-?} from the hub"
-    [ -n "$study_id" ] && "$IMPORT" remove-study "$study_id" --db "$RAW_DB"
+    log "  ingest failed; removing ${sid:-?} from the hub"
+    [ -n "$sid" ] && "$IMPORT" remove-study "$sid" --db "$RAW_DB"
     FAILURES=$((FAILURES + 1))
-    RESULT[$dir]="- :x: \`$study_id\` — import failed (see logs); removed from the hub"
+    RESULT[$dir]="- :x: \`$sid\` — import failed (see logs); removed from the hub"
     printf '%s\n' "${RESULT[$dir]}" >> "$SUMMARY"
     check_progress
   fi

@@ -10,10 +10,14 @@ on:
       - 'docs/**'
       - '.github/workflows/ci.yml'
       - '.github/workflows/e2e.yml'
+  # Pull requests labelled `preview` get an image for their preview instance
+  # (pr-<N>.gopreview.cbioportal.org): when labelled and on each new commit.
+  pull_request:
+    types: [opened, reopened, synchronize, labeled]
   workflow_dispatch:
 
 concurrency:
-  group: docker-${{ github.ref }}
+  group: docker-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -22,17 +26,32 @@ env:
 jobs:
   image:
     name: Build and push (linux/amd64, linux/arm64)
+    # Pull requests: same-repository ones with the `preview` label only (fork
+    # PRs get no Docker Hub credentials), and no rebuild for other labels.
+    if: >-
+      github.event_name != 'pull_request' || (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'preview') &&
+        (github.event.action != 'labeled' || github.event.label.name == 'preview'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
+      # A pull request's head commit, not GitHub's merge commit.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: true
       - name: Image tags and frontend version
         id: meta
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          # main: latest; a pull request: pr-<N>. Both also get sha-<commit>.
+          if [ -n "$PR_NUMBER" ]; then tag=pr-$PR_NUMBER; else tag=latest; fi
+          echo "branch_tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$(git rev-parse --short=7 HEAD) ($(git log -1 --format=%cI))" >> "$GITHUB_OUTPUT"
           echo "frontend_commit=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "frontend_version=$(git -C frontend describe --always --tags)" >> "$GITHUB_OUTPUT"
@@ -65,16 +84,16 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.branch_tag }}
             ${{ env.IMAGE }}:sha-${{ steps.meta.outputs.short_sha }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
-            COMMIT=${{ github.sha }}
+            COMMIT=${{ steps.meta.outputs.commit }}
             FRONTEND_COMMIT=${{ steps.meta.outputs.frontend_commit }}
             FRONTEND_VERSION=${{ steps.meta.outputs.frontend_version }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.commit }}
           build-contexts: |
             frontend-dist=frontend/dist
           cache-from: type=gha

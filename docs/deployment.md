@@ -4,7 +4,9 @@
 
 `docker.io/cbioportal/cbioportal-go` (`latest` and `sha-<7-char commit>`,
 linux/amd64 and linux/arm64) is built and pushed by
-`.github/workflows/docker.yml` on every push to `main`. The
+`.github/workflows/docker.yml` on every push to `main`; pull requests
+labelled `preview` get `pr-<N>` and `sha-<commit>` (see
+[PR previews](#pr-previews)). The
 [Dockerfile](../Dockerfile) builds the frontend once on the build platform and
 cross-compiles the Go binaries, so the arm64 image needs no emulation for the
 heavy steps.
@@ -184,3 +186,32 @@ removed (`cbioportal-import remove-study`); when the transform fails, the
 PR's studies are removed and the hub rebuilt without them, while the hub
 keeps serving its previous build. The script's header lists its settings;
 it runs locally against any ClickHouse and GitHub API (`GITHUB_API`).
+
+## PR previews
+
+A pull request labelled `preview` gets its own instance at
+`https://pr-<N>.gopreview.cbioportal.org`: the PR's image on its own
+databases (`dev_cbioportal_go_pr<N>` with `_raw` and `_ref`), built by the
+PR's own `ingest` / `transform`, so schema changes of the PR apply there.
+The "Preview Configuration" of the PR description picks the data
+([template](../.github/pull_request_template.md)):
+
+| `preview-data:` | Data |
+|---|---|
+| `prod` (default) | zero-copy clone of production, as the mirror (`mirror-prod.sh` with `TARGET_DB`), then `transform --from-prod` |
+| `datahub-pr <N>` | reference data plus the studies cBioPortal/datahub#N changes, at its head (narrowed by `preview-studies:`) |
+| `studies` | reference data plus the datahub (master) studies listed under `preview-studies:` |
+
+[`ops/cbioportal.org/pr-preview-setup.sh`](../ops/cbioportal.org/pr-preview-setup.sh)
+runs every few minutes in the cluster; it rebuilds from empty databases
+only when the PR head or the configuration changed (recorded in
+`<raw>._preview_setup`) and reports a "Preview" Check Run and a Deployment
+on the PR. Closing the PR or removing the label deletes the instance;
+`pr-preview-teardown.sh` drops its databases. Manifests:
+knowledgesystems-k8s-deployment `apps/cbioportal-go-preview/`. Locally:
+
+```bash
+PR_NUMBER=9999 HEAD_SHA=abc1234 PR_BODY="$(cat body.md)" WORKDIR=/tmp/pr \
+  ops/cbioportal.org/pr-preview-setup.sh    # prod mode: also SRC_DB=<a Java-schema db>
+ops/cbioportal.org/pr-preview-teardown.sh 9999
+```

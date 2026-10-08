@@ -25,10 +25,20 @@
 # The user needs SELECT on ${SRC_PREFIX}{blue,green}.* and the update_status
 # table, and SELECT, INSERT, ALTER, CREATE TABLE, CREATE VIEW, DROP TABLE,
 # DROP VIEW and TRUNCATE on the six ${PREFIX}_* databases (they must exist).
+#
+# Fixed source or target, for other copies of production (the per-PR
+# previews of pr-preview-setup.sh):
+#   SRC_DB      clone this database instead of the live production color;
+#               update_status is not read
+#   TARGET_DB   build into TARGET_DB, ${TARGET_DB}_raw and ${TARGET_DB}_ref
+#               (they must exist) unconditionally, instead of the inactive
+#               blue/green color; PREFIX and ACTIVE_DB are not used
 set -euo pipefail
 
 : "${CLICKHOUSE_URL:?missing}"
 PREFIX=${PREFIX:-dev_cbioportal_public_go}
+SRC_DB=${SRC_DB:-}
+TARGET_DB=${TARGET_DB:-}
 WORKDIR=${WORKDIR:-/work}
 MGMT_DB=${MGMT_DB:-publicdb_update_management_database}
 SRC_PREFIX=${SRC_PREFIX:-cbioportal_public_}
@@ -53,11 +63,17 @@ ch() {
 }
 
 # 1) Production color and the import it serves.
-IFS=$'\t' read -r PROD_COLOR PROD_STATUS PROD_COMPLETED < <(ch "SELECT current_database_in_production, update_process_status, toString(time_of_last_update_process_completion) FROM ${MGMT_DB}.update_status WHERE portal_database = '${PORTAL_DATABASE}' FORMAT TSV")
-case "$PROD_COLOR" in blue | green) ;; *) log "FAIL: unexpected production color '$PROD_COLOR'"; exit 1 ;; esac
-SRC_DB=${SRC_PREFIX}${PROD_COLOR}
-SNAPSHOT="$PROD_COLOR $PROD_COMPLETED"
-log "production color=$PROD_COLOR, status=$PROD_STATUS, last import completed $PROD_COMPLETED"
+if [ -n "$SRC_DB" ]; then
+  PROD_STATUS=complete
+  SNAPSHOT="$SRC_DB"
+  log "source $SRC_DB"
+else
+  IFS=$'\t' read -r PROD_COLOR PROD_STATUS PROD_COMPLETED < <(ch "SELECT current_database_in_production, update_process_status, toString(time_of_last_update_process_completion) FROM ${MGMT_DB}.update_status WHERE portal_database = '${PORTAL_DATABASE}' FORMAT TSV")
+  case "$PROD_COLOR" in blue | green) ;; *) log "FAIL: unexpected production color '$PROD_COLOR'"; exit 1 ;; esac
+  SRC_DB=${SRC_PREFIX}${PROD_COLOR}
+  SNAPSHOT="$PROD_COLOR $PROD_COMPLETED"
+  log "production color=$PROD_COLOR, status=$PROD_STATUS, last import completed $PROD_COMPLETED"
+fi
 
 # Keeps the served databases: state.env names them, so the switch step is a
 # no-op and the pods are not restarted.
@@ -67,7 +83,8 @@ keep_active() {
   printf 'CBIOPORTAL_DB=%s\nCBIOPORTAL_RAW_DB=%s\nCBIOPORTAL_REF_DB=%s\n' "$ACTIVE_DB" "${ACTIVE_DB}_raw" "${ACTIVE_DB}_ref" >"$WORKDIR/state.env"
   exit 0
 }
-case "${ACTIVE_DB:-}" in
+case "${TARGET_DB:+fixed}${ACTIVE_DB:-}" in
+  fixed*) ;;
   "${PREFIX}_blue" | "${PREFIX}_green")
     [ "$PROD_STATUS" = complete ] || keep_active "production import in progress (status=$PROD_STATUS)"
     built_from=""
@@ -80,13 +97,18 @@ case "${ACTIVE_DB:-}" in
 esac
 
 # 2) Target color: the one not being served.
-case "${ACTIVE_DB:-}" in
-  "${PREFIX}_blue") COLOR=green ;;
-  "${PREFIX}_green") COLOR=blue ;;
-  *) log "active='${ACTIVE_DB:-}' — bootstrapping into blue"; COLOR=blue ;;
-esac
-DB=${PREFIX}_${COLOR} RAW_DB=${PREFIX}_${COLOR}_raw REF_DB=${PREFIX}_${COLOR}_ref
-log "active=${ACTIVE_DB:-<unset>}; building into $DB"
+if [ -n "$TARGET_DB" ]; then
+  DB=$TARGET_DB RAW_DB=${TARGET_DB}_raw REF_DB=${TARGET_DB}_ref
+  log "building into $DB"
+else
+  case "${ACTIVE_DB:-}" in
+    "${PREFIX}_blue") COLOR=green ;;
+    "${PREFIX}_green") COLOR=blue ;;
+    *) log "active='${ACTIVE_DB:-}' — bootstrapping into blue"; COLOR=blue ;;
+  esac
+  DB=${PREFIX}_${COLOR} RAW_DB=${PREFIX}_${COLOR}_raw REF_DB=${PREFIX}_${COLOR}_ref
+  log "active=${ACTIVE_DB:-<unset>}; building into $DB"
+fi
 
 # 3) Empty the target databases (tables and views; the databases stay, since
 #    the job user may not create or drop databases), then clone production.
