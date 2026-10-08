@@ -32,6 +32,8 @@
 #   UA          User-Agent (api.cbioportal.org refuses browsers; default cbioportal-go-parity)
 #   ISSUE_REPO  repository of the alert issue (default cBioPortal/cbioportal-go)
 #   PARITY_ISSUE  the alert issue's number, instead of looking it up (for --dry-run tests)
+#   PARITY_MEMORY_MAX  memory cap of paritydiff's systemd scope (default 2G;
+#               GOMEMLIMIT, default 1500MiB, is its collector's soft limit)
 #
 # Exit status: 0 when every request is identical or a known difference, 1 on
 # unexplained differences, status mismatches or errors, 2 when the check
@@ -97,8 +99,14 @@ version() {
 VA="$(version "$A")"
 VB="$(version "$B")"
 
+# paritydiff runs in a memory-capped scope where systemd allows one, so a
+# runaway comparison ends only itself, not the session that started it.
+capped=()
+if systemd-run --user --scope -q true 2>/dev/null; then
+  capped=(systemd-run --user --scope -q -p "MemoryMax=${PARITY_MEMORY_MAX:-2G}" -p MemorySwapMax=0)
+fi
 start=$(date +%s)
-"$DIR/bin/paritydiff" -corpus "$CORPUS" -a "$A" -b "$B" -ua "$UA" -rate "$RATE" \
+"${capped[@]}" env GOMEMLIMIT="${GOMEMLIMIT:-1500MiB}" "$DIR/bin/paritydiff" -corpus "$CORPUS" -a "$A" -b "$B" -ua "$UA" -rate "$RATE" \
   -cache '' -retry 2m -self-check -q -json "$RUN/results.json" \
   -dump "$RUN/dump" -dump-unexplained -dump-max 1000000 >"$RUN/output.txt" 2>&1
 rc=$?

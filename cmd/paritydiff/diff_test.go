@@ -22,7 +22,7 @@ func diff(t *testing.T, a, b string, o compareOptions) diffResult {
 
 func TestSelfCheck(t *testing.T) {
 	rq := request{Name: "r", Opts: requestOptions{Unordered: true}}
-	ok := func(body string) response { return response{Status: 200, Body: body} }
+	ok := func(body string) response { return response{Status: 200, Body: []byte(body)} }
 	for _, c := range []struct {
 		name         string
 		a, b, b2     response
@@ -33,7 +33,7 @@ func TestSelfCheck(t *testing.T) {
 		{"stable reference, A differs", ok(`[1]`), ok(`[2]`), ok(`[2]`), nil, differs, refSame},
 		{"unstable reference, A differs", ok(`[1]`), ok(`[2]`), ok(`[3]`), nil, nondeterministic, refDiffers},
 		{"unstable reference, A agrees", ok(`[1]`), ok(`[1]`), ok(`[3]`), nil, identical, refDiffers},
-		{"unstable status", ok(`[1]`), response{Status: 500, Body: "x"}, ok(`[1]`), nil, nondeterministic, refDiffers},
+		{"unstable status", ok(`[1]`), response{Status: 500, Body: []byte("x")}, ok(`[1]`), nil, nondeterministic, refDiffers},
 		{"gateway on B'", ok(`[1]`), ok(`[2]`), response{Status: 503}, nil, differs, refUnverified},
 		{"transport error on B'", ok(`[1]`), ok(`[2]`), response{}, errors.New("reset"), differs, refUnverified},
 	} {
@@ -203,14 +203,14 @@ POST /api/mutations/fetch
 func TestCompareResponsesOutcomes(t *testing.T) {
 	o := defaultOptions()
 	rq := request{Name: "x"}
-	if r := compareResponses(rq, response{200, `{"a":1}`}, response{200, `{"a":1}`}, o); r.Outcome != identical {
+	if r := compareResponses(rq, response{200, []byte(`{"a":1}`)}, response{200, []byte(`{"a":1}`)}, o); r.Outcome != identical {
 		t.Fatalf("got %+v", r)
 	}
-	if r := compareResponses(rq, response{200, `{}`}, response{400, `{}`}, o); r.Outcome != status {
+	if r := compareResponses(rq, response{200, []byte(`{}`)}, response{400, []byte(`{}`)}, o); r.Outcome != status {
 		t.Fatalf("got %+v", r)
 	}
 	rq.Opts.Known = "reason"
-	if r := compareResponses(rq, response{200, `{"a":1}`}, response{200, `{"a":2}`}, o); r.Outcome != known {
+	if r := compareResponses(rq, response{200, []byte(`{"a":1}`)}, response{200, []byte(`{"a":2}`)}, o); r.Outcome != known {
 		t.Fatalf("got %+v", r)
 	}
 }

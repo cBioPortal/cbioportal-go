@@ -21,6 +21,12 @@
 // between A and B is then not attributed to A (outcome "nondeterministic"),
 // and the result records the B/B' differences either way. Both B requests
 // count toward -rate.
+//
+// Memory is bounded by one request's bodies: requests are compared one at a
+// time, A's body is released before B is asked again, and top-level arrays
+// larger than -stream-above are compared element by element (compareStream)
+// instead of decoded whole. Without GOMEMLIMIT the collector's soft limit is
+// 1 GiB.
 package main
 
 import (
@@ -36,6 +42,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -46,8 +53,58 @@ import (
 var userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 type response struct {
-	Status int    `json:"status"`
-	Body   string `json:"body"`
+	Status int
+	Body   []byte
+}
+
+// cacheHeader is the first line of a cache file; the response body follows
+// it as sent. (Files of one JSON line also holding the body as a string are
+// read too.)
+type cacheHeader struct {
+	Method  string `json:"Method,omitempty"`
+	Path    string `json:"Path,omitempty"`
+	Request string `json:"Request,omitempty"`
+	Status  int    `json:"status"`
+	Body    string `json:"body,omitempty"`
+}
+
+// readCache reads a cache file without copying its body.
+func readCache(path string) (response, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return response{}, false
+	}
+	line, body, split := bytes.Cut(b, []byte("\n"))
+	var h cacheHeader
+	if json.Unmarshal(line, &h) != nil {
+		return response{}, false
+	}
+	if !split {
+		body = []byte(h.Body)
+	}
+	return response{Status: h.Status, Body: body}, true
+}
+
+// writeCache writes a cache file: the header line, then the body.
+func writeCache(path string, rq request, r response) {
+	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
+		return
+	}
+	line, err := json.Marshal(cacheHeader{Method: rq.Method, Path: rq.Path, Request: rq.Body, Status: r.Status})
+	if err != nil {
+		return
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return
+	}
+	_, err = f.Write(append(line, '\n'))
+	if err == nil {
+		_, err = f.Write(r.Body)
+	}
+	if f.Close() != nil || err != nil {
+		_ = os.Remove(path)
+	}
 }
 
 type fetcher struct {
@@ -71,11 +128,8 @@ func (f *fetcher) get(rq request) (response, error) {
 	if f.cacheDir != "" {
 		path = f.cachePath(rq)
 		if !f.refresh {
-			if b, err := os.ReadFile(path); err == nil {
-				var r response
-				if json.Unmarshal(b, &r) == nil {
-					return r, nil
-				}
+			if r, ok := readCache(path); ok {
+				return r, nil
 			}
 		}
 	}
@@ -103,23 +157,18 @@ func (f *fetcher) get(rq request) (response, error) {
 		return response{}, err
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
+	var buf bytes.Buffer
+	if resp.ContentLength > 0 {
+		buf.Grow(int(resp.ContentLength))
+	}
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
 		return response{}, err
 	}
 	f.fetched++
-	r := response{Status: resp.StatusCode, Body: string(b)}
+	r := response{Status: resp.StatusCode, Body: buf.Bytes()}
 	// Server errors and throttling are not cached, so a rerun retries them.
 	if path != "" && r.Status < 500 && r.Status != 429 {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-			entry := struct {
-				Method, Path, Request string
-				response
-			}{rq.Method, rq.Path, rq.Body, r}
-			if out, err := json.Marshal(entry); err == nil {
-				_ = os.WriteFile(path, out, 0o644)
-			}
-		}
+		writeCache(path, rq, r)
 	}
 	return r, nil
 }
@@ -201,7 +250,7 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		if rq.Opts.Known != "" {
 			res.Outcome, res.Known = known, rq.Opts.Known
 		}
-		res.Diffs = []string{fmt.Sprintf("a: %.200s", oneLine(ra.Body)), fmt.Sprintf("b: %.200s", oneLine(rb.Body))}
+		res.Diffs = []string{fmt.Sprintf("a: %.200s", oneLine(head(ra.Body))), fmt.Sprintf("b: %.200s", oneLine(head(rb.Body)))}
 		return res
 	}
 	if rq.Opts.StatusOnly || ra.Status >= 300 {
@@ -213,14 +262,19 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	opts.Ignore = setOf(rq.Opts.Ignore)
 	opts.UnorderedKeys = setOf(rq.Opts.UnorderedKeys)
 	opts.Ties = rq.Opts.Ties
-	ja, errA := decodeJSON([]byte(ra.Body))
-	jb, errB := decodeJSON([]byte(rb.Body))
-	var d diffResult
-	switch {
-	case errA == nil && errB == nil:
-		d = compareJSON(ja, jb, opts)
-	case strings.TrimSpace(ra.Body) != strings.TrimSpace(rb.Body):
-		d.add(&opts, "", "non-JSON bodies differ: a=%.80q b=%.80q", ra.Body, rb.Body)
+	d, streamed := diffResult{}, false
+	if len(ra.Body)+len(rb.Body) > streamAbove {
+		d, streamed = compareStream(ra.Body, rb.Body, opts)
+	}
+	if !streamed {
+		ja, errA := decodeJSON(ra.Body)
+		jb, errB := decodeJSON(rb.Body)
+		switch {
+		case errA == nil && errB == nil:
+			d = compareJSON(ja, jb, opts)
+		case !bytes.Equal(bytes.TrimSpace(ra.Body), bytes.TrimSpace(rb.Body)):
+			d.add(&opts, "", "non-JSON bodies differ: a=%.80q b=%.80q", head(ra.Body), head(rb.Body))
+		}
 	}
 	res.Count, res.Diffs = d.Count, d.Diffs
 	switch {
@@ -242,8 +296,20 @@ func setOf(keys []string) map[string]bool {
 	return m
 }
 
+// streamAbove is the combined size of two bodies above which top-level
+// arrays are compared element by element (compareStream).
+var streamAbove = 8 << 20
+
+// head is the start of a body, for messages.
+func head(b []byte) string {
+	if len(b) > 4096 {
+		b = b[:4096]
+	}
+	return string(b)
+}
+
 // cut returns s cut to max bytes (0: whole).
-func cut(s string, max int) string {
+func cut(s []byte, max int) []byte {
 	if max > 0 && len(s) > max {
 		return s[:max]
 	}
@@ -270,7 +336,13 @@ func main() {
 	selfCheckB := flag.Bool("self-check", false, "send every request to B twice and compare the two answers; A/B differences where they differ are \"nondeterministic\"")
 	retry := flag.Duration("retry", -1, "send requests that failed in transport or with 502/503/504 once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
+	flag.IntVar(&streamAbove, "stream-above", streamAbove, "compare top-level arrays element by element when the two bodies together exceed this many bytes, to bound memory")
 	flag.Parse()
+	if os.Getenv("GOMEMLIMIT") == "" {
+		// A soft limit: the collector works harder near it, so the garbage
+		// of comparing large responses is returned early.
+		debug.SetMemoryLimit(1 << 30)
+	}
 
 	f, err := os.Open(*corpus)
 	if err != nil {
@@ -303,15 +375,29 @@ func main() {
 		msA := time.Since(start).Milliseconds()
 		rb, errB := fb.get(rq)
 		var res result
-		switch {
-		case errA != nil || errB != nil:
+		if errA != nil || errB != nil {
 			res = result{Name: rq.Name, Outcome: failed, Diffs: []string{fmt.Sprintf("a: %v", errA), fmt.Sprintf("b: %v", errB)}}
-		default:
+		} else {
 			res = compareResponses(rq, ra, rb, opts)
-			if *selfCheckB {
-				rb2, errB2 := fb.get(rq)
-				res = selfCheck(res, rq, rb, rb2, errB2, opts)
+		}
+		// One request's bodies are held at a time, and A's no longer than
+		// needed: they are dumped (and removed again below if the request
+		// settles) before B is asked a second time.
+		var pathA, pathB string
+		if *dump != "" {
+			pathA, pathB = filepath.Join(*dump, rq.Name+".a.json"), filepath.Join(*dump, rq.Name+".b.json")
+			if res.Outcome != identical && res.Outcome != failed {
+				if err := os.MkdirAll(*dump, 0o755); err != nil {
+					fatal(err)
+				}
+				_ = os.WriteFile(pathA, cut(ra.Body, *dumpMax), 0o644)
+				_ = os.WriteFile(pathB, cut(rb.Body, *dumpMax), 0o644)
 			}
+		}
+		ra = response{}
+		if res.Outcome != failed && *selfCheckB {
+			rb2, errB2 := fb.get(rq)
+			res = selfCheck(res, rq, rb, rb2, errB2, opts)
 		}
 		res.Request = rq.Method + " " + rq.Path
 		res.Body = rq.Body
@@ -319,20 +405,11 @@ func main() {
 			res.Body = res.Body[:200] + "…"
 		}
 		res.MillisA = msA
-		if *dump != "" {
-			pathA, pathB := filepath.Join(*dump, rq.Name+".a.json"), filepath.Join(*dump, rq.Name+".b.json")
-			if res.Outcome == identical || res.Outcome == failed ||
-				(*dumpUnexplained && (res.Outcome == known || res.Outcome == nondeterministic)) {
-				// A retry that settles the request leaves no dump behind.
-				_ = os.Remove(pathA)
-				_ = os.Remove(pathB)
-			} else {
-				if err := os.MkdirAll(*dump, 0o755); err != nil {
-					fatal(err)
-				}
-				_ = os.WriteFile(pathA, []byte(cut(ra.Body, *dumpMax)), 0o644)
-				_ = os.WriteFile(pathB, []byte(cut(rb.Body, *dumpMax)), 0o644)
-			}
+		if *dump != "" && (res.Outcome == identical || res.Outcome == failed ||
+			(*dumpUnexplained && (res.Outcome == known || res.Outcome == nondeterministic))) {
+			// A retry that settles the request leaves no dump behind.
+			_ = os.Remove(pathA)
+			_ = os.Remove(pathB)
 		}
 		return res
 	}
