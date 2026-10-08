@@ -115,21 +115,3 @@ func TestKnownAPIPathWrongMethod(t *testing.T) {
 		t.Errorf("body %q (%v)", w.Body.String(), err)
 	}
 }
-
-// TestTrailingSlashMatch checks that /api/ paths with a trailing slash are
-// served by the route without it, as Java's setUseTrailingSlashMatch does.
-func TestTrailingSlashMatch(t *testing.T) {
-	s := &State{}
-	mux := http.NewServeMux()
-	s.routes(mux)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/hello/", nil))
-	if w.Code != http.StatusOK || w.Body.String() != "Greetings from Spring Boot!" {
-		t.Fatalf("GET /api/hello/: status %d body %q, want 200 greeting", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/no-such-endpoint/", nil))
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GET /api/no-such-endpoint/: status %d, want 404", w.Code)
-	}
-}

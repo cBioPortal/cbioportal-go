@@ -124,16 +124,6 @@ func (s *State) portal(w http.ResponseWriter, r *http.Request) {
 // the portal at "/" and an empty list elsewhere.
 func (s *State) catchAll(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") {
-		// Java matches a trailing slash to the route without it
-		// (WebAppConfig setUseTrailingSlashMatch), e.g. /api/gene-panels/.
-		if trimmed := strings.TrimSuffix(r.URL.Path, "/"); trimmed != r.URL.Path && s.mux != nil {
-			r2 := r.Clone(r.Context())
-			r2.URL.Path, r2.URL.RawPath = trimmed, ""
-			if h, pattern := s.mux.Handler(r2); pattern != "/" {
-				h.ServeHTTP(w, r2)
-				return
-			}
-		}
 		readBody(r, nil)
 		if allow := s.allowedMethods(r); len(allow) > 0 {
 			w.Header().Set("Allow", strings.Join(allow, ", "))
