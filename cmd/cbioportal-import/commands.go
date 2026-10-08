@@ -99,13 +99,58 @@ reference_data/gene_panels) into the raw database.`,
 		setup:    setupLoadGenePanels,
 	},
 	{
+		name: "import-study", args: "<study-dir>...", minArgs: 1, maxArgs: -1,
+		short: "import studies into a portal that is being served",
+		long: `Import-study stages each study directory in the raw database and then
+rebuilds the portal database once, like ingest followed by transform, but
+safe to run against a portal that is being served:
+
+  - One import at a time: the import holds a lock (a table in the raw
+    database) and refreshes it every minute. Another import waits for it
+    (--lock-wait) and takes over a lock whose holder stopped refreshing it
+    (--lock-stale).
+  - The transform builds the new tables beside the served ones (named
+    __next_*) and swaps them in together at the end (EXCHANGE TABLES), so
+    the portal serves either its previous state or the new one.
+  - A study that fails to stage is removed from the portal. When the
+    transform fails, this run's studies are removed and the portal is
+    rebuilt without them.
+
+The reference database is loaded from --seed when it has no genes yet, and
+the shared gene panels from --gene-panels when the raw database has none
+(or always, with --reload-panels). --raw-db and --ref-db default to the
+portal database's name with _raw and _ref. The exit status is 1 when any
+study failed.`,
+		examples: []string{
+			"import-study datahub/public/acbc_mskcc_2015 --db cbioportal",
+			"import-study datahub/public/a datahub/public/b --db portal --seed datahub/seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz --gene-panels datahub/reference_data/gene_panels",
+		},
+		setup: setupImportStudy,
+	},
+	{
+		name: "fetch-datahub", args: "<dir> [<study-path>...]", minArgs: 1, maxArgs: -1,
+		short: "check out datahub studies with their LFS files",
+		long: `Fetch-datahub checks out the given studies of cBioPortal/datahub
+(public/<study>, crdc/gdc/<study>) into <dir>, together with the shared gene
+panels (reference_data/gene_panels) and the seed dumps (seedDB). The
+checkout is shallow and sparse, so only these paths are downloaded. Large
+files come from datahub's own Git LFS store (--lfs-url, the store named in
+datahub's .lfsconfig), never from GitHub's LFS. <dir> is replaced.`,
+		examples: []string{
+			"fetch-datahub datahub public/acbc_mskcc_2015 public/msk_impact_2017",
+			"fetch-datahub datahub --ref pull/2372/head public/brca_tcga",
+		},
+		setup: setupFetchDatahub,
+	},
+	{
 		name: "transform", minArgs: 0, maxArgs: 0,
 		short: "build the portal database's tables from the raw and reference databases",
 		long: `Transform rebuilds every derived table and view of the portal database
 from the staged studies (--raw-db) and the reference data (--ref-db), and
 prints the row count of each. The API serves the portal database (--db).
 
-With --from-prod, --ref-db is instead a clone of a cBioPortal production
+--from-prod is for the migration from Java cBioPortal only: it builds go's
+tables from Java's. --ref-db is then a clone of a cBioPortal production
 ClickHouse database (cbioportal-core's schema plus its *_derived tables, e.g.
 cloned with CREATE TABLE ... CLONE AS) and serves as the reference database
 too: the portal database is built from it, mostly as views over the clone,
@@ -235,7 +280,7 @@ func setupTransform(fs *flag.FlagSet) func([]string, io.Writer) error {
 	rawDB := fs.String("raw-db", "cbioportal_raw", "raw staging `database` to read")
 	db := fs.String("db", "cbioportal", "portal `database` to build; the API serves it with -db")
 	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference `database` to read (with -from-prod: the production clone)")
-	fromProd := fs.Bool("from-prod", false, "build from a clone of a cBioPortal production database (-ref-db) instead of staged studies")
+	fromProd := fs.Bool("from-prod", false, "Java migration only: build from a clone of a Java cBioPortal production database (-ref-db) instead of staged studies")
 	return func(_ []string, w io.Writer) error {
 		if *fromProd {
 			start := time.Now()

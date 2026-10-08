@@ -10,11 +10,10 @@
 #   scripts/import-benchmark.sh counts <db>
 #   scripts/import-benchmark.sh clean                 # drop every bench_* database
 #
-# `fetch` checks out datahub's master (DATAHUB_REF) sparsely into
-# <dir>/datahub, with every LFS file from datahub's own store (its
-# .lfsconfig; DATAHUB_LFS_URL in ops/cbioportal.org/datahub-lib.sh) and no
-# other source, and writes <dir>/panels-<study> with the gene panels each
-# study uses. Keep <dir> outside /tmp: snap Docker cannot see it.
+# `fetch` checks out datahub's master (DATAHUB_REF) into <dir>/datahub with
+# `cbioportal-import fetch-datahub` (LFS files from datahub's own store
+# only), and writes <dir>/panels-<study> with the gene panels each study
+# uses. Keep <dir> outside /tmp: snap Docker cannot see it.
 #
 # Java: validateData.py, then cbioportalImporter.py (one JVM per data file)
 # in a container capped at 8 GiB, -Xmx6g; then populate_derived_tables.sql
@@ -67,16 +66,8 @@ case "${1:-}" in
 fetch)
   WORKDIR="$(mkdir -p "$2" && cd "$2" && pwd)" REPO="$(cd "$2" && pwd)/datahub"
   shift 2
-  # shellcheck source=../ops/cbioportal.org/datahub-lib.sh
-  . "$ROOT/ops/cbioportal.org/datahub-lib.sh"
-  HEAD_LFS_URL=$DATAHUB_LFS_URL
-  datahub_fetch "${DATAHUB_REF:-master}" < <(printf '%s\n' "$@")
-  datahub_checkout
-  log "datahub $FETCHED"
-  lfs_pull reference_data/gene_panels
-  lfs_pull seedDB
+  (cd "$ROOT" && go run ./cmd/cbioportal-import fetch-datahub "$REPO" --ref "${DATAHUB_REF:-master}" "$@")
   for s in "$@"; do
-    lfs_pull "$s"
     panels="$WORKDIR/panels-$(basename "$s")"
     rm -rf "$panels"
     mkdir -p "$panels"
@@ -87,7 +78,7 @@ fetch)
     } | tr -d '\r' | grep -v -x -e '' -e NA | sort -u | while read -r id; do
       cp "$(grep -l -E "^stable_id:[[:space:]]*$id[[:space:]]*\$" "$REPO"/reference_data/gene_panels/*.txt | head -1)" "$panels/"
     done
-    log "$s: $(ls "$panels" | wc -l) gene panels"
+    echo "$s: $(ls "$panels" | wc -l) gene panels" >&2
   done
   ;;
 java)

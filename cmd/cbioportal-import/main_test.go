@@ -77,7 +77,7 @@ func TestHelp(t *testing.T) {
 			if code != 0 || !strings.HasPrefix(out, "Usage: cbioportal-import "+c.name) || !strings.Contains(out, "Examples:") {
 				t.Errorf("%q: exit %d, output:\n%s", args, code, out)
 			}
-			if c.name != "plan" && !strings.Contains(out, "-url endpoint") {
+			if c.name != "plan" && c.name != "fetch-datahub" && !strings.Contains(out, "-url endpoint") {
 				t.Errorf("%q: usage lacks -url", args)
 			}
 		}
