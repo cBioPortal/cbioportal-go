@@ -63,12 +63,6 @@ Statistics stay hand-ported: exact Java parity requires it. CI runs
 Repo: <https://github.com/cBioPortal/cbioportal-go> (`origin`, default
 branch `main`). Commit directly to `main`.
 
-## Dev environment
-
-**Dev servers must bind to the local network.** This is a headless server — the
-user accesses dev servers from another machine on the LAN. Always bind to
-`0.0.0.0`. Report URL as `http://macbook-server-1337:<port>`.
-
 ## No "prior state" comments in code
 
 Comments describe current intent only, not what was changed from.

@@ -19,3 +19,6 @@ test/keycloak/realm.generated.json
 
 # Parity tool cache (www responses) and local scratch
 .parity/
+
+# Per-machine Claude Code instructions
+CLAUDE.local.md
