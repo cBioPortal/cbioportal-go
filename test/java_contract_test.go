@@ -193,6 +193,7 @@ func TestContractNotFoundMessages(t *testing.T) {
 		{"/api/studies/study_es_0/patients/NOPE", "Patient not found in study study_es_0: NOPE"},
 		{"/api/studies/study_es_0/clinical-attributes/NOPE", "Clinical attribute not found in study study_es_0: NOPE"},
 		{"/api/genes/NOTAGENE123", "Gene not found: NOTAGENE123"},
+		{"/api/genes/tp53", "Gene not found: tp53"},
 		{"/api/molecular-profiles/no_such_profile", "Molecular profile not found: no_such_profile"},
 		{"/api/sample-lists/no_such_list", "Sample list not found: no_such_list"},
 		{"/api/cancer-types/no_such_type", "Cancer type not found: no_such_type"},
@@ -203,6 +204,27 @@ func TestContractNotFoundMessages(t *testing.T) {
 	}
 	wantError(t, "POST", "/api/molecular-profiles/no_such_prof/mutations/fetch",
 		`{"sampleListId":"study_es_0_all","entrezGeneIds":[7157]}`, 404, "Molecular profile not found: no_such_prof")
+}
+
+// TestContractGenesFetchIdType: GeneServiceImpl.fetchGenes looks up only the
+// integer ids by entrez id unless geneIdType is HUGO_GENE_SYMBOL, and matches
+// symbols exactly, case included; the genes come sorted by symbol.
+func TestContractGenesFetchIdType(t *testing.T) {
+	requireAPI(t)
+	symbols := func(path string, body any) []string {
+		t.Helper()
+		var genes []map[string]any
+		post(t, path, body, &genes)
+		out := []string{}
+		for _, g := range genes {
+			out = append(out, g["hugoGeneSymbol"].(string))
+		}
+		return out
+	}
+	wantEq(t, symbols("/api/genes/fetch", []string{"TP53", "BRCA1"}), []string{})
+	wantEq(t, symbols("/api/genes/fetch", []any{"7157", 672}), []string{"BRCA1", "TP53"})
+	wantEq(t, symbols("/api/genes/fetch?geneIdType=HUGO_GENE_SYMBOL", []string{"TP53", "brca1", "Kras", "7157"}), []string{"TP53"})
+	wantEq(t, symbols("/api/genes/fetch?geneIdType=HUGO_GENE_SYMBOL", []string{"TP53", "BRCA1"}), []string{"BRCA1", "TP53"})
 }
 
 func TestContractRequestValidation(t *testing.T) {
