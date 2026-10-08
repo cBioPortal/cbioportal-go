@@ -1,11 +1,13 @@
 # Deploying cbioportal-go
 
-Generic tooling for running cbioportal-go on your own ClickHouse; see
-[Deployment](../docs/deployment.md) for the container image and
-[Configuration](../docs/configuration.md) for its settings.
+This folder holds tools that help you run cbioportal-go on your own
+ClickHouse database. See [Deployment](../docs/deployment.md) for the
+container image, and [Configuration](../docs/configuration.md) for its
+settings.
 
-| File | Purpose |
+| File | What it is for |
 |---|---|
-| `publish-local-studies.sh` | Copy studies imported into a local ClickHouse to another ClickHouse and build the portal database there |
+| `publish-local-studies.sh` | Copies studies you imported into a local ClickHouse over to another ClickHouse (for example ClickHouse Cloud). There it loads the reference data and builds the portal database. Run it without arguments to see how to use it. |
 
-The cBioPortal team's own deployment scripts are in [ops/cbioportal.org/](../ops/cbioportal.org/).
+The cBioPortal team's own deployment scripts are in
+[ops/cbioportal.org/](../ops/cbioportal.org/).

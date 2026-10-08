@@ -1,17 +1,20 @@
 # cbioportal.org operations
 
-Scripts and configuration for the cBioPortal team's own deployments
-(go.cbioportal.org, hub.cbioportal.org). They depend on that infrastructure:
-production's ClickHouse databases and update status, datahub's pull requests
-and the team's GitHub App. To run cbioportal-go yourself, see [deploy/](../../deploy/)
-and [Deployment](../../docs/deployment.md).
+This folder holds the scripts and settings the cBioPortal team uses to run
+its own servers: go.cbioportal.org and hub.cbioportal.org. They only work
+with the team's own setup. They need production's ClickHouse databases and
+import status, datahub's pull requests, and the team's GitHub App.
 
-| File | Used by |
+To run cbioportal-go yourself, see [deploy/](../../deploy/) and
+[Deployment](../../docs/deployment.md) instead.
+
+| File | What it is for |
 |---|---|
-| `public-portal.properties`, `public-portal-frontend-config.json` | www.cbioportal.org's portal settings, used by go.cbioportal.org and its mirror deployments |
-| `mirror-prod.sh` | Hourly job that rebuilds go.cbioportal.org's databases after each production import |
-| `hub-import.sh` | Per-PR import Job of hub.cbioportal.org (datahub `preview` PRs) |
-| `pr-preview-setup.sh`, `pr-preview-teardown.sh` | Databases of the cbioportal-go PR previews, pr-&lt;N&gt;.gopreview.cbioportal.org |
-| `datahub-lib.sh` | ClickHouse, GitHub App and datahub checkout helpers shared by the scripts above |
+| `public-portal.properties`, `public-portal-frontend-config.json` | The portal settings of www.cbioportal.org. go.cbioportal.org and the other servers that mirror production use them too, so they look and behave like www. |
+| `mirror-prod.sh` | An hourly job. After each new import on production, it rebuilds go.cbioportal.org's databases as a copy (a "mirror") of production. |
+| `hub-import.sh` | The import job for hub.cbioportal.org. It runs for each datahub pull request labeled `preview` and loads the studies that pull request changes. |
+| `pr-preview-setup.sh`, `pr-preview-teardown.sh` | Create and remove the databases for previews of cbioportal-go pull requests, at pr-&lt;N&gt;.gopreview.cbioportal.org. |
+| `datahub-lib.sh` | Shared helpers for the scripts above: talking to ClickHouse, signing in as the GitHub App, and checking out datahub. |
 
-The image ships these files in `/app/deploy/`, next to `deploy/`'s.
+The container image copies these files into `/app/deploy/`, next to the
+files from `deploy/`.

@@ -3,129 +3,125 @@
 [![CI](https://github.com/cBioPortal/cbioportal-go/actions/workflows/ci.yml/badge.svg)](https://github.com/cBioPortal/cbioportal-go/actions/workflows/ci.yml)
 
 > [!WARNING]
-> **Experimental.** This is an experiment to reimplement
-> [cBioPortal](https://www.cbioportal.org) in Go. It is not an official
-> cBioPortal release, results may differ from www.cbioportal.org, and nothing
-> here should be used for research or clinical decisions. For the real portal
-> go to <https://www.cbioportal.org>.
+> **Experimental.** This is an experiment to rebuild
+> [cBioPortal](https://www.cbioportal.org) in the Go programming language. It
+> is not an official cBioPortal release. Its results may differ from
+> www.cbioportal.org, so do not use it for research or clinical decisions.
+> For the real portal, go to <https://www.cbioportal.org>.
 
-A Go reimplementation of the cBioPortal backend — the study importer and the
-REST API — backed by ClickHouse, with the unmodified cBioPortal web frontend
-running on top.
+cBioPortal is a website for exploring cancer genomics data. Its server side
+is written in Java. This project rewrites two parts of that server in Go:
 
-**Preview server:** <https://go.cbioportal.org> — the same data as
-www.cbioportal.org: a mirror of its production database, rebuilt within an
-hour of each production import.
+- the **importer**, which reads study data files and loads them into a
+  database, and
+- the **REST API**, which the website calls to get data.
+
+The data lives in ClickHouse, a database built for fast counting and
+summarizing over very large tables. The cBioPortal website itself (the
+frontend) runs on top without any changes.
+
+**Preview server:** <https://go.cbioportal.org> has the same data as
+www.cbioportal.org. It reads a copy (a "mirror") of the production database,
+which is rebuilt within an hour after each new import on production.
+
+## Contents
+
+- [How it fits together](#how-it-fits-together)
+- [Quick start](#quick-start)
+- [Development](#development)
+- [What is still missing](#what-is-still-missing)
+- [Documentation](#documentation)
+- [License](#license)
+
+## How it fits together
 
 ```
-study files ──cbioportal-import──▶ ClickHouse ◀──cbioportal-api──▶ browser (API + frontend)
+study files ──cbioportal-import──▶ ClickHouse ◀──cbioportal-api──▶ browser (API + website)
 ```
 
-- **ClickHouse** is the only database.
-- **`cbioportal-import`** loads reference data and studies and builds the tables the API reads.
-- **`cbioportal-api`** serves the REST API and the web UI from one origin.
-- **`frontend/`** is the cbioportal-frontend repo as a git submodule.
+| Part | What it does |
+|---|---|
+| ClickHouse | The only database. It holds all study data. |
+| `cbioportal-import` | Loads reference data (such as genes and cancer types) and studies, then builds the tables the API reads. |
+| `cbioportal-api` | Answers API requests and serves the website, both from the same address. |
+| `frontend/` | The unchanged cbioportal-frontend repository, included as a git submodule (a pinned copy of another repository). |
 
 ## Quick start
 
-Needs Go 1.26, Docker, and Node 22 with pnpm (`corepack enable`), plus the
-cBioPortal seed dump and a study from
-[cBioPortal/datahub](https://github.com/cBioPortal/datahub)
-(`seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz`, e.g. `public/acbc_mskcc_2015`).
+You need Go 1.26, Docker, and Node 22 with pnpm (run `corepack enable` to
+get pnpm). You also need two downloads from
+[cBioPortal/datahub](https://github.com/cBioPortal/datahub):
+
+- the seed file `seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz`, which
+  holds the reference data, and
+- at least one study folder, for example `public/acbc_mskcc_2015`.
 
 ```bash
-# 1. ClickHouse
+# 1. Start ClickHouse
 docker run -d --name cbioportal-clickhouse -p 18123:8123 \
   -e CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:25.3
 
-# 2. Build
+# 2. Build the two programs
 make build
 
-# 3. Reference data (genes, aliases, cancer types) — once
+# 3. Load the reference data (genes, gene aliases, cancer types). Do this once.
 bin/cbioportal-import load-reference seed-cbioportal_hg19_hg38_v2.14.5.sql.gz --db cbioportal_ref
 
-# 4. Import a study and build the tables
+# 4. Load a study, then build the tables the API reads
 bin/cbioportal-import ingest datahub/public/acbc_mskcc_2015 --db cbioportal_raw
 bin/cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
 
-# 5. Build the frontend — once
+# 5. Build the website. Do this once.
 make frontend
 
-# 6. Run the portal
+# 6. Start the portal
 make run        # http://localhost:8080
 ```
 
-To add studies, `ingest` each one and run `transform` again; the running API
-picks up the new tables by itself.
+Loading a study takes two steps. `ingest` copies the study's files into the
+database as they are. `transform` then turns them into the tables the API
+uses. To add more studies, run `ingest` for each one and then run
+`transform` again. The running API notices the new tables on its own.
 
 ## Development
 
 ```bash
-make test       # unit tests (no services)
-make lint       # gofmt + go vet, as CI runs them
+make test       # unit tests (no database needed)
+make lint       # code format and checks, the same as CI
 make contract   # API contract tests against a running API
-make e2e        # the cBioPortal Playwright suite against the API on :18090
-make help       # all targets
+make e2e        # the cBioPortal website test suite against the API on port 18090
+make help       # list all targets
 ```
 
-CI runs lint, unit and contract tests on every push; the full e2e suite runs
-weekly.
+Contract tests send requests to every API endpoint and check the answers.
+The e2e ("end-to-end") tests drive the real website in a browser with
+Playwright. CI (GitHub's automatic checks) runs the format checks, unit
+tests and contract tests on every push. It runs the full e2e suite once a
+week. See [Testing](docs/testing.md) for details.
 
-## TODO for a full reimplementation
+## What is still missing
 
-- **Authentication.** OAuth2/OpenID Connect login (`authenticate=oauth2`,
-  e.g. Keycloak), optional sign-in on an open portal
-  (`authenticate=optional_oauth2`, e.g. Google as on www), study
-  authorization from the user's roles, data access tokens for API clients
-  (`dat.method=oauth2`) and login sessions in Redis
-  (`spring.session.store-type=redis`) work as in the Java portal (see
-  [Configuration](docs/configuration.md#login-and-study-authorization)).
-  Still needed: SAML, `authorization=true` (users from the database) and
-  non-OpenID providers (GitHub, Facebook).
-- **Session service.** Sessions are kept in cBioPortal's session service
-  (`session.service.url`), shared with existing portals and across replicas,
-  or in the built-in single-process store (see
-  [Configuration](docs/configuration.md#sessions)). Still different from
-  Java: a virtual study or custom data read by id is served with all its
-  stored fields, where Java's response leaves out owner, users, version and
-  timestamps (and adds the filter's `uniqueStudyIds`).
-- **Importer coverage.** Tested on a handful of studies; needs validation
-  against all of datahub and cbioportal-core's validator rules.
-- **API parity.** 176 of the Java backend's 190 endpoints are served (see
-  [API coverage](docs/api-coverage.md)). Not served: the SAML login page,
-  MatchMiner, the URL shortener and legacy proxies (unused by the frontend),
-  MSK-internal entity translation, and `getexternalpage.json` (an open URL
-  fetch, left out on purpose). On real production traffic every response
-  matches www or has a documented reason ([Benchmark](docs/benchmark.md));
-  the main remaining difference is the order of tied rows, which follows the
-  Java importer's insertion order.
-- **Performance.** Large responses (clinical data, mutations, molecular and
-  generic-assay data, copy number, structural variants, clinical events) are
-  streamed row by row, so a whole-study request of a 50k-sample cohort stays
-  under 100 MB of memory. Still held in memory: pages sorted with `sortBy`,
-  and the projection-reshaped lists (samples, sample lists, profiles). Whole-
-  profile reads of large studies (expression enrichments, co-expression on
-  TCGA PanCancer) take seconds.
+| Area | What works | What is still needed |
+|---|---|---|
+| Login | OAuth2/OpenID Connect login (`authenticate=oauth2`, for example Keycloak). Optional sign-in on an open portal (`authenticate=optional_oauth2`, for example Google, as on www). Access to studies based on the user's roles. Data access tokens for API clients (`dat.method=oauth2`). Login sessions stored in Redis (`spring.session.store-type=redis`). All of these work as in the Java portal; see [Configuration](docs/configuration.md#login-and-study-authorization). | SAML login, `authorization=true` (users listed in the database), and login providers that do not use OpenID (GitHub, Facebook). |
+| Saved sessions | Saved pages, virtual studies and custom data are kept in cBioPortal's session service (`session.service.url`). That service can be shared with existing portals and between copies of the API. A simpler built-in store also works for a single server. See [Configuration](docs/configuration.md#sessions). | When you read one virtual study or custom data set by its id, go returns every stored field. Java leaves out the owner, users, version and timestamps, and adds the filter's `uniqueStudyIds`. |
+| Importer | Tested on a handful of studies. | Testing against all of datahub, and against the checks in cbioportal-core's validator. |
+| API | 176 of the Java backend's 190 endpoints work (see [API coverage](docs/api-coverage.md)). On real production traffic, every answer matches www or has a written reason why not (see [Benchmark](docs/benchmark.md)). | Not served: the SAML login page, MatchMiner, the URL shortener, old proxy endpoints the website does not use, an MSK-internal id lookup, and `getexternalpage.json` (left out on purpose, because it would fetch any URL for anyone). The main remaining difference is the order of rows that tie when sorted. Java returns those in the order its importer inserted them. |
+| Speed and memory | Large answers (clinical data, mutations, molecular and generic-assay data, copy number, structural variants, clinical events) are sent one row at a time. So a request for a whole 50,000-sample study stays under 100 MB of memory. | Some answers are still built fully in memory: pages sorted with `sortBy`, and the lists of samples, sample lists and profiles. Reading a whole profile of a very large study takes several seconds. Examples are expression enrichments and co-expression on TCGA PanCancer. |
 
 ## Documentation
 
-- [Configuration](docs/configuration.md) — command-line flags, environment
-  variables, portal properties (reuse an existing `portal.properties`).
-- [Testing](docs/testing.md) — test tiers, test databases, the e2e harness, CI.
-- [Architecture](docs/architecture.md) — data flow, code layout, dependency
-  policy.
-- [API coverage](docs/api-coverage.md) — every Java endpoint, its status and
-  contract-test coverage.
-- [Java quirks](docs/java-quirks.md) — Java bugs and oddities go copies,
-  leaves out or cannot match, with their pinning tests.
-- [Benchmark](docs/benchmark.md) — go.cbioportal.org vs www.cbioportal.org:
-  page speed, resource use, cost estimate.
-- [Rewrite method](docs/rewrite-method.md) — how the rewrite was built and
-  checked against the Java backend: Java as the spec, test layers, production
-  traffic replay, mirrored live traffic.
-- [Deployment](docs/deployment.md) — the container image and the
-  production mirror behind go.cbioportal.org.
+| Page | What it covers |
+|---|---|
+| [Configuration](docs/configuration.md) | Command-line flags, environment variables, and portal properties. You can reuse an existing `portal.properties`. |
+| [Testing](docs/testing.md) | The kinds of tests, the test databases, the e2e setup, and CI. |
+| [Architecture](docs/architecture.md) | How data moves through the system, how the code is organized, and which libraries it uses. |
+| [API coverage](docs/api-coverage.md) | Every Java endpoint, whether go serves it, and which tests cover it. |
+| [Java quirks](docs/java-quirks.md) | Bugs and oddities in the Java portal, and whether go copies them, skips them, or cannot match them. |
+| [Benchmark](docs/benchmark.md) | go.cbioportal.org compared with www.cbioportal.org: page speed, resource use, and cost. |
+| [Rewrite method](docs/rewrite-method.md) | How the rewrite was built and checked against the Java portal. |
+| [Deployment](docs/deployment.md) | The container image, and the production mirror behind go.cbioportal.org. |
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE).

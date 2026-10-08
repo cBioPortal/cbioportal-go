@@ -1,9 +1,10 @@
 # How the rewrite was done
 
-cbioportal-go reimplements cBioPortal's Java backend (REST API) and importer
-in Go, with the unmodified frontend on top. This page explains the method
-used to build it and to check it against the Java system. The numbers it
-produced are in [Benchmark](benchmark.md).
+cbioportal-go rewrites cBioPortal's Java backend (the REST API) and its
+importer in Go. The cBioPortal website runs on top without changes. This
+page explains how the rewrite was built, and how we check that it behaves
+the same as the Java version. The measured results are in
+[Benchmark](benchmark.md).
 
 ## Contents
 
@@ -17,95 +18,131 @@ produced are in [Benchmark](benchmark.md).
 
 ## Principle: Java is the specification
 
-There is no written spec of the API beyond its OpenAPI description, so the
-Java source is the spec: controllers, MyBatis/ClickHouse mappers, services,
-Jackson settings, Spring's validation and error handling. Every behaviour is
-ported from the code, not guessed from responses: fields and their order,
-row order, statistics, paging and sorting, error statuses and bodies.
-Production (www.cbioportal.org, api.cbioportal.org) is the second reference
-and settles questions the code leaves open, such as which tied row a page
-returns. Where Java is nondeterministic or buggy, go matches what production
-returns when that is stable, and the difference is documented otherwise.
+A specification ("spec") is a written description of exactly how a program
+must behave. The cBioPortal API has no full spec. There is only its OpenAPI
+description, which lists the endpoints and fields but leaves out many
+details. So the Java source code serves as the spec.
+
+Every behavior in go is copied from reading the Java code, not guessed from
+its answers. That includes:
+
+- which fields an answer has, and in what order,
+- the order of rows,
+- statistics,
+- paging and sorting, and
+- error codes and error messages.
+
+The production site (www.cbioportal.org and api.cbioportal.org) is the
+second reference. It settles questions the code leaves open. For example,
+when two rows tie in a sort, production shows which one comes first.
+
+Sometimes Java gives different answers each time, or has a bug. Then go
+copies what production returns, if production is consistent. If it is not,
+we write the difference down in [Java quirks](java-quirks.md).
 
 ## Design choices
 
 | Area | Choice | Why |
 |---|---|---|
-| Importer | ELT: stream study files into a raw ClickHouse database, then build the model with SQL | One code path for small and huge studies; transforms are reviewable SQL |
-| Production data | `transform --from-prod` builds go's schema from a zero-copy clone of production | Same data as www without re-importing datahub |
-| API | `net/http` with Go 1.22 routing, one handler per Java endpoint | Small, dependency-free; maps one-to-one to Java's controllers |
-| Database client | Official clickhouse-go driver, responses streamed row by row | Flat memory on 2–4 million-row responses |
-| Statistics | Hand-ported from Java (commons-math, Datumbox) | Results must match to the last digit |
-| Dependencies | Standard library first; official vendor libraries when they earn their place | Small attack surface, simple builds |
+| Importer | Copy study files into the database first, then build the tables with SQL (a pattern called ELT: extract, load, transform). | One code path works for small and huge studies, and the SQL is easy to review. |
+| Production data | `transform --from-prod` builds go's tables from a copy of production's database. ClickHouse can make this copy without duplicating the data on disk. | go gets the same data as www without re-importing every study. |
+| API | Go's standard `net/http` server, with one handler per Java endpoint. | It is small and needs no extra libraries. Each handler matches one Java endpoint, so the two are easy to compare. |
+| Database client | ClickHouse's official Go driver. Answers are sent row by row as they are read. | Memory stays flat even for answers with 2 to 4 million rows. |
+| Statistics | Copied by hand from the Java libraries commons-math and Datumbox. | Results must match Java down to the last digit. |
+| Dependencies | The standard library first. Official vendor libraries only when they are worth it. | Fewer outside packages means fewer security risks and simpler builds. |
 
 ## Verification layers
 
-Fastest first. Each layer catches what the previous one cannot.
+We check the rewrite in several layers, from fastest to slowest. Each layer
+catches problems the earlier ones cannot.
 
 | Layer | What it checks | Where |
 |---|---|---|
-| Unit tests | Statistics, binning, SQL builders, request parsing | `internal/...`, `make test` |
-| Contract tests | Every endpoint's status, fields, order and errors on cBioPortal's e2e fixture studies | `test/`, `make contract`, CI on every push |
-| Java oracle | The same requests against Java master on the same fixtures, built with Java's own importer; pins projections, field order and validation | `test/java_oracle.sh` |
-| Importer contracts | What the import stores, rule by rule from cbioportal-core (case lists, defaults, ids) | `test/import_parity_test.go` |
-| Frontend e2e | The upstream Playwright suite (~365 specs) driving the real frontend against go, with Keycloak login and upstream CI settings | `test/e2e_api.sh`, `test/run_e2e.sh` |
-| Before/after replay | Byte comparison of a change against the previous build, on fixture and production corpora | refactors and performance work |
-| Production traffic | Real requests replayed against go and Java (next section) | `cmd/paritydiff`, nightly job |
-| Mirrored live traffic | A share of real traffic copied to go: load, latency, errors, ClickHouse cost | next-but-one section |
+| Unit tests | Small pieces of code: statistics, chart binning, SQL builders and request parsing. | `internal/...`, `make test` |
+| Contract tests | Every endpoint's status code, fields, order and errors. They run on cBioPortal's small test studies (its "fixture" studies). | `test/`, `make contract`, CI on every push |
+| Java oracle | The same requests sent to the latest Java version, loaded with the same test studies by Java's own importer. This settles which fields appear, their order, and how bad input is rejected. | `test/java_oracle.sh` |
+| Importer contracts | What the importer stores, checked rule by rule against cbioportal-core (case lists, default values, ids). | `test/import_parity_test.go` |
+| Website e2e tests | cBioPortal's own Playwright test suite (about 365 test files). It drives the real website in a browser against go, logs in through Keycloak, and uses the same settings as cBioPortal's CI. | `test/e2e_api.sh`, `test/run_e2e.sh` |
+| Before/after replay | The same requests sent to a changed build and to the previous build, and the answers compared byte by byte. Used on test data and on production requests. | Refactoring and speed work |
+| Production traffic | Real requests sent to both go and Java, and the answers compared. See [the next section](#production-traffic). | `cmd/paritydiff`, nightly job |
+| Mirrored live traffic | A share of real traffic is copied to go to measure load, speed, errors and database cost. See [Running next to production](#running-next-to-production). | go.cbioportal.org |
 
 ## Production traffic
 
-Real API requests are the best test corpus: they cover the request shapes
-clients actually send, including odd and invalid ones.
+Real API requests make the best test set. They cover the kinds of requests
+people actually send, including strange and invalid ones. We use them in
+four steps:
 
-1. **Capture.** Java's request logger (`request-logging.enabled`) stored
-   1.66 million requests (method, path, query, body, status) in
-   `cbioportal_qc.logged_requests`, the corpus of the QC harness in
-   cBioPortal/cbioportal#12238.
-2. **Sample.** `test/parity/loggedgen` draws a corpus stratified by endpoint
-   (every endpoint covered, frequent ones more), drops anything that writes
-   (sessions, virtual study publishing, tokens, cache), and annotates the
-   differences that are known and explained.
+1. **Record.** The Java portal can log each request it gets (the setting
+   `request-logging.enabled`). It recorded 1.66 million requests, with
+   their method, path, query, body and status. They are stored in the
+   `cbioportal_qc.logged_requests` table. This is the same data used by the
+   quality-check tool in cBioPortal/cbioportal#12238.
+2. **Pick a sample.** `test/parity/loggedgen` picks a set of requests that
+   covers every endpoint, with more requests for the busy ones. It leaves
+   out anything that changes data, such as saving sessions, publishing
+   virtual studies, tokens or clearing the cache. It also marks the
+   differences we already know about and have explained.
 3. **Compare.** `cmd/paritydiff` sends each request to go.cbioportal.org and
-   to api.cbioportal.org and compares the JSON after normalising what Java
-   leaves unspecified (key order, unordered lists, float tolerance).
-4. **Every night.** The nightly job replays about 5,000 requests after the
-   mirror rebuild and opens or updates a GitHub issue (label `parity`) when a
-   new unexplained difference appears ([Testing](testing.md)).
+   to api.cbioportal.org. It then compares the two JSON answers. First it
+   evens out things Java does not promise to keep the same, such as the
+   order of keys, the order of unsorted lists, and tiny differences in
+   decimal numbers.
+4. **Repeat every night.** A nightly job replays about 5,000 requests,
+   right after the mirror database is rebuilt. When it finds a new
+   difference that has no explanation yet, it opens or updates a GitHub
+   issue with the label `parity`. ("Parity" means go and Java give the same
+   answer.) See [Testing](testing.md).
 
 ## Running next to production
 
-- **Same data.** go.cbioportal.org reads a mirror of production's database,
-  rebuilt within an hour of each production import (and never during one).
-- **Mirrored traffic.** Traefik copies 10% of the API traffic Java serves to
-  go and discards go's answers, so go sees real load without affecting users.
-  Each side tags its ClickHouse queries (`log_comment`), so database cost per
-  request can be compared directly.
-- **Observability.** Prometheus metrics and a JSON access log per request,
-  collected by Datadog, alongside Java's.
+go.cbioportal.org runs beside the real site, so we can see how it behaves
+under real use.
+
+- **Same data.** go.cbioportal.org reads a copy (a "mirror") of
+  production's database. The mirror is rebuilt within an hour after each
+  import on production, and never while an import is still running.
+- **Copied traffic.** Traefik, the program that routes web traffic to the
+  servers, copies 10% of the API requests that Java gets and sends them to
+  go too. go's answers are thrown away, so users never see them. This puts
+  real load on go without any risk to users. Both sides label their
+  database queries (with ClickHouse's `log_comment` setting). That lets us
+  compare the database cost of each request directly.
+- **Monitoring.** go reports Prometheus metrics and writes one JSON log line
+  per request. Datadog collects both, next to Java's.
 
 ## How the work was organised
 
-The code was written with Claude Code: one coordinating session, with
-focused agents working in separate git worktrees on one task each (an
-endpoint group, a performance fix, a parity investigation). A change reached
-`main` only after lint, unit and contract tests passed, and changes that
-touch request handling also needed the full frontend e2e suite. Agents
-reported measurements (parity results, memory, ClickHouse bytes read) that
-were checked before merging. Production access was read-only, except for
-go's own databases and deployments.
+The code was written with Claude Code, an AI coding assistant. One main
+session coordinated the work. It handed single tasks to helper agents, each
+working in its own copy of the repository (a git worktree). A task was, for
+example, one group of endpoints, one speed fix, or one difference to track
+down.
+
+A change went into `main` only after the format checks, unit tests and
+contract tests passed. Changes to how requests are handled also had to pass
+the full website e2e suite. Agents reported their measurements, such as
+parity results, memory use and how much data ClickHouse read. Those numbers
+were checked before a change was merged. Access to production was
+read-only, except for go's own databases and deployments.
 
 ## Lessons
 
-- **Compare against Java, not against yourself.** Byte-identical replays
-  against the previous go build missed two regressions that one run against
-  production caught.
-- **Ordering is the hardest part.** Many differences were row order: Java
-  often has no ORDER BY and inherits ClickHouse's or the importer's order.
-  go keeps the importer's order and production's internal ids for this.
-- **Stream large responses.** API clients download whole profiles (millions
-  of rows); building responses in memory got go's pods OOMKilled.
-- **Read by the table's key.** Filters that miss the primary key (a sample
-  list by id, a join against all samples) cost more than the data itself.
-- **Watch the data pipeline too.** A mirror built by an old image, or copied
-  while an import was running, looked like API bugs.
+- **Compare against Java, not against yourself.** Comparing a new go build
+  with the previous go build missed two bugs. A single comparison against
+  production caught them.
+- **Row order is the hardest part.** Many differences came down to the
+  order of rows. Java often does not sort its results. It just returns them
+  in whatever order ClickHouse or the importer left them. So go keeps the
+  importer's order and production's internal ids.
+- **Send large answers row by row.** Some API users download whole data
+  profiles with millions of rows. Building those answers fully in memory
+  used up so much memory that Kubernetes killed go's servers.
+- **Read tables by their key.** Every ClickHouse table is sorted by a key
+  (its "primary key"). A filter that does not use that key forces ClickHouse
+  to scan much more data. For example, looking up a sample list by its id,
+  or joining against all samples, could cost more than the data itself.
+- **Check the data pipeline too.** Some problems that looked like API bugs
+  were really data problems. For example, a mirror built by an old version
+  of the program, or one copied while an import was still running, gave
+  wrong answers.

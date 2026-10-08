@@ -1,112 +1,213 @@
 # Architecture
 
+This page explains how cbioportal-go is built. It follows a study from its
+data files to the browser, shows where each part lives in the code, and lists
+the outside libraries the project uses. Read it before you change the
+importer or the API.
+
+## Contents
+
+- [Data flow](#data-flow)
+- [Code layout](#code-layout)
+- [The ClickHouse client](#the-clickhouse-client)
+- [Dependencies](#dependencies)
+- [Notes learned porting](#notes-learned-porting)
+
 ## Data flow
+
+All data lives in ClickHouse, a database built for fast counting and
+summarizing over very large tables. Data moves through three databases:
+
+| Database | What it holds |
+|---|---|
+| `cbioportal_raw` | The "staging" area. Each study file is copied here as it is, one table per kind of file. |
+| `cbioportal_ref` | Reference data that every study shares: genes, gene aliases and cancer types. |
+| `cbioportal` | The finished tables that the API reads. |
 
 ```
  study files (datahub-format TSVs)
-        │  cbioportal-import ingest          load raw files as-is
+        │  cbioportal-import ingest          copy the files in as they are
         ▼
  ClickHouse  cbioportal_raw  (staging)  +  cbioportal_ref  (genes, cancer types)
-        │  cbioportal-import transform       SQL → normalized + derived tables
+        │  cbioportal-import transform       build the API's tables with SQL
         ▼
  ClickHouse  cbioportal
         ▲
         │  SQL over HTTP
  cbioportal-api  ──  /api/*  cBioPortal REST API
-                 ──  everything else: the frontend build (frontend/dist)
+                 ──  everything else: the website build (frontend/dist)
 ```
 
-- **Ingest** streams each study's files into staging tables shaped like the
-  files (schema-on-read), so loading is bound by ClickHouse, not parsing
-  (msk_impact_2017, ~11k samples, loads in seconds). Re-ingesting a study
-  replaces it.
-- **Transform** rebuilds the normalized model and the study-view `*_derived`
-  tables with SQL, applying cbioportal-core's import rules (gene resolution,
-  case lists, mutation filtering, computed clinical attributes). Every table the
-  API reads exists for any mix of data types, empty when the data is absent.
-  Studies, patients, samples, sample lists and segments carry the internal
-  ids the importer would assign them (studies in ingest order, then the order
-  in which it reads a study's directory and files), since the Java backend
-  returns many lists in that order.
-  Every object is built under a staging name (`__next_<name>`) and
-  published at the end — tables swapped in with `EXCHANGE TABLES`, views
-  recreated over the published names — so the API serves the previous
-  build while a transform runs, and a failed transform changes nothing.
-  `transform --from-prod` builds the same objects from a clone of cBioPortal's
-  production ClickHouse database instead, mostly as views over its `*_derived`
-  tables (see [Deployment](deployment.md#mirroring-production)).
-- **The API** answers the cBioPortal REST API from those tables and serves the
-  frontend build on the same origin. The Java backend
-  ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal)) and
-  importer ([cbioportal-core](https://github.com/cBioPortal/cbioportal-core))
-  are the reference for behaviour: fields, ordering, statistics and errors.
+The importer follows a pattern called ELT: **e**xtract and **l**oad the
+files first, then **t**ransform them inside the database. The Java importer
+does it the other way around. It cleans each row in Java before it stores
+it.
+
+### Ingest: copy the files in
+
+`cbioportal-import ingest` streams each study file into a staging table
+whose columns match the file's columns. It does not check or clean the data
+yet. Because there is little work per row, ClickHouse's own speed sets the
+pace. For example, msk_impact_2017 (about 11,000 samples) loads in seconds.
+Ingesting a study again replaces the old copy.
+
+### Transform: build the API's tables
+
+`cbioportal-import transform` reads the staging tables and builds the tables
+the API uses. All of this work is done with SQL inside ClickHouse. It
+follows the same import rules as the Java importer, cbioportal-core. For
+example, it matches gene names to genes, builds the case lists, filters
+mutations, and computes extra clinical attributes.
+
+It builds two kinds of tables:
+
+- the **normalized model**: one table per kind of thing (studies, samples,
+  mutations, and so on), similar to the Java database, and
+- the **`*_derived` tables**: wide tables, shaped for the study view page so
+  its charts can be counted quickly.
+
+A few rules keep the results the same as Java:
+
+- Every table the API reads always exists, even when no study has that kind
+  of data. It is just empty then.
+- Studies, patients, samples, sample lists and segments get the same
+  internal ids that the Java importer would give them. Studies are numbered
+  in ingest order. Inside a study, ids follow the order in which the Java
+  importer reads the folder and files. This matters because the Java API
+  returns many lists sorted by these ids.
+
+**Nothing changes until the transform finishes.** Each table is first built
+under a temporary name (`__next_<name>`). At the end, all new tables are
+swapped in at once with ClickHouse's `EXCHANGE TABLES`, and the views are
+recreated on top of them. So the API keeps serving the previous build while
+a transform runs. If a transform fails, nothing changes.
+
+`transform --from-prod` builds the same tables from a different source: a
+copy of cBioPortal's production ClickHouse database. Most of them become
+views over production's own `*_derived` tables. This is how go.cbioportal.org
+gets the same data as www.cbioportal.org (see
+[Deployment](deployment.md#mirroring-production)).
+
+### The API
+
+`cbioportal-api` answers the cBioPortal REST API from the `cbioportal`
+tables. It also serves the website build from the same address. The Java
+backend ([cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal))
+and the Java importer
+([cbioportal-core](https://github.com/cBioPortal/cbioportal-core)) are the
+reference for how things should behave. That covers fields, row order,
+statistics and errors.
 
 ## Code layout
 
-- `cmd/cbioportal-import`, `cmd/cbioportal-api` — the two binaries;
-  `cmd/apibench` times heavy API requests; `cmd/e2ereport` summarizes e2e runs;
-  `cmd/paritydiff` compares API responses with another origin (www).
-- `internal/parser`, `internal/ingest` — study file parsing and streaming into
-  staging tables.
-- `internal/reference` — genes, aliases, cancer types and reference-genome
-  genes from the seed dump.
-- `internal/transform` — the SQL that builds the normalized model and the
-  study-view `*_derived` tables, following cbioportal-core's import rules.
-- `internal/api` — HTTP handlers; `internal/databin`, `internal/stats` — ports
-  of cBioPortal's data binning and statistics.
-- `internal/clickhouse` — ClickHouse over its HTTP interface. `ch.Query[T]` /
-  `ch.QueryP[T]` read struct rows through ClickHouse's Go driver
-  (clickhouse-go, Native format over the same HTTP endpoint, transport,
-  credentials and metrics), mapping columns to fields by their `json` names
-  and reproducing exactly the values encoding/json decodes from JSONEachRow;
-  a result with other column types (Tuple, Map, Date/DateTime, Decimal,
-  UUID, ...) in a field, `any`/map rows, `json.RawMessage` or
-  custom-unmarshaler fields, and every error go through JSONEachRow instead
-  (`CLICKHOUSE_DECODE=json` forces it, `=log` logs each such statement).
-  DDL, inserts and text reads stay plain HTTP. Request values reach ClickHouse
-  as server-side query parameters (`{name:Type}` placeholders, `ch.QueryP`;
-  in `internal/api`, `sqlArgs` binds them while a statement is assembled), not
-  as SQL text. Parameters ride in the URL when small and in a
-  multipart/form-data body otherwise; arrays longer than a form field
-  (ClickHouse's `http_max_field_value_size`, 128 KiB) are sent as external
-  tables the placeholder selects from. The metadata cache (`cachedQueryP`) keys
-  entries on the SQL and its parameter values. `sqlLit`/`inList` remain for
-  values chosen by code.
+| Folder | What it contains |
+|---|---|
+| `cmd/cbioportal-import`, `cmd/cbioportal-api` | The two programs: the importer and the API server. |
+| `cmd/apibench` | A tool that times slow, heavy API requests. |
+| `cmd/e2ereport` | A tool that summarizes the results of an e2e test run. |
+| `cmd/paritydiff` | A tool that sends the same requests to go and to another server (such as www) and compares the answers. |
+| `internal/parser`, `internal/ingest` | Reading study files and streaming them into staging tables. |
+| `internal/reference` | Loading genes, aliases, cancer types and reference-genome genes from the seed file. |
+| `internal/transform` | The SQL that builds the normalized model and the `*_derived` tables. |
+| `internal/api` | The HTTP handlers, one per API endpoint. |
+| `internal/databin`, `internal/stats` | Copies of the Java portal's chart binning and statistics code, rewritten in Go. |
+| `internal/javaorder` | Code that reproduces the order in which Java collections list their items, where that order shows up in answers. |
+| `internal/config` | Reading settings, including an existing `portal.properties`. |
+| `internal/metrics` | Server metrics in the Prometheus format. |
+| `internal/clickhouse` | The client that talks to ClickHouse (next section). |
+
+## The ClickHouse client
+
+`internal/clickhouse` talks to ClickHouse over its HTTP interface. You only
+need this section if you work on database queries.
+
+**Reading rows.** `ch.Query[T]` and `ch.QueryP[T]` read rows into Go
+structs. They use ClickHouse's official Go driver (clickhouse-go) and its
+compact binary "Native" format. The driver uses the same HTTP address,
+login and metrics as everything else. Columns are matched to struct fields
+by the fields' `json` names. The values come out exactly as they would from
+ClickHouse's JSON output format (JSONEachRow).
+
+Some results still go through JSONEachRow instead:
+
+- columns of other types in a struct field, such as Tuple, Map,
+  Date/DateTime, Decimal or UUID,
+- rows read as `any` or as maps,
+- fields of type `json.RawMessage` or with their own JSON decoding, and
+- every error.
+
+You can change this with the `CLICKHOUSE_DECODE` environment variable.
+`CLICKHOUSE_DECODE=json` sends every read through JSONEachRow.
+`CLICKHOUSE_DECODE=log` logs each statement that falls back to it.
+
+Creating tables, inserting rows and reading plain text use plain HTTP
+requests.
+
+**Passing values safely.** Values that come from a request are never pasted
+into the SQL text. They are sent as ClickHouse query parameters instead. The
+SQL contains placeholders such as `{name:Type}`, and ClickHouse fills them
+in. `ch.QueryP` does this. Inside `internal/api`, `sqlArgs` collects the
+values while a statement is put together.
+
+- Small parameters are sent in the URL.
+- Larger ones are sent in a multipart/form-data request body.
+- A list longer than one form field allows (ClickHouse's
+  `http_max_field_value_size`, 128 KiB) is sent as a temporary "external
+  table", and the placeholder selects from it.
+
+`sqlLit` and `inList` still write values straight into the SQL. Use them
+only for values chosen by the code, never for values from a request.
+
+**Cache.** In `internal/api`, a small cache (`cachedQueryP`) keeps answers to
+metadata queries.
+Each entry is stored under its SQL text plus its parameter values.
 
 ## Dependencies
 
-Standard library first: HTTP serving and routing, JSON, gzip, the OncoKB
-reverse proxy and profiling all come from it, so a build is a single
-`go build`. Official, well-maintained dependencies (vendor libraries such as
-ClickHouse's Go driver, Go-team `golang.org/x/...` packages) are fine when they
-earn their place and bring few transitive dependencies; community packages
-for what the stdlib already covers are avoided. Statistics stay hand-ported:
-results must match the Java backend (commons-math, Datumbox) to the last
-digit. CI runs `govulncheck` on every push.
+The project uses Go's standard library first. HTTP serving and routing,
+JSON, gzip, the OncoKB proxy and profiling all come from it. So the whole
+project builds with a plain `go build`.
 
-Current direct dependencies:
+Outside libraries are fine when they are official and well maintained and
+pull in few other packages. Examples are vendor libraries such as
+ClickHouse's Go driver, and the Go team's own `golang.org/x/...` packages.
+The project avoids community packages for things the standard library
+already does.
 
-- `github.com/ClickHouse/clickhouse-go/v2` — ClickHouse's official driver;
-  rows are read in its Native format over the HTTP endpoint (see the client
-  above). It brings ch-go, compression (lz4, zstd, brotli), its Decimal type
-  and a few small indirect packages.
-- `go.yaml.in/yaml/v3` (the YAML organization's maintained yaml.v3) — study
-  tags and gene set hierarchy files.
-- `golang.org/x/sync` — `singleflight` for the metadata cache.
+Statistics code is copied by hand from Java, not taken from a Go library.
+The results must match the Java backend (which uses commons-math and
+Datumbox) down to the last digit. CI runs `govulncheck`, which checks
+dependencies for known security problems, on every push.
+
+The project uses these libraries directly:
+
+| Library | What it is for |
+|---|---|
+| `github.com/ClickHouse/clickhouse-go/v2` | ClickHouse's official driver. It reads rows in the Native format over HTTP (see [the client](#the-clickhouse-client)). It brings along ch-go, compression (lz4, zstd, brotli), its Decimal type, and a few small packages. |
+| `go.yaml.in/yaml/v3` | Reading YAML files: study tags and the gene set hierarchy. This is the YAML organization's maintained version of yaml.v3. |
+| `golang.org/x/sync` | `singleflight`, so that many requests for the same metadata share one database query. |
 
 ## Notes learned porting
 
-- Go's stdlib `flag` stops parsing at the first positional arg, so `ingest <dir>
-  --db X` would silently ignore `--db`; the CLI reorders flags ahead of
-  positionals to fix this.
-- ClickHouse `ALTER … DELETE` is asynchronous; re-ingest uses
-  `SETTINGS mutations_sync = 2` so a study's old rows are gone before the count.
-- On ClickHouse Cloud consecutive HTTP requests can reach different replicas:
-  an `INSERT` right after `ALTER … ADD COLUMN` failed with "no column". And
-  its replicated tables drop an inserted block identical to an earlier one,
-  so a re-ingested, unchanged file stayed deleted. The importer runs every
-  request with `alter_sync = 2`, `mutations_sync = 2`,
+These are problems we hit while building the project, and how we solved
+them.
+
+- **Flags after a folder name were ignored.** Go's standard `flag` package
+  stops reading flags at the first argument that is not a flag. So in
+  `ingest <dir> --db X`, the `--db` would be ignored without warning. The
+  importer moves all flags to the front before it reads them.
+- **Deletes finish later.** In ClickHouse, `ALTER … DELETE` runs in the
+  background. When a study is ingested again, the importer adds
+  `SETTINGS mutations_sync = 2`. This makes ClickHouse wait until the old
+  rows are gone before the importer counts the new ones.
+- **ClickHouse Cloud has several copies of the database.** Two requests in a
+  row can reach different copies. Once, an `INSERT` right after
+  `ALTER … ADD COLUMN` failed because that copy did not have the new column
+  yet. Also, Cloud skips an inserted block of rows when it is identical to an
+  earlier one. So a study file that was ingested again without changes
+  stayed deleted. The importer sends every request with
+  `alter_sync = 2`, `mutations_sync = 2`,
   `select_sequential_consistency = 1` and `insert_deduplicate = 0`.
-- An `io.Reader` that returns one line per `Read` makes the HTTP transport do
-  tiny writes; `BodyReader.Read` fills the whole buffer (12× faster on the seg
-  file).
+- **Tiny writes are slow.** If a reader hands over one line at a time, the
+  HTTP client sends many tiny pieces. `BodyReader.Read` fills its whole
+  buffer each time. That made loading the segment file 12 times faster.
