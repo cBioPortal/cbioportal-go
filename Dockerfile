@@ -57,7 +57,7 @@ COPY --from=frontend-dist / /app/frontend
 # Deployment scripts and configuration: the generic ones and cBioPortal.org's
 # own, side by side under /app/deploy where the cluster manifests expect them.
 COPY deploy/ /app/deploy/
-COPY ops/cbioportal.org/*.sh ops/cbioportal.org/*.properties ops/cbioportal.org/*.json /app/deploy/
+COPY ops/cbioportal.org/*.sh ops/cbioportal.org/*.properties ops/cbioportal.org/*.json ops/cbioportal.org/*.txt /app/deploy/
 WORKDIR /app
 USER 10001:10001
 ENV PORT=8080 FRONTEND_DIR=/app/frontend

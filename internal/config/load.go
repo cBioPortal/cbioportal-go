@@ -166,9 +166,10 @@ func backendProperty(k string) bool {
 }
 
 // fileValuedProperties name other files; their contents are served to the
-// frontend.
+// frontend, or as /llms.txt.
 var fileValuedProperties = []string{
 	"frontend.config",
+	"llms_txt.location",
 	"querypage.setsofgenes.location",
 	"skin.patient_view.custom_sample_type_colors_json",
 	"oncoprint.clinical_tracks.config_json",

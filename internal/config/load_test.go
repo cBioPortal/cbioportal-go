@@ -154,11 +154,13 @@ func TestStudyAvailabilityEnabled(t *testing.T) {
 
 func TestFilePathsRelativeToPropertiesFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "frontend.json"), []byte(`{"a":1}`), 0o644); err != nil {
-		t.Fatal(err)
+	for _, f := range []string{"frontend.json", "llms.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(`{"a":1}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	props := filepath.Join(dir, "portal.properties")
-	if err := os.WriteFile(props, []byte("frontend.config=frontend.json\nquerypage.setsofgenes.location=missing.json\n"), 0o644); err != nil {
+	if err := os.WriteFile(props, []byte("frontend.config=frontend.json\nllms_txt.location=llms.txt\nquerypage.setsofgenes.location=missing.json\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	got, err := loadPortalProperties(props, nil, func(string) (string, bool) { return "", false })
@@ -167,6 +169,9 @@ func TestFilePathsRelativeToPropertiesFile(t *testing.T) {
 	}
 	if want := filepath.Join(dir, "frontend.json"); got["frontend.config"] != want {
 		t.Errorf("frontend.config = %q, want %q", got["frontend.config"], want)
+	}
+	if want := filepath.Join(dir, "llms.txt"); got["llms_txt.location"] != want {
+		t.Errorf("llms_txt.location = %q, want %q", got["llms_txt.location"], want)
 	}
 	if got["querypage.setsofgenes.location"] != "missing.json" {
 		t.Errorf("a path missing next to the file is left as given, got %q", got["querypage.setsofgenes.location"])
