@@ -48,8 +48,9 @@ func (s *State) ConfigureAuth() error {
 // NewRouter builds the API handler with CORS, the OAuth2 login, data access
 // tokens and study authorization (authenticate=oauth2), optional HS256
 // bearer-token auth (disabled by default), Java's trailing-slash matching
-// (trailingSlash) and a body-draining catch-all,
-// behind the request-target checks of Tomcat and Spring's firewall.
+// (trailingSlash) and a catch-all for the portal's pages and static files,
+// with Spring Security's default response headers, behind the
+// request-target checks of Tomcat and Spring's firewall.
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
@@ -57,5 +58,5 @@ func NewRouter(s *State) http.Handler {
 	if s.auth != nil {
 		h = s.auth.Wrap(s.State, h)
 	}
-	return s.Observe(core.JavaFirewall(core.CORS(core.GzipResponse(core.GunzipBody(s.TrailingSlash(h))))))
+	return s.Observe(core.JavaFirewall(core.SecurityHeaders(core.CORS(core.GzipResponse(core.GunzipBody(s.TrailingSlash(h)))))))
 }
