@@ -6,7 +6,7 @@ oddity, and what go does with it. go matches Java exactly, so most of it is
 and Java's nondeterminism go **can't match**. Once go is the reference, this
 list is the plan of things to fix in both.
 
-**Summary.** 66 entries: 39 copied, 17 deviate, 9 can't match (Java's
+**Summary.** 68 entries: 39 copied, 19 deviate, 9 can't match (Java's
 nondeterminism) and one that does not apply. Every copied entry has a
 pinning test except the shared `mutation_event` NCBI build (a property of
 production's data); the export's failure marker, partly copied, has none
@@ -22,6 +22,7 @@ either (it needs a failing export).
 
 ## Contents
 
+- [Where go behaves differently](#where-go-behaves-differently)
 - [Request handling and errors](#request-handling-and-errors)
 - [Studies](#studies)
 - [Genes](#genes)
@@ -31,6 +32,35 @@ either (it needs a failing export).
 - [Sessions and export](#sessions-and-export)
 - [Importer](#importer)
 - [Nondeterminism](#nondeterminism)
+
+## Where go behaves differently
+
+Every **deviates** entry below, in one place: what a client sees from go
+that it would not from Java. They fall in three kinds: Java answers an
+error where go answers the data; Java answers wrong or other studies' data
+where go answers the request's; and import differences that leave the API's
+answers the same.
+
+| Area | Java | go |
+|---|---|---|
+| Study availability | A study being imported is `readPermission: false` whatever the setting says | Only with `study_availability.enabled` |
+| `studies/fetch` | `allSampleCount: 1` | The `_all` list's size |
+| Study list, `resourceCounts` | Counts other studies' resource definitions sharing a resource id | This study's only |
+| Genes pages | Every page re-sorted by symbol (multi-Entrez symbols dropped) | The page in `sortBy` order |
+| Genes `sortBy=cytoband`/`length` | 500 | 200 in the default order |
+| Clinical table, unknown `sortBy` | 500 | The table |
+| `clinical-events-meta`, `survival-data` | 500 (missing `SqlUtils` method) | The data |
+| `treatments/*` without treatment data | The whole portal's treatments | `[]` |
+| Generic assay data, `projection=ID` | 500 | The data |
+| META on five fetch endpoints | Ignored: a body, no total-count | Empty body with total-count |
+| `genomic-data-bin-counts`, two profiles | Bins every gene in the first profile type, adds an NA bin | Each gene in its own profile |
+| SV pair counts | Later pairs report earlier pairs' panels | Each pair's panels |
+| Numeric filter, patient-level generic assay | Ignored | Filters per patient |
+| Categorical enrichment, patient-level | 500 | The enrichment |
+| Namespace attributes | From one arbitrary record | From every record |
+| Import: `clinical_data_derived` | A row per attribute and case, empty values kept | Stored values only; API answers the same |
+| Import: copy-number segments | Skips segments whose start is not below their end | Keeps them (4 on msk_chord_2024, 10 on msk_impact_50k_2026) |
+| Import: timeline rows | Drops rows for patients not in the study and rows with more fields than the header | Keeps them |
 
 ## Request handling and errors
 
@@ -128,6 +158,8 @@ either (it needs a failing export).
 | A MAF chromosome X is stored (and served) as 23 | DaoGeneOptimized.normalizeChr | copied | TestOracleMutationChromosomeNormalized |
 | SV text fields left empty are `"NA"`, integer fields -1 | StructuralVariantUtil | copied | TestContractStructuralVariantImportDefaults |
 | Timeline event data are keyed by the header exactly as written (`Treatment_TYPE`, `ICD DESCRIPTION`); of a repeated header the last non-empty cell wins | ImportTimelineData (`HashMap` per event) | copied (files staged before go recorded headers fall back to the upper-cased column name) | golden `staged/clinical_event_data_derived` |
+| A copy-number segment whose start is not below its end is skipped with a warning (single-base segments) | ImportCopyNumberSegmentData | deviates: kept | import benchmark row counts |
+| Timeline rows of a patient not in the study, or with more fields than the header, are dropped | ImportTimelineData | deviates: kept | — |
 
 ## Nondeterminism
 
