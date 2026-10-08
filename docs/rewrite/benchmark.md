@@ -37,7 +37,8 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
   131 MiB of the 2 GiB they are allowed. Java's pods restarted 7 times
   because they stopped answering health checks.
 - **Resources:** a go pod uses 48 MiB of memory on average, a Java pod
-  1,838 MiB. go uses a third of Java's CPU per request (0.11 vs 0.34 s).
+  1,838 MiB ([why](#why-go-uses-less-memory)). go uses a third of Java's
+  CPU per request (0.11 vs 0.34 s).
 - **Cost:** the 20 Java backend pods cost about $1,280 a month in servers, or
   about $1,500 with their Redis caches. go would need about $160
   ([details](#cost-estimate)). www and api, the portals go can replace today,
@@ -56,6 +57,7 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
 - [Latency by route](#latency-by-route)
 - [Errors by status](#errors-by-status)
 - [Pods: CPU, memory, restarts](#pods-cpu-memory-restarts)
+- [Why go uses less memory](#why-go-uses-less-memory)
 - [ClickHouse load per request](#clickhouse-load-per-request)
 - [Headline requests](#headline-requests)
 - [Parity](#parity)
@@ -140,6 +142,56 @@ out health checks.
 Java's restarts happened because its pods stopped answering Kubernetes'
 health checks, not because they ran out of memory. go's CPU includes four
 deployments of new versions during the window.
+
+## Why go uses less memory
+
+A Java API pod used about 1.8 GB of memory on average and a go pod about
+50 MB. The importers differ just as much: 3–4 GB for Java and 35–215 MB for
+go. Four things explain most of the gap.
+
+**1. Java reserves memory ahead of time.** A Java program runs inside the
+Java virtual machine (JVM), which manages memory for it. The production API
+pods start the JVM with a maximum of 6 GB (`-Xmx6g`). The JVM lets its memory
+grow toward that maximum before it cleans up thoroughly, and it gives freed
+memory back to the system slowly. So a Java pod's memory shows how much it is
+*allowed* to use more than how much it *needs*. go's runtime cleans up a
+little at a time while the program runs, so its memory stays close to what
+it is actually using.
+
+**2. Java brings a lot of machinery along.** The Java backend is built on
+Spring Boot. Before it answers its first request, it loads thousands of
+classes from many libraries, plus the JVM's own compiler, which turns hot
+code into machine code while the program runs. That takes hundreds of
+megabytes. go's API is one program that was compiled to machine code ahead
+of time. The whole program is a single file of about 25 MB.
+
+**3. go sends large answers row by row.** When a client asks for a large
+answer, for example a whole data profile with millions of values, Java first
+reads all of it from the database into a list in memory, then turns the list
+into JSON and sends it. Its memory grows with the size of the answer. go
+writes each row to the client as soon as it arrives from ClickHouse, reusing
+the same small buffers, so its memory stays about the same whether the answer
+has ten rows or ten million. (Before go worked this way, the biggest
+downloads made its pods run out of memory too.)
+
+**4. The go importer lets the database do the work.** Java's importer reads
+every record into Java objects, checks and converts it, and keeps lookup
+tables in memory, such as every gene. It also starts a new JVM for each
+file. go's importer copies each file into ClickHouse almost unchanged, in
+batches, and then builds the final tables with SQL that runs *inside*
+ClickHouse. ClickHouse uses memory for that work, but it is the database
+server both importers already use, and its memory is not counted in either
+importer's number above.
+
+Two cautions when reading these numbers:
+
+- go received about a tenth of Java's requests (the mirrored share), at
+  about 3 requests a second in total. At that rate both servers are mostly
+  idle, so the gap mostly shows the cost of simply running each one. go
+  has not yet been tested at www's full request rate.
+- Java's memory could be lowered by giving the JVM a smaller maximum, at the
+  risk of more frequent cleanups and out-of-memory errors on large answers.
+  go needs no such setting to stay small.
 
 ## ClickHouse load per request
 
@@ -230,7 +282,10 @@ on-demand list prices in us-east-1.
 The Redis response caches add 2 × r7g.large (about $155) and 2 × t3.medium
 (about $60).
 
-go handles the same traffic with 48 MiB per pod on average (131 MiB at most).
+go used 48 MiB per pod on average (131 MiB at most) on a tenth of the same
+traffic. Memory hardly grows with the request rate (see
+[Why go uses less memory](#why-go-uses-less-memory)), but go has not been
+load-tested at full rate.
 Two copies of every portal would fit on two r7g.large nodes, about $160 a
 month. That saves about $1,100 a month ($13,000 a year) on the servers, or
 about $1,300 a month ($15,000 a year) counting the Redis caches. This does not
