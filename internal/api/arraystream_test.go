@@ -237,6 +237,36 @@ func TestPageListLegacyStudies(t *testing.T) {
 	}
 }
 
+// TestPageListCounted pins ColumnStoreGenericAssayController's paging:
+// pageSize and pageNumber together or 400, a page carries the total-count
+// of all items, and the legacy alias (no paging params) is not paged.
+func TestPageListCounted(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, []int{0, 1, 2, 3, 4})
+	})
+	h := (&State{}).extraEndpoints(pageList(handler))
+	for _, c := range []struct {
+		path        string
+		status      int
+		body, total string
+	}{
+		{"/api/generic-assay-meta/fetch?pageSize=2&pageNumber=1", 200, "[2,3]", "5"},
+		{"/api/generic-assay-meta/fetch", 200, "[0,1,2,3,4]", ""},
+		{"/api/generic-assay-meta/fetch?pageSize=2", 400, "", ""},
+		{"/api/generic-assay-meta/fetch?pageNumber=1", 400, "", ""},
+		{"/api/legacy/generic_assay_meta/fetch?pageSize=2&pageNumber=1", 200, "[0,1,2,3,4]", ""},
+	} {
+		got := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", c.path, strings.NewReader(`{"molecularProfileIds":["p"]}`))
+		req.Header.Set("Accept", "application/json")
+		h.ServeHTTP(got, req)
+		if got.Code != c.status || got.Header().Get("total-count") != c.total ||
+			(c.body != "" && strings.TrimSpace(got.Body.String()) != c.body) {
+			t.Errorf("%s: %d %q total-count %q", c.path, got.Code, got.Body.String(), got.Header().Get("total-count"))
+		}
+	}
+}
+
 // TestResourceDefinitionPriorityNumeric pins that a priority-sorted page of
 // resource definitions keeps SQL's numeric order: the handler claims it, so
 // pageList does not re-sort the JSON strings ("10" < "2").

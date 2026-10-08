@@ -85,6 +85,14 @@ func sortIgnored(endpoint string) bool {
 	return unsortedEndpoints[endpoint]
 }
 
+// countedEndpoints take pageSize and pageNumber only together, else 400, and
+// send the number of all items in the total-count header of a page
+// (ColumnStoreGenericAssayController). Their /api/legacy/ aliases are served
+// by legacy controllers that declare no paging.
+var countedEndpoints = map[string]bool{
+	"POST /api/generic-assay-meta/fetch": true,
+}
+
 // pagedEndpoint reports whether the request is for one of pagedEndpoints
 // ({} matches one path segment).
 func pagedEndpoint(method, path string) bool {
@@ -136,6 +144,16 @@ func pageList(next http.Handler) http.Handler {
 			q.Del("sortBy")
 		}
 		sizeParam, numberParam := q.Get("pageSize"), q.Get("pageNumber")
+		counted := countedEndpoints[endpoint]
+		if counted && aliasOf(r) != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if counted && (sizeParam == "") != (numberParam == "") {
+			readBody(r, nil)
+			springError(w, r, http.StatusBadRequest)
+			return
+		}
 		if (sizeParam == "" && numberParam == "" && sortBy == "") || selfPagedPaths[r.URL.Path] ||
 			endpoint == "" || strings.EqualFold(q.Get("projection"), "META") ||
 			(endpoint == "GET /api/genes" && q.Has("keyword")) {
@@ -155,6 +173,16 @@ func pageList(next http.Handler) http.Handler {
 		pg := page{sortBy: sortBy, desc: strings.EqualFold(q.Get("direction"), "DESC"), size: -1}
 		if sizeErr == nil && size >= 0 {
 			pg.start, pg.size = max(number, 0)*size, size
+		}
+		if counted {
+			rec := &bufferedResponse{header: http.Header{}, status: http.StatusOK}
+			next.ServeHTTP(rec, r2)
+			var items []json.RawMessage
+			if rec.status == http.StatusOK && json.Unmarshal(rec.body.Bytes(), &items) == nil {
+				rec.header.Set("total-count", strconv.Itoa(len(items)))
+			}
+			writePage(w, rec.header, rec.status, rec.body.Bytes(), pg)
+			return
 		}
 		if sortBy == "" {
 			pw := &pageWindow{w: w, header: http.Header{}, status: http.StatusOK, page: pg}

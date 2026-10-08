@@ -273,3 +273,26 @@ func TestLegacyStudiesPaging(t *testing.T) {
 		t.Errorf("legacy keyword search not by name DESC: %v", names)
 	}
 }
+
+// TestGenericAssayMetaPaging pins ColumnStoreGenericAssayController's
+// paging: pageSize and pageNumber only together, and a page carries the
+// total-count of every match.
+func TestGenericAssayMetaPaging(t *testing.T) {
+	requireAPI(t)
+	body := `{"molecularProfileIds":["study_es_0_treatment_ic50"]}`
+	all := listOf(t, "POST", "/api/generic-assay-meta/fetch", body)
+	if len(all) < 4 {
+		t.Fatalf("%d entities", len(all))
+	}
+	resp, b := rawDo(t, "POST", "/api/generic-assay-meta/fetch?pageSize=2&pageNumber=1", body)
+	wantEq(t, resp.Header.Get("total-count"), itoa(len(all)))
+	var page []map[string]any
+	json.Unmarshal(b, &page)
+	wantEq(t, fieldOf(page, "stableId"), fieldOf(all, "stableId")[2:4])
+	resp, _ = rawDo(t, "POST", "/api/generic-assay-meta/fetch", body)
+	wantEq(t, resp.Header.Get("total-count"), "")
+	for _, q := range []string{"pageSize=2", "pageNumber=1"} {
+		resp, _ := rawDo(t, "POST", "/api/generic-assay-meta/fetch?"+q, body)
+		wantEq(t, resp.StatusCode, 400)
+	}
+}
