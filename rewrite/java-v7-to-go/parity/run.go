@@ -11,12 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
 
 const (
-	issueTitle = "Nightly parity: unexplained differences"
+	issueTitle = "Parity with Java: 7 clean nights before switching api.cbioportal.org"
 	issueLabel = "parity"
 )
 
@@ -127,7 +128,7 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 	}
 	fmt.Fprint(o.stdout, text)
 
-	if err := alertIssue(o, run, text, bad, day, c, streak); err != nil {
+	if err := trackIssue(o, run, text, day, c, nightLines, streak); err != nil {
 		fmt.Fprintf(o.stderr, "nightly: issue: %v\n", err)
 	}
 	if !o.dry {
@@ -137,24 +138,60 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 	return bad == 0, nil
 }
 
-// alertIssue keeps one open issue titled issueTitle while requests are
-// unexplained, and closes it on a clean night.
-func alertIssue(o runOptions, run, text string, bad int, day string, c Counts, streak int) error {
-	gh := func(args ...string) error {
+// trackIssue posts the night's report as a comment on the open tracking
+// issue (labelled issueLabel, opened when there is none), rewrites the
+// issue's description with the goal and status, and closes it once the
+// goal of clean nights in a row is reached.
+func trackIssue(o runOptions, run, text, day string, c Counts, nightLines []string, streak int) error {
+	gh := func(args ...string) (string, error) {
 		if o.dry {
 			fmt.Fprintf(o.stdout, "[dry-run] gh %s\n", strings.Join(args, " "))
-			return nil
+			return "", nil
 		}
+		var out strings.Builder
 		cmd := exec.Command("gh", args...)
-		cmd.Stdout, cmd.Stderr = o.stdout, o.stderr
-		return cmd.Run()
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(&out, o.stdout), o.stderr
+		err := cmd.Run()
+		return strings.TrimSpace(out.String()), err
 	}
+	linksPath := filepath.Join(o.state, "night-links.txt")
+	links := map[string]string{}
+	for _, l := range readLines(linksPath) {
+		if d, u, ok := strings.Cut(l, " "); ok {
+			links[d] = u
+		}
+	}
+	status := filepath.Join(run, "status.md")
+	writeStatus := func() error {
+		return os.WriteFile(status, []byte(statusBody(o.issueRepo, nightLines, links, streak, day)), 0o644)
+	}
+
 	issue := o.issue
 	if issue == "" {
 		out, _ := exec.Command("gh", "issue", "list", "-R", o.issueRepo, "--state", "open", "--label", issueLabel,
-			"--json", "number,title", "-q", fmt.Sprintf(".[] | select(.title == %q) | .number", issueTitle)).Output()
+			"--json", "number", "-q", ".[].number").Output()
 		issue, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
 	}
+	if issue == "" {
+		labels, _ := exec.Command("gh", "label", "list", "-R", o.issueRepo, "--search", issueLabel,
+			"--json", "name", "-q", ".[].name").Output()
+		if !hasLine(string(labels), issueLabel) {
+			if _, err := gh("label", "create", issueLabel, "-R", o.issueRepo, "--color", "FBCA04",
+				"--description", "API parity between go.cbioportal.org and production"); err != nil {
+				return err
+			}
+		}
+		if err := writeStatus(); err != nil {
+			return err
+		}
+		url, err := gh("issue", "create", "-R", o.issueRepo, "--title", issueTitle, "--label", issueLabel, "--body-file", status)
+		if err != nil {
+			return err
+		}
+		issue = url[strings.LastIndex(url, "/")+1:]
+		fmt.Fprintf(o.stdout, "opened issue #%s\n", issue)
+	}
+
 	body := filepath.Join(run, "issue.md")
 	if len(text) > 60000 {
 		text = text[:60000]
@@ -162,33 +199,39 @@ func alertIssue(o runOptions, run, text string, bad int, day string, c Counts, s
 	if err := os.WriteFile(body, []byte(text), 0o644); err != nil {
 		return err
 	}
-	switch decideIssue(bad, issue) {
-	case issueComment:
-		fmt.Fprintf(o.stdout, "updating issue #%s\n", issue)
-		return gh("issue", "comment", issue, "-R", o.issueRepo, "--body-file", body)
-	case issueCreate:
-		fmt.Fprintln(o.stdout, "opening the issue")
-		labels, _ := exec.Command("gh", "label", "list", "-R", o.issueRepo, "--search", issueLabel,
-			"--json", "name", "-q", ".[].name").Output()
-		if !hasLine(string(labels), issueLabel) {
-			if err := gh("label", "create", issueLabel, "-R", o.issueRepo, "--color", "FBCA04",
-				"--description", "API parity between go.cbioportal.org and production"); err != nil {
-				return err
-			}
+	url, err := gh("issue", "comment", issue, "-R", o.issueRepo, "--body-file", body)
+	if err != nil {
+		return err
+	}
+	if url != "" {
+		links[day] = url
+		var lines []string
+		for d, u := range links {
+			lines = append(lines, d+" "+u)
 		}
-		return gh("issue", "create", "-R", o.issueRepo, "--title", issueTitle, "--label", issueLabel, "--body-file", body)
-	case issueClose:
-		fmt.Fprintf(o.stdout, "closing issue #%s\n", issue)
+		slices.Sort(lines)
+		if !o.dry {
+			writeLines(linksPath, lines)
+		}
+	}
+	if err := writeStatus(); err != nil {
+		return err
+	}
+	if _, err := gh("issue", "edit", issue, "-R", o.issueRepo, "--title", issueTitle, "--body-file", status); err != nil {
+		return err
+	}
+	if decideIssue(streak) == issueClose {
 		closing := filepath.Join(run, "close.md")
-		msg := fmt.Sprintf("Clean on %s: %d identical, %d known differences, %d Java nondeterministic of %d requests. Clean nights in a row: %d of %d.\n",
-			day, c.Identical, c.Known, c.Nondeterministic, c.All, streak, goal)
+		msg := fmt.Sprintf("Goal reached on %s: %d clean nights in a row (%d identical, %d known differences, %d Java nondeterministic of %d requests tonight).\n",
+			day, streak, c.Identical, c.Known, c.Nondeterministic, c.All)
 		if err := os.WriteFile(closing, []byte(msg), 0o644); err != nil {
 			return err
 		}
-		if err := gh("issue", "comment", issue, "-R", o.issueRepo, "--body-file", closing); err != nil {
+		if _, err := gh("issue", "comment", issue, "-R", o.issueRepo, "--body-file", closing); err != nil {
 			return err
 		}
-		return gh("issue", "close", issue, "-R", o.issueRepo)
+		_, err := gh("issue", "close", issue, "-R", o.issueRepo)
+		return err
 	}
 	return nil
 }

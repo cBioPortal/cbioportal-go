@@ -76,12 +76,26 @@ func TestNights(t *testing.T) {
 
 func TestDecideIssue(t *testing.T) {
 	for _, tt := range []struct {
-		bad   int
-		issue string
-		want  issueAction
-	}{{3, "12", issueComment}, {3, "", issueCreate}, {0, "12", issueClose}, {0, "", issueNone}} {
-		if got := decideIssue(tt.bad, tt.issue); got != tt.want {
-			t.Errorf("decideIssue(%d, %q) = %d, want %d", tt.bad, tt.issue, got, tt.want)
+		streak int
+		want   issueAction
+	}{{0, issueKeep}, {goal - 1, issueKeep}, {goal, issueClose}, {goal + 2, issueClose}} {
+		if got := decideIssue(tt.streak); got != tt.want {
+			t.Errorf("decideIssue(%d) = %d, want %d", tt.streak, got, tt.want)
+		}
+	}
+}
+
+func TestStatusBody(t *testing.T) {
+	got := statusBody("org/repo", []string{"2026-10-08 unclean", "2026-10-09 clean"},
+		map[string]string{"2026-10-09": "https://x/c/2"}, 1, "2026-10-09")
+	for _, want := range []string{
+		"**7 clean nights in a row**",
+		"Clean nights in a row: **1 of 7**",
+		"| 2026-10-09 | clean | [report](https://x/c/2) |\n| 2026-10-08 | unexplained differences | — |",
+		"https://github.com/org/repo/blob/main/docs/rewrite/parity.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("status body lacks %q:\n%s", want, got)
 		}
 	}
 }

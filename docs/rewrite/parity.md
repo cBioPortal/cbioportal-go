@@ -162,10 +162,12 @@ than run uncapped.
 1 MB each. Runs are kept for 14 days. The command exits with status 1 when
 anything is unexplained, 2 when the check itself fails.
 
-**The GitHub issue.** While anything is unexplained, the job keeps one issue
-open in this repository, "Nightly parity: unexplained differences", with the
-label `parity`. It opens the issue with the report, adds each later failing
-report as a comment, and closes it after the first clean night.
+**The GitHub issue.** One issue with the label `parity` tracks the goal of 7
+clean nights in a row. Its description says what the goal is and shows where
+it stands: the clean nights so far and a table of recent nights, each linked
+to its report. Every night, clean or not, the job posts that night's report as
+a comment and rewrites the description. When the goal is reached, it says so
+and closes the issue. If no issue is open, the next run opens one.
 
 | Option | Effect |
 |---|---|

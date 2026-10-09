@@ -336,24 +336,51 @@ func firstDiffs(diffs []string, n int) string {
 	return strings.Join(out, "\n")
 }
 
-// issueAction is what the night does with the alert issue.
+// statusBody is the tracking issue's description: the goal, where it
+// stands, and the most recent nights, each linked to its report comment.
+func statusBody(repo string, nightLines []string, links map[string]string, streak int, day string) string {
+	var b strings.Builder
+	b.WriteString("This issue tracks the go/no-go for serving api.cbioportal.org from go: ")
+	fmt.Fprintf(&b, "**%d clean nights in a row** of the nightly parity check.\n\n", goal)
+	b.WriteString("Each night the check sends a sample of yesterday's production requests to ")
+	b.WriteString("go.cbioportal.org and to api.cbioportal.org and compares the answers. A night is ")
+	b.WriteString("clean when every difference is known and explained (a Java bug go fixes, ")
+	b.WriteString("Java giving changing answers, or a documented choice). Each night's report is ")
+	b.WriteString("a comment below; this description is rewritten after every run.\n\n")
+	fmt.Fprintf(&b, "How it works: [docs/rewrite/parity.md](https://github.com/%s/blob/main/docs/rewrite/parity.md).\n\n", repo)
+	fmt.Fprintf(&b, "## Status (%s)\n\nClean nights in a row: **%d of %d**\n\n", day, streak, goal)
+	b.WriteString("| Night | Result | Report |\n|---|---|---|\n")
+	recent := nightLines
+	if len(recent) > 14 {
+		recent = recent[len(recent)-14:]
+	}
+	for i := len(recent) - 1; i >= 0; i-- {
+		d, result, _ := strings.Cut(recent[i], " ")
+		mark := "unexplained differences"
+		if result == "clean" {
+			mark = "clean"
+		}
+		link := "—"
+		if u := links[d]; u != "" {
+			link = "[report](" + u + ")"
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", d, mark, link)
+	}
+	return b.String()
+}
+
+// issueAction is what the night does with the tracking issue after
+// posting its report.
 type issueAction int
 
 const (
-	issueNone    issueAction = iota
-	issueComment             // unexplained requests, the issue is open: add the report
-	issueCreate              // unexplained requests, no issue open: open one
-	issueClose               // a clean night with the issue open: say so and close it
+	issueKeep  issueAction = iota // the goal is not reached: keep the issue open
+	issueClose                    // the goal is reached: say so and close it
 )
 
-func decideIssue(bad int, issue string) issueAction {
-	switch {
-	case bad > 0 && issue != "":
-		return issueComment
-	case bad > 0:
-		return issueCreate
-	case issue != "":
+func decideIssue(streak int) issueAction {
+	if streak >= goal {
 		return issueClose
 	}
-	return issueNone
+	return issueKeep
 }
