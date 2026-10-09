@@ -62,6 +62,20 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"},{"studyId":"s","patientId":"P02"}]}`, "known="},
 		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"}]}`, ""},
 		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS","patientIdentifiers":[{"studyId":"s","patientId":"P01"},{"studyId":"t","patientId":"P02"}]}`, "known="},
+		// A slashed POST whose filter Java's interceptor leaves unparsed.
+		{"POST", "/api/clinical-data/fetch/?clinicalDataType=SAMPLE", `{"identifiers":[{"studyId":"s","entityId":"a"}]}`, "known-if-b-fails="},
+		{"POST", "/api/clinical-data/fetch/", `{}`, "known-if-b-fails="},
+		{"POST", "/api/clinical-events-meta/fetch/", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"}]}`, "known-if-b-fails="},
+		{"POST", "/api/survival-data/fetch/", `{"attributeIdPrefix":"OS"}`, "known-if-b-fails="},
+		{"POST", "/api/generic_assay_data/fetch/", `{"molecularProfileIds":["p"]}`, "known-if-b-fails="},
+		{"POST", "/api/legacy/mutations/fetch/", `{"molecularProfileIds":["p"]}`, "known-if-b-fails="},
+		{"POST", "/api/treatments/patient/?tier=Agent", `{"studyIds":["s"]}`, "known-if-b-fails="},
+		{"POST", "/api/mutations/fetch", `{"molecularProfileIds":["p"]}`, ""},
+		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS"}`, ""},
+		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds":["s"]}`, "known-if-empty="},
+		{"GET", "/api/clinical-data/fetch/", "", ""},
+		{"POST", "/api/clinical-data-counts/fetch/", `{"studyViewFilter":{"studyIds":["s"]}}`, ""},
+		{"POST", "/api/studies/fetch/", `["s"]`, "ignore=allSampleCount,resourceCounts"},
 		// Java bugs in the data.
 		{"POST", "/api/structuralvariant-counts/fetch", `{"studyIds":["s"]}`, "ignore=matchingGenePanelIds,numberOfProfiledCases"},
 		{"GET", "/api/studies/s/significant-copy-number-regions?pageSize=10&projection=SUMMARY", "", "known="},
@@ -98,7 +112,9 @@ func TestAnnotate(t *testing.T) {
 		"\n## get-session-1 unordered known=\"stale\"\nGET /api/session/a\n" +
 		"\n# an old reason\n## get-studies-1 unordered ignore=old\nGET /api/studies/s\n" +
 		"\n## get-dcn-1 unordered\nGET /api/molecular-profiles/p/discrete-copy-number?sampleListId=l&discreteCopyNumberEventType=ALL\n" +
-		"\n## post-treatments-sample-1 unordered known=\"stale\"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n"
+		"\n## post-treatments-sample-1 unordered known=\"stale\"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n" +
+		"\n## post-clinical-1 unordered known-if-b-fails=\"stale\"\nPOST /api/clinical-data/fetch/\n{}\n" +
+		"\n## post-mutations-1 unordered known-if-b-fails=\"stale\"\nPOST /api/mutations/fetch\n{}\n"
 	var out, report strings.Builder
 	if err := annotate(strings.NewReader(in), &out, &report); err != nil {
 		t.Fatal(err)
@@ -110,7 +126,9 @@ func TestAnnotate(t *testing.T) {
 		"\n## get-session-1 unordered " + opts("GET", "/api/session/a", "") + "\nGET /api/session/a\n" +
 		"\n# " + studyComment + "\n## get-studies-1 unordered ignore=resourceCounts\nGET /api/studies/s\n" +
 		"\n## post-treatments-sample-1 unordered " + opts("POST", "/api/treatments/sample", `{"studyIds":["s"]}`) +
-		"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n"
+		"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n" +
+		"\n## post-clinical-1 unordered " + opts("POST", "/api/clinical-data/fetch/", "{}") + "\nPOST /api/clinical-data/fetch/\n{}\n" +
+		"\n## post-mutations-1 unordered\nPOST /api/mutations/fetch\n{}\n"
 	if out.String() != want {
 		t.Errorf("annotate:\n%s\nwant:\n%s", out.String(), want)
 	}

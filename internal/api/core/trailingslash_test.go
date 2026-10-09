@@ -19,6 +19,7 @@ func TestTrailingSlashMatch(t *testing.T) {
 	mux.HandleFunc("GET /api/studies", echo("studies"))
 	mux.HandleFunc("GET /api/studies/{id}", echo("study "))
 	mux.HandleFunc("GET /api/studies/{id}/samples", echo("samples of "))
+	mux.HandleFunc("POST /api/clinical-data/fetch", echo("clinical data"))
 	s := &State{mux: mux}
 	h := s.TrailingSlash(mux)
 	for path, want := range map[string]string{
@@ -38,5 +39,12 @@ func TestTrailingSlashMatch(t *testing.T) {
 		if w.Body.String() != want {
 			t.Errorf("GET %s: %q, want %q", path, w.Body.String(), want)
 		}
+	}
+	// A legacy endpoint whose filter Java's interceptor parses answers a
+	// slashed POST as the unslashed one.
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/clinical-data/fetch/", nil))
+	if w.Body.String() != "clinical data" {
+		t.Errorf("POST /api/clinical-data/fetch/: %q", w.Body.String())
 	}
 }

@@ -55,7 +55,7 @@ func (s *State) ConfigureAuth() error {
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	h := auth.BearerAuth(s.auth != nil, core.SpringStringParams(s.StudyAvailability(core.ExtraEndpoints(studies.New(s.State).StudiesMeta, core.UninterceptedFetch(core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux))))))))))
+	h := auth.BearerAuth(s.auth != nil, core.SpringStringParams(s.StudyAvailability(core.ExtraEndpoints(studies.New(s.State).StudiesMeta, core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
 	if s.auth != nil {
 		h = s.auth.Wrap(s.State, h)
 	}

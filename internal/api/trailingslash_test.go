@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -10,8 +11,8 @@ import (
 
 // TestTrailingSlashRouter checks the router's trailing-slash answers against
 // Java's: errors name the requested path, a method the trimmed route does
-// not serve is a 405, and a POST to a legacy endpoint whose filter the
-// interceptor parses fails as its controller does without the filter.
+// not serve is a 405, and a POST to a legacy endpoint whose filter Java's
+// interceptor parses answers as without the slash.
 func TestTrailingSlashRouter(t *testing.T) {
 	h := NewRouter(newState(&core.State{}))
 	for _, c := range []struct {
@@ -26,21 +27,27 @@ func TestTrailingSlashRouter(t *testing.T) {
 		{"POST", "/api/hello/", "{}", 405, `"path":"/api/hello/"`},
 		{"GET", "/api/", "", 302, ""},
 		{"GET", "/api/swagger-ui/", "", 302, ""},
-		{"POST", "/api/clinical-data/fetch/", `{"attributeIds":["AGE"]}`, 500, `"path":"/api/clinical-data/fetch/"`},
-		{"POST", "/api/clinical-data/fetch/", "", 500, `"error":"Internal Server Error"`},
-		{"POST", "/api/clinical-data/fetch/", "{bad", 400, core.MsgBadJSON},
-		{"POST", "/api/clinical-data/fetch/", "[]", 400, core.MsgBadJSON},
-		{"POST", "/api/legacy/patients/fetch/", "{}", 500, `"path":"/api/legacy/patients/fetch/"`},
-		{"POST", "/api/copy-number-segments/fetch/", "[]", 500, ""},
-		{"POST", "/api/copy-number-segments/fetch/", "{}", 400, core.MsgBadJSON},
-		{"POST", "/api/generic_assay_data/fetch/", "{}", 400, ""},
 	} {
-		req := httptest.NewRequest(c.method, c.path, strings.NewReader(c.body))
-		req.Header.Set("Content-Type", "application/json")
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
+		w := serveSlash(h, c.method, c.path, c.body)
 		if w.Code != c.status || !strings.Contains(w.Body.String(), c.want) {
 			t.Errorf("%s %s %s: status %d body %q, want %d with %q", c.method, c.path, c.body, w.Code, w.Body.String(), c.status, c.want)
+		}
+	}
+	for _, c := range []struct{ path, body string }{
+		{"/api/clinical-data/fetch", `{"attributeIds":["AGE"]}`},
+		{"/api/clinical-data/fetch", ""},
+		{"/api/clinical-data/fetch", "{bad"},
+		{"/api/clinical-data/fetch", "[]"},
+		{"/api/legacy/patients/fetch", "{}"},
+		{"/api/copy-number-segments/fetch", "[]"},
+		{"/api/copy-number-segments/fetch", "{}"},
+		{"/api/generic_assay_data/fetch", "{}"},
+	} {
+		want := serveSlash(h, "POST", c.path, c.body)
+		got := serveSlash(h, "POST", c.path+"/", c.body)
+		wantBody := strings.ReplaceAll(want.Body.String(), `"path":"`+c.path+`"`, `"path":"`+c.path+`/"`)
+		if got.Code != want.Code || got.Body.String() != wantBody {
+			t.Errorf("POST %s/ %s: status %d body %q, want %d %q", c.path, c.body, got.Code, got.Body.String(), want.Code, wantBody)
 		}
 	}
 	w := httptest.NewRecorder()
@@ -48,4 +55,12 @@ func TestTrailingSlashRouter(t *testing.T) {
 	if loc := w.Header().Get("Location"); !strings.HasSuffix(loc, "/api/swagger-ui/index.html") {
 		t.Errorf("GET /api/swagger-ui/: Location %q", loc)
 	}
+}
+
+func serveSlash(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	return w
 }

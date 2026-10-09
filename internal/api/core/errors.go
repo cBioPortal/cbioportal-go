@@ -192,3 +192,13 @@ func interceptedBodyPath(path string) bool {
 	rest, ok := strings.CutPrefix(path, "/api")
 	return ok && interceptedBodyPaths[rest]
 }
+
+// InterceptedBodyPath reports whether Java's
+// InvolvedCancerStudyExtractorInterceptor parses the body of a POST to path,
+// an /api/legacy/ alias resolved.
+func InterceptedBodyPath(path string) bool {
+	if to, ok := APIAliasPath(path); ok {
+		path = to
+	}
+	return interceptedBodyPath(path)
+}

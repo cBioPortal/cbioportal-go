@@ -18,12 +18,12 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 79 entries:
+**Summary.** The page has 80 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 48 | go does the same thing as Java, on purpose. |
-| Fixed in go | 21 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Fixed in go | 22 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
@@ -79,13 +79,14 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 21 fixes in one place. It shows what a client gets
+This table collects all 22 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
 
 | Area | Java | go |
 |---|---|---|
+| POST with a trailing slash to an older multi-study endpoint (`clinical-data/fetch/`, `survival-data/fetch/`, …) | Java fails: a 400 for bad JSON, an empty 400 for `generic_assay_data`, a 500 for any other body. | go answers as it does without the slash. |
 | Study availability | Java marks a study that is being imported as not readable (`readPermission: false`), whatever the setting says. | go does this only when `study_availability.enabled` is on, as the setting's name says. |
 | `studies/fetch`, `/api/legacy/studies` | Java reports `allSampleCount: 1`. | go reports the number of samples in the study's `_all` sample list. |
 | Study list, `resourceCounts` | Java also counts resources of other studies that share a resource id. | go counts only this study's resources. |
@@ -142,7 +143,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | When Java hits an error it did not plan for, it returns Spring Boot's generic 500 body with no message. | BasicErrorController | Copied. | TestFailHidesDatabaseErrors, TestOracleSpringErrorTimestamp |
 | When a parameter is given twice, Java uses only the first value. For example, `entrezGeneId=7157&entrezGeneId=5925` reads only TP53. If the first value is not a number, the error message lists all values joined by commas. A text parameter, such as `attributeId`, `keyword` or `sampleListId`, instead gets all values joined by commas: `attributeId=A&attributeId=B` asks for the attribute `A,B`, which does not exist. | Spring parameter binding (ArrayToStringConverter for text) | Copied. | TestContractRepeatedEntrezGeneID, TestContractRepeatedStringParam |
 | A path with a trailing slash, such as `/api/x/`, works the same as `/api/x`, for every method. | WebAppConfig.configurePathMatch (`setUseTrailingSlashMatch`) | Copied. | TestContractTrailingSlashGet |
-| A POST with a trailing slash to an older multi-study endpoint fails. Bad JSON gives a 400. `generic_assay_data` gives an empty 400. Any other body gives a 500. | InvolvedCancerStudyExtractorInterceptor matches exact paths | Copied. | TestContractTrailingSlashPost |
+| A POST with a trailing slash to an older multi-study endpoint, such as `clinical-data/fetch/`, fails. Bad JSON gives a 400. `generic_assay_data` gives an empty 400. Any other body gives a 500. | InvolvedCancerStudyExtractorInterceptor matches exact paths | Fixed in go. go answers as it does without the slash. | TestContractTrailingSlashPost, TestTrailingSlashMatch, known.go |
 | A multi-study filter body that Java cannot read gives an empty 200. | InvolvedCancerStudyExtractorInterceptor | Copied. | TestContractFilterValidation |
 | An empty text parameter still counts as given. So `sampleListId=` selects no samples. The same happens when a number is turned into a sample list name. | Spring / Jackson | Copied. | TestContractRequiredParams |
 | Paths with `;`, `//`, `.` or `..` segments, or with an encoded `.` or `%`, get a 400 before any endpoint sees them. | StrictHttpFirewall, Tomcat | Copied. | TestContractFirewall, TestJavaFirewall |

@@ -1,10 +1,6 @@
 package core
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,11 +15,10 @@ import (
 // never matches an empty segment. Error bodies keep the requested path, as
 // Spring's do.
 //
-// Java's InvolvedCancerStudyExtractorInterceptor matches the exact path, so
-// on a legacy endpoint whose filter it parses (interceptedBodyPaths) a
-// trailing slash leaves the controller without its filter: such requests
-// answer as legacyUnintercepted, once authentication and authorization have
-// seen them (uninterceptedFetch).
+// A POST to a legacy endpoint whose filter Java's
+// InvolvedCancerStudyExtractorInterceptor parses answers as without the
+// slash too: that interceptor matches the exact path, so Java's controller
+// fails on such a request (docs/rewrite/java-quirks.md).
 func (s *State) TrailingSlash(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
@@ -40,28 +35,7 @@ func (s *State) TrailingSlash(next http.Handler) http.Handler {
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = trimmed
 		r2.URL.RawPath = strings.TrimSuffix(r.URL.RawPath, "/")
-		if r.Method == http.MethodPost {
-			if rest, ok := interceptorPath(trimmed); ok && interceptedBodyPaths[rest] {
-				r2 = r2.WithContext(context.WithValue(r2.Context(), uninterceptedKey{}, rest))
-			}
-		}
 		next.ServeHTTP(w, r2)
-	})
-}
-
-// uninterceptedKey marks a request trailingSlash leaves to
-// legacyUnintercepted; its value is the interceptor's path.
-type uninterceptedKey struct{}
-
-// UninterceptedFetch answers the requests trailingSlash marked as
-// legacyUnintercepted.
-func UninterceptedFetch(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rest, ok := r.Context().Value(uninterceptedKey{}).(string); ok {
-			legacyUnintercepted(w, r, rest)
-			return
-		}
-		next.ServeHTTP(w, r)
 	})
 }
 
@@ -77,43 +51,4 @@ func (s *State) routed(path string) bool {
 		}
 	}
 	return false
-}
-
-// interceptorPath is path as InvolvedCancerStudyExtractorInterceptor compares
-// it: without the /api and /legacy prefixes.
-func interceptorPath(path string) (string, bool) {
-	rest, ok := strings.CutPrefix(path, "/api")
-	if !ok {
-		return "", false
-	}
-	return strings.TrimPrefix(rest, "/legacy"), true
-}
-
-// legacyUnintercepted answers a POST to a legacy intercepted endpoint
-// (relative path rest) that the interceptor did not parse: a body that is
-// not JSON of the filter's shape fails as Spring's body conversion does;
-// otherwise /generic_assay_data/fetch rejects the missing filter with an
-// empty 400 and every other controller fails with a 500 on it.
-func legacyUnintercepted(w http.ResponseWriter, r *http.Request, rest string) {
-	raw, _ := io.ReadAll(r.Body)
-	raw = bytes.TrimSpace(raw)
-	if len(raw) > 0 {
-		var v any
-		if err := json.Unmarshal(raw, &v); err != nil {
-			WriteError(w, http.StatusBadRequest, MsgBadJSON)
-			return
-		}
-		_, isList := v.([]any)
-		_, isObject := v.(map[string]any)
-		wantList := rest == "/copy-number-segments/fetch"
-		if v != nil && (wantList && !isList || !wantList && !isObject) {
-			WriteError(w, http.StatusBadRequest, MsgBadJSON)
-			return
-		}
-	}
-	if rest == "/generic_assay_data/fetch" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	SpringError(w, r, http.StatusInternalServerError)
 }
