@@ -14,10 +14,17 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/filtered-samples/fetch", `{"customDataFilters":[]}`, "known="},
 		{"POST", "/api/filtered-samples/fetch", `{"studyIds":["x"]}`, ""},
 		{"GET", "/api/info", "", "ignore=gitBranch"},
+		{"GET", "/api/info/", "", "ignore=gitBranch"},
 		{"GET", "/api/v3/api-docs/public", "", "ignore=host,servers"},
+		{"GET", "/api/v2/api-docs?group=default", "", "known="},
 		{"GET", "/api/studies/", "", "known="},
 		{"GET", "/api/studies/acc_tcga", "", "ignore=resourceCounts"},
 		{"GET", "/api/studies/acc_tcga/samples", "", ""},
+		{"POST", "/api/studies/fetch?projection=DETAILED", `["acc_tcga"]`, "ignore=allSampleCount,resourceCounts"},
+		{"POST", "/api/studies/fetch/", `["acc_tcga"]`, "ignore=allSampleCount,resourceCounts"},
+		{"GET", "/api/legacy/studies/acc_tcga/", "", "ignore=allSampleCount,resourceCounts"},
+		{"GET", "/api/legacy/studies?keyword=lung", "", "ignore=allSampleCount,resourceCounts"},
+		{"GET", "/api/legacy/studies?pageSize=7&pageNumber=3", "", "known="},
 		{"GET", "/api/studies/s/clinical-data?pageNumber=6&pageSize=200", "", "known="},
 		{"GET", "/api/studies/s/clinical-data?attributeId=AGE", "", ""},
 		{"GET", "/api/samples?keyword=ar&pageSize=3", "", "known="},
@@ -36,10 +43,29 @@ func TestExpect(t *testing.T) {
 		{"GET", "/api/samples?pageSize=10&projection=ID", "", ""},
 		{"GET", "/api/samples?pageSize=10&sortBy=sampleId", "", ""},
 		{"GET", "/api/patients", "", ""},
-		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds": ["acbc_mskcc_2015"]}`, "known="},
-		{"POST", "/api/treatments/sample?tier=Agent", `{"studyIds": ["alk_msk_2026"]}`, "known="},
-		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds":["s"],"alterationFilter":{}}`, ""},
+		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds": ["acbc_mskcc_2015"]}`, "known-if-empty="},
+		{"POST", "/api/treatments/sample?tier=Agent", `{"sampleIdentifiers": [{"studyId": "s", "sampleId": "a"}]}`, "known-if-empty="},
+		{"POST", "/api/treatments/sample", `{"studyIds": ["s"], "tiersBooleanMap": {}}`, "known-if-empty="},
 		{"POST", "/api/treatments/patient-counts/fetch?tier=Agent", `{"studyIds":["s"]}`, ""},
+		// Paging go adds.
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l&pageSize=10&pageNumber=1", "", "known="},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l", "", ""},
+		{"GET", "/api/sample-lists/l/sample-ids?pageSize=5", "", "known="},
+		{"GET", "/api/sample-lists/l/sample-ids", "", ""},
+		{"POST", "/api/molecular-data/fetch?pageSize=2&pageNumber=0", `{"molecularProfileIds":["p"]}`, "known="},
+		{"POST", "/api/genes/fetch?sortBy=hugoGeneSymbol", `["TP53"]`, "known="},
+		{"POST", "/api/genes/fetch?geneIdType=HUGO_GENE_SYMBOL", `["TP53"]`, ""},
+		// Java 500s that go answers.
+		{"POST", "/api/clinical-data/fetch", `{}`, "known="},
+		{"POST", "/api/clinical-data/fetch?clinicalDataType=PATIENT", `{"attributeIds":["MSI_SCORE"]}`, "known="},
+		{"POST", "/api/clinical-data/fetch", `{"identifiers":[{"studyId":"s","entityId":"a"}]}`, ""},
+		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"},{"studyId":"s","patientId":"P02"}]}`, "known="},
+		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"}]}`, ""},
+		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS","patientIdentifiers":[{"studyId":"s","patientId":"P01"},{"studyId":"t","patientId":"P02"}]}`, "known="},
+		// Java bugs in the data.
+		{"POST", "/api/structuralvariant-counts/fetch", `{"studyIds":["s"]}`, "ignore=matchingGenePanelIds,numberOfProfiledCases"},
+		{"GET", "/api/studies/s/significant-copy-number-regions?pageSize=10&projection=SUMMARY", "", "known="},
+		{"GET", "/api/studies/s/significant-copy-number-regions?pageSize=10&sortBy=qValue", "", ""},
 	} {
 		got, _ := expect(c.method, c.target, c.body)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
@@ -48,17 +74,47 @@ func TestExpect(t *testing.T) {
 	}
 }
 
+func TestSkip(t *testing.T) {
+	for _, c := range []struct {
+		method, target, body string
+		want                 bool
+	}{
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l&discreteCopyNumberEventType=ALL&projection=SUMMARY", "", true},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number/?sampleListId=l&discreteCopyNumberEventType=ALL", "", true},
+		{"POST", "/api/molecular-profiles/p_cna/discrete-copy-number/fetch?projection=SUMMARY&pageSize=3&discreteCopyNumberEventType=ALL", `{"sampleListId": "l"}`, true},
+		{"POST", "/api/molecular-profiles/p_cna/discrete-copy-number/fetch?discreteCopyNumberEventType=ALL", `{"entrezGeneIds": [207], "sampleListId": "l"}`, false},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l&entrezGeneIds=8880&discreteCopyNumberEventType=ALL", "", false},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l", "", false},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number-counts?discreteCopyNumberEventType=ALL", "", false},
+	} {
+		if got := skip(c.method, c.target, c.body); got != c.want {
+			t.Errorf("%s %s %s: %v, want %v", c.method, c.target, c.body, got, c.want)
+		}
+	}
+}
+
 func TestAnnotate(t *testing.T) {
 	in := "# head\n\n## get-info-1 unordered\nGET /api/info\n\n## post-x-1 unordered\nPOST /api/x/fetch\n{}\n" +
-		"\n## get-session-1 unordered known=\"kept\"\nGET /api/session/a\n"
-	var out strings.Builder
-	if err := annotate(strings.NewReader(in), &out); err != nil {
+		"\n## get-session-1 unordered known=\"stale\"\nGET /api/session/a\n" +
+		"\n# an old reason\n## get-studies-1 unordered ignore=old\nGET /api/studies/s\n" +
+		"\n## get-dcn-1 unordered\nGET /api/molecular-profiles/p/discrete-copy-number?sampleListId=l&discreteCopyNumberEventType=ALL\n" +
+		"\n## post-treatments-sample-1 unordered known=\"stale\"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n"
+	var out, report strings.Builder
+	if err := annotate(strings.NewReader(in), &out, &report); err != nil {
 		t.Fatal(err)
 	}
+	opts := func(method, target, body string) string { o, _ := expect(method, target, body); return o }
+	_, studyComment := expect("GET", "/api/studies/s", "")
 	want := "# head\n\n# version fields describe the deployment\n## get-info-1 unordered ignore=" + versionFields +
 		"\nGET /api/info\n\n## post-x-1 unordered\nPOST /api/x/fetch\n{}\n" +
-		"\n## get-session-1 unordered known=\"kept\"\nGET /api/session/a\n"
+		"\n## get-session-1 unordered " + opts("GET", "/api/session/a", "") + "\nGET /api/session/a\n" +
+		"\n# " + studyComment + "\n## get-studies-1 unordered ignore=resourceCounts\nGET /api/studies/s\n" +
+		"\n## post-treatments-sample-1 unordered " + opts("POST", "/api/treatments/sample", `{"studyIds":["s"]}`) +
+		"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n"
 	if out.String() != want {
 		t.Errorf("annotate:\n%s\nwant:\n%s", out.String(), want)
+	}
+	if !strings.Contains(report.String(), "left out 1 ") {
+		t.Errorf("report: %q", report.String())
 	}
 }

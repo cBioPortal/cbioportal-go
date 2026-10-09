@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 76 entries:
+**Summary.** The page has 79 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 46 | go does the same thing as Java, on purpose. |
-| Fixed in go | 20 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Copied | 48 | go does the same thing as Java, on purpose. |
+| Fixed in go | 21 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 44 of the 46 copied entries. The two without a test are the
+A test checks 46 of the 48 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -79,7 +79,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 20 fixes in one place. It shows what a client gets
+This table collects all 21 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -87,14 +87,15 @@ stores less where Java stores empty rows.
 | Area | Java | go |
 |---|---|---|
 | Study availability | Java marks a study that is being imported as not readable (`readPermission: false`), whatever the setting says. | go does this only when `study_availability.enabled` is on, as the setting's name says. |
-| `studies/fetch` | Java reports `allSampleCount: 1`. | go reports the number of samples in the study's `_all` sample list. |
+| `studies/fetch`, `/api/legacy/studies` | Java reports `allSampleCount: 1`. | go reports the number of samples in the study's `_all` sample list. |
 | Study list, `resourceCounts` | Java also counts resources of other studies that share a resource id. | go counts only this study's resources. |
 | Genes pages | Java sorts every page by gene symbol and drops symbols that have more than one Entrez id. | go returns the page in the order `sortBy` asks for. |
 | Genes `sortBy=cytoband` or `length` | Java fails with a 500. | go sorts the genes by their cytoband or length on the portal's reference genome. |
 | Keyword searches with `sortBy` | Java ignores `sortBy` and `direction` when searching genes, patients or `/api/legacy/studies` by keyword. | go sorts the matches as asked. |
 | `projection=ID` with `sortBy` | About 30 list endpoints ignore `sortBy` and `direction` when only ids are asked for. | go sorts the ids as it sorts the full records. |
 | Clinical table, unknown `sortBy` | Java fails with a 500. | go answers with the table. |
-| `clinical-events-meta`, `survival-data` | Java fails with a 500, because a method it calls does not exist. | go answers with the data. |
+| `clinical-events-meta`, `survival-data` | Java fails with a 500 for more than one patient, because a method it calls does not exist. | go answers with the data. |
+| `clinical-data/fetch` without `identifiers` | Java fails with a 500 (a null pointer error). | go answers with an empty list. |
 | `treatments/*` for a study without treatment data | Java returns the treatments of every study in the portal. | go returns an empty list. |
 | Generic assay data, `projection=ID` | Java fails with a 500. | go answers with the data. |
 | META on five fetch endpoints | Java ignores META and returns the records without a total count. | go returns an empty body with the total count. |
@@ -139,7 +140,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
 | When Java hits an error it did not plan for, it returns Spring Boot's generic 500 body with no message. | BasicErrorController | Copied. | TestFailHidesDatabaseErrors, TestOracleSpringErrorTimestamp |
-| When a parameter is given twice, Java uses only the first value. For example, `entrezGeneId=7157&entrezGeneId=5925` reads only TP53. If the first value is not a number, the error message lists all values joined by commas. | Spring parameter binding | Copied. | TestContractRepeatedEntrezGeneID |
+| When a parameter is given twice, Java uses only the first value. For example, `entrezGeneId=7157&entrezGeneId=5925` reads only TP53. If the first value is not a number, the error message lists all values joined by commas. A text parameter, such as `attributeId`, `keyword` or `sampleListId`, instead gets all values joined by commas: `attributeId=A&attributeId=B` asks for the attribute `A,B`, which does not exist. | Spring parameter binding (ArrayToStringConverter for text) | Copied. | TestContractRepeatedEntrezGeneID, TestContractRepeatedStringParam |
 | A path with a trailing slash, such as `/api/x/`, works the same as `/api/x`, for every method. | WebAppConfig.configurePathMatch (`setUseTrailingSlashMatch`) | Copied. | TestContractTrailingSlashGet |
 | A POST with a trailing slash to an older multi-study endpoint fails. Bad JSON gives a 400. `generic_assay_data` gives an empty 400. Any other body gives a 500. | InvolvedCancerStudyExtractorInterceptor matches exact paths | Copied. | TestContractTrailingSlashPost |
 | A multi-study filter body that Java cannot read gives an empty 200. | InvolvedCancerStudyExtractorInterceptor | Copied. | TestContractFilterValidation |
@@ -160,7 +161,8 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `GET /api/studies?projection=META` returns `[]` with no newline, plus the total count. | ColumnStoreStudyController | Copied. | TestOracleProjectionBehaviour, TestContractStudiesMeta |
 | `readPermission` ignores whether the study is public and ignores the PUBLIC group. | ColumnStoreStudyController.getAllStudies | Copied. | TestStudyReadable |
 | A study that is being imported (its status is not 1) is listed with `readPermission: false`, whatever `study_availability.enabled` says. This is Java's main branch. Production (v7.1.2) never does this. | ColumnStoreStudyController (master) | Fixed in go. go does this only when the setting is on, as the setting's name says. | TestContractStudyAvailability |
-| `POST /api/studies/fetch` reports `allSampleCount: 1`. | www (legacy StudyController) | Fixed in go. go reports the size of the study's `_all` sample list. | known.go, corpus `studies-fetch-*` |
+| `POST /api/studies/fetch` and the `/api/legacy/studies` endpoints report `allSampleCount: 1`. | www (legacy StudyMapper) | Fixed in go. go reports the size of the study's `_all` sample list. | known.go, corpus `studies-fetch-*` |
+| `/api/legacy/studies` and `/api/legacy/studies/{studyId}` write the legacy model, not the column-store one: the nested cancer type is keyed `cancerTypeId` and comes before `allSampleCount`. The list's ID projection lists the studies by id, and META answers only the total count. A keyword is split at spaces, and each part must occur, case-sensitively, in the study's name or id or its cancer type's name or id. Matches come with names that start with the keyword first, then names containing `tcga`, then by name. Studies without sample lists are left out. | legacy StudyController, StudyMapper on ClickHouse | Copied. | TestContractLegacyStudies |
 | The study list and `resourceCounts` include resources of other studies that share a resource id. | CancerStudyMapper joins `resource_definition` on `resource_id` only | Fixed in go. go counts only the study's own resources. | known.go, corpus `studies-summary` |
 
 ## Genes
@@ -181,9 +183,10 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | The patient keyword search is case-sensitive, and `_` matches any single character. | PatientMapper on ClickHouse | Copied. | TestContractPatientKeywordLike |
 | Clinical attribute counts count rows. A patient attribute is counted once for each selected sample of that patient. | ClinicalAttributeMapper.getClinicalAttributeCountsBySampleIds | Copied. | TestContractClinicalAttributeCountsPerSample |
 | The clinical table's search is case-sensitive. | ClinicalDataMapper.searchedAttributeData | Copied. | TestContractClinicalDataTablePages |
+| `POST /api/clinical-data/fetch` without `identifiers` fails with a 500: the controller reads the identifiers of a filter that has none. | ClinicalDataController.fetchClinicalData | Fixed in go. go answers with an empty list. | TestClinicalDataFetchWithoutIdentifiers, known.go |
 | The clinical table fails with a 500 when `sortBy` is not an attribute. | StudyViewController clinical table; fixtures | Fixed in go. go answers with the table. | — |
-| `clinical-events-meta` and `survival-data` fail with a 500. A database query calls the method `SqlUtils.combineStudyAndPatientIds`, which does not exist. | ClinicalEventMapper; www and fixtures | Fixed in go. go answers with the data. | corpus `clinical-events-meta`, `survival-data*`; TestContractClinicalEventsMetaRequests, TestContractSurvivalFromEvents |
-| `treatments/patient` and `treatments/sample`, asked only for `studyIds` of a study without treatment data, return the treatments of every study in the portal. For acbc_mskcc_2015 that is 1,445 rows. | TreatmentServiceImpl filters every sample out; TreatmentMapper builds no WHERE for empty lists | Fixed in go. go returns an empty list. | known.go |
+| `clinical-events-meta` and `survival-data` fail with a 500 when they name more than one patient. A database query calls the method `SqlUtils.combineStudyAndPatientIds`, which does not exist. | ClinicalEventMapper; www and fixtures | Fixed in go. go answers with the data. | corpus `clinical-events-meta`, `survival-data*`; TestContractClinicalEventsMetaRequests, TestContractSurvivalFromEvents |
+| `treatments/patient` and `treatments/sample`, asked for studies or samples without treatment data, return the treatments of every study in the portal. For acbc_mskcc_2015 that is 1,445 rows. | TreatmentServiceImpl filters every sample out; TreatmentMapper builds no WHERE for empty lists | Fixed in go. go returns an empty list. | known.go |
 
 ## Molecular data and projections
 
@@ -210,9 +213,10 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `genomic-data-counts` reports one NA ("not available") count, attached to one gene. It equals the filtered samples minus that gene's counts. | ClickhouseGenomicDataMapper.getCNACounts | Copied. go attaches it to the first gene. Java picks a gene at random (see [Nondeterminism](#nondeterminism)). | TestContractGenomicDataCountsNA |
 | `generic-assay-data-counts` with entity filters adds an NA row, even when its count is 0. | getGenericAssayDataCounts | Copied. | TestContractGenericAssayDataCounts |
 | `mutation-data-counts` with sample ids lists "Not Mutated" and "Not Profiled" as their own items, even when they are empty. | StudyViewColumnarServiceUtil | Copied. | TestContractMutationDataCountsWithSampleIDs |
+| `mutation-data-counts` without `genomicDataFilters` counts every mutated gene by mutation type (DETAILED and ID). SUMMARY returns an empty list. | ClickhouseGenomicDataMapper.getMutationCountsByType (an empty gene condition) | Copied. | TestContractMutationDataCountsWithoutFilters |
 | Clinical enrichments decide whether a value is a number with Java's `NumberUtils.isCreatable`. A whole number with a leading zero counts only if it is a valid octal number: `07` counts, `08` does not. | ClinicalDataEnrichmentUtil | Copied. | TestDecimalCreatable |
 | `genomic-data-bin-counts` with two profiles puts every gene in the first filter's profile type and adds one NA bin. | GetGenomicDataBinCountsUseCase; www | Fixed in go. go puts each gene in its own profile. | corpus `genomic-data-bin-counts-two-profiles` |
-| Structural variant pair counts add gene2's panels to a panel list shared by all pairs. So later pairs report extra panels. | ProfiledCasesCounter | Fixed in go. go reports each pair's own panels. | corpus `sv-counts-msk` |
+| Structural variant pair counts add gene2's panels to gene1's panel list, which later pairs share. So later pairs report extra panels and more profiled cases. | ProfiledCasesCounter.getGenePanelsForAlterationCount | Fixed in go. go reports each pair's own panels. | corpus `sv-counts-msk`, known.go |
 | A numeric filter on a patient-level generic assay profile is ignored. | column-store study-view filter; fixtures | Fixed in go. go filters by patient. | — |
 | Categorical enrichments of a patient-level profile give a 500. | GenericAssayEnrichmentController; fixtures | Fixed in go. go answers with the enrichment. | TestContractGenericAssayCategoricalEnrichmentPatientLevelHLA |
 | Namespace attributes are read from one record per table and study, picked at random. | NamespaceMapper | Fixed in go. go reads every record. | TestContractNamespaceAttributes |

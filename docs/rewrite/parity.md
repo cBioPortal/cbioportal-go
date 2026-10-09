@@ -70,11 +70,21 @@ It also marks requests whose difference is expected. The list is in
 - **Server-specific fields:** version numbers in `/api/info` and the address
   in the API documentation.
 - **Bugs in www:** the study list shows resource definitions of other
-  studies, and `studies/fetch` reports `allSampleCount: 1`.
+  studies, `studies/fetch` and the legacy studies report
+  `allSampleCount: 1`, and other Java bugs that go fixes
+  ([Java quirks](java-quirks.md)), such as 500s and the treatments of the
+  whole portal (marked only when go answers an empty list).
+- **Paging go adds:** a page of an endpoint whose Java controller has no
+  paging parameters, and the API documentation that lists them.
 - **Tied rows:** a page boundary falls among rows that Java leaves in no
   fixed order, such as samples with the same id in several studies.
 
-`-annotate` adds these marks to an existing list. Compare against
+Requests for a profile's whole copy-number matrix
+(`discreteCopyNumberEventType=ALL` without genes) are left out: Java
+answers them with gigabytes, too costly to replay every night.
+
+`-annotate` marks an existing list again with the current expectations,
+replacing earlier marks, and leaves out the requests now skipped. Compare against
 api.cbioportal.org, with go serving a copy of production built by
 `transform --from-prod`:
 
@@ -118,8 +128,8 @@ builds a list of about 5,000 logged requests:
   which git ignores and only the owner can read, because it is real user
   traffic. Its header records the window, the requests per host and which
   endpoints are covered.
-- Each run marks the list again with `loggedgen -annotate`, so new entries in
-  `known.go` apply right away.
+- Each run marks the list again with `loggedgen -annotate`, so new and
+  changed entries in `known.go` apply right away.
 
 **How requests are sent.** Every request goes to api.cbioportal.org twice
 (`-self-check`), at most 4 requests a second, with no cache. If Java's two

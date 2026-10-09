@@ -21,8 +21,10 @@
 // Records are compared without regard to order, as this backend does not
 // keep the Java importer's row order. Requests whose difference is expected
 // (known.go: www's session store, deployment-specific fields, www bugs,
-// unspecified tie order) are marked with their reason; -annotate marks them
-// in an existing corpus:
+// unspecified tie order, paging go adds) are marked with their reason, and
+// requests too costly to replay every night (whole copy-number matrices)
+// are left out; -annotate marks an existing corpus again with the current
+// expectations:
 //
 //	go run ./rewrite/java-v7-to-go/loggedgen -annotate < old.txt > .parity/logged.txt
 //
@@ -61,7 +63,7 @@ func main() {
 	annotateOnly := flag.Bool("annotate", false, "copy the corpus on stdin to stdout with the expected differences marked")
 	flag.Parse()
 	if *annotateOnly {
-		if err := annotate(os.Stdin, os.Stdout); err != nil {
+		if err := annotate(os.Stdin, os.Stdout, os.Stderr); err != nil {
 			fail(err)
 		}
 		return
@@ -183,6 +185,20 @@ FROM pool GROUP BY server_name, endpoint`, params)
 		h.endpoints[s.Endpoint] = true
 		windowEndpoints[s.Endpoint] = true
 	}
+	// Requests too costly to replay every night (skip) are left out.
+	kept, skipped := rows[:0], 0
+	for _, r := range rows {
+		target := r.Path
+		if r.Query != "" {
+			target += "?" + r.Query
+		}
+		if skip(r.Method, target, r.Body) {
+			skipped++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	rows = kept
 	sampledEndpoints := map[string]bool{}
 	nFromAPI := 0
 	for _, r := range rows {
@@ -205,6 +221,9 @@ FROM pool GROUP BY server_name, endpoint`, params)
 		fmt.Printf("# server %s: %d read-only requests over %d endpoints\n", h, s.requests, len(s.endpoints))
 	}
 	fmt.Printf("# sampled: %d requests, %d of them (api-…) from %s\n", len(rows), nFromAPI, *apiServer)
+	if skipped > 0 {
+		fmt.Printf("# left out: %d requests for whole copy-number matrices (discreteCopyNumberEventType=ALL without genes)\n", skipped)
+	}
 	fmt.Printf("# endpoints: %d of the window's %d read-only endpoints sampled\n", len(sampledEndpoints), len(windowEndpoints))
 
 	count := map[string]int{}
