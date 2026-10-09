@@ -198,6 +198,13 @@ POST /api/mutations/fetch
 	if _, err := parseCorpus(strings.NewReader("## a bogus\nGET /x\n")); err == nil {
 		t.Fatal("unknown option must fail")
 	}
+	if reqs, err := parseCorpus(strings.NewReader("## a unordered known-if-empty=\"no rows, Java's \" ignore=b\nGET /x\n")); err != nil ||
+		reqs[0].Opts.KnownIfEmpty != "no rows, Java's " || reqs[0].Opts.Known != "" || len(reqs[0].Opts.Ignore) != 1 {
+		t.Fatalf("known-if-empty: %+v %v", reqs, err)
+	}
+	if _, err := parseCorpus(strings.NewReader("## a known-if-empty=\"open\nGET /x\n")); err == nil {
+		t.Fatal("unterminated known-if-empty must fail")
+	}
 }
 
 func TestCompareResponsesOutcomes(t *testing.T) {
@@ -212,6 +219,14 @@ func TestCompareResponsesOutcomes(t *testing.T) {
 	rq.Opts.Known = "reason"
 	if r := compareResponses(rq, response{Status: 200, Body: []byte(`{"a":1}`)}, response{Status: 200, Body: []byte(`{"a":2}`)}, o); r.Outcome != known {
 		t.Fatalf("got %+v", r)
+	}
+
+	rq.Opts.Known, rq.Opts.KnownIfEmpty = "", "only when A is empty"
+	for a, want := range map[string]string{"[]": known, " [ ]\n": known, `[{"a":1}]`: differs, `{}`: differs} {
+		r := compareResponses(rq, response{Status: 200, Body: []byte(a)}, response{Status: 200, Body: []byte(`[{"a":2}]`)}, o)
+		if r.Outcome != want || (want == known && r.Known != "only when A is empty") {
+			t.Errorf("a=%q: got %+v, want %s", a, r, want)
+		}
 	}
 }
 

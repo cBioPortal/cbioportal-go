@@ -420,10 +420,21 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		res.Outcome = identical
 	case rq.Opts.Known != "":
 		res.Outcome, res.Known = known, rq.Opts.Known
+	case rq.Opts.KnownIfEmpty != "" && emptyArray(ra):
+		res.Outcome, res.Known = known, rq.Opts.KnownIfEmpty
 	default:
 		res.Outcome = differs
 	}
 	return res
+}
+
+// emptyArray reports whether a body is an empty JSON array.
+func emptyArray(r response) bool {
+	if r.Size() > 64 {
+		return false
+	}
+	b := bytes.TrimSpace(r.head(64))
+	return len(b) >= 2 && b[0] == '[' && len(bytes.TrimSpace(b[1:len(b)-1])) == 0 && b[len(b)-1] == ']'
 }
 
 func setOf(keys []string) map[string]bool {

@@ -26,6 +26,9 @@ type requestOptions struct {
 	StatusOnly    bool
 	Ignore        []string
 	Known         string // a known, accepted difference and its reason
+	// KnownIfEmpty is the reason of a difference accepted only when A
+	// answers an empty JSON array.
+	KnownIfEmpty string
 }
 
 // parseCorpus reads the corpus format:
@@ -39,7 +42,8 @@ type requestOptions struct {
 // held by these keys), ties=field,field (elements equal in these fields may
 // come in any order), ignore=key,key (drop these keys), nullmissing (null
 // equals absent), status-only (compare the status code only),
-// known="reason" (an accepted difference).
+// known="reason" (an accepted difference), known-if-empty="reason" (a
+// difference accepted when A answers an empty array).
 //
 // Entries are separated by their "## " header lines; lines starting with "#"
 // (but not "## ") are comments; blank lines are ignored.
@@ -105,7 +109,8 @@ func parseCorpus(r io.Reader) ([]request, error) {
 	return out, nil
 }
 
-// parseHeader parses "name opt opt ..." where known="..." may contain spaces.
+// parseHeader parses "name opt opt ..." where known="..." and
+// known-if-empty="..." may contain spaces.
 func parseHeader(h string) (request, error) {
 	name, rest, _ := strings.Cut(h, " ")
 	if name == "" {
@@ -113,16 +118,20 @@ func parseHeader(h string) (request, error) {
 	}
 	req := request{Name: name}
 	rest = strings.TrimSpace(rest)
+	quoted := map[string]*string{`known="`: &req.Opts.Known, `known-if-empty="`: &req.Opts.KnownIfEmpty}
 	for rest != "" {
 		var tok string
-		if strings.HasPrefix(rest, `known="`) {
-			end := strings.Index(rest[7:], `"`)
-			if end < 0 {
-				return req, fmt.Errorf("%s: unterminated known=\"", name)
+		if prefix, _, ok := strings.Cut(rest, `"`); ok {
+			if dst := quoted[prefix+`"`]; dst != nil {
+				start := len(prefix) + 1
+				end := strings.Index(rest[start:], `"`)
+				if end < 0 {
+					return req, fmt.Errorf("%s: unterminated %s", name, prefix+`"`)
+				}
+				*dst = rest[start : start+end]
+				rest = strings.TrimSpace(rest[start+end+1:])
+				continue
 			}
-			req.Opts.Known = rest[7 : 7+end]
-			rest = strings.TrimSpace(rest[7+end+1:])
-			continue
 		}
 		tok, rest, _ = strings.Cut(rest, " ")
 		rest = strings.TrimSpace(rest)

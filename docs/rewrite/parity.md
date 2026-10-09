@@ -22,7 +22,8 @@ list of API requests to two servers and compares the responses.
 - Numbers match if they differ by less than one part in a billion (1e-9).
 - Options on each request can sort arrays whose order Java does not define
   (`unordered`, `unordered=key`, `ties=field`), drop keys (`ignore=`), or
-  mark a difference as expected with its reason (`known="..."`).
+  mark a difference as expected with its reason (`known="..."`), or as
+  expected only when go answers an empty list (`known-if-empty="..."`).
 
 Responses from the reference server are cached in `.parity/cache`, which git
 ignores. They are fetched at most twice a second with a browser User-Agent,
