@@ -90,6 +90,10 @@ things the stdlib already covers (routers, ORMs, validation, logging).
 Statistics stay hand-ported: exact Java parity requires it. CI runs
 `govulncheck` on every push.
 
+A small, widely used community package is fine when it saves real code
+and brings almost no dependencies, e.g. `KimMachineGun/automemlimit`
+(sets Go's memory limit from the container's).
+
 ## GitHub
 
 Repo: <https://github.com/cBioPortal/cbioportal-go> (`origin`, default

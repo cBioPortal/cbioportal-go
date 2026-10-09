@@ -10,10 +10,13 @@
 package main
 
 import (
+	"log/slog"
+
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/KimMachineGun/automemlimit/memlimit"
 	"log"
 	"net/http"
 	"os"
@@ -30,6 +33,8 @@ import (
 const name = "cbioportal-api"
 
 func main() {
+	// Go's soft memory limit at 80% of the container's, unless GOMEMLIMIT is set.
+	memlimit.Set(memlimit.WithRatio(0.8), memlimit.WithLogger(slog.Default()))
 	cfg, err := parseArgs(os.Args[1:], os.Getenv)
 	if errors.Is(err, flag.ErrHelp) {
 		printUsage(os.Stdout)

@@ -4,9 +4,12 @@
 package main
 
 import (
+	"log/slog"
+
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/KimMachineGun/automemlimit/memlimit"
 	"io"
 	"os"
 	"strings"
@@ -19,6 +22,8 @@ import (
 const name = "cbioportal-import"
 
 func main() {
+	// Go's soft memory limit at 80% of the container's, unless GOMEMLIMIT is set.
+	memlimit.Set(memlimit.WithRatio(0.8), memlimit.WithLogger(slog.Default()))
 	ch.SetProcessSettings(ch.ReplicaConsistentSettings)
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
