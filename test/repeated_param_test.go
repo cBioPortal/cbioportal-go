@@ -26,3 +26,19 @@ func TestContractRepeatedEntrezGeneID(t *testing.T) {
 	wantEq(t, count(base+"&entrezGeneId=675&entrezGeneId=55"), brca1)
 	wantEq(t, count(base+"&entrezGeneId=55&entrezGeneId=675"), egfr)
 }
+
+// A repeated String parameter (attributeId) binds to its values joined with
+// commas, as Spring's ArrayToStringConverter does: the attribute "A,B",
+// which does not exist.
+func TestContractRepeatedStringParam(t *testing.T) {
+	requireAPI(t)
+	count := func(path string) int {
+		return len(listOf(t, "GET", path, ""))
+	}
+	const base = "/api/studies/study_es_0/clinical-data?clinicalDataType=PATIENT"
+	if count(base+"&attributeId=OS_STATUS") == 0 || count(base+"&attributeId=OS_MONTHS") == 0 {
+		t.Fatal("fixture: no OS_STATUS or OS_MONTHS values")
+	}
+	wantEq(t, count(base+"&attributeId=OS_STATUS&attributeId=OS_MONTHS"), 0)
+	wantEq(t, count(base+"&attributeId=OS_STATUS,OS_MONTHS"), 0)
+}
