@@ -286,6 +286,10 @@ func cancerTypeName(name, id string) string {
 // pages are numbered from 1 (see pageList). Studies come in import order, a
 // keyword search ordered by name, unless sortBy is given.
 func (s Server) studies(w http.ResponseWriter, r *http.Request) {
+	if core.IsLegacyAlias(r) {
+		s.legacyStudies(w, r)
+		return
+	}
 	q := r.URL.Query()
 	where := "1 = 1"
 	args := core.NewArgs()
@@ -305,10 +309,7 @@ func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(q.Get("keyword")) != "" {
 		order = "c.name, " + importOrder
 	}
-	sortCols := map[string]string{"studyId": "c.study_id", "cancerTypeId": "c.cancer_type_id", "name": "c.name",
-		"description": "c.description", "publicStudy": "publicFlag", "pmid": "c.pmid", "citation": "c.citation",
-		"groups": "c.groups", "status": "c.study_id", "importDate": "c.study_id"}
-	if col, ok := sortCols[q.Get("sortBy")]; ok {
+	if col, ok := studySortCols[q.Get("sortBy")]; ok {
 		order = col
 		if strings.EqualFold(q.Get("direction"), "DESC") {
 			order += " DESC"
@@ -342,8 +343,88 @@ func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 	core.WriteJSON(w, s.withResourceCounts(out))
 }
 
+// studySortCols maps the studies' sortBy values (StudySortBy) to columns.
+var studySortCols = map[string]string{"studyId": "c.study_id", "cancerTypeId": "c.cancer_type_id", "name": "c.name",
+	"description": "c.description", "publicStudy": "publicFlag", "pmid": "c.pmid", "citation": "c.citation",
+	"groups": "c.groups", "status": "c.study_id", "importDate": "c.study_id"}
+
+// legacyStudies serves GET /api/legacy/studies (legacy StudyController
+// .getAllStudies, StudyMapper.getStudies) in the legacy model: the ID
+// projection lists the studies by id, META answers only the total-count
+// header, and the nested cancer type is keyed cancerTypeId. A keyword is
+// split at each space, and every part must occur, case-sensitively as
+// ClickHouse's LIKE matches, in the study's name or id or its cancer type's
+// name or id. Keyword matches come in the mapper's order (names starting
+// with the keyword, then names containing "tcga", then by name) unless
+// sortBy is given. Studies without sample lists are left out, as the
+// mapper's inner joins drop them.
+func (s Server) legacyStudies(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	projection := ProjectionParam(r)
+	args := core.NewArgs()
+	conds := []string{"c.study_id IN (SELECT study_id FROM sample_list)"}
+	importOrder := s.StudyOrder("c.study_id")
+	order := importOrder
+	if projection == "ID" {
+		order = "c.study_id"
+	}
+	if q.Has("keyword") {
+		kw := q.Get("keyword")
+		for _, term := range javaSplitSpace(kw) {
+			t := args.Str("%" + term + "%")
+			conds = append(conds, fmt.Sprintf("(c.name LIKE %[1]s OR c.study_id LIKE %[1]s OR "+
+				"ifNull(t.name, '') LIKE %[1]s OR ifNull(t.type_of_cancer_id, '') LIKE %[1]s)", t))
+		}
+		order = fmt.Sprintf("c.name LIKE %s DESC, c.name LIKE '%%tcga%%' DESC, c.name, %s", args.Str(kw+"%"), importOrder)
+	}
+	if q.Has("keyword") || projection == "DETAILED" {
+		conds = append(conds, "ifNull(t.type_of_cancer_id, '') != ''")
+	}
+	if col, ok := studySortCols[q.Get("sortBy")]; ok {
+		if strings.EqualFold(q.Get("direction"), "DESC") {
+			col += " DESC"
+		}
+		order = col + ", " + order
+	}
+	rows, err := core.CachedQueryA[studyRow](s.State, fmt.Sprintf("%s WHERE %s ORDER BY %s",
+		s.studySelect(), strings.Join(conds, " AND "), order), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	if projection == "META" {
+		w.Header().Set("total-count", fmt.Sprint(len(rows)))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	shape := studyShape{summary: projection != "ID", detailed: projection == "DETAILED"}
+	dates := s.StudyImportDates()
+	availability := s.StudyAvailabilityEnabled()
+	out := make([]CancerStudy, len(rows))
+	for i, r := range rows {
+		out[i] = toCancerStudy(r, shape, dates)
+		out[i].ReadPermission = studyReadable(availability, r.Status)
+	}
+	if shape.summary {
+		out = s.withResourceCounts(out)
+	}
+	core.WriteJSON(w, out)
+}
+
+// javaSplitSpace splits s as Java's s.split(" ") does: at every space,
+// keeping empty parts except trailing ones.
+func javaSplitSpace(s string) []string {
+	parts := strings.Split(s, " ")
+	for len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return parts
+}
+
 // study serves GET /api/studies/{studyId} (ColumnStoreStudyController
-// .getStudy): the DETAILED study with its resource counts.
+// .getStudy): the DETAILED study with its resource counts. On
+// /api/legacy/studies/{studyId} (legacy StudyController.getStudy) it is
+// written in the legacy model.
 func (s Server) study(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("studyId")
 	rows, err := core.CachedQueryP[studyRow](s.State, s.studySelect()+" WHERE c.study_id = {study:String}", ch.Params{"study": id})
@@ -355,7 +436,8 @@ func (s Server) study(w http.ResponseWriter, r *http.Request) {
 		core.WriteError(w, http.StatusNotFound, core.MsgStudyNotFound(id))
 		return
 	}
-	st := toCancerStudy(rows[0], studyShape{summary: true, detailed: true, columnStore: true}, s.StudyImportDates())
+	shape := studyShape{summary: true, detailed: true, columnStore: !core.IsLegacyAlias(r)}
+	st := toCancerStudy(rows[0], shape, s.StudyImportDates())
 	core.WriteJSON(w, s.withResourceCounts([]CancerStudy{st})[0])
 }
 

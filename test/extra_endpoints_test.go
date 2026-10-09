@@ -1,9 +1,11 @@
 package contract
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -65,9 +67,11 @@ func TestContractNotReadyYetAliases(t *testing.T) {
 	wantEq(t, string(got), string(want))
 }
 
+// The legacy aliases answer as their /api/ endpoints, except the legacy
+// studies, which have a model of their own (TestContractLegacyStudies).
 func TestContractLegacyAliases(t *testing.T) {
 	requireAPI(t)
-	for _, p := range []string{"/studies/study_es_0", "/studies/study_es_0/samples", "/samples?keyword=TCGA-A1-A0SB"} {
+	for _, p := range []string{"/studies/study_es_0/samples", "/samples?keyword=TCGA-A1-A0SB"} {
 		_, want := rawDo(t, "GET", "/api"+p, "")
 		resp, got := rawDo(t, "GET", "/api/legacy"+p, "")
 		wantEq(t, resp.StatusCode, 200)
@@ -102,4 +106,51 @@ func TestContractCacheStatsDisabled(t *testing.T) {
 func itoa(n int) string {
 	b, _ := json.Marshal(n)
 	return string(b)
+}
+
+// The legacy study endpoints write the legacy model: the nested cancer type
+// keyed cancerTypeId and placed before allSampleCount. The list's ID
+// projection lists the studies by id, META answers only the total-count
+// header, and a keyword matches case-sensitively, with names that start with
+// it first.
+func TestContractLegacyStudies(t *testing.T) {
+	requireAPI(t)
+	resp, body := rawDo(t, "GET", "/api/legacy/studies/study_es_0", "")
+	wantEq(t, resp.StatusCode, 200)
+	var st struct {
+		CancerType map[string]any `json:"cancerType"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil {
+		t.Fatal(err)
+	}
+	wantEq(t, st.CancerType["cancerTypeId"], "brca-es0")
+	if _, ok := st.CancerType["id"]; ok {
+		t.Errorf("legacy cancer type keyed id: %v", st.CancerType)
+	}
+	if i, j := bytes.Index(body, []byte(`"cancerType"`)), bytes.Index(body, []byte(`"allSampleCount"`)); i < 0 || j < i {
+		t.Errorf("cancerType not before allSampleCount: %s", body)
+	}
+
+	ids := listOf(t, "GET", "/api/legacy/studies?projection=ID", "")
+	studies := fieldOf(ids, "studyId")
+	if len(studies) < 3 || !slices.IsSorted(studies) {
+		t.Errorf("ID projection: %v", studies)
+	}
+	for _, s := range ids {
+		wantEq(t, len(s), 2)
+	}
+
+	resp, body = rawDo(t, "GET", "/api/legacy/studies?projection=META&keyword=es", "")
+	wantEq(t, resp.StatusCode, 200)
+	wantEq(t, len(body), 0)
+	if resp.Header.Get("total-count") == "" {
+		t.Errorf("META: no total-count")
+	}
+
+	upper := fieldOf(listOf(t, "GET", "/api/legacy/studies?keyword=Study", ""), "studyId")
+	lower := fieldOf(listOf(t, "GET", "/api/legacy/studies?keyword=study", ""), "studyId")
+	wantEq(t, upper, []string{"study_hg38", "ascn_test_study"})
+	if slices.Equal(upper, lower) {
+		t.Errorf("keyword matched case-insensitively: %v", lower)
+	}
 }

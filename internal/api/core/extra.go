@@ -58,6 +58,12 @@ func aliasOf(r *http.Request) string {
 	return p
 }
 
+// IsLegacyAlias reports whether the request came in on its /api/legacy/
+// alias, for endpoints whose legacy controller answers differently.
+func IsLegacyAlias(r *http.Request) bool {
+	return strings.HasPrefix(aliasOf(r), "/api/legacy/")
+}
+
 // APIAliasPath maps an alias path (/api/legacy/X, /api/not-ready-yet/X) to the
 // /api/X path that serves it.
 func APIAliasPath(path string) (string, bool) {
