@@ -267,7 +267,10 @@ which calls `cbioportal-ops hub import-pr`. The job:
 
 1. checks out the studies the pull request changes;
 2. checks each study with cbioportal-core's validator (`validateData.py`),
-   while it is being imported;
+   in the background, starting when the study is imported; validation does
+   not need the import lock, which is released as soon as the import is
+   done, and the job then waits for it (up to an hour per study) before
+   reporting;
 3. imports them as `cbioportal-import import-study` does (see
    [Loading studies](#loading-studies));
 4. reports a Check Run and a Deployment on the pull request.

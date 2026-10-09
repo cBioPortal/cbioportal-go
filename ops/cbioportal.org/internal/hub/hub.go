@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -111,12 +112,19 @@ type run struct {
 	ok, fails int
 	studies   int
 
+	repo     string                    // the checkout
+	failed   []studyimport.StudyResult // studies that failed to stage, in order
+	complete bool                      // every study was imported
+	// unlock records a complete import and releases the import lock; set
+	// while the lock is held.
+	unlock func()
+
 	validator   *Validator
 	validations map[string]Validation // by study directory, relative to the checkout
 	invalid     int                   // studies with validation errors
 	order       []string              // validated study directories, in order
-	pending     func()                // collects the running validation
-	complete    bool                  // every study was imported
+	running     []*runningValidation  // started, not yet collected
+	byDir       map[string]*runningValidation
 }
 
 func (r *run) importLog() string { return fmt.Sprintf("`%s`.`_hub_import_log`", r.Raw) }
@@ -200,6 +208,7 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		return r.finish("failure", "Could not check out the PR")
 	}
 	defer os.RemoveAll(repo)
+	r.repo = repo
 	r.setupValidation(ctx, co, files)
 
 	// One import at a time across Jobs.
@@ -210,7 +219,20 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		r.summary.Add("- :x: could not take the hub import lock (see logs)")
 		return r.finish("failure", "Could not take the hub import lock")
 	}
-	defer r.lock.Release()
+	r.unlock = func() {
+		// Only a complete import is recorded: a recreated Job retries a
+		// partial one.
+		if r.complete && r.lock.Held() {
+			if _, err := r.ch.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s SELECT %d, '%s', 'success', now()",
+				r.importLog(), r.PR, ch.SQLLit(r.HeadSHA))); err != nil {
+				job.Logf("WARN: could not record the import: %v", err)
+			}
+		}
+		if err := r.lock.Release(); err != nil {
+			job.Logf("%v", err)
+		}
+	}
+	defer r.releaseLock()
 	// A newer commit may have been pushed while this Job waited.
 	if latest, err := gh.PR(ctx, DatahubRepo, r.PR); err == nil && latest.Head.SHA != "" && latest.Head.SHA != r.HeadSHA {
 		r.summary.Add("- superseded by %s", latest.Head.SHA)
@@ -221,7 +243,6 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	for i, s := range studies {
 		dirs[i] = filepath.Join(repo, s)
 	}
-	var failures job.Summary
 	res, err := studyimport.Run(studyimport.Options{
 		URL: job.ClickHouseURL(), DB: r.DB, RawDB: r.Raw, RefDB: r.Ref,
 		Seed:       datahub.NewestSeed(repo),
@@ -233,21 +254,15 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 			r.validate(ctx, rel(repo, dir), dir)
 			return nil
 		},
-		// Done runs before Progress and the summary, so they have the
-		// study's validation.
-		Done: func(dir string) {
-			r.waitValidation()
-			os.RemoveAll(dir)
-		},
+		// A study still being validated is deleted when its validation
+		// ends.
+		Done: r.studyDone,
 		Progress: func(st studyimport.StudyResult) {
 			if st.Status != studyimport.Failed {
 				return
 			}
-			r.fails++
-			failures.Add("%s", r.studyLine(repo, st))
-			r.summary.Add("%s", r.studyLine(repo, st))
-			r.status.Text = ValidationText(r.order, r.validations, r.LogURL)
-			r.status.Progress(ctx, fmt.Sprintf("Importing... (%d of %d studies, %d failed)", r.ok+r.fails, r.studies, r.fails), r.summary.String())
+			r.failed = append(r.failed, st)
+			r.status.Progress(ctx, fmt.Sprintf("Importing... (%d of %d studies, %d failed)", len(r.failed), r.studies, len(r.failed)), r.progressSummary())
 		},
 		Logf: job.Logf,
 	}, dirs)
@@ -256,11 +271,51 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		r.summary.Add("- :x: loading the reference data failed")
 		return r.finish("failure", "Loading the reference data failed")
 	}
-	r.addResults(res, repo, panelsChanged)
+	return r.conclude(res, panelsChanged)
+}
+
+// conclude ends an import: it releases the import lock first, then waits
+// for the validations still running and reports both.
+func (r *run) conclude(res *studyimport.Result, panelsChanged bool) error {
+	r.ok, r.fails = Tally(res, panelsChanged)
 	conclusion, title := Conclusion(r.ok, r.fails)
 	r.complete = conclusion == "success"
 	r.status.DeploymentConclusion = conclusion
+	r.releaseLock()
+	if len(r.running) > 0 {
+		job.Logf("import done (%s); waiting for %d validation(s)", title, len(r.running))
+		r.status.Progress(r.ctx, title+"; validating...", r.progressSummary())
+	}
+	r.waitValidations()
+	r.addFailed()
+	r.addResults(res, r.repo, panelsChanged)
 	return r.finish(WithValidation(conclusion, title, r.invalid))
+}
+
+// releaseLock records a complete import and releases the import lock, if
+// held.
+func (r *run) releaseLock() {
+	if r.unlock != nil {
+		r.unlock()
+		r.unlock = nil
+	}
+}
+
+// progressSummary is the summary so far with the studies that failed.
+func (r *run) progressSummary() string {
+	var s job.Summary
+	for _, st := range r.failed {
+		s.Add("%s", r.studyLine(r.repo, st))
+	}
+	return r.summary.String() + s.String()
+}
+
+// addFailed adds the summary lines of the studies that failed to stage.
+func (r *run) addFailed() {
+	for _, st := range r.failed {
+		r.summary.Add("%s", r.studyLine(r.repo, st))
+	}
+	r.failed = nil
 }
 
 // setupValidation writes the portal information the validator reads, from
@@ -299,9 +354,24 @@ func (r *run) setupValidation(ctx context.Context, co *datahub.Checkout, files [
 	r.validations = map[string]Validation{}
 }
 
-// validate starts validating a study while it is staged; waitValidation
-// collects the result. The outcome never stops the import. Prepare also
-// runs for the gene panels, which are not a study.
+// runningValidation is a study's validation in the background. Its
+// directory is deleted once both the validation and the study's import
+// are done with it.
+type runningValidation struct {
+	name, dir string
+	done      chan Validation
+	users     atomic.Int32
+}
+
+func (v *runningValidation) release() {
+	if v.users.Add(-1) == 0 {
+		os.RemoveAll(v.dir)
+	}
+}
+
+// validate starts validating a study as it is staged; waitValidations
+// collects the results. Validation never holds up or stops the import.
+// Prepare also runs for the gene panels, which are not a study.
 func (r *run) validate(ctx context.Context, name, dir string) {
 	if r.validator == nil {
 		return
@@ -309,24 +379,43 @@ func (r *run) validate(ctx context.Context, name, dir string) {
 	if _, err := os.Stat(filepath.Join(dir, "meta_study.txt")); err != nil {
 		return
 	}
-	done := make(chan Validation, 1)
-	go func() { done <- r.validator.Validate(ctx, dir) }()
-	r.pending = func() {
-		v := <-done
-		r.validations[name] = v
-		r.order = append(r.order, name)
-		if v.Failed() {
+	v := &runningValidation{name: name, dir: dir, done: make(chan Validation, 1)}
+	v.users.Store(2)
+	if r.byDir == nil {
+		r.byDir = map[string]*runningValidation{}
+	}
+	r.byDir[dir] = v
+	r.running = append(r.running, v)
+	go func() {
+		res := r.validator.Validate(ctx, dir)
+		v.release()
+		v.done <- res
+	}()
+}
+
+// studyDone is the import's end with a study directory: it is deleted, or
+// left to its validation to delete.
+func (r *run) studyDone(dir string) {
+	if v, ok := r.byDir[dir]; ok {
+		delete(r.byDir, dir)
+		v.release()
+		return
+	}
+	os.RemoveAll(dir)
+}
+
+// waitValidations waits for the running validations (each bounded by
+// ValidateTimeout) and collects their results.
+func (r *run) waitValidations() {
+	for _, v := range r.running {
+		res := <-v.done
+		r.validations[v.name] = res
+		r.order = append(r.order, v.name)
+		if res.Failed() {
 			r.invalid++
 		}
 	}
-}
-
-// waitValidation waits for the study validate started, if any.
-func (r *run) waitValidation() {
-	if r.pending != nil {
-		r.pending()
-		r.pending = nil
-	}
+	r.running = nil
 }
 
 // WithValidation turns an import's conclusion into a failure when studies
@@ -378,25 +467,37 @@ func (r *run) importLine(repo string, st studyimport.StudyResult) string {
 func (r *run) addResults(res *studyimport.Result, repo string, panelsChanged bool) {
 	if res.PanelsErr != nil {
 		r.summary.Add("- :x: loading the reference gene panels failed")
-		r.fails++
 	} else if panelsChanged && res.PanelsLoaded {
 		r.summary.Add("- :white_check_mark: reference gene panels")
-		r.ok++
 	}
 	for _, st := range res.Studies {
-		switch st.Status {
-		case studyimport.Imported:
-			r.ok++
-		case studyimport.Removed:
-			r.fails++
-		case studyimport.Failed:
-			continue // reported when it failed
+		if st.Status == studyimport.Failed {
+			continue // reported with addFailed
 		}
 		r.summary.Add("%s", r.studyLine(repo, st))
 	}
 	if res.RebuildErr != nil {
 		job.Logf("the rebuild failed too; the hub keeps serving its previous build")
 	}
+}
+
+// Tally counts the imported and failed items of an import: the studies,
+// and the gene panels when they were (re)loaded.
+func Tally(res *studyimport.Result, panelsChanged bool) (ok, failed int) {
+	if res.PanelsErr != nil {
+		failed++
+	} else if panelsChanged && res.PanelsLoaded {
+		ok++
+	}
+	for _, st := range res.Studies {
+		switch st.Status {
+		case studyimport.Imported:
+			ok++
+		case studyimport.Failed, studyimport.Removed:
+			failed++
+		}
+	}
+	return ok, failed
 }
 
 // Conclusion is the Check Run conclusion and title for the counts of
@@ -417,19 +518,9 @@ func Conclusion(ok, failed int) (string, string) {
 // finish records a complete import, releases the lock, and posts the final
 // Check Run and Deployment status.
 func (r *run) finish(conclusion, title string) error {
-	// Only a complete import is recorded: a recreated Job retries a
-	// partial one.
-	if r.lock != nil && r.lock.Held() && r.complete {
-		if _, err := r.ch.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s SELECT %d, '%s', '%s', now()",
-			r.importLog(), r.PR, ch.SQLLit(r.HeadSHA), conclusion)); err != nil {
-			job.Logf("WARN: could not record the import: %v", err)
-		}
-	}
-	if r.lock != nil {
-		if err := r.lock.Release(); err != nil {
-			job.Logf("%v", err)
-		}
-	}
+	r.releaseLock()
+	r.waitValidations()
+	r.addFailed()
 	firstOK := FirstStudyLink(r.summary.String())
 	details := r.LogURL
 	if conclusion == "success" && firstOK != "" {

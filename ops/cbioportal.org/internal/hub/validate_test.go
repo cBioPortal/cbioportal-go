@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cbioportal/cbioportal-go/internal/studyimport"
+	"github.com/cbioportal/cbioportal-go/ops/cbioportal.org/internal/github"
 )
 
 // fakeValidator is a validateData.py stand-in run by /bin/sh: it prints
@@ -27,6 +28,8 @@ case "$2" in
           echo "Validation of data failed." >&2; exit 1 ;;
   */broken) echo "Traceback (most recent call last):" >&2; exit 2 ;;
   */slow) exec sleep 5 ;;
+  */slowwarn) sleep 1; test -f "$2/meta_study.txt" || exit 2
+              echo "WARNING: meta_study.txt: Unrecognized field in meta file"; exit 3 ;;
 esac
 `
 
@@ -104,16 +107,23 @@ func TestValidatedSummary(t *testing.T) {
 			os.WriteFile(filepath.Join(dir, "meta_study.txt"), nil, 0o644)
 		}
 		r.validate(context.Background(), s, dir)
-		r.waitValidation()
+		r.studyDone(dir)
 	}
+	r.waitValidations()
 	if _, ok := r.validations["reference_data/gene_panels"]; ok || len(r.order) != 3 {
 		t.Errorf("only studies are validated: %q", r.order)
+	}
+	for _, s := range []string{"public/pass", "reference_data/gene_panels"} {
+		if _, err := os.Stat(filepath.Join(repo, s)); !os.IsNotExist(err) {
+			t.Errorf("%s not deleted: %v", s, err)
+		}
 	}
 	res := &studyimport.Result{Studies: []studyimport.StudyResult{
 		{Dir: repo + "/public/pass", StudyID: "pass", Status: studyimport.Imported, Duration: time.Second},
 		{Dir: repo + "/public/warn", StudyID: "warn", Status: studyimport.Imported, Duration: time.Second},
 		{Dir: repo + "/public/fail", StudyID: "fail", Status: studyimport.Imported, Duration: time.Second},
 	}}
+	r.ok, r.fails = Tally(res, false)
 	r.addResults(res, repo, false)
 	want := strings.Join([]string{
 		"- :white_check_mark: [pass](https://hub.example.org/study/summary?id=pass) (1s) · validation passed",
@@ -232,5 +242,51 @@ func TestWritePortalInfo(t *testing.T) {
 	}
 	if err := WritePortalInfo(context.Background(), srv.Client(), srv.URL+"/missing", dir, nil); err == nil {
 		t.Error("no error for a failing API")
+	}
+}
+
+// TestLockReleasedBeforeValidation checks that a slow validation neither
+// holds the import lock nor loses its study files: the lock is released as
+// soon as the import is done, and the job then waits for the validation
+// before reporting and deleting the study.
+func TestLockReleasedBeforeValidation(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, "public", "slowwarn")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(dir, "meta_study.txt"), nil, 0o644)
+	r := &run{Settings: &Settings{Base: "https://hub.example.org", LogURL: "https://logs"}, ctx: context.Background(),
+		repo: repo, status: &github.Status{C: &github.Client{}},
+		validator: newFakeValidator(t), validations: map[string]Validation{}}
+	var validatedAtUnlock, released bool
+	r.unlock = func() {
+		released = true
+		validatedAtUnlock = len(r.validations) > 0
+	}
+
+	start := time.Now()
+	r.validate(context.Background(), "public/slowwarn", dir)
+	r.studyDone(dir) // the import is done with the study; the validation is not
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("study deleted while it is validated: %v", err)
+	}
+	res := &studyimport.Result{Studies: []studyimport.StudyResult{
+		{Dir: dir, StudyID: "slowwarn", Status: studyimport.Imported, Duration: time.Second},
+	}}
+	if err := r.conclude(res, false); err != nil {
+		t.Fatal(err)
+	}
+	if !released || validatedAtUnlock {
+		t.Errorf("lock released %v, after the validation %v; want released before it", released, validatedAtUnlock)
+	}
+	if time.Since(start) < time.Second {
+		t.Errorf("conclude returned before the validation ended")
+	}
+	if !r.complete || !strings.Contains(r.summary.String(), "(1s) · validation: 1 warning") {
+		t.Errorf("complete %v, summary %q", r.complete, r.summary.String())
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("study not deleted after its validation: %v", err)
 	}
 }

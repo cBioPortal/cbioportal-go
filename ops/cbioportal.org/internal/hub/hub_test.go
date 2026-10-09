@@ -41,18 +41,22 @@ func TestConclusion(t *testing.T) {
 }
 
 func TestSummary(t *testing.T) {
-	r := &run{Settings: &Settings{Base: "https://hub.example.org"}}
 	repo := "/w/datahub"
-	// Failed studies are reported as they fail (Progress); the rest after
-	// the transform.
+	r := &run{Settings: &Settings{Base: "https://hub.example.org"}, repo: repo}
+	// Failed studies are collected as they fail (Progress) and listed
+	// first; the rest after the transform.
 	failed := studyimport.StudyResult{Dir: repo + "/public/bad", StudyID: "bad", Status: studyimport.Failed, Err: errors.New("x")}
-	r.fails++
-	r.summary.Add("%s", r.studyLine(repo, failed))
+	r.failed = append(r.failed, failed)
 	res := &studyimport.Result{PanelsLoaded: true, Studies: []studyimport.StudyResult{
 		{Dir: repo + "/public/a", StudyID: "a", Status: studyimport.Imported, Duration: 12 * time.Second},
 		failed,
 		{Dir: repo + "/public/gone", Status: studyimport.Skipped},
 	}}
+	if p := r.progressSummary(); p != "- :x: `bad` — import failed (see logs); removed from the hub\n" {
+		t.Errorf("progress summary %q", p)
+	}
+	r.ok, r.fails = Tally(res, true)
+	r.addFailed()
 	r.addResults(res, repo, true)
 	want := strings.Join([]string{
 		"- :x: `bad` — import failed (see logs); removed from the hub",
@@ -78,9 +82,11 @@ func TestSummary(t *testing.T) {
 
 	// A failed transform removes the run's studies again.
 	r = &run{Settings: &Settings{Base: "https://hub.example.org"}}
-	r.addResults(&studyimport.Result{TransformErr: errors.New("t"), Studies: []studyimport.StudyResult{
+	res = &studyimport.Result{TransformErr: errors.New("t"), Studies: []studyimport.StudyResult{
 		{Dir: repo + "/public/a", StudyID: "a", Status: studyimport.Removed},
-	}}, repo, false)
+	}}
+	r.ok, r.fails = Tally(res, false)
+	r.addResults(res, repo, false)
 	if got := r.summary.String(); got != "- :x: `a` — building the hub failed (see logs); removed from the hub\n" || r.fails != 1 {
 		t.Errorf("removed: %q, %d failed", got, r.fails)
 	}
