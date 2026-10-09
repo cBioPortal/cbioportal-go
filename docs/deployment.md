@@ -250,8 +250,11 @@ segments, clinical events, and sample lists and their members. The mirror
 keeps that order by using production's internal ids (`internal_id`,
 `seg_id`, `list_internal_id`, `clinical_event_id`).
 
-Expression enrichments of a TCGA PanCancer study take a few seconds, because
-`genetic_alteration_derived` is sorted by gene before profile.
+Expression and generic assay enrichments read production's
+`genetic_alteration` (one row per gene or entity, keyed by profile) rather
+than the derived tables, which are sorted by gene before profile and, for
+generic assays, hold every study of a profile type together. A TCGA
+PanCancer study's comparison reads 0.1–0.5 GiB this way, instead of 4–68 GiB.
 
 ## hub.cbioportal.org
 

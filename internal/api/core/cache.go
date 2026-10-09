@@ -138,6 +138,25 @@ func (s *State) RawColumns(table string) []string {
 	return out
 }
 
+// RefColumns lists a reference database table's columns in order, or none
+// when the reference database has no such table.
+func (s *State) RefColumns(table string) []string {
+	type col struct {
+		Name string `json:"name"`
+	}
+	cols, err := CachedQueryP[col](s,
+		"SELECT name FROM system.columns WHERE database = 'cbioportal_ref' AND table = {table:String} ORDER BY position",
+		ch.Params{"table": table})
+	if err != nil {
+		return nil
+	}
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = c.Name
+	}
+	return out
+}
+
 // ModelHasColumn reports whether a table of the portal database has a column.
 func (s *State) ModelHasColumn(table, column string) bool {
 	type row struct {
