@@ -107,7 +107,7 @@ func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		core.WriteJSON(w, out)
 		return
 	}
-	if len(f.GenomicDataFilters) == 0 {
+	if len(f.GenomicDataFilters) == 0 && includeSampleIDs {
 		core.WriteJSON(w, out)
 		return
 	}
@@ -117,6 +117,12 @@ func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	}
 	if includeSampleIDs {
 		genes = genes[:1]
+	}
+	// Without genomicDataFilters the mapper's gene condition is empty
+	// (getMutationCountsByType's foreach), so every mutated gene is counted.
+	geneCond := ""
+	if len(genes) > 0 {
+		geneCond = "AND hugo_gene_symbol IN " + args.Strs(genes) + " "
 	}
 	type typeRow struct {
 		Gene   string `json:"gene"`
@@ -128,9 +134,9 @@ func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	rows, _ := core.QueryA[typeRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
 			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM %s "+
-			"AND sample_unique_id IN (%s) AND variant_type = 'mutation' AND hugo_gene_symbol IN %s "+
+			"AND sample_unique_id IN (%s) AND variant_type = 'mutation' %s"+
 			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
-		svf.scope().From(args, core.TGenomicEventDerived), filtered, args.Strs(genes)), args)
+		svf.scope().From(args, core.TGenomicEventDerived), filtered, geneCond), args)
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	for _, r := range rows {

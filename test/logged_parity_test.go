@@ -1,6 +1,10 @@
 package contract
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 // Contracts from replaying production's logged requests (rewrite/java-v7-to-go/loggedgen).
 
@@ -100,4 +104,34 @@ func TestContractMutationDataCountsWithSampleIDs(t *testing.T) {
 		}
 	}
 	t.Errorf("no Not Profiled item: %+v", d)
+}
+
+// mutation-data-counts without genomicDataFilters: the DETAILED table counts
+// every mutated gene (the mapper's gene condition is empty), the SUMMARY pie
+// has no genes to count.
+func TestContractMutationDataCountsWithoutFilters(t *testing.T) {
+	requireAPI(t)
+	const body = `{"genomicDataFilters":[],"studyViewFilter":{"studyIds":["study_es_0"]}}`
+	all := listOf(t, "POST", "/api/mutation-data-counts/fetch?projection=DETAILED", body)
+	one := listOf(t, "POST", "/api/mutation-data-counts/fetch?projection=DETAILED",
+		`{"genomicDataFilters":[{"hugoGeneSymbol":"TP53","profileType":"mutations"}],"studyViewFilter":{"studyIds":["study_es_0"]}}`)
+	if len(one) != 1 || len(all) < 10 {
+		t.Fatalf("%d genes without filters, %d for TP53", len(all), len(one))
+	}
+	if !slices.Contains(fieldOf(all, "hugoGeneSymbol"), "TP53") {
+		t.Errorf("TP53 missing from the unfiltered counts")
+	}
+	wantEq(t, len(listOf(t, "POST", "/api/mutation-data-counts/fetch", body)), 0)
+}
+
+// clinical-data/fetch without identifiers names no samples or patients:
+// an empty list, where Java fails with a 500 (it reads the identifiers of a
+// filter that has none).
+func TestClinicalDataFetchWithoutIdentifiers(t *testing.T) {
+	requireAPI(t)
+	for _, body := range []string{`{}`, `{"attributeIds":["OS_STATUS"]}`} {
+		resp, b := rawDo(t, "POST", "/api/clinical-data/fetch?clinicalDataType=PATIENT", body)
+		wantEq(t, resp.StatusCode, 200)
+		wantEq(t, strings.TrimSpace(string(b)), "[]")
+	}
 }
