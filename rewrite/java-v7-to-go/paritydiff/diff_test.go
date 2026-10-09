@@ -205,6 +205,10 @@ POST /api/mutations/fetch
 	if _, err := parseCorpus(strings.NewReader("## a known-if-empty=\"open\nGET /x\n")); err == nil {
 		t.Fatal("unterminated known-if-empty must fail")
 	}
+	if reqs, err := parseCorpus(strings.NewReader("## a known-if-b-fails=\"Java's 500\" unordered\nGET /x\n")); err != nil ||
+		reqs[0].Opts.KnownIfBFails != "Java's 500" || reqs[0].Opts.Known != "" || !reqs[0].Opts.Unordered {
+		t.Fatalf("known-if-b-fails: %+v %v", reqs, err)
+	}
 }
 
 func TestCompareResponsesOutcomes(t *testing.T) {
@@ -227,6 +231,23 @@ func TestCompareResponsesOutcomes(t *testing.T) {
 		if r.Outcome != want || (want == known && r.Known != "only when A is empty") {
 			t.Errorf("a=%q: got %+v, want %s", a, r, want)
 		}
+	}
+
+	rq.Opts.KnownIfEmpty, rq.Opts.KnownIfBFails = "", "only when B fails"
+	for _, c := range []struct {
+		a, b int
+		want string
+	}{
+		{200, 500, known}, {200, 400, known}, {204, 404, known},
+		{200, 502, status}, {200, 503, status}, {400, 500, status}, {500, 200, status}, {200, 302, status},
+	} {
+		r := compareResponses(rq, response{Status: c.a, Body: []byte(`[]`)}, response{Status: c.b, Body: []byte(`{}`)}, o)
+		if r.Outcome != c.want || (c.want == known && r.Known != "only when B fails") {
+			t.Errorf("a=%d b=%d: got %+v, want %s", c.a, c.b, r, c.want)
+		}
+	}
+	if r := compareResponses(rq, response{Status: 200, Body: []byte(`[1]`)}, response{Status: 200, Body: []byte(`[2]`)}, o); r.Outcome != differs {
+		t.Errorf("same status: got %+v, want %s", r, differs)
 	}
 }
 

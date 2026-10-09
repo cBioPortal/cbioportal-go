@@ -29,6 +29,10 @@ type requestOptions struct {
 	// KnownIfEmpty is the reason of a difference accepted only when A
 	// answers an empty JSON array.
 	KnownIfEmpty string
+	// KnownIfBFails is the reason of a status difference accepted only when
+	// A succeeds (2xx) and B fails with a 4xx or a 5xx other than a
+	// gateway's.
+	KnownIfBFails string
 }
 
 // parseCorpus reads the corpus format:
@@ -43,7 +47,8 @@ type requestOptions struct {
 // come in any order), ignore=key,key (drop these keys), nullmissing (null
 // equals absent), status-only (compare the status code only),
 // known="reason" (an accepted difference), known-if-empty="reason" (a
-// difference accepted when A answers an empty array).
+// difference accepted when A answers an empty array), known-if-b-fails="reason"
+// (a status difference accepted when A succeeds and B fails).
 //
 // Entries are separated by their "## " header lines; lines starting with "#"
 // (but not "## ") are comments; blank lines are ignored.
@@ -109,8 +114,9 @@ func parseCorpus(r io.Reader) ([]request, error) {
 	return out, nil
 }
 
-// parseHeader parses "name opt opt ..." where known="..." and
-// known-if-empty="..." may contain spaces.
+// parseHeader parses "name opt opt ..." where the quoted options
+// (known="...", known-if-empty="...", known-if-b-fails="...") may contain
+// spaces.
 func parseHeader(h string) (request, error) {
 	name, rest, _ := strings.Cut(h, " ")
 	if name == "" {
@@ -118,7 +124,8 @@ func parseHeader(h string) (request, error) {
 	}
 	req := request{Name: name}
 	rest = strings.TrimSpace(rest)
-	quoted := map[string]*string{`known="`: &req.Opts.Known, `known-if-empty="`: &req.Opts.KnownIfEmpty}
+	quoted := map[string]*string{`known="`: &req.Opts.Known, `known-if-empty="`: &req.Opts.KnownIfEmpty,
+		`known-if-b-fails="`: &req.Opts.KnownIfBFails}
 	for rest != "" {
 		var tok string
 		if prefix, _, ok := strings.Cut(rest, `"`); ok {

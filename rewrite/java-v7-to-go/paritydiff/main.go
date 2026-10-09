@@ -368,8 +368,11 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	res := result{Name: rq.Name, StatusA: ra.Status, StatusB: rb.Status}
 	if ra.Status != rb.Status {
 		res.Outcome = status
-		if rq.Opts.Known != "" {
+		switch {
+		case rq.Opts.Known != "":
 			res.Outcome, res.Known = known, rq.Opts.Known
+		case rq.Opts.KnownIfBFails != "" && ra.Status/100 == 2 && rb.Status >= 400 && rb.Status < 600 && !gateway(rb.Status):
+			res.Outcome, res.Known = known, rq.Opts.KnownIfBFails
 		}
 		res.Diffs = []string{fmt.Sprintf("a: %.200s", oneLine(head(ra))), fmt.Sprintf("b: %.200s", oneLine(head(rb)))}
 		return res
