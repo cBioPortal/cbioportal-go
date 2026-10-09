@@ -362,7 +362,7 @@ func (s Server) legacyStudies(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	projection := ProjectionParam(r)
 	args := core.NewArgs()
-	conds := []string{"c.study_id IN (SELECT study_id FROM sample_list)"}
+	conds := []string{"ifNull(lc.study_id, '') != ''"}
 	importOrder := s.StudyOrder("c.study_id")
 	order := importOrder
 	if projection == "ID" {
