@@ -59,21 +59,27 @@ func TestOncokbProxyNoTimeoutButCancels(t *testing.T) {
 	if oncokbClient.Timeout != 0 {
 		t.Fatalf("oncokbClient.Timeout = %v", oncokbClient.Timeout)
 	}
-	cancelled := make(chan struct{})
+	arrived, cancelled := make(chan struct{}), make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
 		<-r.Context().Done()
 		close(cancelled)
 	}))
 	defer upstream.Close()
 	t.Setenv("ONCOKB_URL", upstream.URL)
+	router := NewRouter(newState(&core.State{}))
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/proxy/dev/oncokb/utils/allCuratedGenes", nil).WithContext(ctx)
 	done := make(chan struct{})
 	go func() {
-		NewRouter(newState(&core.State{})).ServeHTTP(httptest.NewRecorder(), req)
+		router.ServeHTTP(httptest.NewRecorder(), req)
 		close(done)
 	}()
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("request never reached upstream")
+	}
 	cancel()
 	select {
 	case <-cancelled:
