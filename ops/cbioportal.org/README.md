@@ -49,6 +49,15 @@ GitHub API, `DATAHUB_GIT` and `DATAHUB_LFS_URL` at another datahub.
 | `LOCK_WAIT`, `LOCK_STALE`, `LOCK_POLL` | 7200, 600, 30 | seconds to wait for another import, without a heartbeat before a lock is taken over, between checks |
 | `WORKDIR` | `/tmp/hub-import` | scratch space for the checkout |
 | `LOG_URL` | `HUB_BASE` | link to the job's logs |
+| `HUB_API` | `HUB_BASE` | the hub API the validator's reference data (cancer types, genes, gene panels) is read from |
+| `VALIDATOR` | `/opt/cbioportal-core/scripts/importer/validateData.py` | cbioportal-core's validator; `off` imports without validating |
+| `PYTHON` | `python3` | the validator's Python |
+| `VALIDATE_TIMEOUT` | 3600 | seconds one study's validation may take |
+
+Each study is validated while it is imported, and imported whatever
+the result. Validation errors make the Check Run fail; its summary gives each
+study's error and warning counts and its text the messages (see
+[docs/deployment.md](../../docs/deployment.md#hubcbioportalorg)).
 
 A `hub-import-only:` list in the pull request description (`- public/<study>`
 lines) limits the import to those studies. A commit that was imported

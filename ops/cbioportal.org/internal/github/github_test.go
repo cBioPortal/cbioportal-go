@@ -133,6 +133,7 @@ func TestStatusReporting(t *testing.T) {
 	s := &Status{C: c, Repo: "o/r", SHA: "abc", CheckName: "Preview", Environment: "pr-5-preview", Description: "d", LogURL: "https://logs"}
 	s.Start(ctx, "Building...", "summary", "https://env/")
 	s.Progress(ctx, "Half", "more")
+	s.Text = "details"
 	s.Finish(ctx, "skipped", "Superseded", "final", "https://details", "https://env/")
 	if err := c.DeactivateEnvironment(ctx, "o/r", "pr-5 preview"); err != nil {
 		t.Fatal(err)
@@ -147,7 +148,7 @@ func TestStatusReporting(t *testing.T) {
 		`POST /repos/o/r/deployments Bearer inst-1 {"auto_merge":false,"description":"d","environment":"pr-5-preview","ref":"abc","required_contexts":[],"transient_environment":true}`,
 		`POST /repos/o/r/deployments/22/statuses Bearer inst-1 {"environment_url":"https://env/","log_url":"https://logs","state":"in_progress"}`,
 		`PATCH /repos/o/r/check-runs/11 Bearer inst-1 {"details_url":"https://logs","output":{"summary":"more","title":"Half"},"status":"in_progress"}`,
-		`PATCH /repos/o/r/check-runs/11 Bearer inst-1 {"conclusion":"skipped","details_url":"https://details","output":{"summary":"final","title":"Superseded"},"status":"completed"}`,
+		`PATCH /repos/o/r/check-runs/11 Bearer inst-1 {"conclusion":"skipped","details_url":"https://details","output":{"summary":"final","text":"details","title":"Superseded"},"status":"completed"}`,
 		`POST /repos/o/r/deployments/22/statuses Bearer inst-1 {"environment_url":"https://env/","log_url":"https://logs","state":"inactive"}`,
 		`GET /repos/o/r/deployments?environment=pr-5+preview&per_page=100 Bearer inst-1`,
 		`POST /repos/o/r/deployments/31/statuses Bearer inst-1 {"state":"inactive"}`,

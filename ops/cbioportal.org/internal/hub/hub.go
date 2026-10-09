@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,6 +23,9 @@ import (
 // DatahubRepo is the GitHub repository of datahub.
 const DatahubRepo = "cBioPortal/datahub"
 
+// DefaultValidator is where the image keeps cbioportal-core's validator.
+const DefaultValidator = "/opt/cbioportal-core/scripts/importer/validateData.py"
+
 // Settings of an import, from the environment the Job manifest sets.
 type Settings struct {
 	PR            int
@@ -36,6 +40,14 @@ type Settings struct {
 	LockHeartbeat time.Duration
 	Owner         string // the lock holder's name (default: pr-<N>-<sha>-<host>-<pid>)
 	DatahubGit    string
+
+	// Validation with cbioportal-core's validateData.py: Validator is the
+	// script ("" skips validation), Python its interpreter, HubAPI the API
+	// the portal information is read from.
+	Validator       string
+	Python          string
+	HubAPI          string
+	ValidateTimeout time.Duration
 }
 
 // SettingsFromEnv reads the Settings.
@@ -56,6 +68,15 @@ func SettingsFromEnv() (*Settings, error) {
 	s.Raw = job.Env("HUB_RAW_DB", s.DB+"_raw")
 	s.Ref = job.Env("HUB_REF_DB", s.DB+"_ref")
 	s.LogURL = job.Env("LOG_URL", s.Base)
+	s.HubAPI = job.Env("HUB_API", s.Base)
+	s.Validator = job.Env("VALIDATOR", DefaultValidator)
+	if s.Validator == "off" {
+		s.Validator = ""
+	}
+	s.Python = job.Env("PYTHON", "python3")
+	if s.ValidateTimeout, err = job.EnvSeconds("VALIDATE_TIMEOUT", time.Hour); err != nil {
+		return nil, err
+	}
 	if s.LockWait, err = job.EnvSeconds("LOCK_WAIT", 2*time.Hour); err != nil {
 		return nil, err
 	}
@@ -89,6 +110,13 @@ type run struct {
 	summary   job.Summary
 	ok, fails int
 	studies   int
+
+	validator   *Validator
+	validations map[string]Validation // by study directory, relative to the checkout
+	invalid     int                   // studies with validation errors
+	order       []string              // validated study directories, in order
+	pending     func()                // collects the running validation
+	complete    bool                  // every study was imported
 }
 
 func (r *run) importLog() string { return fmt.Sprintf("`%s`.`_hub_import_log`", r.Raw) }
@@ -172,6 +200,7 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		return r.finish("failure", "Could not check out the PR")
 	}
 	defer os.RemoveAll(repo)
+	r.setupValidation(ctx, co, files)
 
 	// One import at a time across Jobs.
 	r.lock = &studyimport.Lock{C: r.ch, DB: r.Raw, Table: "_hub_import_lock", Owner: r.Owner,
@@ -197,8 +226,17 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		URL: job.ClickHouseURL(), DB: r.DB, RawDB: r.Raw, RefDB: r.Ref,
 		Seed:       datahub.NewestSeed(repo),
 		GenePanels: filepath.Join(repo, datahub.GenePanelsDir), ReloadPanels: panelsChanged,
-		Prepare: func(dir string) error { _, err := co.PullLFS(ctx, rel(repo, dir)); return err },
+		Prepare: func(dir string) error {
+			if _, err := co.PullLFS(ctx, rel(repo, dir)); err != nil {
+				return err
+			}
+			r.validate(ctx, rel(repo, dir), dir)
+			return nil
+		},
+		// Done runs before Progress and the summary, so they have the
+		// study's validation.
 		Done: func(dir string) {
+			r.waitValidation()
 			os.RemoveAll(dir)
 		},
 		Progress: func(st studyimport.StudyResult) {
@@ -208,6 +246,7 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 			r.fails++
 			failures.Add("%s", r.studyLine(repo, st))
 			r.summary.Add("%s", r.studyLine(repo, st))
+			r.status.Text = ValidationText(r.order, r.validations, r.LogURL)
 			r.status.Progress(ctx, fmt.Sprintf("Importing... (%d of %d studies, %d failed)", r.ok+r.fails, r.studies, r.fails), r.summary.String())
 		},
 		Logf: job.Logf,
@@ -218,7 +257,86 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		return r.finish("failure", "Loading the reference data failed")
 	}
 	r.addResults(res, repo, panelsChanged)
-	return r.finish(Conclusion(r.ok, r.fails))
+	conclusion, title := Conclusion(r.ok, r.fails)
+	r.complete = conclusion == "success"
+	r.status.DeploymentConclusion = conclusion
+	return r.finish(WithValidation(conclusion, title, r.invalid))
+}
+
+// setupValidation writes the portal information the validator reads, from
+// the hub's API and the gene panel files the pull request changes (files).
+// Without them the studies are imported unvalidated.
+func (r *run) setupValidation(ctx context.Context, co *datahub.Checkout, files []string) {
+	if r.Validator == "" {
+		return
+	}
+	if _, err := os.Stat(r.Validator); err != nil {
+		job.Logf("not validating: %v", err)
+		r.summary.Add("- :heavy_minus_sign: studies not validated: validateData.py is not installed")
+		return
+	}
+	info := filepath.Join(r.Workdir, "portal-info")
+	var panels []string
+	for _, f := range files {
+		if strings.HasPrefix(f, datahub.GenePanelsDir+"/") {
+			panels = append(panels, filepath.Join(co.Dir, f))
+		}
+	}
+	if len(panels) > 0 {
+		if _, err := co.PullLFS(ctx, datahub.GenePanelsDir); err != nil {
+			job.Logf("not validating: %v", err)
+			r.summary.Add("- :heavy_minus_sign: studies not validated: could not download the gene panels (see logs)")
+			return
+		}
+	}
+	job.Logf("reading the portal information for validation from %s", r.HubAPI)
+	if err := WritePortalInfo(ctx, &http.Client{Timeout: 5 * time.Minute}, r.HubAPI, info, panels); err != nil {
+		job.Logf("not validating: %v", err)
+		r.summary.Add("- :heavy_minus_sign: studies not validated: could not read the hub's portal information (see logs)")
+		return
+	}
+	r.validator = &Validator{Python: r.Python, Script: r.Validator, InfoDir: info, Timeout: r.ValidateTimeout, Logf: job.Logf}
+	r.validations = map[string]Validation{}
+}
+
+// validate starts validating a study while it is staged; waitValidation
+// collects the result. The outcome never stops the import. Prepare also
+// runs for the gene panels, which are not a study.
+func (r *run) validate(ctx context.Context, name, dir string) {
+	if r.validator == nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(dir, "meta_study.txt")); err != nil {
+		return
+	}
+	done := make(chan Validation, 1)
+	go func() { done <- r.validator.Validate(ctx, dir) }()
+	r.pending = func() {
+		v := <-done
+		r.validations[name] = v
+		r.order = append(r.order, name)
+		if v.Failed() {
+			r.invalid++
+		}
+	}
+}
+
+// waitValidation waits for the study validate started, if any.
+func (r *run) waitValidation() {
+	if r.pending != nil {
+		r.pending()
+		r.pending = nil
+	}
+}
+
+// WithValidation turns an import's conclusion into a failure when studies
+// have validation errors, as datahub's own validation does; the studies are
+// imported all the same.
+func WithValidation(conclusion, title string, invalid int) (string, string) {
+	if invalid == 0 || conclusion == "skipped" {
+		return conclusion, title
+	}
+	return "failure", fmt.Sprintf("%s; %d with validation errors", title, invalid)
 }
 
 // Plan returns the study directories of a pull request's changed files,
@@ -233,8 +351,17 @@ func Plan(files []string, body string) ([]string, bool) {
 	return studies, datahub.TouchesGenePanels(files)
 }
 
-// studyLine is the summary line of a study.
+// studyLine is the summary line of a study, with its validation.
 func (r *run) studyLine(repo string, st studyimport.StudyResult) string {
+	line := r.importLine(repo, st)
+	if v, ok := r.validations[rel(repo, st.Dir)]; ok {
+		line += " · " + v.Note()
+	}
+	return line
+}
+
+// importLine is the import part of a study's summary line.
+func (r *run) importLine(repo string, st studyimport.StudyResult) string {
 	switch st.Status {
 	case studyimport.Imported:
 		return fmt.Sprintf("- :white_check_mark: [%[1]s](%[2]s/study/summary?id=%[1]s) (%[3]ds)", st.StudyID, r.Base, int(st.Duration/time.Second))
@@ -292,7 +419,7 @@ func Conclusion(ok, failed int) (string, string) {
 func (r *run) finish(conclusion, title string) error {
 	// Only a complete import is recorded: a recreated Job retries a
 	// partial one.
-	if r.lock != nil && r.lock.Held() && conclusion == "success" {
+	if r.lock != nil && r.lock.Held() && r.complete {
 		if _, err := r.ch.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s SELECT %d, '%s', '%s', now()",
 			r.importLog(), r.PR, ch.SQLLit(r.HeadSHA), conclusion)); err != nil {
 			job.Logf("WARN: could not record the import: %v", err)
@@ -315,8 +442,9 @@ func (r *run) finish(conclusion, title string) error {
 	if env == "" {
 		env = r.Base + "/"
 	}
+	r.status.Text = ValidationText(r.order, r.validations, r.LogURL)
 	r.status.Finish(r.ctx, conclusion, title, r.summary.String(), details, env)
-	if conclusion == "failure" {
+	if conclusion == "failure" && !r.complete {
 		return ErrFailed
 	}
 	return nil

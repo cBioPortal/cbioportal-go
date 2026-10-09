@@ -20,6 +20,13 @@ type Status struct {
 	Description string // of the Deployment
 	LogURL      string
 	Logf        func(format string, args ...any)
+	// Text, when set, is the Check Run's details below its summary
+	// (output.text, at most 65535 characters).
+	Text string
+	// DeploymentConclusion, when set, is the conclusion Finish gives the
+	// Deployment instead of the Check Run's (a check can fail on something
+	// other than the deployment).
+	DeploymentConclusion string
 
 	checkID, deployID int64
 }
@@ -75,6 +82,14 @@ func DeploymentState(conclusion string) string {
 	return "failure"
 }
 
+// withText adds Text to a Check Run body's output.
+func (s *Status) withText(body map[string]any) map[string]any {
+	if s.Text != "" {
+		body["output"].(map[string]any)["text"] = s.Text
+	}
+	return body
+}
+
 func (s *Status) logf(format string, args ...any) {
 	if s.Logf != nil {
 		s.Logf(format, args...)
@@ -112,7 +127,7 @@ func (s *Status) Progress(ctx context.Context, title, summary string) {
 	if s.checkID == 0 {
 		return
 	}
-	if err := s.C.Send(ctx, "PATCH", fmt.Sprintf("/repos/%s/check-runs/%d", s.Repo, s.checkID), CheckRunProgress(s.LogURL, title, summary), nil); err != nil {
+	if err := s.C.Send(ctx, "PATCH", fmt.Sprintf("/repos/%s/check-runs/%d", s.Repo, s.checkID), s.withText(CheckRunProgress(s.LogURL, title, summary)), nil); err != nil {
 		s.logf("WARN: could not update check run %d: %v", s.checkID, err)
 	}
 }
@@ -121,11 +136,14 @@ func (s *Status) Progress(ctx context.Context, title, summary string) {
 // Deployment's state for the conclusion (linking envURL).
 func (s *Status) Finish(ctx context.Context, conclusion, title, summary, detailsURL, envURL string) {
 	if s.checkID != 0 {
-		if err := s.C.Send(ctx, "PATCH", fmt.Sprintf("/repos/%s/check-runs/%d", s.Repo, s.checkID), CheckRunComplete(conclusion, detailsURL, title, summary), nil); err != nil {
+		if err := s.C.Send(ctx, "PATCH", fmt.Sprintf("/repos/%s/check-runs/%d", s.Repo, s.checkID), s.withText(CheckRunComplete(conclusion, detailsURL, title, summary)), nil); err != nil {
 			s.logf("WARN: could not update check run %d: %v", s.checkID, err)
 		}
 	}
 	if s.deployID != 0 {
+		if s.DeploymentConclusion != "" {
+			conclusion = s.DeploymentConclusion
+		}
 		if err := s.C.Send(ctx, "POST", fmt.Sprintf("/repos/%s/deployments/%d/statuses", s.Repo, s.deployID), DeploymentStatus(DeploymentState(conclusion), envURL, s.LogURL), nil); err != nil {
 			s.logf("WARN: could not update deployment %d: %v", s.deployID, err)
 		}

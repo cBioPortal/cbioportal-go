@@ -48,18 +48,36 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}'" -o /out/ \
       ./cmd/cbioportal-api ./cmd/cbioportal-import ./ops/cbioportal.org/cmd/cbioportal-ops ./rewrite/cmd/cbioportal-rewrite-test
 
+# cbioportal-core's study validator (scripts/importer), run by the hub's
+# import job. To bump it, set CBIOPORTAL_CORE_REF to a newer commit of
+# cBioPortal/cbioportal-core's main branch and check that its
+# requirements.txt needs nothing the Python packages below lack.
+FROM alpine:${ALPINE_VERSION} AS validator
+ARG CBIOPORTAL_CORE_REF=61438ff5cea71f361ad938cafe4b5bb86d604180
+RUN apk add --no-cache python3 py3-requests py3-yaml py3-jinja2 py3-pip curl
+RUN mkdir -p /opt/cbioportal-core \
+ && curl -fsSL "https://codeload.github.com/cBioPortal/cbioportal-core/tar.gz/${CBIOPORTAL_CORE_REF}" \
+    | tar -xz -C /opt/cbioportal-core --strip-components=1 \
+      "cbioportal-core-${CBIOPORTAL_CORE_REF}/scripts/importer" "cbioportal-core-${CBIOPORTAL_CORE_REF}/requirements.txt" \
+ && echo "${CBIOPORTAL_CORE_REF}" > /opt/cbioportal-core/REF \
+ && pip install --no-deps --no-compile --target /opt/cbioportal-core/site dsnparse==0.1.15
+ENV PYTHONPATH=/opt/cbioportal-core/site
+RUN python3 /opt/cbioportal-core/scripts/importer/validateData.py --help >/dev/null
+
 FROM alpine:${ALPINE_VERSION}
 RUN apk add --no-cache bash git git-lfs curl jq openssl ca-certificates \
+    python3 py3-requests py3-yaml py3-jinja2 \
  && addgroup -g 10001 cbioportal \
  && adduser -D -u 10001 -G cbioportal -h /home/cbioportal cbioportal
 COPY --from=go /out/ /usr/local/bin/
 COPY --from=frontend-dist / /app/frontend
+COPY --from=validator /opt/cbioportal-core /opt/cbioportal-core
 # Deployment scripts and configuration: the generic ones and cBioPortal.org's
 # own, side by side under /app/deploy where the cluster manifests expect them.
 COPY deploy/ /app/deploy/
 COPY ops/cbioportal.org/*.sh ops/cbioportal.org/*.properties ops/cbioportal.org/*.json ops/cbioportal.org/*.txt /app/deploy/
 WORKDIR /app
 USER 10001:10001
-ENV PORT=8080 FRONTEND_DIR=/app/frontend
+ENV PORT=8080 FRONTEND_DIR=/app/frontend PYTHONPATH=/opt/cbioportal-core/site
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/cbioportal-api"]

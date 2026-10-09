@@ -38,6 +38,14 @@ What is inside:
 | `/usr/local/bin/cbioportal-rewrite-test` | tools for the move from Java cBioPortal, such as the production mirror ([rewrite/](../rewrite/)) |
 | `/app/frontend` | the built frontend |
 | `/app/deploy` | deployment scripts, which the cluster's jobs run |
+| `/opt/cbioportal-core` | cbioportal-core's study validator (`scripts/importer/validateData.py`) and Python 3, for the hub's import job |
+
+The validator is copied from a fixed cbioportal-core commit, the
+`CBIOPORTAL_CORE_REF` build argument in the Dockerfile (its commit is also in
+`/opt/cbioportal-core/REF`). To update it, change that commit to a newer one
+on cbioportal-core's `main` and check that cbioportal-core's
+`requirements.txt` asks for nothing new; the image provides requests, PyYAML
+and Jinja2 from Alpine, and dsnparse.
 
 The image is based on Alpine Linux, runs as a non-root user (uid 10001) and
 listens on port 8080. The build has no `.git` folder, so two build arguments
@@ -258,9 +266,29 @@ the cluster) starts a job that runs
 which calls `cbioportal-ops hub import-pr`. The job:
 
 1. checks out the studies the pull request changes;
-2. imports them as `cbioportal-import import-study` does (see
+2. checks each study with cbioportal-core's validator (`validateData.py`),
+   while it is being imported;
+3. imports them as `cbioportal-import import-study` does (see
    [Loading studies](#loading-studies));
-3. reports a Check Run and a Deployment on the pull request.
+4. reports a Check Run and a Deployment on the pull request.
+
+**Validation.** The validator compares each study with the hub's reference
+data: cancer types, genes, gene sets and gene panels. The job reads these
+once from the hub's own API and saves them as files for the validator (its
+`-p` option). If the pull request adds or changes gene panel files, those
+panels replace the hub's, because the hub loads them only during the import;
+their genes are matched by Hugo symbol or Entrez id only. Gene aliases are
+not checked, as when the validator asks a portal's API directly.
+
+A study is imported whatever the validator finds, so the preview can always
+be looked at. The Check Run shows, for each study, whether validation passed
+or how many errors and warnings it found, and lists the messages under the
+summary (up to GitHub's size limit; the job's log has the full output). When
+any study has validation errors, the Check Run fails, as datahub's own
+validation does, while the Deployment still links to the preview. A commit
+whose studies all imported is not imported again, even if validation failed.
+If the validator is missing or the hub's API cannot be read, the studies are
+imported without validation and the summary says so.
 
 Imports from different pull requests wait for each other, using a lock table
 in the raw database. If a study fails to load, it is removed. If the
