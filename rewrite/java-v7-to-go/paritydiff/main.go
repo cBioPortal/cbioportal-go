@@ -12,8 +12,9 @@
 // treat null as absent (see parseCorpus). Responses from -b are cached on
 // disk (-cache) and fetched at most -rate requests per second, so reruns do
 // not hit the remote origin again. With -retry, requests that failed in
-// transport or with a gateway status (502, 503, 504, as while a deployment
-// rolls out) are sent once more after the given pause.
+// transport, with a gateway status (502, 503, 504, as while a deployment
+// rolls out) or with a 500 from -b only are sent once more after the given
+// pause.
 //
 // With -self-check every request is sent to -b a second time (B'), right
 // after the first, and B is compared with B' the same way. A request whose
@@ -355,9 +356,12 @@ func selfCheck(res result, rq request, rb, rb2 response, errB2 error, opts compa
 }
 
 // transient reports whether a result may be a passing failure of either
-// origin rather than a difference: a transport error or a gateway status.
+// origin rather than a difference: a transport error, a gateway status, or
+// a 500 from B where A answered. A 500 from A is never retried, so a go
+// failure always shows.
 func transient(r result) bool {
-	return r.Outcome == failed || (r.Outcome == status && (gateway(r.StatusA) || gateway(r.StatusB)))
+	return r.Outcome == failed || (r.Outcome == status && (gateway(r.StatusA) || gateway(r.StatusB) ||
+		(r.StatusA/100 == 2 && r.StatusB == 500)))
 }
 
 // gateway reports whether a status is a proxy's while the origin is down or
@@ -510,7 +514,7 @@ func main() {
 	dumpUnexplained := flag.Bool("dump-unexplained", false, "dump only responses that differ without a known reason")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
 	selfCheckB := flag.Bool("self-check", false, "send every request to B twice and compare the two answers; A/B differences where they differ are \"nondeterministic\"")
-	retry := flag.Duration("retry", -1, "send requests that failed in transport or with 502/503/504 once more after this pause (negative: no retry)")
+	retry := flag.Duration("retry", -1, "send requests that failed in transport, with 502/503/504, or with 500 from B only once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
 	flag.IntVar(&streamAbove, "stream-above", streamAbove, "compare top-level arrays element by element when the two bodies together exceed this many bytes, to bound memory")
 	flag.IntVar(&decodeAbove, "decode-above", decodeAbove, "compare bodies that are not arrays only byte for byte when the two together exceed this many bytes")

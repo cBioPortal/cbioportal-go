@@ -138,6 +138,10 @@ builds a list of about 5,000 logged requests:
 answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent
 once more after 2 minutes, so a server restart is not reported as a bug.
+The same goes for a request where go answers and Java returns 500: Java
+sometimes fails once under load and answers fine a minute later. If Java
+still returns 500 the second time, the request counts as unexplained. A 500
+from go is never sent again, so a go failure always shows.
 
 **Memory.** paritydiff holds one request at a time, keeps bodies over 1 MB
 in files, and compares large arrays element by element with an external

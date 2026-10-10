@@ -260,6 +260,8 @@ func TestTransient(t *testing.T) {
 		{result{Outcome: status, StatusA: 502, StatusB: 200}, true},
 		{result{Outcome: status, StatusA: 200, StatusB: 504}, true},
 		{result{Outcome: status, StatusA: 500, StatusB: 200}, false},
+		{result{Outcome: status, StatusA: 200, StatusB: 500}, true},
+		{result{Outcome: status, StatusA: 404, StatusB: 500}, false},
 		{result{Outcome: differs, StatusA: 200, StatusB: 200}, false},
 		{result{Outcome: known, StatusA: 503, StatusB: 200}, false},
 	} {

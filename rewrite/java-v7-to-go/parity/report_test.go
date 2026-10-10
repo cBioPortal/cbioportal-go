@@ -143,7 +143,7 @@ func TestReport(t *testing.T) {
 		"- Endpoints: 12 of the window's 40 read-only endpoints sampled\n",
 		"| api.cbioportal.org | 1 | 1 | 0 | 0 | 0 |\n| www.cbioportal.org | 4 | 0 | 1 | 1 | 2 |\n",
 		"| unexplained difference | 1 |\n| status mismatch | 1 |\n| error | 0 |\n",
-		"1 requests failed in transport or with 502/503/504",
+		"1 requests failed in transport, with 502/503/504, or with a Java-only 500",
 		"New since the last run: `fresh`\n",
 		// New requests first.
 		"\n### fresh (new): status a=500 b=200\n\n`POST /api/b`\n\nbody: `{\"x\":1}`\n\n```\n\n```\n\n### old: differs, 2 differences\n\n`GET /api/a`\n\n```\nd1\nd2\nd3\nd4\nd5\n```\n",
