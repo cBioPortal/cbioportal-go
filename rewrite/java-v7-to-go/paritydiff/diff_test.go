@@ -270,3 +270,20 @@ func TestTransient(t *testing.T) {
 		}
 	}
 }
+
+func TestSettleJavaFailed(t *testing.T) {
+	for _, c := range []struct {
+		r    result
+		want string
+	}{
+		{result{Outcome: status, StatusA: 200, StatusB: 500}, javaFailed},
+		{result{Outcome: status, StatusA: 200, StatusB: 504}, javaFailed},
+		{result{Outcome: status, StatusA: 500, StatusB: 200}, status},
+		{result{Outcome: status, StatusA: 200, StatusB: 404}, status},
+		{result{Outcome: known, StatusA: 200, StatusB: 500}, known},
+	} {
+		if got := settleJavaFailed(c.r).Outcome; got != c.want {
+			t.Errorf("settleJavaFailed(%+v) = %s, want %s", c.r, got, c.want)
+		}
+	}
+}

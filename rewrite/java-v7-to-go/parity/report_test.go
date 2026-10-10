@@ -127,6 +127,7 @@ func TestReport(t *testing.T) {
 		{Name: "fresh", Request: "POST /api/b", Body: `{"x":1}`, Outcome: "status", StatusA: 500, StatusB: 200},
 		{Name: "nd", Request: "GET /api/c", Outcome: "nondeterministic", Reference: "differs", ReferenceDiffs: []string{"r1"}},
 		{Name: "kn", Request: "GET /api/d", Outcome: "known", Retried: true},
+		{Name: "jf", Request: "GET /api/e", Outcome: "java-failed", StatusA: 200, StatusB: 500, Retried: true},
 	}
 	got := report(reportInput{
 		Day: "2026-10-08", A: "https://go", B: "https://java", VersionA: "go", VersionB: "7.1.2",
@@ -134,19 +135,21 @@ func TestReport(t *testing.T) {
 		Results: rs, New: []string{"fresh"}, Streak: 0, RunDir: "/runs/2026-10-08",
 	})
 	for _, want := range []string{
-		"# Nightly parity 2026-10-08\n\nResult: **unexplained diff** (2 unexplained of 5 requests, 1 new since the last run)\n",
+		"# Nightly parity 2026-10-08\n\nResult: **unexplained diff** (2 unexplained of 6 requests, 1 new since the last run)\n",
 		"Clean nights in a row: **0** (go/no-go for api.cbioportal.org: 7)\n",
 		"Java nondeterministic: 1 requests answered differently by B's two runs, 1 of them also differing from A (not counted as unexplained)\n",
-		"- Corpus: 5 requests sampled from production traffic, generated 2026-10-08; 3 min at 4/s to B\n",
+		"- Corpus: 6 requests sampled from production traffic, generated 2026-10-08; 3 min at 4/s to B\n",
 		"- Window: 2026-10-07 22:30 to 2026-10-08 10:00 UTC (first and last request seen)\n",
 		"- Window traffic on www.cbioportal.org: 90 read-only requests over 10 endpoints\n- Window traffic on api.cbioportal.org: 10",
 		"- Endpoints: 12 of the window's 40 read-only endpoints sampled\n",
-		"| api.cbioportal.org | 1 | 1 | 0 | 0 | 0 |\n| www.cbioportal.org | 4 | 0 | 1 | 1 | 2 |\n",
+		"| api.cbioportal.org | 1 | 1 | 0 | 0 | 0 | 0 |\n| www.cbioportal.org | 5 | 0 | 1 | 1 | 1 | 2 |\n",
+		"| Java nondeterministic | 1 |\n| Java failed, go answered | 1 |\n",
 		"| unexplained difference | 1 |\n| status mismatch | 1 |\n| error | 0 |\n",
-		"1 requests failed in transport, with 502/503/504, or with a Java-only 500",
+		"2 requests failed in transport, with 502/503/504, or with a Java-only 500",
 		"New since the last run: `fresh`\n",
 		// New requests first.
 		"\n### fresh (new): status a=500 b=200\n\n`POST /api/b`\n\nbody: `{\"x\":1}`\n\n```\n\n```\n\n### old: differs, 2 differences\n\n`GET /api/a`\n\n```\nd1\nd2\nd3\nd4\nd5\n```\n",
+		"## Java failed, go answered\n\nJava answered these with a 5xx, also when sent again; go answered them. They do not count against a clean night, but go's answers are not checked against anything.\n\n### jf: a=200 b=500\n\n`GET /api/e`\n",
 		"## Java nondeterministic\n\nB answered these differently on its two runs (b, b'); \"also A\" marks those where A differed from B as well.\n\n### nd (also A)\n\n`GET /api/c`\n\n```\nr1\n```\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -154,7 +157,7 @@ func TestReport(t *testing.T) {
 		}
 	}
 	clean := report(reportInput{Day: "2026-10-08", Corpus: corpusHead, Results: rs[:1], Streak: 3})
-	if strings.Contains(clean, "## Unexplained") || strings.Contains(clean, "## Java nondeterministic") || !strings.Contains(clean, "Result: **identical**") {
+	if strings.Contains(clean, "## Unexplained") || strings.Contains(clean, "## Java nondeterministic") || strings.Contains(clean, "## Java failed") || !strings.Contains(clean, "Result: **identical**") {
 		t.Errorf("clean report:\n%s", clean)
 	}
 }

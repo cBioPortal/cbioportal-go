@@ -304,6 +304,9 @@ const (
 	failed    = "error"
 	// nondeterministic: A and B differ, and so do B and B' (-self-check).
 	nondeterministic = "nondeterministic"
+	// javaFailed: A answered and B failed with a 5xx, after any retry. A
+	// valid request B cannot serve is B's failure; A's answer is unchecked.
+	javaFailed = "java-failed"
 )
 
 // Self-check results (result.Reference).
@@ -362,6 +365,15 @@ func selfCheck(res result, rq request, rb, rb2 response, errB2 error, opts compa
 func transient(r result) bool {
 	return r.Outcome == failed || (r.Outcome == status && (gateway(r.StatusA) || gateway(r.StatusB) ||
 		(r.StatusA/100 == 2 && r.StatusB == 500)))
+}
+
+// settleJavaFailed marks a status mismatch where A answered and B failed
+// with a 5xx as B's failure.
+func settleJavaFailed(r result) result {
+	if r.Outcome == status && r.StatusA/100 == 2 && r.StatusB/100 == 5 {
+		r.Outcome = javaFailed
+	}
+	return r
 }
 
 // gateway reports whether a status is a proxy's while the origin is down or
@@ -631,11 +643,12 @@ func main() {
 		}
 	}
 	counts := map[string]int{}
-	for _, r := range results {
-		counts[r.Outcome]++
+	for i, r := range results {
+		results[i] = settleJavaFailed(r)
+		counts[results[i].Outcome]++
 	}
-	fmt.Printf("\n%d requests: %d identical, %d known differences, %d differ, %d status mismatches, %d errors (%d fetched from B)\n",
-		len(results), counts[identical], counts[known], counts[differs], counts[status], counts[failed], fb.fetched)
+	fmt.Printf("\n%d requests: %d identical, %d known differences, %d differ, %d status mismatches, %d errors, %d B failures (%d fetched from B)\n",
+		len(results), counts[identical], counts[known], counts[differs], counts[status], counts[failed], counts[javaFailed], fb.fetched)
 	if *selfCheckB {
 		refs := map[string]int{}
 		for _, r := range results {

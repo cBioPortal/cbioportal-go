@@ -38,7 +38,7 @@ func (r Result) unexplained() bool {
 // Counts are the requests of a run by outcome.
 type Counts struct {
 	All, Identical, Known, Differs, Status, Error, Nondeterministic int
-	Retried, JavaDiffers, JavaUnverified                            int
+	JavaFailed, Retried, JavaDiffers, JavaUnverified                int
 }
 
 func count(results []Result) Counts {
@@ -57,6 +57,8 @@ func count(results []Result) Counts {
 			c.Error++
 		case "nondeterministic":
 			c.Nondeterministic++
+		case "java-failed":
+			c.JavaFailed++
 		}
 		if r.Retried {
 			c.Retried++
@@ -83,6 +85,8 @@ func (c Counts) Result() string {
 		return "status mismatch"
 	case c.Error > 0:
 		return "error"
+	case c.JavaFailed > 0:
+		return "Java failed, go answered"
 	case c.Known > 0:
 		return "known"
 	}
@@ -207,8 +211,8 @@ func report(in reportInput) string {
 	}
 	p("- Endpoints: %s", strings.Join(corpusHeader(in.Corpus, "endpoints: "), "\n"))
 	p("")
-	p("| server | requests | identical | known | Java nondeterministic | unexplained |")
-	p("|---|---:|---:|---:|---:|---:|")
+	p("| server | requests | identical | known | Java nondeterministic | Java failed | unexplained |")
+	p("|---|---:|---:|---:|---:|---:|---:|")
 	for _, api := range []bool{true, false} {
 		var rs []Result
 		for _, r := range in.Results {
@@ -224,7 +228,7 @@ func report(in reportInput) string {
 			server = "api.cbioportal.org"
 		}
 		sc := count(rs)
-		p("| %s | %d | %d | %d | %d | %d |", server, sc.All, sc.Identical, sc.Known, sc.Nondeterministic, sc.Bad())
+		p("| %s | %d | %d | %d | %d | %d | %d |", server, sc.All, sc.Identical, sc.Known, sc.Nondeterministic, sc.JavaFailed, sc.Bad())
 	}
 	p("")
 	p("| outcome | requests |")
@@ -232,6 +236,7 @@ func report(in reportInput) string {
 	p("| identical | %d |", c.Identical)
 	p("| known difference | %d |", c.Known)
 	p("| Java nondeterministic | %d |", c.Nondeterministic)
+	p("| Java failed, go answered | %d |", c.JavaFailed)
 	p("| unexplained difference | %d |", c.Differs)
 	p("| status mismatch | %d |", c.Status)
 	p("| error | %d |", c.Error)
@@ -287,6 +292,29 @@ func report(in reportInput) string {
 		if bad > shown {
 			p("")
 			p("… and %d more, listed in %s/unexplained.txt on the parity host.", bad-shown, in.RunDir)
+		}
+	}
+	if c.JavaFailed > 0 {
+		p("")
+		p("## Java failed, go answered")
+		p("")
+		p("Java answered these with a 5xx, also when sent again; go answered them. They do not count against a clean night, but go's answers are not checked against anything.")
+		var rs []Result
+		for _, r := range in.Results {
+			if r.Outcome == "java-failed" {
+				rs = append(rs, r)
+			}
+		}
+		for _, r := range rs[:min(shown, len(rs))] {
+			p("\n### %s: a=%d b=%d", r.Name, r.StatusA, r.StatusB)
+			p("\n`%s`", cut(r.Request, 300))
+			if r.Body != "" {
+				p("\nbody: `%s`", r.Body)
+			}
+		}
+		if c.JavaFailed > shown {
+			p("")
+			p("… and %d more, in %s/results.json on the parity host.", c.JavaFailed-shown, in.RunDir)
 		}
 	}
 	if c.JavaDiffers > 0 {

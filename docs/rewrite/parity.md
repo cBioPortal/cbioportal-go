@@ -139,9 +139,15 @@ answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent
 once more after 2 minutes, so a server restart is not reported as a bug.
 The same goes for a request where go answers and Java returns 500: Java
-sometimes fails once under load and answers fine a minute later. If Java
-still returns 500 the second time, the request counts as unexplained. A 500
+sometimes fails once under load and answers fine a minute later. A 500
 from go is never sent again, so a go failure always shows.
+
+**When Java fails and go answers.** If Java still answers with a 5xx after
+the second try while go answers, the request is counted as *Java failed,
+go answered*. It does not count against a clean night: the request was
+valid, and answering it is what go should do. The report lists these
+requests on their own, because there is no Java answer to check go's
+answer against.
 
 **Memory.** paritydiff holds one request at a time, keeps bodies over 1 MB
 in files, and compares large arrays element by element with an external
