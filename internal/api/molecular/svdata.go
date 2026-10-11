@@ -150,7 +150,12 @@ func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 	var where string
 	var studies []string
 	args := core.NewArgs()
+	// Present sample identifiers win over the profiles, as in Java's
+	// controller: an empty list selects nothing.
 	switch {
+	case f.SampleMolecularIdentifiers != nil && len(f.SampleMolecularIdentifiers) == 0:
+		core.WriteJSON(w, []StructuralVariant{})
+		return
 	case len(f.SampleMolecularIdentifiers) > 0:
 		pairs := make([][2]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {

@@ -140,6 +140,11 @@ func TestContractStructuralVariantQueries(t *testing.T) {
 		}},
 	}, &alk)
 	post(t, "/api/structural-variant/fetch", map[string]any{"molecularProfileIds": profiles, "entrezGeneIds": []int{673}}, &braf)
+	// A present but empty sampleMolecularIdentifiers wins over the profiles
+	// and selects nothing, as in Java's controller.
+	var none []map[string]any
+	post(t, "/api/structural-variant/fetch", map[string]any{"molecularProfileIds": profiles, "sampleMolecularIdentifiers": []any{}}, &none)
+	wantEq(t, len(none), 0)
 	if len(alk) == 0 || len(alk) >= len(all) {
 		t.Fatalf("ALK::* query: %d of %d", len(alk), len(all))
 	}
