@@ -468,7 +468,8 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/patients", params: paged(legacyProjection, PatientSort), shape: patientShape, nest: "cancerStudy"},
 	{method: "GET", pattern: "/api/studies/{studyId}/patients", params: paged(legacyProjection, PatientSort), exists: []string{"study"}, shape: patientShape, nest: "cancerStudy"},
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}", exists: []string{"study", "patient"}, fixed: "DETAILED", shape: patientShape, nest: "cancerStudy"},
-	{method: "POST", pattern: "/api/patients/fetch", params: []Param{projectionParamOf(legacyProjection)}, shape: patientShape, nest: "cancerStudy"},
+	{method: "POST", pattern: "/api/patients/fetch", params: []Param{projectionParamOf(legacyProjection)}, shape: patientShape, nest: "cancerStudy",
+		filter: patientFilterSchema, intercepted: "interceptedPatientFilter"},
 
 	// Sample lists.
 	{method: "GET", pattern: "/api/sample-lists", params: paged(legacyProjection, sampleListSort), shape: sampleListShape},
@@ -498,6 +499,10 @@ var contractRoutes = []contractRoute{
 	// Clinical events (the study's list has its own page size bound).
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", params: paged(legacyProjection, clinicalEventSort)},
 	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
+	{method: "POST", pattern: "/api/clinical-events-meta/fetch", filter: clinicalEventAttributeRequestSchema,
+		intercepted: "interceptedClinicalEventAttributeRequest", unvalidated: true},
+	{method: "POST", pattern: "/api/survival-data/fetch", filter: survivalRequestSchema,
+		intercepted: "interceptedSurvivalRequest", unvalidated: true},
 
 	// Resources, copy-number segments, significance lists.
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/resource-data", params: append([]Param{resourceIDParam}, paged(legacyProjection, resourceDataSortParam)...), metaUnsupported: true},
@@ -508,7 +513,8 @@ var contractRoutes = []contractRoute{
 	{method: "POST", pattern: "/api/resource-definitions/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/copy-number-segments",
 		params: append([]Param{{Name: "chromosome", text: true}}, pagedMax(legacyProjection, CopyNumberSegmentSort, 20000)...)},
-	{method: "POST", pattern: "/api/copy-number-segments/fetch", params: []Param{{Name: "chromosome", text: true}, projectionParamOf(legacyProjection)}},
+	{method: "POST", pattern: "/api/copy-number-segments/fetch", params: []Param{{Name: "chromosome", text: true}, projectionParamOf(legacyProjection)},
+		filter: sampleIdentifierListSchema, intercepted: "interceptedSampleIdentifiers", unvalidated: true},
 	{method: "GET", pattern: "/api/studies/{studyId}/significantly-mutated-genes", params: paged(legacyProjection, smgSort)},
 	{method: "GET", pattern: "/api/studies/{studyId}/significant-copy-number-regions", params: paged(legacyProjection, scnrSort)},
 
@@ -516,7 +522,8 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}", exists: []string{"profile"}, fixed: "DETAILED", shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
 	{method: "GET", pattern: "/api/studies/{studyId}/molecular-profiles", params: paged(legacyProjection, molecularProfileSort), exists: []string{"study"}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
-	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []Param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab"},
+	{method: "POST", pattern: "/api/molecular-profiles/fetch", params: []Param{projectionParamOf(legacyProjection)}, shape: molecularProfileShape, nest: "study", nestAfter: "showProfileInAnalysisTab",
+		filter: molecularProfileFilterSchema, intercepted: "interceptedMolecularProfileFilter"},
 	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/mutations", exists: []string{"profile"},
 		params: append([]Param{sampleListIDParam, {Name: "entrezGeneId", required: true}},
 			paged(legacyProjection, mutationSort)...)},

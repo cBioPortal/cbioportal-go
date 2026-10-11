@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 80 entries:
+**Summary.** The page has 81 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 48 | go does the same thing as Java, on purpose. |
+| Copied | 49 | go does the same thing as Java, on purpose. |
 | Fixed in go | 22 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 46 of the 48 copied entries. The two without a test are the
+A test checks 47 of the 49 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -144,7 +144,8 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | When a parameter is given twice, Java uses only the first value. For example, `entrezGeneId=7157&entrezGeneId=5925` reads only TP53. If the first value is not a number, the error message lists all values joined by commas. A text parameter, such as `attributeId`, `keyword` or `sampleListId`, instead gets all values joined by commas: `attributeId=A&attributeId=B` asks for the attribute `A,B`, which does not exist. | Spring parameter binding (ArrayToStringConverter for text) | Copied. | TestContractRepeatedEntrezGeneID, TestContractRepeatedStringParam |
 | A path with a trailing slash, such as `/api/x/`, works the same as `/api/x`, for every method. | WebAppConfig.configurePathMatch (`setUseTrailingSlashMatch`) | Copied. | TestContractTrailingSlashGet |
 | A POST with a trailing slash to an older multi-study endpoint, such as `clinical-data/fetch/`, fails. Bad JSON gives a 400. `generic_assay_data` gives an empty 400. Any other body gives a 500. | InvolvedCancerStudyExtractorInterceptor matches exact paths | Fixed in go. go answers as it does without the slash. | TestContractTrailingSlashPost, TestTrailingSlashMatch, known.go |
-| A multi-study filter body that Java cannot read gives an empty 200. | InvolvedCancerStudyExtractorInterceptor | Copied. | TestContractFilterValidation |
+| An older fetch endpoint answers 200 with an empty body when Java cannot read its request body. Java reads these bodies strictly first, so a field the filter does not have is enough. For example, `{"studyIds":["lihc_tcga"],"projection":"DETAILED"}` to `molecular-profiles/fetch` gets an empty answer, because `projection` belongs in the URL. This covers the multi-study filters and `patients/fetch`, `molecular-profiles/fetch`, `copy-number-segments/fetch`, `survival-data/fetch` and `clinical-events-meta/fetch`. | InvolvedCancerStudyExtractorInterceptor (a plain `ObjectMapper`, which fails on unknown fields) | Copied. | TestContractFilterValidation, TestReadInterceptedFilters |
+| A structural variant fetch with an empty `sampleMolecularIdentifiers` list returns nothing, even when `molecularProfileIds` is given. Java uses the sample list whenever it is present. | StructuralVariantController | Copied. | TestContractStructuralVariantQueries |
 | An empty text parameter still counts as given. So `sampleListId=` selects no samples. The same happens when a number is turned into a sample list name. | Spring / Jackson | Copied. | TestContractRequiredParams |
 | Paths with `;`, `//`, `.` or `..` segments, or with an encoded `.` or `%`, get a 400 before any endpoint sees them. | StrictHttpFirewall, Tomcat | Copied. | TestContractFirewall, TestJavaFirewall |
 | Only a fixed list of about 25 paths serves the portal page. Other paths outside `/api/` get a 404, even ones the frontend has a page for, such as `/about` and `/faq`. Those pages still work when you click your way to them. Paths are matched exactly as Spring does: `/patient/x` serves the page, but `/patient/x/` and `/restore/` do not. | WebAppConfig.addViewControllers, IndexPageController | Copied. | TestPortalRoutes, TestContractPortalRoutes |

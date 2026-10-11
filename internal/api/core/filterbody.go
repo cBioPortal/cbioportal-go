@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -27,6 +28,8 @@ const (
 	fInts                       // List<Integer>
 	fObjects                    // List<an object filter>
 	fAnyArray                   // a list read leniently (not validated here)
+	fObject                     // an object filter
+	fEnum                       // a Java enum: one of values
 )
 
 type filterProp struct {
@@ -34,7 +37,9 @@ type filterProp struct {
 	// field is the Java field a violation names, when it is not name.
 	field string
 	kind  filterKind
-	elem  *filterSchema // fObjects
+	elem  *filterSchema // fObjects, fObject
+	// values are the constants of an fEnum.
+	values []string
 	// sizeMin / sizeMax are the @Size bounds; sized is false without one.
 	sizeMin, sizeMax int
 	sized            bool
@@ -43,6 +48,9 @@ type filterProp struct {
 // filterSchema is one Java filter class.
 type filterSchema struct {
 	props []filterProp
+	// listOf makes the body a List of this class instead (a JSON array of
+	// its objects).
+	listOf *filterSchema
 	// either names the two properties exactly one of which must be present
 	// (non-null), the class's @AssertTrue; eitherNonEmpty counts an empty
 	// list as absent (CollectionUtils.isEmpty).
@@ -82,6 +90,21 @@ func profilesOrIdentifiers(min int, order []string, extra ...filterProp) *filter
 }
 
 var (
+	patientIdentifierSchema = &filterSchema{props: []filterProp{
+		{name: "patientId", kind: fString}, {name: "studyId", kind: fString}}}
+	// ClinicalEventRequest; ClinicalEventData's clinicalEventId (a Long) is
+	// read as any scalar.
+	clinicalEventRequestSchema = &filterSchema{props: []filterProp{
+		{name: "eventType", kind: fString},
+		{name: "attributes", kind: fObjects, elem: &filterSchema{props: []filterProp{
+			{name: "clinicalEventId", kind: fString}, {name: "key", kind: fString}, {name: "value", kind: fString}}}},
+	}}
+	// ClinicalEventRequestIdentifier.
+	clinicalEventRequestIdentifierSchema = &filterSchema{props: []filterProp{
+		{name: "clinicalEventRequests", kind: fObjects, elem: clinicalEventRequestSchema},
+		{name: "position", kind: fEnum, values: []string{"FIRST", "LAST"}},
+	}}
+
 	mutationFilterSchema = sampleListOrIDs([]string{"entrezGeneIds", "sampleIds", "eitherSampleListIdOrSampleIdsPresent"},
 		sizedProp("entrezGeneIds", fInts, 1, MaxPageSize))
 	molecularDataFilterSchema = sampleListOrIDs([]string{"entrezGeneIds", "sampleIds", "eitherSampleListIdOrSampleIdsPresent"},
@@ -117,6 +140,37 @@ var (
 	clinicalDataSingleStudyFilterSchema = &filterSchema{
 		props: []filterProp{sizedProp("ids", fStrings, 1, MaxPageSize), sizedProp("attributeIds", fStrings, 1, MaxPageSize)},
 		order: []string{"ids", "attributeIds"}}
+	// PatientFilter.
+	patientFilterSchema = func() *filterSchema {
+		ids := sizedProp("patientIdentifiers", fObjects, 1, MaxPageSize)
+		ids.elem = patientIdentifierSchema
+		return &filterSchema{props: []filterProp{ids, sizedProp("uniquePatientKeys", fStrings, 1, MaxPageSize)},
+			either:     [2]string{"patientIdentifiers", "uniquePatientKeys"},
+			assertName: "eitherPatientIdentifiersOrUniquePatientKeysPresent",
+			order:      []string{"patientIdentifiers", "uniquePatientKeys", "eitherPatientIdentifiersOrUniquePatientKeysPresent"}}
+	}()
+	// MolecularProfileFilter.
+	molecularProfileFilterSchema = &filterSchema{
+		props:      []filterProp{sizedProp("studyIds", fStrings, 1, MaxPageSize), sizedProp("molecularProfileIds", fStrings, 1, MaxPageSize)},
+		either:     [2]string{"studyIds", "molecularProfileIds"},
+		assertName: "eitherStudyIdsOrMolecularProfileIdsPresent",
+		order:      []string{"studyIds", "molecularProfileIds", "eitherStudyIdsOrMolecularProfileIdsPresent"}}
+	// List<SampleIdentifier>, the copy-number-segments/fetch body.
+	sampleIdentifierListSchema = &filterSchema{listOf: &filterSchema{props: []filterProp{
+		{name: "sampleId", kind: fString}, {name: "studyId", kind: fString}}}}
+	// SurvivalRequest; its violations are left to the handler.
+	survivalRequestSchema = &filterSchema{props: []filterProp{
+		{name: "patientIdentifiers", kind: fObjects, elem: patientIdentifierSchema},
+		{name: "attributeIdPrefix", kind: fString},
+		{name: "startEventRequestIdentifier", kind: fObject, elem: clinicalEventRequestIdentifierSchema},
+		{name: "endEventRequestIdentifier", kind: fObject, elem: clinicalEventRequestIdentifierSchema},
+		{name: "censoredEventRequestIdentifier", kind: fObject, elem: clinicalEventRequestIdentifierSchema},
+	}}
+	// ClinicalEventAttributeRequest; its violations are left to the handler.
+	clinicalEventAttributeRequestSchema = &filterSchema{props: []filterProp{
+		{name: "patientIdentifiers", kind: fObjects, elem: patientIdentifierSchema},
+		{name: "clinicalEventRequests", kind: fObjects, elem: clinicalEventRequestSchema},
+	}}
 	structuralVariantFilterSchema = func() *filterSchema {
 		s := profilesOrIdentifiers(0, []string{"eitherMolecularProfileIdsOrSampleMolecularIdentifiersPresent"},
 			sizedProp("entrezGeneIds", fInts, 0, MaxPageSize), filterProp{name: "structuralVariantQueries", kind: fAnyArray})
@@ -135,6 +189,10 @@ func (fs *filterSchema) readFilter(body []byte) (ok bool, property, violation st
 	var v any
 	if dec.Decode(&v) != nil {
 		return false, "", ""
+	}
+	if fs.listOf != nil {
+		arr, isArr := v.([]any)
+		return isArr && (&filterProp{kind: fObjects, elem: fs.listOf}).read(arr), "", ""
 	}
 	obj, isObj := v.(map[string]any)
 	if !isObj || !fs.read(obj) {
@@ -168,8 +226,15 @@ func (p *filterProp) read(val any) bool {
 	if val == nil {
 		return true
 	}
-	if p.kind == fString {
+	switch p.kind {
+	case fString:
 		return jsonScalar(val)
+	case fEnum:
+		str, ok := val.(string)
+		return ok && slices.Contains(p.values, str)
+	case fObject:
+		o, ok := val.(map[string]any)
+		return ok && p.elem.read(o)
 	}
 	arr, ok := val.([]any)
 	if !ok {

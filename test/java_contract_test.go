@@ -335,6 +335,10 @@ func TestContractFilterValidation(t *testing.T) {
 		"interceptedMolecularDataMultipleStudyFilter size must be between 1 and 10000000")
 	wantError(t, "POST", "/api/gene-panel-data/fetch", `{}`, 400, "interceptedGenePanelDataMultipleStudyFilter must be true")
 	wantError(t, "POST", "/api/structural-variant/fetch", `{"molecularProfileIds":[]}`, 400, "interceptedStructuralVariantFilter must be true")
+	wantError(t, "POST", "/api/patients/fetch", `{}`, 400, "interceptedPatientFilter must be true")
+	wantError(t, "POST", "/api/patients/fetch", `{"uniquePatientKeys":[]}`, 400, "interceptedPatientFilter size must be between 1 and 10000000")
+	wantError(t, "POST", "/api/molecular-profiles/fetch", `{}`, 400, "interceptedMolecularProfileFilter must be true")
+	wantError(t, "POST", "/api/molecular-profiles/fetch", `{"studyIds":[]}`, 400, "interceptedMolecularProfileFilter size must be between 1 and 10000000")
 	wantError(t, "POST", "/api/mutations/fetch?projection=X", `{}`, 400,
 		"Request parameter type mismatch: java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter.Projection.X")
 	for _, c := range []struct{ path, body string }{
@@ -343,6 +347,15 @@ func TestContractFilterValidation(t *testing.T) {
 		{"/api/molecular-data/fetch", `{"sampleMolecularIdentifiers":[{"molecularProfileId":"study_es_0_gistic","sampleId":"x","foo":1}]}`},
 		{"/api/gene-panel-data/fetch", `{"molecularProfileIds":["study_es_0_mutations"],"entrezGeneIds":[]}`},
 		{"/api/generic_assay_data/fetch", `{"molecularProfileIds":["study_es_0_mutational_signature"],"foo":1}`},
+		{"/api/patients/fetch", `{"patientIds":["TCGA-A1-A0SB"]}`},
+		{"/api/patients/fetch", `{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"studyId":"study_es_0"}`},
+		{"/api/molecular-profiles/fetch", `{"studyIds":["study_es_0"],"projection":"DETAILED"}`},
+		{"/api/molecular-profiles/fetch", `{"studyIds":"study_es_0"}`},
+		{"/api/copy-number-segments/fetch", `[{"stableSampleId":"TCGA-A1-A0SB-01"}]`},
+		{"/api/copy-number-segments/fetch", `{"studyId":"study_es_0","sampleIds":[]}`},
+		{"/api/survival-data/fetch", `{"sampleListId":"study_es_0_all"}`},
+		{"/api/survival-data/fetch", `{"attributeIdPrefix":"OS","startEventRequestIdentifier":{"position":"MIDDLE"}}`},
+		{"/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"clinicalEventRequests":[{"clinicalEventType":"TREATMENT"}]}`},
 	} {
 		if resp, b := rawDo(t, "POST", c.path, c.body); resp.StatusCode != 200 || len(b) != 0 {
 			t.Errorf("POST %s %s: %d %.100q, want an empty 200", c.path, c.body, resp.StatusCode, b)
