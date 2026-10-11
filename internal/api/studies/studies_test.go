@@ -27,3 +27,25 @@ func TestTreatmentCountBothSpellings(t *testing.T) {
 		t.Error("studyCountJoins does not count both Treatment and TREATMENT events")
 	}
 }
+
+// A cancer type's primary site is its ancestor right below "tissue"
+// (CancerTypeServiceImpl.getParent).
+func TestPrimarySite(t *testing.T) {
+	byID := map[string]CancerType{}
+	for _, c := range []CancerType{
+		{CancerTypeID: "tissue", Parent: ""},
+		{CancerTypeID: "breast", Name: "Breast", Parent: "tissue"},
+		{CancerTypeID: "brca", Parent: "breast"},
+		{CancerTypeID: "idc", Parent: "brca"},
+		{CancerTypeID: "orphan", Parent: "missing"},
+		{CancerTypeID: "loop", Parent: "loop"},
+	} {
+		byID[c.CancerTypeID] = c
+	}
+	for id, want := range map[string]string{"breast": "breast", "brca": "breast", "idc": "breast", "orphan": "", "loop": ""} {
+		site, ok := primarySite(byID, byID[id])
+		if ok != (want != "") || site.CancerTypeID != want {
+			t.Errorf("%s: %q %v, want %q", id, site.CancerTypeID, ok, want)
+		}
+	}
+}

@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 84 entries:
+**Summary.** The page has 87 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 51 | go does the same thing as Java, on purpose. |
-| Fixed in go | 23 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Copied | 53 | go does the same thing as Java, on purpose. |
+| Fixed in go | 24 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 49 of the 51 copied entries. The two without a test are the
+A test checks 51 of the 53 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -94,6 +94,7 @@ stores less where Java stores empty rows.
 | Genes pages | Java sorts every page by gene symbol and drops symbols that have more than one Entrez id. | go returns the page in the order `sortBy` asks for. |
 | Genes `sortBy=cytoband` or `length` | Java fails with a 500. | go sorts the genes by their cytoband or length on the portal's reference genome. |
 | Keyword searches with `sortBy` | Java ignores `sortBy` and `direction` when searching genes, patients or `/api/legacy/studies` by keyword. | go sorts the matches as asked. |
+| `/api/legacy/studies` keyword search, later pages | Java fills every page that has too few matches with the studies of the matching primary site, starting from the first one each time, so pages repeat studies. | go makes one list, the matches and then those studies, and cuts the pages from it. |
 | `projection=ID` with `sortBy` | About 30 list endpoints ignore `sortBy` and `direction` when only ids are asked for. | go sorts the ids as it sorts the full records. |
 | Clinical table, unknown `sortBy` | Java fails with a 500. | go answers with the table. |
 | `clinical-events-meta`, `survival-data` | Java fails with a 500 for more than one patient, because a method it calls does not exist. | go answers with the data. |
@@ -167,6 +168,8 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `POST /api/studies/fetch` and the `/api/legacy/studies` endpoints report `allSampleCount: 1`. | www (legacy StudyMapper) | Fixed in go. go reports the size of the study's `_all` sample list. | known.go, corpus `studies-fetch-*` |
 | `POST /api/studies/fetch` and the `/api/legacy/studies` endpoints count only timeline events of type `Treatment` in `treatmentCount`. A study whose events are typed `TREATMENT`, such as gist_msk_2022, reports 0 treated patients. `GET /api/studies` counts both spellings. | legacy StudyMapper (`event_type = 'Treatment'`) | Fixed in go. Every study endpoint counts both spellings. | TestTreatmentCountBothSpellings, known.go |
 | `/api/legacy/studies` and `/api/legacy/studies/{studyId}` write the legacy model, not the column-store one: the nested cancer type is keyed `cancerTypeId` and comes before `allSampleCount`. The list's ID projection lists the studies by id, and META answers only the total count. A keyword is split at spaces, and each part must occur, case-sensitively, in the study's name or id or its cancer type's name or id. Matches come with names that start with the keyword first, then names containing `tcga`, then by name. Studies without sample lists are left out. | legacy StudyController, StudyMapper on ClickHouse | Copied. | TestContractLegacyStudies |
+| After the matches, a `/api/legacy/studies` keyword search adds the studies whose cancer type belongs to a matching primary site. A primary site is a top cancer type, right below `tissue`, such as Breast. It matches when its id or name contains the whole keyword, ignoring case. So `keyword=breast` also lists every breast cancer study, although no study name contains "breast" in lower case. The added studies come without resource counts and in the SUMMARY projection, also when the request asks for ID or DETAILED. META counts them. | StudyServiceImpl.findPrimarySiteMatchingStudies, CancerTypeServiceImpl.getPrimarySiteMap | Copied. Java lists the added studies in no set order; go lists them in import order. | TestContractLegacyStudiesPrimarySite, TestPrimarySite |
+| With paging, Java adds the primary-site studies of a keyword search to every page that has fewer matches than `pageSize`, and starts again from the first added study each time. Later pages repeat the same studies. | StudyServiceImpl.getAllStudies | Fixed in go. go cuts every page from one list: the matches, then the added studies. | TestContractLegacyStudiesPrimarySite |
 | The study list and `resourceCounts` include resources of other studies that share a resource id. | CancerStudyMapper joins `resource_definition` on `resource_id` only | Fixed in go. go counts only the study's own resources. | known.go, corpus `studies-summary` |
 
 ## Genes
@@ -203,6 +206,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | A sample's molecular data come in the order of Java's internal entity ids, not in Entrez id order. | MolecularDataServiceImpl (`genetic_alteration` key order) | Copied. | TestContractMolecularDataGeneticEntityOrder |
 | In variant counts, a missing keyword is stored as the text `"null"`, so a search for an empty keyword never matches. A gene and keyword with no mutations get no row. | VariantCountMapper, `mutation_count_by_keyword` | Copied. | TestContractVariantCountsRows, TestOracleVariantCountsOnlyExistingKeywords |
 | Generic assay entities are sorted by the number their id starts with, then by text. For example, 17-AAG comes last. | GenericAssayMapper | Copied. | TestContractGenericAssayMeta |
+| `generic-assay-meta/fetch` with `searchTerm` keeps the entities whose stable id, NAME or DESCRIPTION contains the term, ignoring case. The term is trimmed first. `%` and `_` in it work as wildcards (`_` is any one character). With `projection=ID` only the stable id is searched, and the wildcards are plain characters. A page's total count counts the matches. The `/api/legacy/` alias ignores `searchTerm`. | GetGenericAssayMetaUseCase, GenericAssayMapper (`ILIKE`) | Copied. | TestGenericAssayMetaSearchTerm, TestGenericAssayMetaSearch |
 | Asking for the gene set hierarchy of a profile that is not a GSVA profile gives a 500. | GenesetHierarchyServiceImpl (IllegalArgumentException) | Copied. | TestContractGenesetHierarchyBody |
 | A mutation reports the genome build (NCBI build) of whichever study imported that mutation first. Java's importer shares one mutation record across studies. | the importer shares `mutation_event` across studies | Copied on a copy of production's database. go's own importer keeps each study's own build. | — |
 | A correlation that cannot be computed is written as `"NaN"`. An empty violin plot's axis runs from `Infinity` to `-Infinity`. | Jackson, ViolinPlotServiceImpl | Copied. | TestOracleNonFiniteDoubles |

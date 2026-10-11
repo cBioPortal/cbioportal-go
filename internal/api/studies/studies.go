@@ -392,15 +392,22 @@ func (s Server) legacyStudies(w http.ResponseWriter, r *http.Request) {
 		core.Fail(w, r, err)
 		return
 	}
+	var extra []studyRow
+	if q.Has("keyword") {
+		if extra, err = s.primarySiteStudies(q.Get("keyword"), rows); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
+	}
 	if projection == "META" {
-		w.Header().Set("total-count", fmt.Sprint(len(rows)))
+		w.Header().Set("total-count", fmt.Sprint(len(rows)+len(extra)))
 		w.WriteHeader(http.StatusOK)
 		return
 	}
 	shape := studyShape{summary: projection != "ID", detailed: projection == "DETAILED"}
 	dates := s.StudyImportDates()
 	availability := s.StudyAvailabilityEnabled()
-	out := make([]CancerStudy, len(rows))
+	out := make([]CancerStudy, len(rows), len(rows)+len(extra))
 	for i, r := range rows {
 		out[i] = toCancerStudy(r, shape, dates)
 		out[i].ReadPermission = studyReadable(availability, r.Status)
@@ -408,7 +415,79 @@ func (s Server) legacyStudies(w http.ResponseWriter, r *http.Request) {
 	if shape.summary {
 		out = s.withResourceCounts(out)
 	}
+	for _, r := range extra {
+		st := toCancerStudy(r, studyShape{summary: true}, dates)
+		st.ReadPermission = studyReadable(availability, r.Status)
+		out = append(out, st)
+	}
 	core.WriteJSON(w, out)
+}
+
+// primarySiteStudies are the studies a legacy keyword search adds after its
+// matches (StudyServiceImpl.findPrimarySiteMatchingStudies): those whose
+// cancer type's primary site (its ancestor right below "tissue") has an id
+// or name containing the whole keyword, ignoring case, and that are not
+// matches already. They come in import order, in the SUMMARY projection
+// and without resource counts, whatever the request's projection.
+func (s Server) primarySiteStudies(keyword string, matches []studyRow) ([]studyRow, error) {
+	types, err := s.QueryCancerTypes("", nil)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]CancerType, len(types))
+	for _, t := range types {
+		byID[t.CancerTypeID] = t
+	}
+	kw := strings.ToLower(keyword)
+	var matching []string
+	for _, t := range types {
+		if t.CancerTypeID == tissue {
+			continue
+		}
+		site, ok := primarySite(byID, t)
+		if ok && (strings.Contains(strings.ToLower(site.CancerTypeID), kw) || strings.Contains(strings.ToLower(site.Name), kw)) {
+			matching = append(matching, t.CancerTypeID)
+		}
+	}
+	if len(matching) == 0 {
+		return nil, nil
+	}
+	args := core.NewArgs()
+	rows, err := core.CachedQueryA[studyRow](s.State, fmt.Sprintf("%s WHERE ifNull(lc.study_id, '') != '' AND c.cancer_type_id IN %s ORDER BY %s",
+		s.studySelect(), args.Strs(matching), s.StudyOrder("c.study_id")), args)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(matches))
+	for _, r := range matches {
+		seen[r.StudyID] = true
+	}
+	var out []studyRow
+	for _, r := range rows {
+		if !seen[r.StudyID] {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// tissue is the root of the cancer type tree.
+const tissue = "tissue"
+
+// primarySite returns the ancestor of t whose parent is the root ("tissue"),
+// or t itself when its parent is; false when the chain breaks off.
+func primarySite(byID map[string]CancerType, t CancerType) (CancerType, bool) {
+	for range len(byID) + 1 {
+		if t.Parent == tissue {
+			return t, true
+		}
+		p, ok := byID[t.Parent]
+		if !ok {
+			return CancerType{}, false
+		}
+		t = p
+	}
+	return CancerType{}, false
 }
 
 // javaSplitSpace splits s as Java's s.split(" ") does: at every space,

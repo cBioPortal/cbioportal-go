@@ -3,6 +3,7 @@ package contract
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"slices"
@@ -153,4 +154,42 @@ func TestContractLegacyStudies(t *testing.T) {
 	if slices.Equal(upper, lower) {
 		t.Errorf("keyword matched case-insensitively: %v", lower)
 	}
+}
+
+// TestContractLegacyStudiesPrimarySite pins StudyServiceImpl's
+// findPrimarySiteMatchingStudies: after the keyword matches come the studies
+// whose cancer type's primary site has an id or name containing the
+// keyword, ignoring case, in the SUMMARY projection whatever the request's,
+// and META counts them.
+func TestContractLegacyStudiesPrimarySite(t *testing.T) {
+	requireAPI(t)
+	// No study name, id or cancer type contains "breast" case-sensitively,
+	// but three studies' cancer types sit under the Breast primary site.
+	added := listOf(t, "GET", "/api/legacy/studies?keyword=breast&projection=ID", "")
+	ids := fieldOf(added, "studyId")
+	slices.Sort(ids)
+	wantEq(t, ids, []string{"study_es_0", "study_hg38", "teststudy_genepanels"})
+	for _, s := range added {
+		if s["name"] == nil || s["cancerType"] != nil {
+			t.Errorf("added study not in the SUMMARY projection: %v", s)
+		}
+	}
+	resp, _ := rawDo(t, "GET", "/api/legacy/studies?keyword=breast&projection=META", "")
+	wantEq(t, resp.Header.Get("total-count"), "3")
+	// Pages cut one list (Java starts the added studies again on every
+	// short page, so its pages repeat them).
+	var paged []string
+	for n := range 3 {
+		paged = append(paged, fieldOf(listOf(t, "GET", fmt.Sprintf("/api/legacy/studies?keyword=breast&pageSize=2&pageNumber=%d", n), ""), "studyId")...)
+	}
+	slices.Sort(paged)
+	wantEq(t, paged, ids)
+	// Matches keep their projection and are not listed twice.
+	matched := listOf(t, "GET", "/api/legacy/studies?keyword=Breast&projection=ID", "")
+	wantEq(t, len(matched), 3)
+	for _, s := range matched {
+		wantEq(t, len(s), 2)
+	}
+	wantEq(t, len(listOf(t, "GET", "/api/legacy/studies?keyword=Melanoma", "")), 1)
+	wantEq(t, fieldOf(listOf(t, "GET", "/api/legacy/studies?keyword=SKIN", ""), "studyId"), []string{"ascn_test_study"})
 }

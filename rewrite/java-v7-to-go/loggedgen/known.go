@@ -51,6 +51,7 @@ var (
 	isGisticRegions   = pathIs(`^/api/studies/[^/]+/significant-copy-number-regions$`)
 	isDiscreteCNAList = pathIs(`^/api/molecular-profiles/[^/]+/discrete-copy-number(/fetch)?$`)
 	isMolecularData   = pathIs(`^/api/(molecular-profiles/[^/]+/molecular-data(/fetch)?|molecular-data/fetch)$`)
+	isKeywordSorted   = pathIs(`^/api/(legacy/studies|genes|(studies/[^/]+/)?patients)/?$`)
 )
 
 // paged reports a request for one page of a list.
@@ -184,6 +185,12 @@ var expectations = []expectation{
 		match:   func(m, p string, q url.Values, b string) bool { return m == "GET" && isStudy(p) },
 		options: "ignore=resourceCounts",
 		comment: "www counts resource definitions of other studies sharing a resource id (CancerStudyMapper joins resource_definition on resource_id only)",
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "GET" && isKeywordSorted(p) && q.Get("keyword") != "" && q.Get("sortBy") != ""
+		},
+		options: `known="Java ignores sortBy and direction in a keyword search (StudyMapper, GeneMapper, PatientMapper); go sorts the matches as asked"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
