@@ -81,9 +81,14 @@ It also marks requests whose difference is expected. The list is in
 - **Tied rows:** a page boundary falls among rows that Java leaves in no
   fixed order, such as samples with the same id in several studies.
 
-Requests for a profile's whole copy-number matrix
-(`discreteCopyNumberEventType=ALL` without genes) are left out: Java
-answers them with gigabytes, too costly to replay every night.
+Two kinds of requests are left out, because Java answers them with
+gigabytes, too costly to replay every night:
+
+- A profile's whole copy-number matrix (`discreteCopyNumberEventType=ALL`
+  without genes).
+- One page (`pageSize` or `pageNumber`) of a profile's values without
+  genes. Java has no paging there and sends the whole matrix, so the
+  answers would differ anyway: go sends just the page.
 
 `-annotate` marks an existing list again with the current expectations,
 replacing earlier marks, and leaves out the requests now skipped. Compare against

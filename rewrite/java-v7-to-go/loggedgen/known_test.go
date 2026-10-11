@@ -100,6 +100,11 @@ func TestSkip(t *testing.T) {
 		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l&entrezGeneIds=8880&discreteCopyNumberEventType=ALL", "", false},
 		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l", "", false},
 		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number-counts?discreteCopyNumberEventType=ALL", "", false},
+		{"POST", "/api/molecular-profiles/p_gistic/molecular-data/fetch?projection=DETAILED&pageSize=500000&pageNumber=10", `{"sampleIds": ["s1", "s2"]}`, true},
+		{"POST", "/api/molecular-data/fetch?pageNumber=1", `{"molecularProfileIds": ["p_mrna"]}`, true},
+		{"GET", "/api/molecular-profiles/p_mrna/molecular-data?sampleListId=l&pageSize=10", "", true},
+		{"POST", "/api/molecular-profiles/p_gistic/molecular-data/fetch?pageSize=10", `{"sampleIds": ["s1"], "entrezGeneIds": [7157]}`, false},
+		{"POST", "/api/molecular-profiles/p_gistic/molecular-data/fetch", `{"sampleIds": ["s1"]}`, false},
 	} {
 		if got := skip(c.method, c.target, c.body); got != c.want {
 			t.Errorf("%s %s %s: %v, want %v", c.method, c.target, c.body, got, c.want)

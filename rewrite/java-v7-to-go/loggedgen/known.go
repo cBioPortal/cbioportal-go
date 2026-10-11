@@ -50,6 +50,7 @@ var (
 	isSVCounts        = pathIs(`^/api/structuralvariant-counts/fetch$`)
 	isGisticRegions   = pathIs(`^/api/studies/[^/]+/significant-copy-number-regions$`)
 	isDiscreteCNAList = pathIs(`^/api/molecular-profiles/[^/]+/discrete-copy-number(/fetch)?$`)
+	isMolecularData   = pathIs(`^/api/(molecular-profiles/[^/]+/molecular-data(/fetch)?|molecular-data/fetch)$`)
 )
 
 // paged reports a request for one page of a list.
@@ -129,14 +130,23 @@ func hasGenes(q url.Values, body string) bool {
 }
 
 // skip reports a request too costly to replay against production every
-// night: the whole copy-number matrix of a profile (event type ALL keeps
-// the diploid values too) for every gene, gigabytes from Java even when go
-// is asked for one page of it.
+// night, gigabytes from Java even when go is asked for one page of it:
+//   - the whole copy-number matrix of a profile (event type ALL keeps the
+//     diploid values too) for every gene;
+//   - one page of a profile's values for every gene. Java's molecular-data
+//     controllers have no paging parameters and answer the whole matrix,
+//     so the answers differ anyway (go pages them, a known difference).
 func skip(method, target, body string) bool {
 	path, rawQuery, _ := strings.Cut(target, "?")
 	path = strings.TrimSuffix(path, "/")
 	q, _ := url.ParseQuery(rawQuery)
-	return isDiscreteCNAList(path) && strings.EqualFold(q.Get("discreteCopyNumberEventType"), "ALL") && !hasGenes(q, body)
+	switch {
+	case isDiscreteCNAList(path):
+		return strings.EqualFold(q.Get("discreteCopyNumberEventType"), "ALL") && !hasGenes(q, body)
+	case isMolecularData(path):
+		return paged(q) && !hasGenes(q, body)
+	}
+	return false
 }
 
 // versionFields are /api/info's fields that describe the deployment.
@@ -356,7 +366,7 @@ func annotate(r io.Reader, w io.Writer, report io.Writer) error {
 		fmt.Fprintln(bw, c)
 	}
 	if skipped > 0 && report != nil {
-		fmt.Fprintf(report, "loggedgen: left out %d requests for whole copy-number matrices\n", skipped)
+		fmt.Fprintf(report, "loggedgen: left out %d requests for whole profile matrices\n", skipped)
 	}
 	return bw.Flush()
 }

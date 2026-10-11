@@ -22,7 +22,7 @@
 // keep the Java importer's row order. Requests whose difference is expected
 // (known.go: www's session store, deployment-specific fields, www bugs,
 // unspecified tie order, paging go adds) are marked with their reason, and
-// requests too costly to replay every night (whole copy-number matrices)
+// requests too costly to replay every night (whole profile matrices)
 // are left out; -annotate marks an existing corpus again with the current
 // expectations:
 //
@@ -222,7 +222,7 @@ FROM pool GROUP BY server_name, endpoint`, params)
 	}
 	fmt.Printf("# sampled: %d requests, %d of them (api-…) from %s\n", len(rows), nFromAPI, *apiServer)
 	if skipped > 0 {
-		fmt.Printf("# left out: %d requests for whole copy-number matrices (discreteCopyNumberEventType=ALL without genes)\n", skipped)
+		fmt.Printf("# left out: %d requests for whole profile matrices (all genes of a copy-number profile, or a page of a profile's values)\n", skipped)
 	}
 	fmt.Printf("# endpoints: %d of the window's %d read-only endpoints sampled\n", len(sampledEndpoints), len(windowEndpoints))
 
