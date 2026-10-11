@@ -79,7 +79,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 22 fixes in one place. It shows what a client gets
+This table collects all 23 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -89,6 +89,7 @@ stores less where Java stores empty rows.
 | POST with a trailing slash to an older multi-study endpoint (`clinical-data/fetch/`, `survival-data/fetch/`, …) | Java fails: a 400 for bad JSON, an empty 400 for `generic_assay_data`, a 500 for any other body. | go answers as it does without the slash. |
 | Study availability | Java marks a study that is being imported as not readable (`readPermission: false`), whatever the setting says. | go does this only when `study_availability.enabled` is on, as the setting's name says. |
 | `studies/fetch`, `/api/legacy/studies` | Java reports `allSampleCount: 1`. | go reports the number of samples in the study's `_all` sample list. |
+| `studies/fetch`, `/api/legacy/studies`, `treatmentCount` | Java counts only timeline events of type `Treatment`, so a study whose events are typed `TREATMENT` reports 0 treated patients. | go counts both spellings, as `GET /api/studies` does in Java too. |
 | Study list, `resourceCounts` | Java also counts resources of other studies that share a resource id. | go counts only this study's resources. |
 | Genes pages | Java sorts every page by gene symbol and drops symbols that have more than one Entrez id. | go returns the page in the order `sortBy` asks for. |
 | Genes `sortBy=cytoband` or `length` | Java fails with a 500. | go sorts the genes by their cytoband or length on the portal's reference genome. |
@@ -164,6 +165,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `readPermission` ignores whether the study is public and ignores the PUBLIC group. | ColumnStoreStudyController.getAllStudies | Copied. | TestStudyReadable |
 | A study that is being imported (its status is not 1) is listed with `readPermission: false`, whatever `study_availability.enabled` says. This is Java's main branch. Production (v7.1.2) never does this. | ColumnStoreStudyController (master) | Fixed in go. go does this only when the setting is on, as the setting's name says. | TestContractStudyAvailability |
 | `POST /api/studies/fetch` and the `/api/legacy/studies` endpoints report `allSampleCount: 1`. | www (legacy StudyMapper) | Fixed in go. go reports the size of the study's `_all` sample list. | known.go, corpus `studies-fetch-*` |
+| `POST /api/studies/fetch` and the `/api/legacy/studies` endpoints count only timeline events of type `Treatment` in `treatmentCount`. A study whose events are typed `TREATMENT`, such as gist_msk_2022, reports 0 treated patients. `GET /api/studies` counts both spellings. | legacy StudyMapper (`event_type = 'Treatment'`) | Fixed in go. Every study endpoint counts both spellings. | TestTreatmentCountBothSpellings, known.go |
 | `/api/legacy/studies` and `/api/legacy/studies/{studyId}` write the legacy model, not the column-store one: the nested cancer type is keyed `cancerTypeId` and comes before `allSampleCount`. The list's ID projection lists the studies by id, and META answers only the total count. A keyword is split at spaces, and each part must occur, case-sensitively, in the study's name or id or its cancer type's name or id. Matches come with names that start with the keyword first, then names containing `tcga`, then by name. Studies without sample lists are left out. | legacy StudyController, StudyMapper on ClickHouse | Copied. | TestContractLegacyStudies |
 | The study list and `resourceCounts` include resources of other studies that share a resource id. | CancerStudyMapper joins `resource_definition` on `resource_id` only | Fixed in go. go counts only the study's own resources. | known.go, corpus `studies-summary` |
 
@@ -211,6 +213,8 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
 | A request body without `studyViewFilter` gives a 500 (a null pointer error). So does a body missing its bin filters or its gene or attribute list, or no body at all. Clinical counts and bins for a filter that names no studies give the error "SQL exception." | ColumnarStoreStudyViewController and its binners | Copied. | TestContractStudyViewBodyWithoutFilter |
+| A filter value can be a bare string: `"values": ["OS"]` means `"values": [{"value": "OS"}]`. | DataFilterValue(String) constructor, used by Jackson | Copied. | TestDataFilterValueBareString |
+| The `/api/legacy/` gene tables (`mutated-genes`, `cna-genes`, `structuralvariant-genes`) have no `numberOfAlteredCasesOnPanel`, and their `matchingGenePanelIds` lists only real gene panels. A whole-exome study lists none, where the column-store tables list `WES`. | legacy ProfiledCasesCounter | Copied. | TestLegacyGeneCounts |
 | `negateFilters` is accepted and then ignored. | ColumnarStoreStudyViewController.fetchFilteredSamples | Copied. | TestContractFilteredSamplesNegateFiltersIgnored |
 | `genomic-data-counts` reports one NA ("not available") count, attached to one gene. It equals the filtered samples minus that gene's counts. | ClickhouseGenomicDataMapper.getCNACounts | Copied. go attaches it to the first gene. Java picks a gene at random (see [Nondeterminism](#nondeterminism)). | TestContractGenomicDataCountsNA |
 | `generic-assay-data-counts` with entity filters adds an NA row, even when its count is 0. | getGenericAssayDataCounts | Copied. | TestContractGenericAssayDataCounts |

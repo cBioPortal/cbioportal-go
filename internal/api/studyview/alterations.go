@@ -37,6 +37,64 @@ type GeneAlterationCount struct {
 	EntrezGeneIDs               []*int64 `json:"entrezGeneIds"`
 	HugoGeneSymbols             []string `json:"hugoGeneSymbols"`
 	UniqueEventKey              string   `json:"uniqueEventKey"`
+	// profiledWES and profiledAll are the filtered samples profiled whole
+	// exome, and profiled at all, for the legacy profiled-case count.
+	profiledWES, profiledAll uint64
+}
+
+// legacyGeneAlterationCount is GeneAlterationCount as Java's legacy
+// /api/legacy/{mutated,cna,structuralvariant}-genes/fetch answer it: the
+// legacy ProfiledCasesCounter never sets numberOfAlteredCasesOnPanel, and
+// lists only real gene panels, so whole-exome samples add no "WES". A gene
+// on none of those panels counts the whole-exome samples as profiled, or,
+// when there are none, every profiled sample.
+type legacyGeneAlterationCount struct {
+	NumberOfAlteredCases  uint64   `json:"numberOfAlteredCases"`
+	TotalCount            uint64   `json:"totalCount"`
+	NumberOfProfiledCases uint64   `json:"numberOfProfiledCases"`
+	MatchingGenePanelIDs  []string `json:"matchingGenePanelIds"`
+	EntrezGeneID          *int64   `json:"entrezGeneId,omitempty"`
+	HugoGeneSymbol        string   `json:"hugoGeneSymbol"`
+	QValue                *float64 `json:"qValue,omitempty"`
+	Alteration            *int64   `json:"alteration,omitempty"`
+	Cytoband              *string  `json:"cytoband,omitempty"`
+	EntrezGeneIDs         []*int64 `json:"entrezGeneIds"`
+	HugoGeneSymbols       []string `json:"hugoGeneSymbols"`
+	UniqueEventKey        string   `json:"uniqueEventKey"`
+}
+
+func legacyGeneCounts(counts []GeneAlterationCount) []legacyGeneAlterationCount {
+	out := make([]legacyGeneAlterationCount, len(counts))
+	for i, c := range counts {
+		panels := []string{}
+		for _, p := range c.MatchingGenePanelIDs {
+			if p != "WES" {
+				panels = append(panels, p)
+			}
+		}
+		profiled := c.NumberOfProfiledCases
+		if len(panels) == 0 && c.profiledWES == 0 {
+			profiled = c.profiledAll
+		}
+		out[i] = legacyGeneAlterationCount{
+			NumberOfAlteredCases: c.NumberOfAlteredCases, TotalCount: c.TotalCount,
+			NumberOfProfiledCases: profiled, MatchingGenePanelIDs: panels,
+			EntrezGeneID: c.EntrezGeneID, HugoGeneSymbol: c.HugoGeneSymbol, QValue: c.QValue,
+			Alteration: c.Alteration, Cytoband: c.Cytoband, EntrezGeneIDs: c.EntrezGeneIDs,
+			HugoGeneSymbols: c.HugoGeneSymbols, UniqueEventKey: c.UniqueEventKey,
+		}
+	}
+	return out
+}
+
+// writeGeneCounts answers a gene table, in the legacy shape on its
+// /api/legacy/ alias.
+func writeGeneCounts(w http.ResponseWriter, r *http.Request, counts []GeneAlterationCount) {
+	if core.IsLegacyAlias(r) {
+		core.WriteJSON(w, legacyGeneCounts(counts))
+		return
+	}
+	core.WriteJSON(w, counts)
 }
 
 // withEventKeys fills the derived getters: the event key is the symbol for a
@@ -360,15 +418,17 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 		profiled[c.Gene] = c.N
 	}
 	type n struct {
-		N uint64 `json:"n"`
+		N   uint64 `json:"n"`
+		All uint64 `json:"all"`
 	}
 	wes, _ := core.QueryA[n](s.CH, fmt.Sprintf(
-		"SELECT uniqExact(sample_unique_id) AS n FROM sample_to_gene_panel_derived "+
-			"WHERE alteration_type = '%s' AND gene_panel_id = 'WES' AND sample_unique_id IN (%s)",
-		alterationType, filtered), args)
-	var wesCount uint64
+		"SELECT uniqExactIf(sample_unique_id, gene_panel_id = 'WES') AS n, "+
+			"uniqExactIf(sample_unique_id, genetic_profile_id IN %s) AS all FROM sample_to_gene_panel_derived "+
+			"WHERE alteration_type = '%s' AND sample_unique_id IN (%s)",
+		args.Strs(profileIDs), alterationType, filtered), args)
+	var wesCount, allCount uint64
 	if len(wes) > 0 {
-		wesCount = wes[0].N
+		wesCount, allCount = wes[0].N, wes[0].All
 	}
 	type panel struct {
 		Gene  string `json:"gene"`
@@ -390,6 +450,7 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 	for i := range counts {
 		g := counts[i].HugoGeneSymbol
 		counts[i].NumberOfProfiledCases = profiled[g] + wesCount
+		counts[i].profiledWES, counts[i].profiledAll = wesCount, allCount
 		m := matching[g]
 		sort.Strings(m)
 		if m == nil {
@@ -410,7 +471,7 @@ func (s Server) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
 		core.Fail(w, r, err)
 		return
 	}
-	core.WriteJSON(w, out)
+	writeGeneCounts(w, r, out)
 }
 
 func (s Server) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
@@ -423,7 +484,7 @@ func (s Server) cnaGenesFetch(w http.ResponseWriter, r *http.Request) {
 		core.Fail(w, r, err)
 		return
 	}
-	core.WriteJSON(w, out)
+	writeGeneCounts(w, r, out)
 }
 
 func (s Server) svGenesFetch(w http.ResponseWriter, r *http.Request) {
@@ -436,7 +497,7 @@ func (s Server) svGenesFetch(w http.ResponseWriter, r *http.Request) {
 		core.Fail(w, r, err)
 		return
 	}
-	core.WriteJSON(w, out)
+	writeGeneCounts(w, r, out)
 }
 
 // molecularProfileSampleCountsFetch counts the filtered samples in each
