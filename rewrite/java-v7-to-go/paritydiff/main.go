@@ -389,6 +389,8 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 			res.Outcome, res.Known = known, rq.Opts.Known
 		case rq.Opts.KnownIfBFails != "" && ra.Status/100 == 2 && rb.Status >= 400 && rb.Status < 600 && !gateway(rb.Status):
 			res.Outcome, res.Known = known, rq.Opts.KnownIfBFails
+		case rq.Opts.KnownIfBEmpty != "" && rb.Status == 200 && emptyBody(rb):
+			res.Outcome, res.Known = known, rq.Opts.KnownIfBEmpty
 		}
 		res.Diffs = []string{fmt.Sprintf("a: %.200s", oneLine(head(ra))), fmt.Sprintf("b: %.200s", oneLine(head(rb)))}
 		return res
@@ -441,6 +443,8 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		res.Outcome, res.Known = known, rq.Opts.Known
 	case rq.Opts.KnownIfEmpty != "" && emptyArray(ra):
 		res.Outcome, res.Known = known, rq.Opts.KnownIfEmpty
+	case rq.Opts.KnownIfBEmpty != "" && emptyBody(rb):
+		res.Outcome, res.Known = known, rq.Opts.KnownIfBEmpty
 	default:
 		res.Outcome = differs
 	}
@@ -454,6 +458,11 @@ func emptyArray(r response) bool {
 	}
 	b := bytes.TrimSpace(r.head(64))
 	return len(b) >= 2 && b[0] == '[' && len(bytes.TrimSpace(b[1:len(b)-1])) == 0 && b[len(b)-1] == ']'
+}
+
+// emptyBody reports whether a body is empty or only white space.
+func emptyBody(r response) bool {
+	return r.Size() <= 64 && len(bytes.TrimSpace(r.head(64))) == 0
 }
 
 func setOf(keys []string) map[string]bool {

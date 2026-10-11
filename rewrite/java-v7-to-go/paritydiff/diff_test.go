@@ -287,3 +287,21 @@ func TestSettleJavaFailed(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownIfBEmpty(t *testing.T) {
+	rq := request{Name: "r", Opts: requestOptions{KnownIfBEmpty: "interceptor"}}
+	var o compareOptions
+	for _, c := range []struct {
+		a, b response
+		want string
+	}{
+		{response{Status: 200, Body: []byte(`[1]`)}, response{Status: 200, Body: []byte(``)}, known},
+		{response{Status: 400, Body: []byte(`{"message":"x"}`)}, response{Status: 200, Body: []byte("\n")}, known},
+		{response{Status: 200, Body: []byte(`[1]`)}, response{Status: 200, Body: []byte(`[]`)}, differs},
+		{response{Status: 400, Body: []byte(`{}`)}, response{Status: 500, Body: []byte(``)}, status},
+	} {
+		if r := compareResponses(rq, c.a, c.b, o); r.Outcome != c.want {
+			t.Errorf("a=%d %q b=%d %q: %s, want %s", c.a.Status, c.a.Body, c.b.Status, c.b.Body, r.Outcome, c.want)
+		}
+	}
+}

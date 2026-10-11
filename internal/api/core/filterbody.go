@@ -180,10 +180,10 @@ var (
 )
 
 // readFilter reads body as Jackson reads the filter class: ok is false when
-// it fails to (invalid JSON, a property the class does not declare, a value
-// of the wrong type). The first Bean Validation violation is then the
-// property and its message, or "".
-func (fs *filterSchema) readFilter(body []byte) (ok bool, property, violation string) {
+// it fails to (invalid JSON, a property the class does not declare unless
+// ignoreUnknown, a value of the wrong type). The first Bean Validation
+// violation is then the property and its message, or "".
+func (fs *filterSchema) readFilter(body []byte, ignoreUnknown bool) (ok bool, property, violation string) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	var v any
@@ -192,21 +192,25 @@ func (fs *filterSchema) readFilter(body []byte) (ok bool, property, violation st
 	}
 	if fs.listOf != nil {
 		arr, isArr := v.([]any)
-		return isArr && (&filterProp{kind: fObjects, elem: fs.listOf}).read(arr), "", ""
+		return isArr && (&filterProp{kind: fObjects, elem: fs.listOf}).read(arr, ignoreUnknown), "", ""
 	}
 	obj, isObj := v.(map[string]any)
-	if !isObj || !fs.read(obj) {
+	if !isObj || !fs.read(obj, ignoreUnknown) {
 		return false, "", ""
 	}
 	property, violation = fs.violation(obj)
 	return true, property, violation
 }
 
-// read checks obj's properties and their types.
-func (fs *filterSchema) read(obj map[string]any) bool {
+// read checks obj's properties and their types, skipping properties the
+// class does not declare when ignoreUnknown.
+func (fs *filterSchema) read(obj map[string]any, ignoreUnknown bool) bool {
 	for k, val := range obj {
 		p := fs.prop(k)
-		if p == nil || !p.read(val) {
+		if p == nil && ignoreUnknown {
+			continue
+		}
+		if p == nil || !p.read(val, ignoreUnknown) {
 			return false
 		}
 	}
@@ -222,7 +226,7 @@ func (fs *filterSchema) prop(name string) *filterProp {
 	return nil
 }
 
-func (p *filterProp) read(val any) bool {
+func (p *filterProp) read(val any, ignoreUnknown bool) bool {
 	if val == nil {
 		return true
 	}
@@ -234,7 +238,7 @@ func (p *filterProp) read(val any) bool {
 		return ok && slices.Contains(p.values, str)
 	case fObject:
 		o, ok := val.(map[string]any)
-		return ok && p.elem.read(o)
+		return ok && p.elem.read(o, ignoreUnknown)
 	}
 	arr, ok := val.([]any)
 	if !ok {
@@ -255,7 +259,7 @@ func (p *filterProp) read(val any) bool {
 			}
 		case fObjects:
 			o, ok := el.(map[string]any)
-			if !ok || !p.elem.read(o) {
+			if !ok || !p.elem.read(o, ignoreUnknown) {
 				return false
 			}
 		}

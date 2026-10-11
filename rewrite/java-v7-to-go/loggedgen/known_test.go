@@ -34,7 +34,7 @@ func TestExpect(t *testing.T) {
 		{"GET", "/api/samples?keyword=ar&pageSize=3", "", "known="},
 		{"POST", "/api/clinical-data-table/fetch?pageSize=500&sortBy=X", "{}", "known="},
 		{"POST", "/api/clinical-data-table/fetch?pageSize=500", "{}", "known="},
-		{"POST", "/api/clinical-data-table/fetch", "{}", ""},
+		{"POST", "/api/clinical-data-table/fetch", "{}", "known-if-b-empty="},
 		{"POST", "/api/molecular-profile-sample-counts/fetch", "{}", "ignore=label"},
 		{"POST", "/api/sample-lists-counts/fetch", "{}", "ignore=label"},
 		{"POST", "/api/molecular-profiles/p/mutations/fetch?pageSize=1000&pageNumber=452&projection=DETAILED", `{"sampleListId":"l"}`, "known="},
@@ -62,9 +62,9 @@ func TestExpect(t *testing.T) {
 		// Java 500s that go answers.
 		{"POST", "/api/clinical-data/fetch", `{}`, "known="},
 		{"POST", "/api/clinical-data/fetch?clinicalDataType=PATIENT", `{"attributeIds":["MSI_SCORE"]}`, "known="},
-		{"POST", "/api/clinical-data/fetch", `{"identifiers":[{"studyId":"s","entityId":"a"}]}`, ""},
+		{"POST", "/api/clinical-data/fetch", `{"identifiers":[{"studyId":"s","entityId":"a"}]}`, "known-if-b-empty="},
 		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"},{"studyId":"s","patientId":"P02"}]}`, "known="},
-		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"}]}`, ""},
+		{"POST", "/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"s","patientId":"P01"}]}`, "known-if-b-empty="},
 		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS","patientIdentifiers":[{"studyId":"s","patientId":"P01"},{"studyId":"t","patientId":"P02"}]}`, "known="},
 		// A slashed POST whose filter Java's interceptor leaves unparsed.
 		{"POST", "/api/clinical-data/fetch/?clinicalDataType=SAMPLE", `{"identifiers":[{"studyId":"s","entityId":"a"}]}`, "known-if-b-fails="},
@@ -74,8 +74,8 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/generic_assay_data/fetch/", `{"molecularProfileIds":["p"]}`, "known-if-b-fails="},
 		{"POST", "/api/legacy/mutations/fetch/", `{"molecularProfileIds":["p"]}`, "known-if-b-fails="},
 		{"POST", "/api/treatments/patient/?tier=Agent", `{"studyIds":["s"]}`, "known-if-b-fails="},
-		{"POST", "/api/mutations/fetch", `{"molecularProfileIds":["p"]}`, ""},
-		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS"}`, ""},
+		{"POST", "/api/mutations/fetch", `{"molecularProfileIds":["p"]}`, "known-if-b-empty="},
+		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS"}`, "known-if-b-empty="},
 		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds":["s"]}`, "known-if-empty="},
 		{"GET", "/api/clinical-data/fetch/", "", ""},
 		{"POST", "/api/clinical-data-counts/fetch/", `{"studyViewFilter":{"studyIds":["s"]}}`, ""},
@@ -137,7 +137,7 @@ func TestAnnotate(t *testing.T) {
 		"\n## post-treatments-sample-1 unordered " + opts("POST", "/api/treatments/sample", `{"studyIds":["s"]}`) +
 		"\nPOST /api/treatments/sample\n{\"studyIds\":[\"s\"]}\n" +
 		"\n## post-clinical-1 unordered " + opts("POST", "/api/clinical-data/fetch/", "{}") + "\nPOST /api/clinical-data/fetch/\n{}\n" +
-		"\n## post-mutations-1 unordered\nPOST /api/mutations/fetch\n{}\n"
+		"\n## post-mutations-1 unordered " + opts("POST", "/api/mutations/fetch", "{}") + "\nPOST /api/mutations/fetch\n{}\n"
 	if out.String() != want {
 		t.Errorf("annotate:\n%s\nwant:\n%s", out.String(), want)
 	}

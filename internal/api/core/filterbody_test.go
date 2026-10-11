@@ -32,7 +32,31 @@ func TestReadInterceptedFilters(t *testing.T) {
 		{"events meta", clinicalEventAttributeRequestSchema, `{"patientIdentifiers":[{"studyId":"s","patientId":"p"}],"clinicalEventRequests":[{"eventType":"TREATMENT"}]}`, true, ""},
 		{"events meta unknown", clinicalEventAttributeRequestSchema, `{"patientIdentifiers":[],"clinicalEventRequests":[{"clinicalEventType":"TREATMENT"}]}`, false, ""},
 	} {
-		ok, _, viol := c.fs.readFilter([]byte(c.body))
+		ok, _, viol := c.fs.readFilter([]byte(c.body), false)
+		if ok != c.ok || viol != c.viol {
+			t.Errorf("%s: ok=%v violation=%q, want %v %q", c.name, ok, viol, c.ok, c.viol)
+		}
+	}
+}
+
+// go reads an intercepted filter skipping the properties it does not
+// declare, where Java's interceptor gives up; wrong types still fail.
+func TestReadInterceptedFiltersIgnoreUnknown(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		fs   *filterSchema
+		body string
+		ok   bool
+		viol string
+	}{
+		{"profiles projection", molecularProfileFilterSchema, `{"studyIds":["s"],"projection":"DETAILED"}`, true, ""},
+		{"profiles scalar list", molecularProfileFilterSchema, `{"studyIds":"s"}`, false, ""},
+		{"segments unknown", sampleIdentifierListSchema, `[{"stableSampleId":"a"}]`, true, ""},
+		{"segments object", sampleIdentifierListSchema, `{"studyId":"s"}`, false, ""},
+		{"survival enum", survivalRequestSchema, `{"startEventRequestIdentifier":{"position":"MIDDLE"}}`, false, ""},
+		{"events meta unknown", clinicalEventAttributeRequestSchema, `{"patientIdentifiers":[{"studyId":"s","patientId":"p"}],"clinicalEventRequests":[{"clinicalEventType":"TREATMENT"}]}`, true, ""},
+	} {
+		ok, _, viol := c.fs.readFilter([]byte(c.body), true)
 		if ok != c.ok || viol != c.viol {
 			t.Errorf("%s: ok=%v violation=%q, want %v %q", c.name, ok, viol, c.ok, c.viol)
 		}

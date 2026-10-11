@@ -344,7 +344,8 @@ type contractRoute struct {
 	// intercepted names the controller parameter of a filter that
 	// InvolvedCancerStudyExtractorInterceptor reads first: a body it cannot
 	// read ends the request with an empty 200, and violations name the
-	// parameter.
+	// parameter. Unlike Java's interceptor, go skips properties the filter
+	// does not declare and answers the request (docs/rewrite/java-quirks.md).
 	intercepted string
 	// unvalidated leaves the filter's violations to the handler, which
 	// answers them itself (GenericAssayDataController).
@@ -359,7 +360,7 @@ type contractRoute struct {
 func (rt *contractRoute) checkFilter(w http.ResponseWriter, r *http.Request, q map[string][]string) (msg string, done bool) {
 	raw, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(raw))
-	ok, prop, violation := rt.filter.readFilter(raw)
+	ok, prop, violation := rt.filter.readFilter(raw, rt.intercepted != "")
 	if rt.intercepted != "" {
 		if !ok {
 			w.WriteHeader(http.StatusOK)

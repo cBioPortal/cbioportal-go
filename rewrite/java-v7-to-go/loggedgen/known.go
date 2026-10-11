@@ -293,6 +293,12 @@ var expectations = []expectation{
 // fails on the request, while go answers it as without the slash.
 const slashedIntercepted = `known-if-b-fails="with a trailing slash Java's InvolvedCancerStudyExtractorInterceptor, which matches exact paths, leaves the filter unparsed and the controller fails; go answers as without the slash (Fixed in go; docs/rewrite/java-quirks.md)"`
 
+// unknownIntercepted is the expectation of every POST to a legacy endpoint
+// whose filter Java's InvolvedCancerStudyExtractorInterceptor parses: it
+// fails on a property the filter does not declare and Java answers an
+// empty 200, while go answers as without the property.
+const unknownIntercepted = `known-if-b-empty="Java's InvolvedCancerStudyExtractorInterceptor fails on a filter property it does not declare and answers an empty 200; go answers as without the property (Fixed in go; docs/rewrite/java-quirks.md)"`
+
 // expect returns the extra header options and comment for a request. Java
 // matches a path with a trailing slash as the path without it, except for
 // the filter of a legacy multi-study POST (slashedIntercepted).
@@ -300,21 +306,28 @@ func expect(method, target, body string) (options, comment string) {
 	path, rawQuery, _ := strings.Cut(target, "?")
 	slashed := strings.HasSuffix(path, "/")
 	path = strings.TrimSuffix(path, "/")
-	if method == "POST" && slashed && core.InterceptedBodyPath(path) {
+	intercepted := method == "POST" && core.InterceptedBodyPath(path)
+	if intercepted && slashed {
 		return slashedIntercepted, ""
 	}
 	q, _ := url.ParseQuery(rawQuery)
 	for _, e := range expectations {
 		if e.match(method, path, q, body) {
+			if intercepted {
+				return strings.TrimSpace(e.options + " " + unknownIntercepted), e.comment
+			}
 			return e.options, e.comment
 		}
+	}
+	if intercepted {
+		return unknownIntercepted, ""
 	}
 	return "", ""
 }
 
 // expectationOptions are the header options expect sets; annotate replaces
 // them.
-var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails)="[^"]*"| ignore=\S+`)
+var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty)="[^"]*"| ignore=\S+`)
 
 // annotate copies a corpus written by this command with the expectations
 // marked as they stand now: the options and comments of earlier

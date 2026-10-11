@@ -327,7 +327,8 @@ func TestContractFilterValidation(t *testing.T) {
 	}
 
 	// Filters InvolvedCancerStudyExtractorInterceptor reads: an unreadable
-	// one is an empty 200, violations name the controller parameter.
+	// one (wrong types) is an empty 200, violations name the controller
+	// parameter. Unknown properties: TestContractInterceptedFilterUnknownProperties.
 	wantError(t, "POST", "/api/mutations/fetch", `{}`, 400, "interceptedMutationMultipleStudyFilter must be true")
 	wantError(t, "POST", "/api/mutations/fetch", `{"molecularProfileIds":["study_es_0_mutations"],"entrezGeneIds":[]}`,
 		400, "interceptedMutationMultipleStudyFilter size must be between 1 and 10000000")
@@ -342,23 +343,43 @@ func TestContractFilterValidation(t *testing.T) {
 	wantError(t, "POST", "/api/mutations/fetch?projection=X", `{}`, 400,
 		"Request parameter type mismatch: java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter.Projection.X")
 	for _, c := range []struct{ path, body string }{
-		{"/api/mutations/fetch", `{"molecularProfileIds":["study_es_0_mutations"],"foo":1}`},
 		{"/api/mutations/fetch", `{"molecularProfileIds":"study_es_0_mutations"}`},
-		{"/api/molecular-data/fetch", `{"sampleMolecularIdentifiers":[{"molecularProfileId":"study_es_0_gistic","sampleId":"x","foo":1}]}`},
-		{"/api/gene-panel-data/fetch", `{"molecularProfileIds":["study_es_0_mutations"],"entrezGeneIds":[]}`},
-		{"/api/generic_assay_data/fetch", `{"molecularProfileIds":["study_es_0_mutational_signature"],"foo":1}`},
-		{"/api/patients/fetch", `{"patientIds":["TCGA-A1-A0SB"]}`},
-		{"/api/patients/fetch", `{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"studyId":"study_es_0"}`},
-		{"/api/molecular-profiles/fetch", `{"studyIds":["study_es_0"],"projection":"DETAILED"}`},
 		{"/api/molecular-profiles/fetch", `{"studyIds":"study_es_0"}`},
-		{"/api/copy-number-segments/fetch", `[{"stableSampleId":"TCGA-A1-A0SB-01"}]`},
 		{"/api/copy-number-segments/fetch", `{"studyId":"study_es_0","sampleIds":[]}`},
-		{"/api/survival-data/fetch", `{"sampleListId":"study_es_0_all"}`},
 		{"/api/survival-data/fetch", `{"attributeIdPrefix":"OS","startEventRequestIdentifier":{"position":"MIDDLE"}}`},
-		{"/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"clinicalEventRequests":[{"clinicalEventType":"TREATMENT"}]}`},
 	} {
 		if resp, b := rawDo(t, "POST", c.path, c.body); resp.StatusCode != 200 || len(b) != 0 {
 			t.Errorf("POST %s %s: %d %.100q, want an empty 200", c.path, c.body, resp.StatusCode, b)
+		}
+	}
+}
+
+// TestContractInterceptedFilterUnknownProperties checks that a filter Java's
+// InvolvedCancerStudyExtractorInterceptor reads is answered as without the
+// properties it does not declare. Java's interceptor fails on them and
+// answers an empty 200; go fixes that (docs/rewrite/java-quirks.md).
+func TestContractInterceptedFilterUnknownProperties(t *testing.T) {
+	requireAPI(t)
+	for _, c := range []struct{ path, body, without string }{
+		{"/api/mutations/fetch", `{"molecularProfileIds":["study_es_0_mutations"],"foo":1}`, `{"molecularProfileIds":["study_es_0_mutations"]}`},
+		{"/api/molecular-data/fetch", `{"sampleMolecularIdentifiers":[{"molecularProfileId":"study_es_0_gistic","sampleId":"TCGA-A1-A0SB-01","foo":1}]}`,
+			`{"sampleMolecularIdentifiers":[{"molecularProfileId":"study_es_0_gistic","sampleId":"TCGA-A1-A0SB-01"}]}`},
+		{"/api/generic_assay_data/fetch", `{"molecularProfileIds":["study_es_0_mutational_signature"],"foo":1}`, `{"molecularProfileIds":["study_es_0_mutational_signature"]}`},
+		{"/api/gene-panel-data/fetch", `{"molecularProfileIds":["study_es_0_mutations"],"entrezGeneIds":[]}`, `{"molecularProfileIds":["study_es_0_mutations"]}`},
+		{"/api/patients/fetch", `{"patientIds":["TCGA-A1-A0SB"]}`, `{}`},
+		{"/api/patients/fetch", `{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"studyId":"study_es_0"}`,
+			`{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}]}`},
+		{"/api/molecular-profiles/fetch", `{"studyIds":["study_es_0"],"projection":"DETAILED"}`, `{"studyIds":["study_es_0"]}`},
+		{"/api/copy-number-segments/fetch", `[{"sampleId":"TCGA-A1-A0SB-01","studyId":"study_es_0","stableSampleId":"x"}]`, `[{"sampleId":"TCGA-A1-A0SB-01","studyId":"study_es_0"}]`},
+		{"/api/survival-data/fetch", `{"sampleListId":"study_es_0_all"}`, `{}`},
+		{"/api/clinical-events-meta/fetch", `{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"clinicalEventRequests":[{"clinicalEventType":"TREATMENT"}]}`,
+			`{"patientIdentifiers":[{"studyId":"study_es_0","patientId":"TCGA-A1-A0SB"}],"clinicalEventRequests":[{}]}`},
+	} {
+		want, wantBody := rawDo(t, "POST", c.path, c.without)
+		got, gotBody := rawDo(t, "POST", c.path, c.body)
+		if got.StatusCode != want.StatusCode || string(gotBody) != string(wantBody) || len(gotBody) == 0 {
+			t.Errorf("POST %s %s: %d %.100q, want %d %.100q as without the unknown properties",
+				c.path, c.body, got.StatusCode, gotBody, want.StatusCode, wantBody)
 		}
 	}
 }
