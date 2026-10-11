@@ -234,7 +234,7 @@ These long lists get no paging, on purpose:
 
 | Method | Path | Body | Params | Status | Tested | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/api/generic-assay-meta/fetch` | GenericAssayMetaFilter | projection, paging, searchTerm | implemented | yes | `pageSize` and `pageNumber` must come together. A page has a `total-count` header. go does not use `searchTerm` yet. |
+| POST | `/api/generic-assay-meta/fetch` | GenericAssayMetaFilter | projection, paging, searchTerm | implemented | yes | `pageSize` and `pageNumber` must come together. A page has a `total-count` header. |
 | GET | `/api/generic-assay-meta/{molecularProfileId}` |  | projection | implemented | yes |  |
 | GET | `/api/generic-assay-meta/generic-assay/{genericAssayStableId}` |  | projection | implemented | yes |  |
 | GET | `/api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}` |  | projection | implemented | yes |  |

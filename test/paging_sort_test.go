@@ -297,6 +297,40 @@ func TestGenericAssayMetaPaging(t *testing.T) {
 	}
 }
 
+// TestGenericAssayMetaSearchTerm pins GetGenericAssayMetaUseCase's
+// searchTerm: the stable id, NAME or DESCRIPTION contains it ignoring case
+// (LIKE wildcards included), the stable id alone for the ID projection; a
+// page's total-count counts the matches; the legacy alias ignores it.
+func TestGenericAssayMetaSearchTerm(t *testing.T) {
+	requireAPI(t)
+	body := `{"molecularProfileIds":["study_es_0_treatment_ic50"]}`
+	ids := func(q string) []string {
+		return fieldOf(listOf(t, "POST", "/api/generic-assay-meta/fetch?"+q, body), "stableId")
+	}
+	all := ids("")
+	for q, want := range map[string][]string{
+		"searchTerm=azd":                            {"AZD0530", "AZD6244"},
+		"searchTerm=name%20of%20erlo":               {"Erlotinib"},
+		"searchTerm=desc%20of%20IRINO":              {"Irinotecan"},
+		"searchTerm=url%20of":                       nil,
+		"searchTerm=AZD_5":                          {"AZD0530"},
+		"searchTerm=name%20of%20erlo&projection=ID": nil,
+		"searchTerm=azd&projection=ID":              {"AZD0530", "AZD6244"},
+		"searchTerm=%20%20":                         all,
+	} {
+		if got := ids(q); fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("%s: %v, want %v", q, got, want)
+		}
+	}
+	resp, b := rawDo(t, "POST", "/api/generic-assay-meta/fetch?searchTerm=azd&pageSize=1&pageNumber=1", body)
+	wantEq(t, resp.Header.Get("total-count"), "2")
+	var page []map[string]any
+	json.Unmarshal(b, &page)
+	wantEq(t, fmt.Sprint(fieldOf(page, "stableId")), "[AZD6244]")
+	legacy := fieldOf(listOf(t, "POST", "/api/legacy/generic_assay_meta/fetch?searchTerm=azd", body), "stableId")
+	wantEq(t, len(legacy), len(all))
+}
+
 // The clinical table's paging bounds and direction (StudyViewController).
 func TestContractClinicalTableParams(t *testing.T) {
 	requireAPI(t)

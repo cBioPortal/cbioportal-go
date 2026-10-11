@@ -254,10 +254,18 @@ type genericAssayMetaRow struct {
 
 // genericAssayMetaFetch handles POST /api/generic-assay-meta/fetch — distinct
 // entities (with NAME/DESCRIPTION/URL properties) across the requested profiles
-// and/or entity ids.
+// and/or entity ids. searchTerm, trimmed, keeps the entities whose stable id,
+// NAME or DESCRIPTION contains it (GetGenericAssayMetaUseCase): ignoring case,
+// with LIKE wildcards, and on the stable id alone for the ID projection. The
+// legacy alias takes no searchTerm.
 func (s Server) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	var f genericAssayMetaFilter
 	core.ReadBody(r, &f)
+	search := ""
+	if !core.IsLegacyAlias(r) {
+		search = strings.TrimSpace(r.URL.Query().Get("searchTerm"))
+	}
+	idOnly := strings.EqualFold(r.URL.Query().Get("projection"), "ID")
 
 	args := core.NewArgs()
 	var conds []string
@@ -285,10 +293,34 @@ func (s Server) genericAssayMetaFetch(w http.ResponseWriter, r *http.Request) {
 	if len(conds) > 0 {
 		where = strings.Join(conds, " AND ")
 	}
+	var matches func(GenericAssayMeta) bool
+	if search != "" {
+		matches = genericAssayMetaSearch(search, idOnly)
+	}
 	out := core.NewJSONArray(w, r)
 	out.Finish(s.genericAssayMetaEach(where, args, func(m GenericAssayMeta) error {
+		if matches != nil && !matches(m) {
+			return nil
+		}
 		return out.Add(m)
 	}))
+}
+
+// genericAssayMetaSearch returns the test of whether an entity matches a
+// non-empty searchTerm as GetGenericAssayMetaUseCase matches it: for the ID
+// projection its stable id contains the term, ignoring case; otherwise its
+// stable id, NAME or DESCRIPTION is ILIKE '%term%'
+// (GenericAssayMetaSearchPredicate).
+func genericAssayMetaSearch(term string, idOnly bool) func(GenericAssayMeta) bool {
+	if idOnly {
+		lower := strings.ToLower(term)
+		return func(m GenericAssayMeta) bool { return strings.Contains(strings.ToLower(m.StableID), lower) }
+	}
+	like := core.ILikeMatcher("%" + term + "%")
+	return func(m GenericAssayMeta) bool {
+		props := m.GenericEntityMetaProperties.Vals
+		return like(m.StableID) || like(props["NAME"]) || like(props["DESCRIPTION"])
+	}
 }
 
 // genericAssayMetaEach calls fn with each record of
