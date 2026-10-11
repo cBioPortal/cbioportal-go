@@ -104,7 +104,8 @@ func ReadBody(r *http.Request, v any) {
 	if !topLevelFits(raw, v) {
 		panic(badBody{})
 	}
-	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(v); err != nil && malformedJSON(err) {
+	err = DecodeJSON(raw, v)
+	if err != nil && malformedJSON(err) {
 		panic(badBody{})
 	}
 }

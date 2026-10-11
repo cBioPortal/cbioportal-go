@@ -102,7 +102,7 @@ func decodeBinRequest(r *http.Request, v any, key string) []json.RawMessage {
 	var raw map[string]json.RawMessage
 	body := json.RawMessage{}
 	core.ReadBody(r, &body)
-	json.Unmarshal(body, v)
+	core.DecodeJSON(body, v)
 	json.Unmarshal(body, &raw)
 	var filters []json.RawMessage
 	json.Unmarshal(raw[key], &filters)

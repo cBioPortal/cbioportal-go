@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -112,6 +113,40 @@ func TestMatchContract(t *testing.T) {
 	}
 }
 
+// Scalars of the wrong JSON type are read as Jackson coerces them: a quoted
+// number into a number, a number or boolean into a string. Values set before
+// the read stay where the body has no key.
+func TestReadBodyCoercesScalars(t *testing.T) {
+	type inner struct {
+		Count int `json:"count"`
+	}
+	type embedded struct {
+		Threshold float64 `json:"threshold"`
+	}
+	type filter struct {
+		embedded
+		EntrezGeneIDs []int64          `json:"entrezGeneIds"`
+		SampleIDs     []string         `json:"sampleIds"`
+		Projection    string           `json:"projection"`
+		Somatic       bool             `json:"includeSomatic"`
+		Size          *int             `json:"size"`
+		Inner         inner            `json:"inner"`
+		ByKey         map[string]int64 `json:"byKey"`
+		Raw           json.RawMessage  `json:"raw"`
+	}
+	r := httptest.NewRequest("POST", "/api/molecular-data/fetch", strings.NewReader(
+		`{"entrezGeneIds":["7157", 672, " 675 "],"sampleIds":[1, true],"includeSomatic":"true","size":"",`+
+			`"inner":{"count":"3"},"byKey":{"a":"4"},"threshold":"0.5","raw":"7"}`))
+	f := filter{Projection: "SUMMARY"}
+	ReadBody(r, &f)
+	got, _ := json.Marshal(f)
+	want := `{"threshold":0.5,"entrezGeneIds":[7157,672,675],"sampleIds":["1","true"],"projection":"SUMMARY",` +
+		`"includeSomatic":true,"size":null,"inner":{"count":3},"byKey":{"a":4},"raw":"7"}`
+	if string(got) != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
 func TestReadBodyMalformed(t *testing.T) {
 	h := BodyErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ids []string
@@ -126,7 +161,7 @@ func TestReadBodyMalformed(t *testing.T) {
 		{"/api/genes/fetch", `["TP53"]`, 200, `["TP53"]`},
 		{"/api/genes/fetch", `{bad json`, 400, `{"message":"There is an error in the JSON format of the request payload"}`},
 		{"/api/genes/fetch", `{"studyIds":["x"]}`, 400, `{"message":"There is an error in the JSON format of the request payload"}`},
-		{"/api/genes/fetch", `[1]`, 200, `[""]`},
+		{"/api/genes/fetch", `[1]`, 200, `["1"]`},
 		{"/api/genes/fetch", ``, 200, `null`},
 		{"/api/patients/fetch", `{bad json`, 200, ``},
 		{"/api/patients/fetch", ``, 200, ``},
