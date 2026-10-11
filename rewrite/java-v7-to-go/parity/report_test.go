@@ -138,7 +138,7 @@ func TestReport(t *testing.T) {
 		"# Nightly parity 2026-10-08\n\nResult: **unexplained diff** (2 unexplained of 6 requests, 1 new since the last run)\n",
 		"Clean nights in a row: **0** (go/no-go for api.cbioportal.org: 7)\n",
 		"Java nondeterministic: 1 requests answered differently by B's two runs, 1 of them also differing from A (not counted as unexplained)\n",
-		"- Corpus: 6 requests sampled from production traffic (sampled again every Sunday), file updated 2026-10-08; 3 min at 4/s to B\n",
+		"- Corpus: 6 requests sampled from production traffic, written 2026-10-08; 3 min at 4/s to B\n",
 		"- Window: 2026-10-07 22:30 to 2026-10-08 10:00 UTC (first and last request seen)\n",
 		"- Window traffic on www.cbioportal.org: 90 read-only requests over 10 endpoints\n- Window traffic on api.cbioportal.org: 10",
 		"- Endpoints: 12 of the window's 40 read-only endpoints sampled\n",

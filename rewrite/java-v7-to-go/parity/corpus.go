@@ -18,23 +18,15 @@ import (
 // CORPUS_UNTIL, UTC) on the public portal, stratified by endpoint (each
 // endpoint's share grows with the square root of its volume, at least
 // CORPUS_MIN), CORPUS_API_SHARE of them from api.cbioportal.org, with the
-// known differences marked. The sample seed is the ISO week, so a weekly
-// regeneration draws another sample. The corpus is real user traffic: it is
+// known differences marked. The window defaults to the UTC day before night
+// and the sample seed to night's date, so every night draws a new sample of
+// the previous day's traffic. The corpus is real user traffic: it is
 // written mode 600 and belongs outside git (.parity/ is ignored).
 //
 // ClickHouse credentials come from CLICKHOUSE_URL/USER/PASSWORD, or else
 // from CLOUD_ENV (default ~/.config/cbioportal-go/cloud.env).
-func writeCorpus(root, out string, stderr io.Writer) error {
-	year, week := time.Now().UTC().ISOWeek()
-	args := []string{"run", "./rewrite/java-v7-to-go/loggedgen",
-		"-n", env("CORPUS_N", "5000"),
-		"-min", env("CORPUS_MIN", "3"),
-		"-seed", env("CORPUS_SEED", fmt.Sprintf("%d%02d", year, week)),
-		"-alloc", "sqrt",
-		"-since", env("CORPUS_SINCE", "2026-10-07 22:30:00"),
-		"-until", os.Getenv("CORPUS_UNTIL"),
-		"-api-share", env("CORPUS_API_SHARE", "0.25"),
-	}
+func writeCorpus(root, out string, night time.Time, stderr io.Writer) error {
+	args := corpusArgs(night)
 	if os.Getenv("CLICKHOUSE_URL") == "" {
 		home, _ := os.UserHomeDir()
 		if err := loadEnvFile(env("CLOUD_ENV", filepath.Join(home, ".config/cbioportal-go/cloud.env"))); err != nil {
@@ -127,4 +119,19 @@ func parseEnvFile(r io.Reader) (map[string]string, error) {
 		vars[k] = v
 	}
 	return vars, s.Err()
+}
+
+// corpusArgs are the go run arguments of loggedgen for night's corpus.
+func corpusArgs(night time.Time) []string {
+	const timeLayout = "2006-01-02 15:04:05"
+	until := night.Truncate(24 * time.Hour)
+	return []string{"run", "./rewrite/java-v7-to-go/loggedgen",
+		"-n", env("CORPUS_N", "5000"),
+		"-min", env("CORPUS_MIN", "3"),
+		"-seed", env("CORPUS_SEED", until.Format("20060102")),
+		"-alloc", "sqrt",
+		"-since", env("CORPUS_SINCE", until.AddDate(0, 0, -1).Format(timeLayout)),
+		"-until", env("CORPUS_UNTIL", until.Format(timeLayout)),
+		"-api-share", env("CORPUS_API_SHARE", "0.25"),
+	}
 }

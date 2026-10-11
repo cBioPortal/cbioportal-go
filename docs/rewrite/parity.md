@@ -108,25 +108,26 @@ with api.cbioportal.org on real production traffic every day. For each request i
 answers are identical, a known difference, or unexplained.
 
 ```bash
-go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--regen] [--dry-run]
+go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--day YYYY-MM-DD] [--dry-run]
 ```
 
 `test/parity/nightly.sh` runs the same command. `parity -h` lists the
 settings (environment variables such as `PARITY_DIR`, `A`, `B`, `RATE`).
 
 **The request list.** `parity corpus` (or `test/parity/logged_corpus.sh`)
-builds a list of about 5,000 logged requests:
+builds a list of about 5,000 logged requests. Every run builds a new list
+first, so each night tests different requests:
 
-- They come from a capture window of `cbioportal_qc.logged_requests` set by
-  `CORPUS_SINCE` (default 2026-10-07 22:30 UTC) and `CORPUS_UNTIL`. Each
-  distinct request counts once.
+- They come from the previous day (midnight to midnight, UTC) of
+  `cbioportal_qc.logged_requests`. `CORPUS_SINCE` and `CORPUS_UNTIL` set
+  another window. Each distinct request counts once.
 - Only requests to www.cbioportal.org and api.cbioportal.org, only read-only
   endpoints, only those that returned 200 with a complete body.
 - Busy endpoints get more requests, growing with the square root of their
   volume, with at least 3 each.
 - A quarter (`CORPUS_API_SHARE`) comes from api.cbioportal.org, since that is
   the site go aims to replace first. Those entries are named `api-…`.
-- The list changes once a week. It is saved to `.parity/nightly/corpus.txt`,
+- The list is saved to `.parity/nightly/corpus.txt`,
   which git ignores and only the owner can read, because it is real user
   traffic. Its header records the window, the requests per host and which
   endpoints are covered.
@@ -182,7 +183,7 @@ and closes the issue. If no issue is open, the next run opens one.
 | Option | Effect |
 |---|---|
 | `--dry-run` | print the GitHub actions instead of doing them, and do not count the night |
-| `--regen` | rebuild the request list first (also done when the list has no window) |
+| `--day` | record the run as that night instead of today, to redo a past night; the list then comes from the day before it |
 
 **Where it runs.** On the parity host, cron starts it at 15:17 UTC, after the
 mirror is rebuilt at 14:00:
@@ -196,8 +197,7 @@ go build -o ~/.local/bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrit
 `parity nightly` works in `~/.local/share/cbioportal-go-parity` (`-home`). It
 checks out `origin/main` (or the ref in `state/ref`, e.g. `local/<branch>`
 from the local clone) into `src/`, runs `parity run` from there, keeps the
-record of nights in `state/` (`PARITY_STATE`), rebuilds the request list on
-Sundays, and logs to `logs/<date>.log` (kept 60 days). A lock stops two runs
+record of nights in `state/` (`PARITY_STATE`), and logs to `logs/<date>.log` (kept 60 days). A lock stops two runs
 from overlapping.
 
 ## Java oracle

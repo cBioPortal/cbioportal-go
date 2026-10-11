@@ -31,7 +31,8 @@ type runOptions struct {
 	memoryMax      string
 	memoryAS       string // address-space cap where no systemd scope can be had
 	goMemLimit     string
-	regen, dry     bool
+	day            string // the night recorded, YYYY-MM-DD (default: today, UTC)
+	dry            bool
 	stdout, stderr io.Writer
 }
 
@@ -45,7 +46,14 @@ func die(format string, args ...any) error { return errRun{fmt.Sprintf(format, a
 // nightlyRun replays the corpus against A and B, writes the report and
 // keeps the alert issue up to date. It returns whether the night was clean.
 func nightlyRun(o runOptions) (clean bool, err error) {
-	day := time.Now().UTC().Format(time.DateOnly)
+	day := o.day
+	if day == "" {
+		day = time.Now().UTC().Format(time.DateOnly)
+	}
+	night, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return false, die("bad day %q: want YYYY-MM-DD", day)
+	}
 	run := filepath.Join(o.dir, "runs", day)
 	corpusPath := filepath.Join(o.dir, "corpus.txt")
 	if err := os.MkdirAll(filepath.Join(o.dir, "runs"), 0o755); err != nil {
@@ -55,10 +63,8 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 		return false, die("cannot create %s: %v", o.state, err)
 	}
 
-	if o.regen || !hasSinceHeader(corpusPath) {
-		if err := writeCorpus(o.root, corpusPath, o.stderr); err != nil {
-			return false, die("corpus generation failed: %v", err)
-		}
+	if err := writeCorpus(o.root, corpusPath, night, o.stderr); err != nil {
+		return false, die("corpus generation failed: %v", err)
 	}
 	bin := filepath.Join(o.dir, "bin")
 	for _, tool := range []string{"loggedgen", "paritydiff"} {
@@ -347,22 +353,6 @@ func pruneRuns(runs string, maxAge time.Duration) {
 		}
 		os.RemoveAll(filepath.Join(p, "cache"))
 	}
-}
-
-// hasSinceHeader reports whether the corpus exists and was written by the
-// windowed generator.
-func hasSinceHeader(path string) bool {
-	data, err := os.ReadFile(path)
-	return err == nil && slicesContainsPrefix(string(data), "# since: ")
-}
-
-func slicesContainsPrefix(text, prefix string) bool {
-	for l := range strings.SplitSeq(text, "\n") {
-		if strings.HasPrefix(l, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func hasLine(text, line string) bool {

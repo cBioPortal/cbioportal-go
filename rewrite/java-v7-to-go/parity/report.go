@@ -204,7 +204,7 @@ func report(in reportInput) string {
 	p("")
 	p("- A: %s (%s)", in.A, in.VersionA)
 	p("- B: %s (%s), every request sent twice", in.B, in.VersionB)
-	p("- Corpus: %d requests sampled from production traffic (sampled again every Sunday), file updated %s; %d min at %s/s to B", c.All, in.CorpusDate, in.Minutes, in.Rate)
+	p("- Corpus: %d requests sampled from production traffic, written %s; %d min at %s/s to B", c.All, in.CorpusDate, in.Minutes, in.Rate)
 	p("- Window: %s", strings.Join(corpusHeader(in.Corpus, "window: "), "\n"))
 	for _, s := range corpusHeader(in.Corpus, "server ") {
 		p("- Window traffic on %s", s)
@@ -370,7 +370,7 @@ func statusBody(repo string, nightLines []string, links map[string]string, strea
 	var b strings.Builder
 	b.WriteString("This issue tracks the go/no-go for serving api.cbioportal.org from go: ")
 	fmt.Fprintf(&b, "**%d clean nights in a row** of the nightly parity check.\n\n", goal)
-	b.WriteString("Each night the check sends a sample of production requests (sampled again every Sunday) to ")
+	b.WriteString("Each night the check sends a new sample of the previous day's production requests to ")
 	b.WriteString("go.cbioportal.org and to api.cbioportal.org and compares the answers. A night is ")
 	b.WriteString("clean when every difference is known and explained (a Java bug go fixes, ")
 	b.WriteString("Java giving changing answers, or a documented choice). Each night's report is ")

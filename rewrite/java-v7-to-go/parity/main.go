@@ -19,21 +19,22 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const usage = `Usage:
-  parity run [-regen] [-dry-run] [-root DIR]
+  parity run [-day YYYY-MM-DD] [-dry-run] [-root DIR]
       one comparison from the repository at DIR (default: the go.mod above
-      the working directory). -regen regenerates the corpus first (also done
-      when there is none, or it predates the windowed generator); -dry-run
+      the working directory), of a new corpus sampled from the previous
+      day's traffic. -day records the run as that night (default: today,
+      UTC), to redo a past night, and samples the day before it; -dry-run
       prints the GitHub issue actions instead of running gh and records
       nothing in the state directory.
   parity corpus [-root DIR] [OUT]
       write the logged-traffic corpus (default DIR/.parity/nightly/corpus.txt)
   parity nightly [-home DIR] [-repo DIR] [-- RUN-ARGS]
       the cron entry: one run at a time, from a checkout (DIR/src) of the
-      ref in DIR/state/ref (default origin/main), logged to DIR/logs, with
-      -regen on Sundays.
+      ref in DIR/state/ref (default origin/main), logged to DIR/logs.
 
 Environment of run:
   PARITY_DIR     corpus.txt, runs/<date>/ (results.json, output.txt,
@@ -54,8 +55,9 @@ Environment of run:
                  (twice PARITY_MEMORY_MAX, as Go reserves address space
                  ahead). With neither, run refuses to start paritydiff.
                  GOMEMLIMIT (1500MiB) is its collector's soft limit
-Environment of corpus: CORPUS_N (5000), CORPUS_MIN (3), CORPUS_SEED (the ISO
-  week), CORPUS_SINCE, CORPUS_UNTIL, CORPUS_API_SHARE (0.25); ClickHouse from
+Environment of corpus: CORPUS_N (5000), CORPUS_MIN (3), CORPUS_SEED (the
+  night's date), CORPUS_SINCE and CORPUS_UNTIL (the UTC day before the
+  night), CORPUS_API_SHARE (0.25); ClickHouse from
   CLICKHOUSE_URL/USER/PASSWORD, else CLOUD_ENV (~/.config/cbioportal-go/cloud.env).
 
 Exit status of run: 0 when every request is identical or a known
@@ -78,7 +80,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "run":
 		root := fs.String("root", "", "repository root")
-		regen := fs.Bool("regen", false, "regenerate the corpus first")
+		day := fs.String("day", "", "record the run as this night, YYYY-MM-DD (default: today, UTC)")
 		dry := fs.Bool("dry-run", false, "print the GitHub issue actions instead of running gh")
 		if err := fs.Parse(args[1:]); err != nil {
 			return flagStatus(err)
@@ -99,7 +101,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			rate: env("RATE", "4"), ua: env("UA", "cbioportal-go-parity"),
 			issueRepo: env("ISSUE_REPO", "cBioPortal/cbioportal-go"), issue: os.Getenv("PARITY_ISSUE"),
 			memoryMax: env("PARITY_MEMORY_MAX", "2G"), memoryAS: os.Getenv("PARITY_MEMORY_AS"), goMemLimit: env("GOMEMLIMIT", "1500MiB"),
-			regen: *regen, dry: *dry, stdout: stdout, stderr: stderr,
+			day: *day, dry: *dry, stdout: stdout, stderr: stderr,
 		})
 		if err != nil {
 			fmt.Fprintln(stderr, "nightly:", err)
@@ -123,7 +125,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		if fs.NArg() > 0 {
 			out = fs.Arg(0)
 		}
-		if err := writeCorpus(r, out, stderr); err != nil {
+		if err := writeCorpus(r, out, time.Now().UTC(), stderr); err != nil {
 			fmt.Fprintln(stderr, "corpus:", err)
 			return 1
 		}

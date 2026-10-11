@@ -21,8 +21,7 @@ type nightlyOptions struct {
 const originURL = "https://github.com/cBioPortal/cbioportal-go.git"
 
 // cronNightly runs one nightly comparison from a checkout of the ref named
-// in state/ref (default origin/main), logging to logs/<date>.log. Sundays
-// it regenerates the corpus first, so it follows current traffic. It
+// in state/ref (default origin/main), logging to logs/<date>.log. It
 // returns the exit status.
 func cronNightly(o nightlyOptions) int {
 	home, _ := os.UserHomeDir()
@@ -99,9 +98,6 @@ func cronNightly(o nightlyOptions) int {
 	log("src %s (%s)", strings.TrimSpace(string(head)), ref)
 
 	args := []string{"run", "./rewrite/cmd/cbioportal-rewrite-test", "java-v7-to-go", "parity", "run"}
-	if now.Weekday() == time.Sunday {
-		args = append(args, "--regen")
-	}
 	args = append(args, o.extra...)
 	cmd := exec.Command("go", args...)
 	if _, err := os.Stat(filepath.Join(src, "rewrite/cmd/cbioportal-rewrite-test")); err != nil {
