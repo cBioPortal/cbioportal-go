@@ -45,6 +45,18 @@ type dataFilterValue struct {
 
 func (v dataFilterValue) isNA() bool { return v.Value != nil && *v.Value == "NA" }
 
+// UnmarshalJSON also takes a bare string as the value, as Java's
+// DataFilterValue(String) constructor does: "OS" is {"value":"OS"}.
+func (v *dataFilterValue) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*v = dataFilterValue{Value: &s}
+		return nil
+	}
+	type plain dataFilterValue
+	return json.Unmarshal(b, (*plain)(v))
+}
+
 type dataFilter struct {
 	Values []dataFilterValue `json:"values"`
 }

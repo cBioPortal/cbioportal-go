@@ -40,3 +40,18 @@ func TestMergeDataFilters(t *testing.T) {
 		t.Errorf("invalid sequence: got %d and %d values, want 2 and 3 (unmerged)", len(got[0].Values), len(got[1].Values))
 	}
 }
+
+// A bare string in values is the value, as with Java's
+// DataFilterValue(String) constructor.
+func TestDataFilterValueBareString(t *testing.T) {
+	var f studyViewFilter
+	body := `{"clinicalDataFilters":[{"attributeId":"ONCOTREE_CODE","values":["OS",{"value":"EWS"},{"start":1,"end":2}]}]}`
+	if err := json.Unmarshal([]byte(body), &f); err != nil {
+		t.Fatal(err)
+	}
+	v := f.ClinicalDataFilters[0].Values
+	if len(v) != 3 || v[0].Value == nil || *v[0].Value != "OS" || v[1].Value == nil || *v[1].Value != "EWS" ||
+		v[2].Start == nil || string(*v[2].Start) != "1" || v[2].Value != nil {
+		t.Errorf("got %+v", v)
+	}
+}
