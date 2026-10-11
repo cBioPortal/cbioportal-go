@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 81 entries:
+**Summary.** The page has 84 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 49 | go does the same thing as Java, on purpose. |
-| Fixed in go | 22 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Copied | 51 | go does the same thing as Java, on purpose. |
+| Fixed in go | 23 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 47 of the 49 copied entries. The two without a test are the
+A test checks 49 of the 51 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
