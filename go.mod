@@ -1,6 +1,6 @@
 module github.com/cbioportal/cbioportal-go
 
-go 1.26.8
+go 1.26.9
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
