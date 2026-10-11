@@ -196,8 +196,9 @@ var expectations = []expectation{
 		match: func(m, p string, q url.Values, b string) bool {
 			return (m == "POST" && isStudiesFetch(p)) || (m == "GET" && isLegacyStudies(p))
 		},
-		options: "ignore=allSampleCount,resourceCounts",
-		comment: "Java's legacy StudyMapper reports allSampleCount 1 and joins resource_definition on resource_id only, listing other studies' definitions of a resource",
+		options: "ignore=allSampleCount,resourceCounts,treatmentCount",
+		comment: "Java's legacy StudyMapper reports allSampleCount 1, joins resource_definition on resource_id only, listing other studies' definitions of a resource, " +
+			"and counts only events of type 'Treatment', so studies whose events are 'TREATMENT' report 0 treated patients",
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
