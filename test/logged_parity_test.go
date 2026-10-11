@@ -122,6 +122,16 @@ func TestContractMutationDataCountsWithoutFilters(t *testing.T) {
 		t.Errorf("TP53 missing from the unfiltered counts")
 	}
 	wantEq(t, len(listOf(t, "POST", "/api/mutation-data-counts/fetch", body)), 0)
+	// A genomic data filter without a gene: Java leaves hugoGeneSymbol null
+	// and omits it.
+	noGene := listOf(t, "POST", "/api/mutation-data-counts/fetch",
+		`{"genomicDataFilters":[{"values":[{"value":"MUTATION"}],"profileType":"MUTATION"}],"studyViewFilter":{"studyIds":["study_es_0"]}}`)
+	if len(noGene) != 1 {
+		t.Fatalf("gene-less filter: %d items", len(noGene))
+	}
+	if _, ok := noGene[0]["hugoGeneSymbol"]; ok {
+		t.Errorf("gene-less filter: hugoGeneSymbol present: %v", noGene[0])
+	}
 }
 
 // clinical-data/fetch without identifiers names no samples or patients:

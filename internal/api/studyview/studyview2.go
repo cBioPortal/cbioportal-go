@@ -24,8 +24,9 @@ func (s Server) routeStudyView2(mux *http.ServeMux) {
 // ---------- Mutation data counts ----------
 
 // GenomicDataCountItem groups the per-category counts for one gene/profile.
+// A filter without a gene leaves hugoGeneSymbol null, which Java omits.
 type GenomicDataCountItem struct {
-	HugoGeneSymbol string             `json:"hugoGeneSymbol"`
+	HugoGeneSymbol string             `json:"hugoGeneSymbol,omitempty"`
 	ProfileType    string             `json:"profileType"`
 	Counts         []GenomicDataCount `json:"counts"`
 }
