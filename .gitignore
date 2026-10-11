@@ -1,4 +1,14 @@
-# Build output
+# Build output. go build writes a binary into the folder it runs in;
+# "!*/" keeps the source folders of the same names.
+cbioportal-import
+cbioportal-api
+cbioportal-ops
+cbioportal-rewrite-test
+paritydiff
+loggedgen
+apibench
+e2ereport
+!*/
 /bin/
 *.test
 *.out
