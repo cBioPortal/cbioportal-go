@@ -718,7 +718,10 @@ func (o *oauth2Login) exchange(r *http.Request, reg *oauth2Registration, code, n
 	if err != nil {
 		return core.User{}, "", err
 	}
-	issuers := append([]string{meta.Issuer}, reg.Issuers...)
+	var issuers []string
+	if meta.Issuer != "" {
+		issuers = append([]string{meta.Issuer}, reg.Issuers...)
+	}
 	if err := checkIDToken(claims, issuers, reg.ClientID, nonce, time.Now()); err != nil {
 		return core.User{}, "", err
 	}
@@ -755,9 +758,12 @@ func (o *oauth2Login) userInfo(ctx context.Context, endpoint, accessToken string
 }
 
 // checkIDToken validates the claims of a signature-checked ID token: issued
-// by one of issuers, for clientID, unexpired, with the login's nonce.
+// by one of issuers, for clientID, unexpired, with the login's nonce. With
+// no issuers (a provider configured without issuer-uri) the issuer is not
+// checked, as in Spring's OidcIdTokenValidator: Microsoft's common endpoint
+// issues tokens under each user's own tenant.
 func checkIDToken(claims map[string]any, issuers []string, clientID, nonce string, now time.Time) error {
-	if iss, _ := claims["iss"].(string); !slices.Contains(issuers, iss) {
+	if iss, _ := claims["iss"].(string); len(issuers) > 0 && !slices.Contains(issuers, iss) {
 		return fmt.Errorf("ID token issuer %q is not %q", iss, issuers[0])
 	}
 	var aud []string

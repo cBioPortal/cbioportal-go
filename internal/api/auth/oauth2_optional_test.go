@@ -293,3 +293,41 @@ func TestRegistrationProperties(t *testing.T) {
 		t.Errorf("relaxedName(user_name_attribute) = %q", got)
 	}
 }
+
+// www.cbioportal.org's Microsoft registration names the common endpoint's
+// URIs and no issuer-uri; its ID tokens carry each user's own tenant as
+// issuer, which is then not checked (signature, audience, expiry and nonce
+// still are).
+func TestMicrosoftCommonRegistration(t *testing.T) {
+	const reg, prov = "spring.security.oauth2.client.registration.azure.", "spring.security.oauth2.client.provider.azure."
+	cfg, err := loadOAuth2Config(map[string]string{
+		"authenticate":                   "optional_oauth2",
+		reg + "client-id":                "mid",
+		reg + "clientSecret":             "msecret",
+		reg + "authorization-grant-type": "authorization_code",
+		reg + "redirect-uri":             "{baseUrl}/login/oauth2/code/azure",
+		reg + "scope":                    "openid,profile,email",
+		prov + "user-name-attribute":     "email",
+		prov + "authorization-uri":       "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+		prov + "token-uri":               "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+		prov + "jwk-set-uri":             "https://login.microsoftonline.com/common/discovery/v2.0/keys",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Registrations) != 1 || cfg.Registrations[0].ID != "azure" || cfg.Registrations[0].IssuerURI != "" {
+		t.Fatalf("registrations %+v", cfg.Registrations)
+	}
+	now := time.Unix(1_000_000_000, 0)
+	tok := map[string]any{"iss": "https://login.microsoftonline.com/9188040d-6c67-4c5b-b112-36a304b66dad/v2.0",
+		"aud": "mid", "exp": float64(4e9), "nonce": "n"}
+	if err := checkIDToken(tok, nil, "mid", "n", now); err != nil {
+		t.Errorf("tenant issuer without issuer-uri: %v", err)
+	}
+	if err := checkIDToken(tok, []string{"https://login.microsoftonline.com/common/v2.0"}, "mid", "n", now); err == nil {
+		t.Error("issuer not checked against a configured issuer")
+	}
+	if err := checkIDToken(tok, nil, "other", "n", now); err == nil {
+		t.Error("audience not checked without issuer-uri")
+	}
+}

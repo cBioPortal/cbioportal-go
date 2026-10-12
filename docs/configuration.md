@@ -310,6 +310,11 @@ A few more details:
 - The server finds the provider's addresses from `issuer-uri`. You can also
   set them yourself with `authorization-uri`, `token-uri`, `user-info-uri`
   and `jwk-set-uri`.
+- Without `issuer-uri`, the server does not check who issued the login
+  token, as in Java. It still checks the token's signature, that it is for
+  this client, and that it has not expired. This is how Microsoft sign-in
+  for both work and personal accounts is set up: Microsoft's `common`
+  addresses issue each token in the name of the user's own organization.
 - Property names can be written in any of Spring's styles. `clientId`,
   `client_id` and `client-id` all mean the same.
 - `{baseUrl}` is the address the browser uses. If a proxy or ingress in
