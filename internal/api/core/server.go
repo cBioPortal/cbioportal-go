@@ -47,7 +47,7 @@ type State struct {
 	frontendFiles *staticFiles
 	// staticFiles serves the portal's own files (CBIOPORTAL_STATIC_DIR) at
 	// their path, before the built-in resources and the frontend build.
-	staticFiles *staticFiles
+	staticFiles   *staticFiles
 	frontendProxy http.Handler
 	// PageConfig is the frontend configuration (the /config_service body) a
 	// portal page embeds as window.rawServerConfig; nil embeds none.
