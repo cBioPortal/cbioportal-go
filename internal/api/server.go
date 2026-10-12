@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/auth"
@@ -43,6 +44,15 @@ func (s *State) ConfigureAuth() error {
 	s.auth = l
 	s.AuthMethod = l.Method()
 	return nil
+}
+
+// CheckLogin reaches the sign-in providers and the login session store of
+// the configured login; nil without one.
+func (s *State) CheckLogin(ctx context.Context) []auth.CheckResult {
+	if s.auth == nil {
+		return nil
+	}
+	return s.auth.Check(ctx)
 }
 
 // NewRouter builds the API handler with CORS, the OAuth2 login, data access

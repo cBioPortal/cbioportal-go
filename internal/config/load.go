@@ -121,6 +121,12 @@ func ClassifyProperties(props map[string]string) (used, ignored []string) {
 	return used, ignored
 }
 
+// KnownProperty reports whether this server reads the portal property k.
+func KnownProperty(k string) bool {
+	used, _ := ClassifyProperties(map[string]string{k: ""})
+	return len(used) == 1
+}
+
 // PropertiesSummary is a one-line account of which portal properties take
 // effect, naming at most max keys per list. It never includes values, which
 // may hold passwords.

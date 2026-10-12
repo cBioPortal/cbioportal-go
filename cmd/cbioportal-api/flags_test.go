@@ -98,9 +98,48 @@ func TestUsageListsEveryOption(t *testing.T) {
 			t.Errorf("usage lacks -%s / $%s", o.name, o.env)
 		}
 	}
-	for _, s := range append([]string{"--<key>=<value>", "-version", "Examples:"}, "CLICKHOUSE_PASSWORD", "ONCOKB_TOKEN", "AUTH_JWT_SECRET", "PUBLISHER_API_KEY") {
+	for _, s := range append([]string{"--<key>=<value>", "-version", "Examples:"}, "CLICKHOUSE_PASSWORD", "ONCOKB_TOKEN", "AUTH_JWT_SECRET", "PUBLISHER_API_KEY",
+		"CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_SECRET", "CBIOPORTAL_REDIS_PASSWORD") {
 		if !strings.Contains(out, s) {
 			t.Errorf("usage lacks %s", s)
 		}
+	}
+}
+
+func TestRunCommands(t *testing.T) {
+	e := env(map[string]string{"CBIOPORTAL_LOGIN_GOOGLE_CLIENT_SECRET": "s3cret", "CBIOPORTAL_DB": "envdb"})
+	for _, tc := range []struct {
+		args       []string
+		code       int
+		out, notIn string
+	}{
+		{[]string{"version", "--json"}, 0, `"name": "cbioportal-api"`, ""},
+		{[]string{"-version"}, 0, "cbioportal-api ", ""},
+		{[]string{"help"}, 0, "Commands (the command comes first", ""},
+		{[]string{"config", "--login=optional", "--login-google-client-id=gid"}, 0, "authenticate", "s3cret"},
+		{[]string{"config", "--json", "--spring.data.redis.host=h"}, 0, `"source": "spring.data.redis.host (argument)"`, ""},
+		{[]string{"config", "--json"}, 0, `"source": "env $CBIOPORTAL_DB"`, ""},
+		{[]string{"confg"}, 2, "did you mean config?", ""},
+		{[]string{"--prot=1"}, 2, "did you mean --port?", ""},
+		{[]string{"-dbb", "x"}, 2, "did you mean --db?", ""},
+		{[]string{"--db=x", "config"}, 2, `the command "config" must come first`, ""},
+		{[]string{"config", "--login=optional", "--authenticate=oauth2"}, 2, "set it one way", ""},
+		{[]string{"config", "--login=maybe"}, 2, "is not off, optional or required", ""},
+		{[]string{"config", "--clickhouse-bulk-max-time=soon"}, 2, "invalid duration", ""},
+	} {
+		var out bytes.Buffer
+		code := run(tc.args, &out, &out, e)
+		got := out.String()
+		if code != tc.code || !strings.Contains(got, tc.out) || (tc.notIn != "" && strings.Contains(got, tc.notIn)) {
+			t.Errorf("%q: exit %d, want %d; output:\n%s", tc.args, code, tc.code, got)
+		}
+	}
+}
+
+// A portal property that only looks like a flag stays a property.
+func TestParseArgsKeepsPropertiesNearFlags(t *testing.T) {
+	cfg, err := parseArgs([]string{"--authenticate=false", "--app.name=x", "--dat.method=none"}, env(nil))
+	if err != nil || len(cfg.portalArgs) != 3 {
+		t.Fatalf("err %v, portal args %q", err, cfg.portalArgs)
 	}
 }

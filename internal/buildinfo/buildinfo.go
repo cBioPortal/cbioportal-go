@@ -4,6 +4,7 @@ package buildinfo
 
 import (
 	"regexp"
+	"runtime"
 	"runtime/debug"
 	"strings"
 )
@@ -109,4 +110,19 @@ func format(info *debug.BuildInfo) string {
 		version += " (" + strings.Join(details, ", ") + ")"
 	}
 	return version
+}
+
+// Info is a program's version, for --json output.
+type Info struct {
+	Name     string `json:"name"`
+	Version  string `json:"version"`
+	Commit   string `json:"commit"`
+	Modified bool   `json:"modified"`
+	Go       string `json:"go"`
+}
+
+// Get returns the version of the program name.
+func Get(name string) Info {
+	rev, modified := Commit()
+	return Info{Name: name, Version: Version(), Commit: rev, Modified: modified, Go: runtime.Version()}
 }

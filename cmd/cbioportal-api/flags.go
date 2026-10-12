@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
+	"github.com/cbioportal/cbioportal-go/internal/cli"
+	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
 // option is one server setting: a flag whose default comes from an
@@ -24,6 +27,9 @@ type option struct {
 	// export marks settings that internal/api reads from the environment;
 	// main exports their resolved value back into env before starting it.
 	export bool
+	// setting marks go's names for portal properties (config.Settings),
+	// translated into those properties at startup.
+	setting bool
 }
 
 type section struct {
@@ -64,6 +70,25 @@ var sections = []section{
 	}},
 }
 
+func init() {
+	// go's names for the login and login-session portal properties, before
+	// the portal properties section; their secrets are environment only.
+	var settings []section
+	for _, ss := range config.Settings {
+		sec := section{title: ss.Title}
+		for _, st := range ss.Settings {
+			if st.Secret {
+				envOnly = append(envOnly, [2]string{st.Env, st.Usage})
+				continue
+			}
+			sec.opts = append(sec.opts, option{name: st.Name, arg: st.Arg, env: st.Env, usage: st.Usage, setting: true})
+		}
+		settings = append(settings, sec)
+	}
+	last := len(sections) - 1
+	sections = append(append(sections[:last:last], settings...), sections[last])
+}
+
 // envOnly are settings deliberately without a flag: secrets, which a flag
 // would expose to every user through the process list (ps), and the profiler
 // address, read before flags are parsed.
@@ -87,9 +112,22 @@ func allOptions() []option {
 
 // settings is the parsed command line.
 type settings struct {
-	values      map[string]string // resolved value of every option, by flag name
-	portalArgs  []string          // --key=value portal property arguments, in order
+	values map[string]string // resolved value of every option, by flag name
+	// sources says where each value came from: "flag", "env $NAME" or
+	// "default"; an unset option has none.
+	sources     map[string]string
+	portalArgs  []string // --key=value portal property arguments, in order
 	showVersion bool
+}
+
+// goSettings returns the values of go's names for portal properties
+// (config.Settings), the secret ones from the environment.
+func (c *settings) goSettings() map[string]string {
+	out := map[string]string{}
+	for _, st := range config.AllSettings() {
+		out[st.Name] = c.values[st.Name]
+	}
+	return out
 }
 
 // parseArgs resolves every option (flag > environment > built-in default)
@@ -114,7 +152,7 @@ func parseArgs(args []string, getenv func(string) string) (*settings, error) {
 			strs[o.name] = fs.String(o.name, def, o.usage)
 		}
 	}
-	cfg := &settings{values: map[string]string{}}
+	cfg := &settings{values: map[string]string{}, sources: map[string]string{}}
 	fs.BoolVar(&cfg.showVersion, "version", false, "print the version and exit")
 
 	flagArgs, portalArgs, err := splitArgs(args, fs)
@@ -125,6 +163,9 @@ func parseArgs(args []string, getenv func(string) string) (*settings, error) {
 		return nil, err
 	}
 	if fs.NArg() > 0 {
+		if slices.Contains(commandNames, fs.Arg(0)) {
+			return nil, fmt.Errorf("the command %q must come first: cbioportal-api %s [flags]", fs.Arg(0), fs.Arg(0))
+		}
 		return nil, fmt.Errorf("unexpected argument %q (portal properties are written --key=value)", fs.Arg(0))
 	}
 	for name, p := range strs {
@@ -133,8 +174,34 @@ func parseArgs(args []string, getenv func(string) string) (*settings, error) {
 	for name, p := range bools {
 		cfg.values[name] = fmt.Sprint(*p)
 	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	for _, o := range allOptions() {
+		switch {
+		case set[o.name]:
+			cfg.sources[o.name] = "flag"
+		case getenv(o.env) != "":
+			cfg.sources[o.name] = "env $" + o.env
+		case o.def != "":
+			cfg.sources[o.name] = "default"
+		}
+	}
+	for _, st := range config.AllSettings() {
+		if v := getenv(st.Env); st.Secret && v != "" {
+			cfg.values[st.Name], cfg.sources[st.Name] = v, "env $"+st.Env
+		}
+	}
 	cfg.portalArgs = portalArgs
 	return cfg, nil
+}
+
+// flagNames lists every flag, for suggestions.
+func flagNames() []string {
+	names := []string{"version", "help"}
+	for _, o := range allOptions() {
+		names = append(names, o.name)
+	}
+	return names
 }
 
 // splitArgs separates server flags (with their values) from portal property
@@ -161,8 +228,16 @@ func splitArgs(args []string, fs *flag.FlagSet) (flagArgs, portalArgs []string, 
 			continue
 		}
 		if strings.HasPrefix(a, "--") && hasValue && name != "" {
+			// A near miss of a flag (--prot=8080) is a typo, not a portal
+			// property: no property this server knows is that close to one.
+			if s := cli.Suggest(name, flagNames()); s != "" && !strings.Contains(name, ".") && !config.KnownProperty(name) {
+				return nil, nil, fmt.Errorf("unknown flag --%s%s", name, cli.DidYouMean("--"+s))
+			}
 			portalArgs = append(portalArgs, a)
 			continue
+		}
+		if s := cli.Suggest(name, flagNames()); s != "" {
+			return nil, nil, fmt.Errorf("unknown flag %s%s", a, cli.DidYouMean("--"+s))
 		}
 		return nil, nil, fmt.Errorf("unknown flag %s (portal properties are written --key=value)", a)
 	}
@@ -174,20 +249,36 @@ func isBoolFlag(f *flag.Flag) bool {
 	return ok && b.IsBoolFlag()
 }
 
-const usageHeader = `Usage: cbioportal-api [flags] [--<portal.property>=<value> ...]
+const usageHeader = `Usage: cbioportal-api [command] [flags] [--<portal.property>=<value> ...]
 
 cbioportal-api serves the cBioPortal REST API, and optionally the web
 frontend, from the ClickHouse tables built by cbioportal-import.
 
+Commands (the command comes first; without one the server serves):
+  serve     serve the API (the default)
+  config    print the effective settings and where each comes from;
+            secrets are shown as (redacted). --json for JSON
+  check     check the settings and reach ClickHouse, the sign-in providers
+            and the login session store; exit status 1 when a check fails.
+            --json for JSON
+  version   print the version (--json for JSON)
+  help      print this help
+
 Each flag falls back to its environment variable, then to the built-in
 default: flag > environment > default. Flags may be written -name or --name,
-with the value after '=' or as the next argument.
+with the value after '=' or as the next argument. The login flags are go's
+names for the Java portal's Spring properties, which work too
+(docs/configuration.md lists both).
+
+Exit status: 0 success, 1 failure, 2 invalid command line or settings.
 `
 
 const usageFooter = `Examples:
   cbioportal-api -db cbioportal -frontend-dir frontend/dist
   cbioportal-api --port=8080 --skin.title="My portal" --quick_search.enabled=true
   cbioportal-api --portal-properties=./application.properties
+  cbioportal-api --login=optional --login-google-client-id=<id>   (secret in $CBIOPORTAL_LOGIN_GOOGLE_CLIENT_SECRET)
+  cbioportal-api check --json --db cbioportal
   PORT=8080 CBIOPORTAL_DB=cbioportal cbioportal-api
 `
 
