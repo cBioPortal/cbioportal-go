@@ -162,7 +162,7 @@ func (s Server) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 		where += " AND c.sample_id IN {samples:Array(String)}"
 		p["samples"] = sampleIDs
 	} else if sampleListID != "" {
-		where += " AND c.sample_id IN " + s.BySampleList(sampleListID).ListMembers(core.ParamsBinder(p))
+		where += " AND c.sample_id IN " + s.BySampleListIn(sampleListID, meta.StudyID).ListMembers(core.ParamsBinder(p))
 	}
 	samples := core.ByStudy(meta.StudyID).Samples(core.ParamsBinder(p))
 	sel := fmt.Sprintf(
@@ -436,7 +436,7 @@ func (s Server) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		where += " AND m.sample_id IN {samples:Array(String)}"
 		p["samples"] = f.SampleIDs
 	} else if f.SampleListID != "" {
-		where += " AND m.sample_id IN " + s.BySampleList(f.SampleListID).ListMembers(core.ParamsBinder(p))
+		where += " AND m.sample_id IN " + s.BySampleListIn(f.SampleListID, study).ListMembers(core.ParamsBinder(p))
 	}
 	samples := core.ByStudy(study).Samples(core.ParamsBinder(p))
 	// Substitution classes normalised to the pyrimidine strand (C/T reference).

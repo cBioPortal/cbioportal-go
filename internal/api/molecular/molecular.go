@@ -433,7 +433,7 @@ func (s Server) mutations(w http.ResponseWriter, r *http.Request) {
 	}
 	args := core.NewArgs()
 	where := profileMutationsClause(args, r.PathValue("id"))
-	where += s.sampleListClause(args, "sample_id", q.Get("sampleListId"))
+	where += s.sampleListClause(args, "sample_id", q.Get("sampleListId"), r.PathValue("id"))
 	entrez := singleEntrezGeneID(q)
 	where += geneFilter(entrez)
 	limit := 0
@@ -459,13 +459,13 @@ func profileMutationsClause(a *core.SQLArgs, profileID string) string {
 	return fmt.Sprintf("study_id = %s AND molecular_profile_id = %s", a.Str(profileStudy(profileID)), a.Str(profileID))
 }
 
-// sampleListClause restricts col to the members of a sample list (no-op for
-// an empty list id).
-func (s Server) sampleListClause(a *core.SQLArgs, col, listID string) string {
+// sampleListClause restricts col to the members of a sample list that are
+// samples of the profile's study (no-op for an empty list id).
+func (s Server) sampleListClause(a *core.SQLArgs, col, listID, profileID string) string {
 	if listID == "" {
 		return ""
 	}
-	return fmt.Sprintf(" AND %s IN %s", col, s.BySampleList(listID).ListMembers(a))
+	return fmt.Sprintf(" AND %s IN %s", col, s.BySampleListIn(listID, profileStudy(profileID)).ListMembers(a))
 }
 
 type mutationFilter struct {
@@ -503,7 +503,7 @@ func (s Server) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 	if len(f.SampleIDs) > 0 {
 		where += " AND sample_id IN " + args.Strs(f.SampleIDs)
 	} else {
-		where += s.sampleListClause(args, "sample_id", f.SampleListID)
+		where += s.sampleListClause(args, "sample_id", f.SampleListID, r.PathValue("id"))
 	}
 	where += geneFilter(f.EntrezGeneIDs)
 	s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)

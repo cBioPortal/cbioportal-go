@@ -99,6 +99,27 @@ func TestContractMutationsBySampleList(t *testing.T) {
 	}
 }
 
+// A sample list of another study selects none of a mutation profile's rows,
+// even where its sample ids are the profile study's too: Java joins the list
+// by sample internal id. Molecular data reads the list's sample ids instead
+// (MolecularDataServiceImpl), so there the same ids do match.
+// TCGA-A2-A04P-01 is in study_hg38_all and in study_es_0.
+func TestContractSampleListOfAnotherStudy(t *testing.T) {
+	requireAPI(t)
+	var own, other, fetched, values []map[string]any
+	get(t, "/api/molecular-profiles/study_es_0_mutations/mutations?sampleListId=study_es_0_all&entrezGeneId=675", &own)
+	if len(own) == 0 {
+		t.Fatal("no BRCA2 mutations in study_es_0_all")
+	}
+	get(t, "/api/molecular-profiles/study_es_0_mutations/mutations?sampleListId=study_hg38_all&entrezGeneId=675", &other)
+	wantEq(t, len(other), 0)
+	post(t, "/api/molecular-profiles/study_es_0_mutations/mutations/fetch",
+		map[string]any{"sampleListId": "study_hg38_all"}, &fetched)
+	wantEq(t, len(fetched), 0)
+	get(t, "/api/molecular-profiles/study_es_0_mrna/molecular-data?sampleListId=study_hg38_all&entrezGeneId=4313", &values)
+	wantEq(t, ids(values, "sampleId"), []string{"TCGA-A2-A04P-01"})
+}
+
 func TestContractCopyNumberSegmentsBareList(t *testing.T) {
 	requireAPI(t)
 	body := []map[string]string{{"studyId": "study_es_0", "sampleId": "TCGA-A2-A04P-01"}}

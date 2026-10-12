@@ -230,6 +230,14 @@ func (s *State) BySampleList(id string) Scope {
 	return sc
 }
 
+// BySampleListIn holds a read to the members of one sample list that are
+// samples of studyID: none when the list belongs to another study. Java
+// joins such a list to a profile's rows by sample internal id, so a list of
+// another study selects nothing even where its sample ids are the same.
+func (s *State) BySampleListIn(id, studyID string) Scope {
+	return Scope{study: oneOf(studyID), list: oneOf(id)}
+}
+
 // BySampleLists holds a read to the given sample lists, within their
 // studies.
 func (s *State) BySampleLists(ids ...string) Scope {

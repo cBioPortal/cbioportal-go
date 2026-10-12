@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 88 entries:
+**Summary.** The page has 89 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 53 | go does the same thing as Java, on purpose. |
+| Copied | 54 | go does the same thing as Java, on purpose. |
 | Fixed in go | 25 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 51 of the 53 copied entries. The two without a test are the
+A test checks 52 of the 54 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -206,6 +206,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | META on the resource-data and resource-definitions GET endpoints gives a 501 ("not implemented"). | controllers throw UnsupportedOperationException | Copied. | TestOracleResourceMetaNotImplemented |
 | In `mutation-data-counts`, only SUMMARY counts samples as mutated or not mutated. ID counts by mutation type, the same as DETAILED. | ColumnarStoreStudyViewController | Copied. | TestOracleProjectionBehaviour |
 | A sample's molecular data come in the order of Java's internal entity ids, not in Entrez id order. | MolecularDataServiceImpl (`genetic_alteration` key order) | Copied. | TestContractMolecularDataGeneticEntityOrder |
+| A `sampleListId` of another study selects no mutations, no copy-number calls (the default `HOMDEL_AND_AMP` events) and no mutation spectrum, even when the list's sample ids are also samples of the profile's study. Java matches the list to the rows by its internal sample number. Molecular data and the other copy-number events read the list's sample ids instead, so there the same ids do match. | MutationMapper, DiscreteCopyNumberMapper (`sample_list_list`), MolecularDataServiceImpl | Copied. | TestContractSampleListOfAnotherStudy |
 | In variant counts, a missing keyword is stored as the text `"null"`, so a search for an empty keyword never matches. A gene and keyword with no mutations get no row. | VariantCountMapper, `mutation_count_by_keyword` | Copied. | TestContractVariantCountsRows, TestOracleVariantCountsOnlyExistingKeywords |
 | Generic assay entities are sorted by the number their id starts with, then by text. For example, 17-AAG comes last. | GenericAssayMapper | Copied. | TestContractGenericAssayMeta |
 | `generic-assay-meta/fetch` with `searchTerm` keeps the entities whose stable id, NAME or DESCRIPTION contains the term, ignoring case. The term is trimmed first. `%` and `_` in it work as wildcards (`_` is any one character). With `projection=ID` only the stable id is searched, and the wildcards are plain characters. A page's total count counts the matches. The `/api/legacy/` alias ignores `searchTerm`. | GetGenericAssayMetaUseCase, GenericAssayMapper (`ILIKE`) | Copied. | TestGenericAssayMetaSearchTerm, TestGenericAssayMetaSearch |
