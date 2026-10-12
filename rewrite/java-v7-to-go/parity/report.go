@@ -86,7 +86,7 @@ func (c Counts) Result() string {
 	case c.Error > 0:
 		return "error"
 	case c.JavaFailed > 0:
-		return "Java failed, go answered"
+		return "Production failed, go worked"
 	case c.Known > 0:
 		return "known"
 	}
@@ -211,7 +211,7 @@ func report(in reportInput) string {
 	}
 	p("- Endpoints: %s", strings.Join(corpusHeader(in.Corpus, "endpoints: "), "\n"))
 	p("")
-	p("| server | requests | identical | known | Java nondeterministic | Java failed | unexplained |")
+	p("| server | requests | identical | known | Java nondeterministic | production failed | unexplained |")
 	p("|---|---:|---:|---:|---:|---:|---:|")
 	for _, api := range []bool{true, false} {
 		var rs []Result
@@ -236,7 +236,7 @@ func report(in reportInput) string {
 	p("| identical | %d |", c.Identical)
 	p("| known difference | %d |", c.Known)
 	p("| Java nondeterministic | %d |", c.Nondeterministic)
-	p("| Java failed, go answered | %d |", c.JavaFailed)
+	p("| Production failed, go worked | %d |", c.JavaFailed)
 	p("| unexplained difference | %d |", c.Differs)
 	p("| status mismatch | %d |", c.Status)
 	p("| error | %d |", c.Error)
@@ -296,7 +296,7 @@ func report(in reportInput) string {
 	}
 	if c.JavaFailed > 0 {
 		p("")
-		p("## Java failed, go answered")
+		p("## Production failed, go worked")
 		p("")
 		p("Java answered these with a 5xx, also when sent again; go answered them. They do not count against a clean night, but go's answers are not checked against anything.")
 		var rs []Result

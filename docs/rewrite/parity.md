@@ -157,9 +157,9 @@ The same goes for a request where go answers and Java returns 500: Java
 sometimes fails once under load and answers fine a minute later. A 500
 from go is never sent again, so a go failure always shows.
 
-**When Java fails and go answers.** If Java still answers with a 5xx after
-the second try while go answers, the request is counted as *Java failed,
-go answered*. It does not count against a clean night: the request was
+**When production fails and go works.** If Java still answers with a 5xx
+after the second try while go answers, the request is counted as
+*Production failed, go worked*. It does not count against a clean night: the request was
 valid, and answering it is what go should do. The report lists these
 requests on their own, because there is no Java answer to check go's
 answer against.
