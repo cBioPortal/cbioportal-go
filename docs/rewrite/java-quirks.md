@@ -18,12 +18,12 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 90 entries:
+**Summary.** The page has 92 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 55 | go does the same thing as Java, on purpose. |
-| Fixed in go | 25 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Fixed in go | 27 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
@@ -79,7 +79,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 25 fixes in one place. It shows what a client gets
+This table collects all 27 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -103,7 +103,9 @@ stores less where Java stores empty rows.
 | `treatments/*` for a study without treatment data | Java returns the treatments of every study in the portal. | go returns an empty list. |
 | Generic assay data, `projection=ID` | Java fails with a 500. | go answers with the data. |
 | META on five fetch endpoints | Java ignores META and returns the records without a total count. | go returns an empty body with the total count. |
+| `mutations/fetch` with `sampleMolecularIdentifiers` | Java returns each sample's mutations from every mutation profile of its study, such as the `_uncalled` profile next to `_mutations`. | go returns the mutations of the profiles named. |
 | `genomic-data-bin-counts` with two profiles | Java puts every gene in the first profile's type and adds an extra NA bin. | go puts each gene in its own profile. |
+| `genomic-data-bin-counts` and `generic-assay-data-bin-counts` with several genes or entities | Java adds one NA bin for the whole request, to one of them, so the others have none. | go gives each gene or entity its own NA bin. |
 | Structural variant pair counts | Java adds earlier pairs' gene panels to later pairs. | go reports each pair's own panels. |
 | Numeric filter on a patient-level generic assay | Java ignores the filter. | go filters by patient. |
 | Categorical enrichment, patient-level | Java fails with a 500. | go answers with the enrichment. |
@@ -204,6 +206,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 |---|---|---|---|
 | Generic assay data fails with a 500 for `projection=ID`. | GenericAssayDataController; fixtures | Fixed in go. go answers with the data. | — |
 | Some endpoints ignore META and return the records without a total count. They are `sample-lists/fetch`, `gene-panels/fetch`, `resource-definitions/fetch`, the generic assay meta endpoints and `mutation-data-counts/fetch`. | their controllers; fixtures | Fixed in go. go returns an empty body with the total count. `treatments/sample-counts/fetch` returns its records, as Java does. | — |
+| `mutations/fetch` with `sampleMolecularIdentifiers` returns each sample's mutations from every mutation profile of its study, not only from the profile named. For example, asking for `glioma_msk_2018_mutations` also returns the samples' records of `glioma_msk_2018_mutations_uncalled`, and the META total count counts them. | MutationMapper (`whereInMultipleMolecularProfiles` selects the samples, not the profiles) | Fixed in go. go returns the mutations of the profiles named. | TestLiveMutationsUncalledProfile, known.go |
 | META on the resource-data and resource-definitions GET endpoints gives a 501 ("not implemented"). | controllers throw UnsupportedOperationException | Copied. | TestOracleResourceMetaNotImplemented |
 | In `mutation-data-counts`, only SUMMARY counts samples as mutated or not mutated. ID counts by mutation type, the same as DETAILED. | ColumnarStoreStudyViewController | Copied. | TestOracleProjectionBehaviour |
 | A sample's molecular data come in the order of Java's internal entity ids, not in Entrez id order. | MolecularDataServiceImpl (`genetic_alteration` key order) | Copied. | TestContractMolecularDataGeneticEntityOrder |
@@ -230,6 +233,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `mutation-data-counts` without `genomicDataFilters` counts every mutated gene by mutation type (DETAILED and ID). SUMMARY returns an empty list. | ClickhouseGenomicDataMapper.getMutationCountsByType (an empty gene condition) | Copied. | TestContractMutationDataCountsWithoutFilters |
 | Clinical enrichments decide whether a value is a number with Java's `NumberUtils.isCreatable`. A whole number with a leading zero counts only if it is a valid octal number: `07` counts, `08` does not. | ClinicalDataEnrichmentUtil | Copied. | TestDecimalCreatable |
 | `genomic-data-bin-counts` with two profiles puts every gene in the first filter's profile type and adds one NA bin. | GetGenomicDataBinCountsUseCase; www | Fixed in go. go puts each gene in its own profile. | corpus `genomic-data-bin-counts-two-profiles` |
+| `genomic-data-bin-counts` and `generic-assay-data-bin-counts` add one NA bin for the whole request. It goes to whichever gene or entity ClickHouse lists first, so the others get no NA bin. | StudyViewMapper (`getGenomicDataBinCounts`, `getGenericAssayDataBinCounts`) | Fixed in go. go gives each gene or entity its own NA bin. | TestBinCountsNAPerGene, known.go |
 | Structural variant pair counts add gene2's panels to gene1's panel list, which later pairs share. So later pairs report extra panels and more profiled cases. | ProfiledCasesCounter.getGenePanelsForAlterationCount | Fixed in go. go reports each pair's own panels. | corpus `sv-counts-msk`, known.go |
 | A numeric filter on a patient-level generic assay profile is ignored. | column-store study-view filter; fixtures | Fixed in go. go filters by patient. | — |
 | Categorical enrichments of a patient-level profile give a 500. | GenericAssayEnrichmentController; fixtures | Fixed in go. go answers with the enrichment. | TestContractGenericAssayCategoricalEnrichmentPatientLevelHLA |

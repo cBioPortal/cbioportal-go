@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -312,7 +313,28 @@ func (a alleleSpecificCopyNumber) present() bool {
 		a.TotalCopyNumber != nil
 }
 
-func profileStudy(mpid string) string { return strings.TrimSuffix(mpid, "_mutations") }
+// profileStudy is the study of a molecular profile.
+func (s Server) profileStudy(mpid string) string { return s.profileStudies([]string{mpid})[mpid] }
+
+// profileStudies maps molecular profile ids to their studies, with one
+// (cached) query. A profile id not in the portal falls back to the
+// <study>_mutations convention; it matches no rows.
+func (s Server) profileStudies(ids []string) map[string]string {
+	distinct := slices.Compact(slices.Sorted(slices.Values(ids)))
+	rows, _ := core.CachedQueryP[struct {
+		ID    string `json:"id"`
+		Study string `json:"study"`
+	}](s.State, "SELECT molecular_profile_id AS id, study_id AS study FROM molecular_profile "+
+		"WHERE molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": distinct})
+	out := make(map[string]string, len(distinct))
+	for _, id := range distinct {
+		out[id] = strings.TrimSuffix(id, "_mutations")
+	}
+	for _, r := range rows {
+		out[r.ID] = r.Study
+	}
+	return out
+}
 
 // geneHugo is the gene symbol Java reports: the reference gene's, else the
 // record's own.
@@ -331,7 +353,7 @@ func toMutation(r mutationRow, detailed bool) Mutation {
 	hugo := geneHugo(r.RefHugoGeneSymbol, r.HugoGeneSymbol)
 	mutationType := core.NAString(r.MutationType)
 	m := Mutation{
-		MolecularProfileID: r.StudyID + "_mutations", SampleID: r.SampleID, StudyID: r.StudyID,
+		MolecularProfileID: r.MolecularProfileID, SampleID: r.SampleID, StudyID: r.StudyID,
 		EntrezGeneID: r.EntrezGeneID,
 		Chr:          core.NAString(r.Chr), StartPosition: r.StartPosition, EndPosition: r.EndPosition,
 		ReferenceAllele: core.NAString(r.ReferenceAllele), VariantAllele: r.VariantAllele, ProteinChange: r.ProteinChange,
@@ -432,7 +454,7 @@ func (s Server) mutations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := core.NewArgs()
-	where := profileMutationsClause(args, r.PathValue("id"))
+	where := s.profileMutationsClause(args, r.PathValue("id"))
 	where += s.sampleListClause(args, "sample_id", q.Get("sampleListId"), r.PathValue("id"))
 	entrez := singleEntrezGeneID(q)
 	where += geneFilter(entrez)
@@ -455,8 +477,8 @@ func singleEntrezGeneID(q url.Values) []int64 {
 
 // profileMutationsClause selects a mutation profile's rows (a study can hold
 // both its MUTATION_EXTENDED and MUTATION_UNCALLED profiles).
-func profileMutationsClause(a *core.SQLArgs, profileID string) string {
-	return fmt.Sprintf("study_id = %s AND molecular_profile_id = %s", a.Str(profileStudy(profileID)), a.Str(profileID))
+func (s Server) profileMutationsClause(a *core.SQLArgs, profileID string) string {
+	return fmt.Sprintf("study_id = %s AND molecular_profile_id = %s", a.Str(s.profileStudy(profileID)), a.Str(profileID))
 }
 
 // sampleListClause restricts col to the members of a sample list that are
@@ -465,7 +487,7 @@ func (s Server) sampleListClause(a *core.SQLArgs, col, listID, profileID string)
 	if listID == "" {
 		return ""
 	}
-	return fmt.Sprintf(" AND %s IN %s", col, s.BySampleListIn(listID, profileStudy(profileID)).ListMembers(a))
+	return fmt.Sprintf(" AND %s IN %s", col, s.BySampleListIn(listID, s.profileStudy(profileID)).ListMembers(a))
 }
 
 type mutationFilter struct {
@@ -498,7 +520,7 @@ func (s Server) mutationsFetchProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args := core.NewArgs()
-	where := profileMutationsClause(args, r.PathValue("id"))
+	where := s.profileMutationsClause(args, r.PathValue("id"))
 	// MutationFilter is EITHER explicit sample ids OR a sample list.
 	if len(f.SampleIDs) > 0 {
 		where += " AND sample_id IN " + args.Strs(f.SampleIDs)
@@ -517,18 +539,24 @@ func (s Server) mutationsFetch(w http.ResponseWriter, r *http.Request) {
 	// filter. The results view uses the molecularProfileIds form.
 	args := core.NewArgs()
 	if len(f.SampleMolecularIdentifiers) > 0 {
+		profiles := make([]string, len(f.SampleMolecularIdentifiers))
+		for i, id := range f.SampleMolecularIdentifiers {
+			profiles[i] = id.MolecularProfileID
+		}
+		study := s.profileStudies(profiles)
 		triples := make([][3]string, len(f.SampleMolecularIdentifiers))
 		for i, id := range f.SampleMolecularIdentifiers {
-			triples[i] = [3]string{profileStudy(id.MolecularProfileID), id.MolecularProfileID, id.SampleID}
+			triples[i] = [3]string{study[id.MolecularProfileID], id.MolecularProfileID, id.SampleID}
 		}
 		where := fmt.Sprintf("(study_id, molecular_profile_id, sample_id) IN %s%s", args.Triples(triples), geneFilter(f.EntrezGeneIDs))
 		s.mutationsWhere(w, r, where, args, f.EntrezGeneIDs, 0)
 		return
 	}
 	if len(f.MolecularProfileIDs) > 0 {
+		study := s.profileStudies(f.MolecularProfileIDs)
 		studies := make([]string, len(f.MolecularProfileIDs))
 		for i, id := range f.MolecularProfileIDs {
-			studies[i] = profileStudy(id)
+			studies[i] = study[id]
 		}
 		where := fmt.Sprintf("study_id IN %s AND molecular_profile_id IN %s%s",
 			args.Strs(studies), args.Strs(f.MolecularProfileIDs), geneFilter(f.EntrezGeneIDs))

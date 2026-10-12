@@ -318,6 +318,52 @@ func TestContractGenomicDataBinCounts(t *testing.T) {
 	}
 }
 
+// Each gene or generic assay entity of a bin-count request gets its own NA
+// bin. Java's StudyViewMapper adds one NA bin for the whole request, to
+// whichever gene or entity ClickHouse lists first (Fixed in go;
+// docs/rewrite/java-quirks.md).
+func TestBinCountsNAPerGene(t *testing.T) {
+	requireAPI(t)
+	samples := esSamples("TCGA-A1-A0SD-01", "TCGA-A1-A0SE-01", "TCGA-A1-A0SH-01", "TCGA-A1-A0SB-01")
+	var bins []map[string]any
+	postNumbers(t, "/api/genomic-data-bin-counts/fetch", map[string]any{
+		"genomicDataBinFilters": []map[string]string{
+			{"hugoGeneSymbol": "ZHX3", "profileType": "mrna_median_Zscores"},
+			{"hugoGeneSymbol": "MMP2", "profileType": "mrna_median_Zscores"},
+			{"hugoGeneSymbol": "BRCA1", "profileType": "mrna_median_Zscores"},
+		},
+		"studyViewFilter": map[string]any{"sampleIdentifiers": samples},
+	}, &bins)
+	var na []string
+	for _, row := range binRows(bins, "hugoGeneSymbol") {
+		if strings.HasPrefix(row, "specialValue=NA ") {
+			na = append(na, row)
+		}
+	}
+	wantEq(t, na, []string{
+		"specialValue=NA count=1 hugoGeneSymbol=ZHX3",
+		"specialValue=NA count=1 hugoGeneSymbol=MMP2",
+		"specialValue=NA count=4 hugoGeneSymbol=BRCA1",
+	})
+
+	var gaBins []map[string]any
+	postNumbers(t, "/api/generic-assay-data-bin-counts/fetch", map[string]any{
+		"genericAssayDataBinFilters": []map[string]string{
+			{"stableId": "AEW541", "profileType": "treatment_ic50"},
+			{"stableId": "AZD0530", "profileType": "treatment_ic50"},
+		},
+		"studyViewFilter": map[string]any{"sampleIdentifiers": esSamples(
+			"TCGA-A1-A0SB-01", "TCGA-A1-A0SD-01", "TCGA-A1-A0SE-01", "TCGA-A1-A0SB-02")},
+	}, &gaBins)
+	na = nil
+	for _, row := range binRows(gaBins, "stableId") {
+		if strings.HasPrefix(row, "specialValue=NA ") {
+			na = append(na, row)
+		}
+	}
+	wantEq(t, na, []string{"specialValue=NA count=1 stableId=AEW541", "specialValue=NA count=1 stableId=AZD0530"})
+}
+
 // Custom (session) numeric data binned over the filtered samples; the
 // sample of the filter without a value is the NA bin.
 func TestContractCustomDataBinCounts(t *testing.T) {

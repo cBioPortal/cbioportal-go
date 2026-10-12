@@ -426,7 +426,7 @@ func (s Server) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, []struct{}{})
 		return
 	}
-	study := profileStudy(mpid)
+	study := s.profileStudy(mpid)
 	// MutationSpectrumServiceImpl reads the profile's mutations with snpOnly:
 	// reference and tumor allele are both single bases.
 	where := "m.study_id = {study:String} AND m.molecular_profile_id = {profile:String} " +
