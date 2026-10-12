@@ -94,3 +94,38 @@ func TestOpenAPIDocs(t *testing.T) {
 		t.Errorf("missing file: %d", w.Code)
 	}
 }
+
+// The descriptions answer 406 for an Accept header that rules out their
+// media type, as springdoc's endpoints do on the Java portal.
+func TestOpenAPIDocsAccept(t *testing.T) {
+	mux := http.NewServeMux()
+	New(&core.State{}).Routes(mux)
+	for _, c := range []struct {
+		path, accept string
+		want         int
+		body         string
+	}{
+		{"/api/v3/api-docs.yaml", "", http.StatusOK, ""},
+		{"/api/v3/api-docs.yaml", "*/*", http.StatusOK, ""},
+		{"/api/v3/api-docs.yaml", "application/json, text/plain, */*", http.StatusOK, ""},
+		{"/api/v3/api-docs.yaml", "application/*", http.StatusOK, ""},
+		{"/api/v3/api-docs.yaml", "application/vnd.oai.openapi;q=0.5", http.StatusOK, ""},
+		{"/api/v3/api-docs.yaml", "application/json", http.StatusNotAcceptable, `"error":"Not Acceptable","path":"/api/v3/api-docs.yaml"}`},
+		{"/api/v3/api-docs.yaml/public", "text/plain", http.StatusNotAcceptable, ""},
+		{"/api/v3/api-docs", "application/json", http.StatusOK, ""},
+		{"/api/v3/api-docs", "application/yaml", http.StatusNotAcceptable, ""},
+	} {
+		r := httptest.NewRequest(http.MethodGet, c.path, nil)
+		if c.accept != "" {
+			r.Header.Set("Accept", c.accept)
+		}
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != c.want || !strings.Contains(w.Body.String(), c.body) {
+			t.Errorf("%s Accept %q: %d %.100s", c.path, c.accept, w.Code, w.Body.String())
+		}
+		if c.want == http.StatusNotAcceptable && c.accept == "text/plain" && w.Body.Len() != 0 {
+			t.Errorf("%s Accept text/plain: body %q", c.path, w.Body.String())
+		}
+	}
+}

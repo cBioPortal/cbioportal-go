@@ -102,6 +102,10 @@ func openAPIDoc(file string) http.HandlerFunc {
 		ct = "application/vnd.oai.openapi"
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !accepts(r, ct) {
+			core.SpringError(w, r, http.StatusNotAcceptable)
+			return
+		}
 		if err != nil {
 			core.WriteError(w, http.StatusInternalServerError, "API description unavailable")
 			return
@@ -113,6 +117,28 @@ func openAPIDoc(file string) http.HandlerFunc {
 			w.Write(after)
 		}
 	}
+}
+
+// accepts reports whether the Accept header allows the media type ct (no
+// header allows any). Spring answers 406 Not Acceptable otherwise, e.g.
+// for application/json on the YAML descriptions.
+func accepts(r *http.Request, ct string) bool {
+	typ, _, _ := strings.Cut(ct, "/")
+	named := false
+	for _, v := range r.Header.Values("Accept") {
+		for _, part := range strings.Split(v, ",") {
+			mt, _, _ := strings.Cut(part, ";")
+			mt = strings.ToLower(strings.TrimSpace(mt))
+			if mt == "" {
+				continue
+			}
+			named = true
+			if mt == "*/*" || mt == typ+"/*" || mt == ct {
+				return true
+			}
+		}
+	}
+	return !named
 }
 
 // swaggerConfig is springdoc's Swagger UI configuration for the portal's two
