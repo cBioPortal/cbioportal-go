@@ -48,7 +48,7 @@ study files ──cbioportal-import──▶ ClickHouse ◀──cbioportal-api�
 
 ## Quick start
 
-You need Go 1.26, Docker, and Node 22 with pnpm (run `corepack enable` to
+You need Go 1.27, Docker, and Node 22 with pnpm (run `corepack enable` to
 get pnpm). You also need two downloads from
 [cBioPortal/datahub](https://github.com/cBioPortal/datahub):
 

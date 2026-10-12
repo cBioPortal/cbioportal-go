@@ -27,7 +27,7 @@ RUN pnpm run buildAll
 FROM scratch AS frontend-dist
 COPY --from=frontend /src/frontend/dist /
 
-FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS go
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS go
 ARG TARGETOS
 ARG TARGETARCH
 # Version stamp for builds without .git, e.g. "6b38ed6 (2026-10-02T21:00:00Z)".
