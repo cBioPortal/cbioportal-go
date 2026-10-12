@@ -125,9 +125,11 @@ func patientCount(body string) int {
 
 // hasGenes reports a request that names genes, in its query or its body.
 func hasGenes(q url.Values, body string) bool {
-	if q.Has("entrezGeneId") || q.Has("entrezGeneIds") {
-		return true
-	}
+	return q.Has("entrezGeneId") || q.Has("entrezGeneIds") || bodyHasGenes(body)
+}
+
+// bodyHasGenes reports whether a request body names entrezGeneIds.
+func bodyHasGenes(body string) bool {
 	f := bodyObject(body)
 	ids, ok := f["entrezGeneIds"]
 	return ok && string(ids) != "null"
@@ -150,7 +152,9 @@ func skip(method, target, body string) bool {
 	q, _ := url.ParseQuery(rawQuery)
 	switch {
 	case isDiscreteCNAList(path):
-		return strings.EqualFold(q.Get("discreteCopyNumberEventType"), "ALL") && !hasGenes(q, body)
+		// Java's GET has no gene parameter: an entrezGeneId in its query is
+		// ignored, and only the POST body's entrezGeneIds narrow the list.
+		return strings.EqualFold(q.Get("discreteCopyNumberEventType"), "ALL") && !bodyHasGenes(body)
 	case isMolecularData(path):
 		return (paged(q) || method == "POST") && !hasGenes(q, body)
 	}

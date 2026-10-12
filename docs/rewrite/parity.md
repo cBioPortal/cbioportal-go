@@ -90,7 +90,8 @@ Three kinds of requests are left out, because they ask for gigabytes,
 too costly to replay every night:
 
 - A profile's whole copy-number matrix (`discreteCopyNumberEventType=ALL`
-  without genes).
+  without genes). Only a POST body can name genes there: the GET ignores
+  an `entrezGeneId` in its address and answers every gene.
 - One page (`pageSize` or `pageNumber`) of a profile's values without
   genes. Java has no paging there and sends the whole matrix, so the
   answers would differ anyway: go sends just the page.
