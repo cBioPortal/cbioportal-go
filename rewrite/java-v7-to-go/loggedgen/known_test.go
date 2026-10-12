@@ -108,7 +108,11 @@ func TestSkip(t *testing.T) {
 		{"POST", "/api/molecular-data/fetch?pageNumber=1", `{"molecularProfileIds": ["p_mrna"]}`, true},
 		{"GET", "/api/molecular-profiles/p_mrna/molecular-data?sampleListId=l&pageSize=10", "", true},
 		{"POST", "/api/molecular-profiles/p_gistic/molecular-data/fetch?pageSize=10", `{"sampleIds": ["s1"], "entrezGeneIds": [7157]}`, false},
-		{"POST", "/api/molecular-profiles/p_gistic/molecular-data/fetch", `{"sampleIds": ["s1"]}`, false},
+		{"POST", "/api/molecular-profiles/p_gistic/molecular-data/fetch", `{"sampleIds": ["s1"]}`, true},
+		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "sampleIds": ["s1"], "genes": ["CDK1"]}`, true},
+		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "entrezGeneIds": [983]}`, false},
+		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "entrezGeneIds": []}`, false},
+		{"GET", "/api/molecular-profiles/p_mrna/molecular-data?sampleListId=l", "", false},
 	} {
 		if got := skip(c.method, c.target, c.body); got != c.want {
 			t.Errorf("%s %s %s: %v, want %v", c.method, c.target, c.body, got, c.want)

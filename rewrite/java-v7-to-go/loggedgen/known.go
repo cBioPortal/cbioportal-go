@@ -136,7 +136,11 @@ func hasGenes(q url.Values, body string) bool {
 //     diploid values too) for every gene;
 //   - one page of a profile's values for every gene. Java's molecular-data
 //     controllers have no paging parameters and answer the whole matrix,
-//     so the answers differ anyway (go pages them, a known difference).
+//     so the answers differ anyway (go pages them, a known difference);
+//   - a molecular-data fetch that names no genes, which asks for whole
+//     matrices. Java's filters do not require entrezGeneIds. Where the body
+//     also has a field the filter lacks (such as sampleIds or genes on
+//     molecular-data/fetch), Java answers an empty 200 and go the matrices.
 func skip(method, target, body string) bool {
 	path, rawQuery, _ := strings.Cut(target, "?")
 	path = strings.TrimSuffix(path, "/")
@@ -145,7 +149,7 @@ func skip(method, target, body string) bool {
 	case isDiscreteCNAList(path):
 		return strings.EqualFold(q.Get("discreteCopyNumberEventType"), "ALL") && !hasGenes(q, body)
 	case isMolecularData(path):
-		return paged(q) && !hasGenes(q, body)
+		return (paged(q) || method == "POST") && !hasGenes(q, body)
 	}
 	return false
 }
