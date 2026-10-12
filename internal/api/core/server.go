@@ -455,7 +455,7 @@ func withFrontendConfig(page []byte, host string, rawConfig []byte) []byte {
 		// json.Marshal escapes <, > and &, so the configuration cannot end the script element.
 		js += "window.rawServerConfig = " + string(rawConfig) + ";"
 	}
-	script := []byte("<script>" + js + "</script>" + devModeScript)
+	script := []byte("<script>" + js + "</script>" + devModeScript + fontAwesome4)
 	if i := bytes.Index(page, []byte("</head>")); i >= 0 {
 		page = append(append(append([]byte{}, page[:i]...), script...), page[i:]...)
 	} else {
@@ -470,6 +470,12 @@ func withFrontendConfig(page []byte, host string, rawConfig []byte) []byte {
 	}
 	return page
 }
+
+// fontAwesome4 is the Font Awesome 4.7 stylesheet the Java portal's index
+// template links last in the head. The frontend brings Font Awesome 6, and
+// this later link gives its fa-* icons the 4.7 glyphs www.cbioportal.org
+// shows.
+const fontAwesome4 = `<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.css" rel="stylesheet" />`
 
 // withSiteBanner puts a notice bar (e.g. "experimental preview") at the top
 // of the page body, above the app, when text is set; link, if set, is

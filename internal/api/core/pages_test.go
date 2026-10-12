@@ -193,6 +193,9 @@ func TestRawServerConfig(t *testing.T) {
 	if strings.Contains(string(withFrontendConfig([]byte("<html><head></head></html>"), "example.org", nil)), "rawServerConfig") {
 		t.Error("rawServerConfig without a configuration")
 	}
+	if !strings.Contains(page, fontAwesome4+"</head>") {
+		t.Error("Font Awesome 4.7 is not the head's last stylesheet, as in the Java portal's page")
+	}
 
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html><head></head><body></body></html>"), 0o644)
