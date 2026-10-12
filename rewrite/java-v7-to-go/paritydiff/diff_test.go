@@ -305,3 +305,33 @@ func TestKnownIfBEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownIfSubset(t *testing.T) {
+	prev := streamAbove
+	defer func() { streamAbove = prev }()
+	for _, c := range []struct {
+		name       string
+		opts       requestOptions
+		a, b, want string
+	}{
+		{"a in b", requestOptions{KnownIfASubset: "x"}, `[{"p":1},{"p":2}]`, `[{"p":3},{"p":2},{"p":1}]`, known},
+		{"a in b, a empty", requestOptions{KnownIfASubset: "x"}, `[]`, `[{"p":1}]`, known},
+		{"a not in b", requestOptions{KnownIfASubset: "x"}, `[{"p":1},{"p":4}]`, `[{"p":3},{"p":2},{"p":1}]`, differs},
+		{"b in a, wrong side", requestOptions{KnownIfASubset: "x"}, `[{"p":3},{"p":2},{"p":1}]`, `[{"p":1}]`, differs},
+		{"same length", requestOptions{KnownIfASubset: "x"}, `[{"p":1}]`, `[{"p":2}]`, differs},
+		{"nested", requestOptions{KnownIfASubset: "x"}, `{"r":[{"p":1}]}`, `{"r":[{"p":1},{"p":2}]}`, differs},
+		{"b in a", requestOptions{KnownIfBSubset: "x"}, `[{"g":"A","n":1},{"g":"B","n":1}]`, `[{"g":"A","n":1}]`, known},
+		{"b not in a", requestOptions{KnownIfBSubset: "x"}, `[{"g":"A","n":1},{"g":"B","n":1}]`, `[{"g":"A","n":2}]`, differs},
+		{"a in b, b-subset option", requestOptions{KnownIfBSubset: "x"}, `[{"p":1}]`, `[{"p":1},{"p":2}]`, differs},
+	} {
+		c.opts.Unordered = true
+		rq := request{Name: c.name, Opts: c.opts}
+		ra, rb := response{Status: 200, Body: []byte(c.a)}, response{Status: 200, Body: []byte(c.b)}
+		for _, above := range []int{1 << 30, 0} {
+			streamAbove = above
+			if r := compareResponses(rq, ra, rb, defaultOptions()); r.Outcome != c.want {
+				t.Errorf("%s (stream above %d): %s %q, want %s", c.name, above, r.Outcome, r.Diffs, c.want)
+			}
+		}
+	}
+}

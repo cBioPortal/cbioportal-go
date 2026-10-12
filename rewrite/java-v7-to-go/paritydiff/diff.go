@@ -41,7 +41,18 @@ func defaultOptions() compareOptions {
 type diffResult struct {
 	Count int      // number of differences found
 	Diffs []string // the first MaxDiffs of them, as "path: description"
+	// Lengths reports top-level arrays of different lengths; OnlyA and
+	// OnlyB then count the elements found on one side only.
+	Lengths      bool
+	OnlyA, OnlyB int
 }
+
+// aInB reports whether the only differences are top-level elements B has
+// and A lacks; bInA the reverse.
+func (r diffResult) aInB() bool { return r.onlyLengths() && r.OnlyA == 0 }
+func (r diffResult) bInA() bool { return r.onlyLengths() && r.OnlyB == 0 }
+
+func (r diffResult) onlyLengths() bool { return r.Lengths && r.Count == 1+r.OnlyA+r.OnlyB }
 
 func (r *diffResult) add(o *compareOptions, path, format string, args ...any) {
 	r.Count++
@@ -343,6 +354,9 @@ func walkArray(x, y []any, path string, o *compareOptions, r *diffResult) {
 	}
 	r.add(o, path, "length a=%d b=%d", len(x), len(y))
 	onlyA, onlyB := multisetDiff(x, y)
+	if path == "" {
+		r.Lengths, r.OnlyA, r.OnlyB = true, len(onlyA), len(onlyB)
+	}
 	for _, v := range onlyA {
 		r.add(o, path+"[]", "only in a: %s", short(v))
 	}

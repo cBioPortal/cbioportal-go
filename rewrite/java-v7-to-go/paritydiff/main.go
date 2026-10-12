@@ -445,6 +445,10 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		res.Outcome, res.Known = known, rq.Opts.KnownIfEmpty
 	case rq.Opts.KnownIfBEmpty != "" && emptyBody(rb):
 		res.Outcome, res.Known = known, rq.Opts.KnownIfBEmpty
+	case rq.Opts.KnownIfASubset != "" && d.aInB():
+		res.Outcome, res.Known = known, rq.Opts.KnownIfASubset
+	case rq.Opts.KnownIfBSubset != "" && d.bInA():
+		res.Outcome, res.Known = known, rq.Opts.KnownIfBSubset
 	default:
 		res.Outcome = differs
 	}

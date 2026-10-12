@@ -36,6 +36,11 @@ type requestOptions struct {
 	// KnownIfBEmpty is the reason of a difference accepted only when B
 	// answers 200 with an empty body.
 	KnownIfBEmpty string
+	// KnownIfASubset is the reason of a difference accepted only when the
+	// top-level arrays differ just by elements B has and A lacks;
+	// KnownIfBSubset when they differ just by elements A has and B lacks.
+	KnownIfASubset string
+	KnownIfBSubset string
 }
 
 // parseCorpus reads the corpus format:
@@ -53,7 +58,10 @@ type requestOptions struct {
 // difference accepted when A answers an empty array), known-if-b-empty="reason"
 // (a difference accepted when B answers 200 with an empty body),
 // known-if-b-fails="reason"
-// (a status difference accepted when A succeeds and B fails).
+// (a status difference accepted when A succeeds and B fails),
+// known-if-a-subset="reason" (a difference accepted when every element of
+// A's array is in B's, which has more) and known-if-b-subset="reason" (the
+// same with A and B swapped).
 //
 // Entries are separated by their "## " header lines; lines starting with "#"
 // (but not "## ") are comments; blank lines are ignored.
@@ -121,8 +129,8 @@ func parseCorpus(r io.Reader) ([]request, error) {
 
 // parseHeader parses "name opt opt ..." where the quoted options
 // (known="...", known-if-empty="...", known-if-b-fails="...",
-// known-if-b-empty="...") may contain
-// spaces.
+// known-if-b-empty="...", known-if-a-subset="...", known-if-b-subset="...")
+// may contain spaces.
 func parseHeader(h string) (request, error) {
 	name, rest, _ := strings.Cut(h, " ")
 	if name == "" {
@@ -131,7 +139,8 @@ func parseHeader(h string) (request, error) {
 	req := request{Name: name}
 	rest = strings.TrimSpace(rest)
 	quoted := map[string]*string{`known="`: &req.Opts.Known, `known-if-empty="`: &req.Opts.KnownIfEmpty,
-		`known-if-b-fails="`: &req.Opts.KnownIfBFails, `known-if-b-empty="`: &req.Opts.KnownIfBEmpty}
+		`known-if-b-fails="`: &req.Opts.KnownIfBFails, `known-if-b-empty="`: &req.Opts.KnownIfBEmpty,
+		`known-if-a-subset="`: &req.Opts.KnownIfASubset, `known-if-b-subset="`: &req.Opts.KnownIfBSubset}
 	for rest != "" {
 		var tok string
 		if prefix, _, ok := strings.Cut(rest, `"`); ok {

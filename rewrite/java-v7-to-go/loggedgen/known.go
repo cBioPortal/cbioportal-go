@@ -14,8 +14,9 @@ import (
 
 // expectation is the comparison setting of logged requests whose difference
 // from production is expected: options appended to the corpus header (an
-// ignore list, known="reason", known-if-empty="reason" or
-// known-if-b-fails="reason") and, for ignored
+// ignore list, known="reason", known-if-empty="reason",
+// known-if-b-fails="reason", known-if-a-subset="reason" or
+// known-if-b-subset="reason") and, for ignored
 // keys, a comment with the reason.
 type expectation struct {
 	match   func(method, path string, query url.Values, body string) bool
@@ -52,6 +53,8 @@ var (
 	isDiscreteCNAList = pathIs(`^/api/molecular-profiles/[^/]+/discrete-copy-number(/fetch)?$`)
 	isMolecularData   = pathIs(`^/api/(molecular-profiles/[^/]+/molecular-data(/fetch)?|molecular-data/fetch)$`)
 	isKeywordSorted   = pathIs(`^/api/(legacy/studies|genes|(studies/[^/]+/)?patients)/?$`)
+	isMutationsFetch  = pathIs(`^/api/(legacy/)?mutations/fetch$`)
+	isDataBinCounts   = pathIs(`^/api/(legacy/)?(genomic|generic-assay)-data-bin-counts/fetch$`)
 )
 
 // paged reports a request for one page of a list.
@@ -285,6 +288,16 @@ var expectations = []expectation{
 		comment: "a profile type's label is the name of the profile ClickHouse's unordered GROUP BY yields first, in hash-table order that shifts with the filtered samples",
 	},
 	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isMutationsFetch(p) && strings.Contains(b, `"sampleMolecularIdentifiers"`)
+		},
+		options: `known-if-a-subset="for (profile, sample) pairs Java's MutationMapper selects the samples, not the profiles, so it adds the samples' records of the study's other mutation profiles (such as _uncalled); go answers the named profiles' records (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isDataBinCounts(p) },
+		options: `known-if-b-subset="Java's StudyViewMapper adds one NA bin for the whole request, attached to whichever gene or entity ClickHouse lists first, so the others have none; go gives each its own NA bin (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
 		match:   func(m, p string, q url.Values, b string) bool { return isCaseListCounts(p) },
 		options: "ignore=label",
 		comment: "a case list type's label is the name of the list ClickHouse's unordered GROUP BY yields first (mergeCaseListCounts), in hash-table order that shifts with the filtered samples",
@@ -331,7 +344,7 @@ func expect(method, target, body string) (options, comment string) {
 
 // expectationOptions are the header options expect sets; annotate replaces
 // them.
-var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty)="[^"]*"| ignore=\S+`)
+var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset)="[^"]*"| ignore=\S+`)
 
 // annotate copies a corpus written by this command with the expectations
 // marked as they stand now: the options and comments of earlier

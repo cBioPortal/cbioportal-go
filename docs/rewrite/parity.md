@@ -26,7 +26,11 @@ list of API requests to two servers and compares the responses.
   expected only when go answers an empty list (`known-if-empty="..."`), or
   as expected only when go succeeds and Java fails with a 4xx or 5xx
   (`known-if-b-fails="..."`), or as expected only when Java answers 200
-  with an empty body (`known-if-b-empty="..."`).
+  with an empty body (`known-if-b-empty="..."`). Two more options accept a
+  list that is missing some items on one side only. With
+  `known-if-a-subset="..."`, every item go answers must also be in Java's
+  longer list. With `known-if-b-subset="..."`, every item Java answers must
+  also be in go's longer list.
 
 Responses from the reference server are cached in `.parity/cache`, which git
 ignores. They are fetched at most twice a second with a browser User-Agent,

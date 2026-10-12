@@ -445,6 +445,7 @@ func compareStreamErr(a, b sizedReaderAt, o *compareOptions) (r diffResult, err 
 	if err != nil {
 		return r, err
 	}
+	r.Lengths, r.OnlyA, r.OnlyB = true, onlyA.n, onlyB.n
 	for _, side := range []struct {
 		only firstOnly
 		body sizedReaderAt

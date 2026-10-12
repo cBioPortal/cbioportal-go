@@ -84,6 +84,11 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/structuralvariant-counts/fetch", `{"studyIds":["s"]}`, "ignore=matchingGenePanelIds,numberOfProfiledCases"},
 		{"GET", "/api/studies/s/significant-copy-number-regions?pageSize=10&projection=SUMMARY", "", "known="},
 		{"GET", "/api/studies/s/significant-copy-number-regions?pageSize=10&sortBy=qValue", "", ""},
+		{"POST", "/api/mutations/fetch?projection=DETAILED", `{"sampleMolecularIdentifiers":[{"molecularProfileId":"p","sampleId":"a"}]}`, "known-if-a-subset="},
+		{"POST", "/api/legacy/mutations/fetch", `{"sampleMolecularIdentifiers":[]}`, "known-if-a-subset="},
+		{"POST", "/api/genomic-data-bin-counts/fetch?dataBinMethod=DYNAMIC", `{"genomicDataBinFilters":[]}`, "known-if-b-subset="},
+		{"POST", "/api/generic-assay-data-bin-counts/fetch", `{"genericAssayDataBinFilters":[]}`, "known-if-b-subset="},
+		{"POST", "/api/clinical-data-bin-counts/fetch", `{"attributes":[]}`, ""},
 	} {
 		got, _ := expect(c.method, c.target, c.body)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
