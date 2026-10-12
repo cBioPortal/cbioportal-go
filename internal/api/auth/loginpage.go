@@ -42,7 +42,7 @@ var loginPageTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE htm
 <style>
 body { margin: 0; padding: 20px 16px; text-align: center; color: #333; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 14px; }
 main { max-width: 900px; margin: 0 auto; }
-.logo img, .provider img { max-width: 100%; }
+.logo img, .provider img { max-width: 100%; object-fit: contain; }
 .logo img { height: 50px; }
 .notice { margin: 1em auto; padding: 0 .7em; border: 1px solid #fcefa1; background: #fbf9ee; }
 .message { margin: 1.5em 0; line-height: 1.4; }
