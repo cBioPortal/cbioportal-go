@@ -10,6 +10,7 @@ sessions, and monitoring.
 
 - [cbioportal-import](#cbioportal-import)
 - [cbioportal-api](#cbioportal-api)
+  - [Where the frontend comes from](#where-the-frontend-comes-from)
   - [Limits on bulk requests](#limits-on-bulk-requests)
   - [Website paths](#website-paths)
 - [Portal properties](#portal-properties)
@@ -125,7 +126,7 @@ usually easier.
 | `-clickhouse-bulk-max-memory` | `CLICKHOUSE_BULK_MAX_MEMORY` | `10GiB` | The memory one ClickHouse query of a bulk endpoint may use. `0` means no limit. See [Limits on bulk requests](#limits-on-bulk-requests). |
 | `-clickhouse-bulk-max-time` | `CLICKHOUSE_BULK_MAX_TIME` | `10m` | How long one query of a bulk endpoint may run, including the time the client takes to read the answer. A number alone means seconds. `0` means no limit. |
 | `-clickhouse-bulk-sort-spill` | `CLICKHOUSE_BULK_SORT_SPILL` | `1GiB` | The memory a sort in a bulk query may use before ClickHouse continues it on disk. `0` keeps ClickHouse's own setting. |
-| `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend, so the website and the API share one address. The server serves its `index.html` as the portal's pages and its files under `/reactapp/` and `/images/`. See [Website paths](#website-paths). |
+| `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend, so the website and the API share one address. The server serves its `index.html` as the portal's pages and its files under `/reactapp/` and `/images/`. See [Where the frontend comes from](#where-the-frontend-comes-from). |
 | `-frontend-url` | `FRONTEND_URL` | | The address of a frontend development server. The server passes the portal's pages, and every path it does not serve itself, on to it. Use this instead of `-frontend-dir`. |
 | `-oncokb-url` | `ONCOKB_URL` | `https://public.api.oncokb.org/api/v1` | The OncoKB API. The frontend reaches it through the server's `/proxy/...` path. |
 | `-site-banner`, `-site-banner-link` | `SITE_BANNER`, `SITE_BANNER_LINK` | | A notice (and an optional link) shown at the top of every page. This is useful for a preview site. |
@@ -168,6 +169,46 @@ cbioportal-api 6b38ed6 (2026-10-02T09:15:00Z) listening on 0.0.0.0:8080 (clickho
 portal properties: 5 used (authenticate, quick_search.enabled, session.service.url, skin.blurb, skin.title), 3 ignored (not used by this server: db.user, spring.datasource.password, spring.datasource.url)
 ```
 
+### Where the frontend comes from
+
+The frontend is the website's code: the scripts and styles that run in
+the browser. The server can give the browser the frontend in three ways:
+
+| Setting | What happens |
+|---|---|
+| `--frontend-assets-url` (Java name `frontend.url`) | The server sends the Java portal's page, and the browser loads the frontend's scripts and styles from this address. www.cbioportal.org works this way, with `https://frontend.cbioportal.org/`. A new frontend release then needs no new server. |
+| `--frontend-dir` | The server sends a built frontend itself, from a folder. The container image does this with the frontend it was built with (`FRONTEND_DIR=/app/frontend`). |
+| `--frontend-url` | The server passes the pages on to a frontend development server. This is for working on the frontend. |
+
+If more than one is set, `--frontend-url` wins, then
+`--frontend-assets-url`, then `--frontend-dir`. So setting
+`--frontend-assets-url` on the container image is enough: the image's own
+frontend is then not used. The server logs which one it uses when it
+starts. With none of them, the pages load the frontend from the server's
+own `/reactapp/`, which is empty, so only the API works.
+
+`--frontend-assets-version` (Java name `app.version`) is added to the
+frontend's file addresses, for example
+`https://frontend.cbioportal.org/reactapp/main.app.js?2026-09-17`. Change it
+when a new frontend is released, so browsers fetch the new files instead
+of using old copies they have stored. www.cbioportal.org uses the release
+date.
+
+Both are go settings with environment variables:
+`CBIOPORTAL_FRONTEND_ASSETS_URL` and `CBIOPORTAL_FRONTEND_ASSETS_VERSION`.
+For example:
+
+```bash
+cbioportal-api --frontend-assets-url=https://frontend.cbioportal.org/ --frontend-assets-version=2026-09-17
+```
+
+The page that goes with this setting is the Java portal's page: it reads
+`/js/load-frontend.js`, which writes the frontend's script and style tags.
+It also honours the Java portal's switches for testing a frontend from
+the browser: `?localdev=true` loads it from `https://localhost:3000/`, and
+setting `localStorage.netlify` to a deploy preview's name loads that
+preview.
+
 ### Limits on bulk requests
 
 Some endpoints can return a whole profile of data at once: molecular data,
@@ -205,7 +246,7 @@ The server answers the paths outside `/api/` as the Java portal does:
 
 | Path | Answer |
 |---|---|
-| The portal's pages: `/`, `/index.html`, `/results/*`, `/study/*`, `/patient/*`, `/comparison/*`, `/mutation_mapper`, `/oncoprinter`, `/restore`, `/loading/*`, `/webAPI`, `/datasets`, `/news`, `/visualize`, `/ln`, `/encodedRedirect`, `/index.do`, `/case.do/*`, `/oncotree2genes` | The frontend's page. It includes the portal's configuration, so the browser does not have to ask `/config_service` for it. |
+| The portal's pages: `/`, `/index.html`, `/results/*`, `/study/*`, `/patient/*`, `/comparison/*`, `/mutation_mapper`, `/oncoprinter`, `/restore`, `/loading/*`, `/webAPI`, `/datasets`, `/news`, `/visualize`, `/ln`, `/encodedRedirect`, `/index.do`, `/case.do/*`, `/oncotree2genes` | The portal's page, see [Where the frontend comes from](#where-the-frontend-comes-from). It includes the portal's configuration, so the browser does not have to ask `/config_service` for it. A form posted to one of these paths, for a query too long for an address, is passed to the frontend as `window.postData`. |
 | `/installations`, `/tutorials`, `/oql`, `/donate` | A redirect to the map of installations or to the documentation. |
 | `/reactapp/…` | The frontend's code and styles. |
 | `/images/…`, `/js/…` | The Java portal's images and scripts, which are built into the server. Other `/images/…` files come from the frontend. |
@@ -613,7 +654,8 @@ they have no separate go names.
 
 ### Java names
 
-This table is for moving a Java portal's login settings to go's names.
+This table is for moving a Java portal's login and frontend settings to
+go's names.
 Each go setting stands for the Java portal's properties on the right. In
 the names below, `<name>` is the value of `--login-oidc-name` (default
 `oidc`), and `spring…` is short for `spring.security.oauth2.client`.
@@ -635,6 +677,8 @@ the names below, `<name>` is the value of `--login-oidc-name` (default
 | `--login-roles-path` | `spring.security.oauth2.client.jwt-roles-path` |
 | `--study-authorization` | `security.method_authorization_enabled` |
 | `--login-auto-redirect` | `security.force_redirect_on_one_idp` |
+| `--frontend-assets-url` | `frontend.url` |
+| `--frontend-assets-version` | `app.version` |
 | `--login-session-store=memory` | `spring.session.store-type=none` (or unset) |
 | `--login-session-store=redis` | `spring.session.store-type=redis` |
 | `--redis-url`, `--redis-host`, `--redis-port`, `--redis-username`, `--redis-database` | `spring.data.redis.url`, `.host`, `.port`, `.username`, `.database` |

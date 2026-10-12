@@ -61,7 +61,10 @@ docker run --rm --network host cbioportal/cbioportal-go:dev -db cbioportal
 The API container uses the settings described in
 [Configuration](configuration.md):
 
-- `PORT=8080` and `FRONTEND_DIR=/app/frontend`.
+- `PORT=8080` and `FRONTEND_DIR=/app/frontend`, the frontend the image was
+  built with. To load a separately released frontend instead, as
+  www.cbioportal.org does, set `CBIOPORTAL_FRONTEND_ASSETS_URL` (see
+  [Where the frontend comes from](configuration.md#where-the-frontend-comes-from)).
 - `CLICKHOUSE_URL`, `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD` to reach
   ClickHouse, the database.
 - `CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB` and `CBIOPORTAL_REF_DB`, the three

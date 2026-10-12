@@ -10,7 +10,8 @@ import (
 
 // A Setting is one of go's own names for a group of portal properties: the
 // login and login-session settings, which the Java portal reads under
-// Spring's names (spring.security.oauth2.client.*, spring.data.redis.*).
+// Spring's names (spring.security.oauth2.client.*, spring.data.redis.*), and
+// the address the frontend is loaded from (frontend.url, app.version).
 // The server reads one model, the portal properties; a go setting is
 // translated into the properties it stands for (Expand), so a Java portal's
 // properties and go's names configure the same thing.
@@ -76,7 +77,8 @@ func oidc(key func(id string) string) func(string, map[string]string) (map[strin
 	}
 }
 
-// Settings are go's login and login-session settings, in -h order.
+// Settings are go's login, frontend-address and login-session settings, in
+// -h order.
 var Settings = []SettingSection{
 	{"Login", []Setting{
 		{Name: "login", Env: "CBIOPORTAL_LOGIN", Arg: "off|optional|required",
@@ -145,6 +147,14 @@ var Settings = []SettingSection{
 		{Name: "login-auto-redirect", Env: "CBIOPORTAL_LOGIN_AUTO_REDIRECT", Arg: "bool",
 			Usage:  "with one sign-in provider, go straight to it instead of listing it (default true)",
 			Expand: boolean("login-auto-redirect", "security.force_redirect_on_one_idp")},
+	}},
+	{"Frontend from another address", []Setting{
+		{Name: "frontend-assets-url", Env: "CBIOPORTAL_FRONTEND_ASSETS_URL", Arg: "url",
+			Usage:  "load the frontend's scripts and styles from this address, as www.cbioportal.org\n    \tdoes from https://frontend.cbioportal.org/; wins over --frontend-dir",
+			Expand: one("frontend.url")},
+		{Name: "frontend-assets-version", Env: "CBIOPORTAL_FRONTEND_ASSETS_VERSION", Arg: "text",
+			Usage:  "added to the frontend's script and style addresses, so browsers fetch a new\n    \trelease instead of a cached one, e.g. its release date",
+			Expand: one("app.version")},
 	}},
 	{"Login sessions", []Setting{
 		{Name: "login-session-store", Env: "CBIOPORTAL_LOGIN_SESSION_STORE", Arg: "memory|redis",

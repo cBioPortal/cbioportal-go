@@ -102,7 +102,7 @@ func (s *State) servePortal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if portalPages[p] {
-		if r.Method == http.MethodPost && (s.frontendDir != "" || s.frontendProxy != nil) {
+		if r.Method == http.MethodPost {
 			s.postedPage(w, r)
 			return
 		}
@@ -126,14 +126,17 @@ func (s *State) servePortal(w http.ResponseWriter, r *http.Request) {
 	SpringNotFound(w, r)
 }
 
-// page serves the portal page: the frontend's index page, the dev server's,
-// or, without a frontend, the built-in study browser.
+// page serves the portal page: the dev server's; the Java portal's page,
+// which loads the frontend from the frontend.url property, as Java does
+// whenever that property is set (portal); the local frontend build's index
+// page; or, without any of them, the Java portal's page loading the frontend
+// from this origin.
 func (s *State) page(w http.ResponseWriter, r *http.Request) {
 	switch {
-	case s.frontendDir != "":
-		s.indexPage(w, r)
 	case s.frontendProxy != nil:
 		s.frontendProxy.ServeHTTP(w, r)
+	case s.frontendDir != "" && strings.TrimSpace(s.Props["frontend.url"]) == "":
+		s.indexPage(w, r)
 	default:
 		ReadBody(r, nil)
 		s.portal(w, r)

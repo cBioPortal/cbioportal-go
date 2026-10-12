@@ -209,7 +209,7 @@ func TestRawServerConfig(t *testing.T) {
 }
 
 // TestPortalWithoutFrontend checks a server without a frontend serves its
-// built-in page on the portal's routes and Spring's 404 elsewhere.
+// Java portal's page on the portal's routes and Spring's 404 elsewhere.
 func TestPortalWithoutFrontend(t *testing.T) {
 	s := &State{}
 	for path, want := range map[string]int{"/": 200, "/patient": 200, "/foo": 404, "/images/cbioportal_logo.png": 200, "/reactapp/main.app.js": 404} {
@@ -218,5 +218,73 @@ func TestPortalWithoutFrontend(t *testing.T) {
 		if w.Code != want {
 			t.Errorf("%s: %d, want %d", path, w.Code, want)
 		}
+	}
+}
+
+// TestJavaPortalPage checks the page served without a local frontend build:
+// the Java portal's index.html, loading the frontend from frontend.url (or
+// this origin) with the configuration embedded and escaped.
+func TestJavaPortalPage(t *testing.T) {
+	s := &State{}
+	s.PageConfig = func(*http.Request) map[string]any {
+		return map[string]any{"frontendUrl": "https://frontend.example.org/", "app_version": "v1", "skin_title": "</script>"}
+	}
+	w := httptest.NewRecorder()
+	s.CatchAll(w, httptest.NewRequest("GET", "/study/summary?id=x", nil))
+	page := w.Body.String()
+	for _, want := range []string{
+		`<html class="cbioportal-frontend" lang="en">`,
+		`window.frontendConfig.frontendUrl = "https://frontend.example.org/";`,
+		`appVersion: "v1",`,
+		`<script src="/js/load-frontend.js?v1"></script>`,
+		`loadAppStyles(window.frontendConfig);`,
+		`loadReactApp(window.frontendConfig);`,
+		`"skin_title":"` + escapedEnd + `"`,
+		fontAwesome4 + "\n</head>",
+		`<div id="reactRoot"></div>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+	if strings.Contains(page, "googletagmanager") {
+		t.Error("Google Tag Manager without google_tag_manager_id")
+	}
+
+	// Without frontend.url the page loads the frontend from this origin;
+	// Google Tag Manager is added when its id is set.
+	s.PageConfig = func(*http.Request) map[string]any { return map[string]any{"google_tag_manager_id": "GTM-X"} }
+	w = httptest.NewRecorder()
+	s.CatchAll(w, httptest.NewRequest("GET", "/", nil))
+	page = w.Body.String()
+	if !strings.Contains(page, `} else if ("") {`) || !strings.Contains(page, `window.frontendConfig.frontendUrl = "//" + host + "/";`) {
+		t.Errorf("frontend URL fallback missing:\n%s", page)
+	}
+	if !strings.Contains(page, `'dataLayer',"GTM-X")`) || !strings.Contains(page, `ns.html?id=GTM-X"`) {
+		t.Error("Google Tag Manager missing")
+	}
+
+	// frontend.url wins over a local build, as the property alone decides
+	// in Java; the build's files stay served.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html><head></head><body>local build</body></html>"), 0o644)
+	built := frontendState(dir)
+	built.Props = map[string]string{"frontend.url": "https://frontend.example.org/"}
+	built.PageConfig = func(*http.Request) map[string]any {
+		return map[string]any{"frontendUrl": "https://frontend.example.org/"}
+	}
+	w = httptest.NewRecorder()
+	built.CatchAll(w, httptest.NewRequest("GET", "/", nil))
+	if b := w.Body.String(); strings.Contains(b, "local build") || !strings.Contains(b, `frontendUrl = "https://frontend.example.org/"`) {
+		t.Errorf("frontend.url with a local build:\n%s", b)
+	}
+
+	// A form POST is answered with the page and the posted parameters.
+	w = httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/results", strings.NewReader("gene_list=TP53"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	s.CatchAll(w, r)
+	if !strings.Contains(w.Body.String(), `<head><script>var postData = {"gene_list":"TP53"};</script>`) {
+		t.Errorf("posted page:\n%s", w.Body.String())
 	}
 }

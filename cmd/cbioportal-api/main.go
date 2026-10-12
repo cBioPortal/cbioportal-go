@@ -196,6 +196,17 @@ func serve(stderr io.Writer, cfg *settings, ld *loaded) int {
 	log.Printf("%s listening on %s (clickhouse %s, db %s, raw-db %s, ref-db %s)",
 		buildinfo.String(name), addr, v["clickhouse-url"], v["db"], v["raw-db"], v["ref-db"])
 	log.Print(config.PropertiesSummary(ld.props, 8))
+	switch {
+	case v["frontend-url"] != "":
+		log.Printf("frontend: the dev server at %s", v["frontend-url"])
+	case strings.TrimSpace(ld.props["frontend.url"]) != "":
+		log.Printf("frontend: loaded by the browser from %s", strings.TrimSpace(ld.props["frontend.url"]))
+	case v["frontend-dir"] != "":
+		log.Printf("frontend: the build in %s", v["frontend-dir"])
+	default:
+		log.Print("frontend: none; the portal pages load it from this server's /reactapp/, which is empty " +
+			"without --frontend-dir (set --frontend-dir, --frontend-url or --frontend-assets-url)")
+	}
 	if m := v["metrics-addr"]; m != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", api.MetricsHandler())
