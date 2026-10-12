@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"flag"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -95,7 +97,9 @@ func TestUsageErrors(t *testing.T) {
 		{[]string{"help", "frobnicate"}, 2, `unknown command "frobnicate"`},
 		{[]string{"ingest"}, 2, "cbioportal-import: ingest: missing <study-dir>"},
 		{[]string{"ingest", "a", "b"}, 2, `cbioportal-import: ingest: unexpected argument "b"`},
-		{[]string{"transform", "--bogus"}, 2, "cbioportal-import: transform: flag provided but not defined: -bogus"},
+		{[]string{"transform", "--bogus"}, 2, "cbioportal-import: transform: unknown flag -bogus"},
+		{[]string{"transform", "--rawdb", "x"}, 2, "unknown flag -rawdb (did you mean --raw-db?)"},
+		{[]string{"transfrom"}, 2, `unknown command "transfrom" (did you mean transform?)`},
 		{[]string{"ingest", "dir", "--db"}, 2, "flag needs an argument: -db"},
 		{[]string{"plan", "/nonexistent-study-dir"}, 1, "cbioportal-import: plan: "},
 	}
@@ -113,5 +117,20 @@ func TestVersion(t *testing.T) {
 		if code != 0 || !strings.HasPrefix(out, "cbioportal-import ") {
 			t.Errorf("%s: exit %d, %q", arg, code, out)
 		}
+	}
+	if code, out, _ := runCLI("version", "--json"); code != 0 || !strings.Contains(out, `"name": "cbioportal-import"`) {
+		t.Errorf("version --json: exit %d, %q", code, out)
+	}
+}
+
+func TestPlanJSON(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "meta_study.txt"), []byte("cancer_study_identifier: s1\ntype_of_cancer: brca\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "meta_clinical_sample.txt"), []byte(
+		"cancer_study_identifier: s1\ngenetic_alteration_type: CLINICAL\ndatatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "data_clinical_sample.txt"), []byte("PATIENT_ID\tSAMPLE_ID\nP1\tS1\n"), 0o644)
+	code, out, errOut := runCLI("plan", dir, "--json")
+	if code != 0 || !strings.Contains(out, `"studyId": "s1"`) || !strings.Contains(out, `"datatype": "SAMPLE_ATTRIBUTES"`) {
+		t.Errorf("plan --json: exit %d, %q %q", code, out, errOut)
 	}
 }

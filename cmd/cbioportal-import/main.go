@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
@@ -55,7 +56,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printCommandUsage(stdout, cmd, fs)
 		return 0
 	case "version", "-version", "--version":
-		fmt.Fprintln(stdout, buildinfo.String(name))
+		if asJSON, _ := cli.JSONFlag(args[1:]); asJSON {
+			cli.WriteJSON(stdout, buildinfo.Get(name))
+		} else {
+			fmt.Fprintln(stdout, buildinfo.String(name))
+		}
 		return 0
 	}
 
@@ -64,14 +69,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if strings.HasPrefix(args[0], "-") {
 			fmt.Fprintf(stderr, "%s: flag %s given before a command\n\n", name, args[0])
 		} else {
-			fmt.Fprintf(stderr, "%s: unknown command %q\n\n", name, args[0])
+			fmt.Fprintf(stderr, "%s: unknown command %q%s\n\n", name, args[0], cli.DidYouMean(cli.Suggest(args[0], commandNames())))
 		}
 		printOverview(stderr)
 		return 2
 	}
 	fs, exec := cmd.flagSet()
 	usageErr := func(err error) int {
-		fmt.Fprintf(stderr, "%s: %s: %v\nRun '%s help %s' for usage.\n", name, cmd.name, err, name, cmd.name)
+		msg := err.Error()
+		if f, ok := strings.CutPrefix(msg, "flag provided but not defined: "); ok {
+			var names []string
+			fs.VisitAll(func(fl *flag.Flag) { names = append(names, fl.Name) })
+			msg = "unknown flag " + f + cli.DidYouMean(dashed(cli.Suggest(strings.TrimLeft(f, "-"), names)))
+		}
+		fmt.Fprintf(stderr, "%s: %s: %s\nRun '%s help %s' for usage.\n", name, cmd.name, msg, name, cmd.name)
 		return 2
 	}
 	if err := fs.Parse(reorder(args[1:], fs)); err != nil {
@@ -89,6 +100,22 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func commandNames() []string {
+	names := []string{"version", "help"}
+	for _, c := range commands {
+		names = append(names, c.name)
+	}
+	return names
+}
+
+// dashed is "--" + s, or "" for no suggestion.
+func dashed(s string) string {
+	if s == "" {
+		return ""
+	}
+	return "--" + s
 }
 
 func lookup(name string) *command {

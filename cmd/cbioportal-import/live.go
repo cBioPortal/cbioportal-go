@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/datahub"
 	"github.com/cbioportal/cbioportal-go/internal/studyimport"
@@ -34,10 +35,23 @@ func setupImportStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
 	lockWait := fs.Duration("lock-wait", studyimport.DefaultLockWait, "how long to wait for another import")
 	lockStale := fs.Duration("lock-stale", studyimport.DefaultLockStale, "take over a lock without a heartbeat for this long")
 	owner := fs.String("owner", "", "`name` this import holds the lock as (default: <host>-<pid>)")
+	dryRun := dryRunFlag(fs)
+	asJSON := jsonFlag(fs)
 	return func(args []string, w io.Writer) error {
 		o := studyimport.Options{
 			URL: *url, DB: *db, RawDB: orDefault(*rawDB, *db+"_raw"), RefDB: orDefault(*refDB, *db+"_ref"),
 			Seed: *seed, GenePanels: *panels, ReloadPanels: *reloadPanels, Logf: stderrLog,
+		}
+		if *dryRun {
+			p, err := studyimport.Plan(o, args)
+			if err != nil {
+				return err
+			}
+			if *asJSON {
+				return cli.WriteJSON(w, p)
+			}
+			printImportPlan(w, o, p)
+			return nil
 		}
 		if *owner == "" {
 			host, _ := os.Hostname()
@@ -50,18 +64,41 @@ func setupImportStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
 			return err
 		}
 		failed := 0
+		type study struct {
+			Dir     string  `json:"dir"`
+			StudyID string  `json:"studyId,omitempty"`
+			Status  string  `json:"status"`
+			Error   string  `json:"error,omitempty"`
+			Seconds float64 `json:"seconds"`
+		}
+		studies := []study{}
 		for _, st := range res.Studies {
 			line := fmt.Sprintf("%-9s %s", st.Status, st.Dir)
 			if st.StudyID != "" {
 				line += " (" + st.StudyID + ")"
 			}
+			s := study{Dir: st.Dir, StudyID: st.StudyID, Status: string(st.Status), Seconds: st.Duration.Seconds()}
 			if st.Err != nil && st.Status != studyimport.Skipped {
 				line += ": " + st.Err.Error()
+				s.Error = st.Err.Error()
 			}
-			fmt.Fprintln(w, line)
+			if !*asJSON {
+				fmt.Fprintln(w, line)
+			}
+			studies = append(studies, s)
 			if st.Status == studyimport.Failed || st.Status == studyimport.Removed {
 				failed++
 			}
+		}
+		if *asJSON {
+			errText := func(err error) string {
+				if err == nil {
+					return ""
+				}
+				return err.Error()
+			}
+			cli.WriteJSON(w, map[string]any{"database": o.DB, "studies": studies, "panelsLoaded": res.PanelsLoaded,
+				"panelsError": errText(res.PanelsErr), "transformError": errText(res.TransformErr)})
 		}
 		switch {
 		case res.PanelsErr != nil:
@@ -72,6 +109,31 @@ func setupImportStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
 			return fmt.Errorf("%d of %d studies failed", failed, len(res.Studies))
 		}
 		return nil
+	}
+}
+
+// printImportPlan prints what import-study would do.
+func printImportPlan(w io.Writer, o studyimport.Options, p *studyimport.ImportPlan) {
+	if p.LoadSeed {
+		fmt.Fprintf(w, "would load the reference data into %s from %s\n", o.RefDB, o.Seed)
+	}
+	if p.LoadPanels {
+		fmt.Fprintf(w, "would load the shared gene panels into %s from %s\n", o.RawDB, o.GenePanels)
+	}
+	for _, s := range p.Studies {
+		switch s.Action {
+		case "skip":
+			fmt.Fprintf(w, "would skip    %s: %s\n", s.Dir, s.Reason)
+		case "replace":
+			fmt.Fprintf(w, "would replace %s (%s, staged in %d tables of %s)\n", s.Dir, s.StudyID, s.Tables, o.RawDB)
+		default:
+			fmt.Fprintf(w, "would import  %s (%s, new)\n", s.Dir, s.StudyID)
+		}
+	}
+	if p.Transform {
+		fmt.Fprintf(w, "would then rebuild %s and swap it in\n", o.DB)
+	} else {
+		fmt.Fprintf(w, "nothing to stage: %s would be left as is\n", o.DB)
 	}
 }
 
@@ -121,6 +183,7 @@ func setupFetchDatahub(fs *flag.FlagSet) func([]string, io.Writer) error {
 	ref := fs.String("ref", "master", "datahub `ref` to check out: a branch, a commit or pull/<N>/head")
 	gitURL := fs.String("git", datahub.GitURL(), "datahub git `URL`; defaults to $DATAHUB_GIT if set")
 	lfsURL := fs.String("lfs-url", datahub.LFSURL(), "datahub's LFS store `URL`; defaults to $DATAHUB_LFS_URL if set")
+	asJSON := jsonFlag(fs)
 	return func(args []string, w io.Writer) error {
 		dir, err := filepath.Abs(args[0])
 		if err != nil {
@@ -146,6 +209,9 @@ func setupFetchDatahub(fs *flag.FlagSet) func([]string, io.Writer) error {
 			if _, err := co.PullLFS(ctx, sub); err != nil {
 				return fmt.Errorf("%s: %w", sub, err)
 			}
+		}
+		if *asJSON {
+			return cli.WriteJSON(w, map[string]any{"ref": *ref, "commit": commit, "dir": dir, "studies": append([]string{}, studies...)})
 		}
 		fmt.Fprintf(w, "datahub %s (%s) in %s\n", *ref, commit, dir)
 		return nil

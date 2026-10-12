@@ -158,6 +158,75 @@ func Run(o Options, dirs []string) (*Result, error) {
 	return res, nil
 }
 
+// PlannedStudy is what Run would do with one study directory.
+type PlannedStudy struct {
+	Dir     string `json:"dir"`
+	StudyID string `json:"studyId,omitempty"`
+	// Action is "import" for a new study, "replace" for one the raw
+	// database already holds (its rows are replaced), or "skip".
+	Action string `json:"action"`
+	Reason string `json:"reason,omitempty"`
+	// Tables is the number of raw tables holding the study's rows now.
+	Tables int `json:"tables,omitempty"`
+}
+
+// ImportPlan is what Run would do, found without changing anything.
+type ImportPlan struct {
+	Studies    []PlannedStudy `json:"studies"`
+	LoadSeed   bool           `json:"loadSeed"`
+	LoadPanels bool           `json:"loadPanels"`
+	Transform  bool           `json:"transform"`
+}
+
+// Plan reports what Run(o, dirs) would do, reading the databases and the
+// study directories (which must be local: Prepare is not called) but
+// changing nothing.
+func Plan(o Options, dirs []string) (*ImportPlan, error) {
+	p := &ImportPlan{}
+	n, err := countRows(ch.New(o.URL, o.RefDB), o.RefDB, "gene", "")
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		if o.Seed == "" {
+			return nil, fmt.Errorf("reference database %s has no genes: pass a seed dump to load them", o.RefDB)
+		}
+		p.LoadSeed = true
+	}
+	raw := ch.New(o.URL, o.RawDB)
+	if o.GenePanels != "" {
+		p.LoadPanels = o.ReloadPanels
+		if !o.ReloadPanels {
+			n, err := countRows(raw, o.RawDB, "gene_panel", "study_id = ''")
+			if err != nil {
+				return nil, err
+			}
+			p.LoadPanels = n == 0
+		}
+	}
+	for _, dir := range dirs {
+		ps := PlannedStudy{Dir: dir, Action: "skip"}
+		if _, err := os.Stat(filepath.Join(dir, "meta_study.txt")); err != nil {
+			ps.Reason = "no meta_study.txt"
+		} else if ps.StudyID, err = StudyID(dir); err != nil {
+			ps.Reason = err.Error()
+		} else {
+			tables, err := ingest.StudyTables(raw, ps.StudyID)
+			if err != nil {
+				return nil, err
+			}
+			ps.Action, ps.Tables = "import", len(tables)
+			if len(tables) > 0 {
+				ps.Action = "replace"
+			}
+			p.Transform = true
+		}
+		p.Studies = append(p.Studies, ps)
+	}
+	p.Transform = p.Transform || p.LoadPanels
+	return p, nil
+}
+
 // stage ingests one study directory, removing it from RawDB on failure.
 func (o *Options) stage(raw *ch.Client, dir string) StudyResult {
 	r := StudyResult{Dir: dir}
