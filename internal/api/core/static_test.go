@@ -73,3 +73,44 @@ func TestStaticFiles(t *testing.T) {
 		t.Error("client route did not serve index.html")
 	}
 }
+
+// The portal's static folder serves its files at their path, before the
+// built-in resources and the frontend build; other paths fall through.
+func TestStaticDir(t *testing.T) {
+	front, own := t.TempDir(), t.TempDir()
+	for dir, files := range map[string]map[string]string{
+		front: {"images/logo.png": "frontend logo", "index.html": "<html><head></head><body></body></html>"},
+		own:   {"images/logo.png": "portal logo", "images/cbioportal_logo.png": "portal's cBioPortal logo", "custom/tab.js": "tab()"},
+	} {
+		for name, body := range files {
+			p := filepath.Join(dir, name)
+			os.MkdirAll(filepath.Dir(p), 0o755)
+			os.WriteFile(p, []byte(body), 0o644)
+		}
+	}
+	s := frontendState(front)
+	s.staticFiles = newStaticFiles(own)
+	get := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		s.CatchAll(w, httptest.NewRequest(http.MethodGet, path, nil))
+		return w
+	}
+	for path, want := range map[string]string{
+		"/images/logo.png":            "portal logo",
+		"/images/cbioportal_logo.png": "portal's cBioPortal logo",
+		"/custom/tab.js":              "tab()",
+	} {
+		if w := get(path); w.Code != http.StatusOK || w.Body.String() != want {
+			t.Errorf("%s: %d %q, want %q", path, w.Code, w.Body.String(), want)
+		}
+	}
+	if w := get("/images/login/microsoft_signin.png"); w.Code != http.StatusOK || w.Body.Len() < 100 {
+		t.Errorf("built-in image: %d, %d bytes", w.Code, w.Body.Len())
+	}
+	if w := get("/custom/../../etc/passwd"); w.Code == http.StatusOK && strings.Contains(w.Body.String(), "root:") {
+		t.Error("path escapes the static folder")
+	}
+	if w := get("/custom/"); w.Code == http.StatusOK && strings.Contains(w.Body.String(), "tab.js") {
+		t.Error("folder listing served")
+	}
+}

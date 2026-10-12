@@ -127,6 +127,7 @@ usually easier.
 | `-clickhouse-bulk-max-time` | `CLICKHOUSE_BULK_MAX_TIME` | `10m` | How long one query of a bulk endpoint may run, including the time the client takes to read the answer. A number alone means seconds. `0` means no limit. |
 | `-clickhouse-bulk-sort-spill` | `CLICKHOUSE_BULK_SORT_SPILL` | `1GiB` | The memory a sort in a bulk query may use before ClickHouse continues it on disk. `0` keeps ClickHouse's own setting. |
 | `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend, so the website and the API share one address. The server serves its `index.html` as the portal's pages and its files under `/reactapp/` and `/images/`. See [Where the frontend comes from](#where-the-frontend-comes-from). |
+| `-static-dir` | `CBIOPORTAL_STATIC_DIR` | | A folder of the portal's own files, such as its logo or a custom tab's script. Each file is served at its path inside the folder, so `static/images/logo.png` is served at `/images/logo.png`. These files come before the built-in ones, so a portal can also replace a built-in image this way. |
 | `-frontend-url` | `FRONTEND_URL` | | The address of a frontend development server. The server passes the portal's pages, and every path it does not serve itself, on to it. Use this instead of `-frontend-dir`. |
 | `-oncokb-url` | `ONCOKB_URL` | `https://public.api.oncokb.org/api/v1` | The OncoKB API. The frontend reaches it through the server's `/proxy/...` path. |
 | `-site-banner`, `-site-banner-link` | `SITE_BANNER`, `SITE_BANNER_LINK` | | A notice (and an optional link) shown at the top of every page. This is useful for a preview site. |
@@ -249,6 +250,7 @@ The server answers the paths outside `/api/` as the Java portal does:
 | The portal's pages: `/`, `/index.html`, `/results/*`, `/study/*`, `/patient/*`, `/comparison/*`, `/mutation_mapper`, `/oncoprinter`, `/restore`, `/loading/*`, `/webAPI`, `/datasets`, `/news`, `/visualize`, `/ln`, `/encodedRedirect`, `/index.do`, `/case.do/*`, `/oncotree2genes` | The portal's page, see [Where the frontend comes from](#where-the-frontend-comes-from). It includes the portal's configuration, so the browser does not have to ask `/config_service` for it. A form posted to one of these paths, for a query too long for an address, is passed to the frontend as `window.postData`. |
 | `/installations`, `/tutorials`, `/oql`, `/donate` | A redirect to the map of installations or to the documentation. |
 | `/reactapp/…` | The frontend's code and styles. |
+| A file in the static folder (`--static-dir`) | That file. It comes before everything below. |
 | `/images/…`, `/js/…` | The Java portal's images and scripts, which are built into the server. Other `/images/…` files come from the frontend. |
 | Anything else, such as `/about` or `/favicon.ico` | A 404 with Spring's error body. The frontend still shows its own pages, such as About, when you get there by clicking inside the website. |
 

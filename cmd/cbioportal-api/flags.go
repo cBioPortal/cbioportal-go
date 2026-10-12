@@ -53,6 +53,7 @@ var sections = []section{
 	}},
 	{"Frontend", []option{
 		{name: "frontend-dir", arg: "dir", env: "FRONTEND_DIR", usage: "serve this frontend build for every non-/api/ path (single origin)", export: true},
+		{name: "static-dir", arg: "dir", env: "CBIOPORTAL_STATIC_DIR", usage: "serve the files in this folder at their path, before the built-in ones, e.g.\n    \tstatic/images/logo.png at /images/logo.png (a portal's logo or custom tab scripts)", export: true},
 		{name: "frontend-url", arg: "url", env: "FRONTEND_URL", usage: "reverse-proxy every non-/api/ path to this frontend dev server instead", export: true},
 		{name: "oncokb-url", arg: "url", env: "ONCOKB_URL", def: "https://public.api.oncokb.org/api/v1", usage: "OncoKB API behind the frontend's /proxy/ endpoint", export: true},
 		{name: "site-banner", arg: "text", env: "SITE_BANNER", usage: "notice bar at the top of every portal page, e.g. for a preview deployment", export: true},

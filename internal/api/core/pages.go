@@ -144,13 +144,23 @@ func (s *State) page(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveStatic serves a static resource if r names one, and reports whether
-// it did: /js/** from the Java portal's resources, /images/** from them or
-// else the frontend build, /reactapp/** from the frontend build. A resource
+// it did: any file of the portal's static folder (--static-dir) at its path,
+// then /js/** from the Java portal's resources, /images/** from them or else
+// the frontend build, /reactapp/** from the frontend build. A resource
 // requested with another method than GET or HEAD gets a 405.
 func (s *State) serveStatic(w http.ResponseWriter, r *http.Request) bool {
 	p := path.Clean(r.URL.Path)
 	if p != r.URL.Path && p+"/" != r.URL.Path {
 		return false
+	}
+	if s.staticFiles != nil && !strings.HasSuffix(r.URL.Path, "/") {
+		file := filepath.Join(s.staticFiles.dir, filepath.FromSlash(p))
+		if st, err := os.Stat(file); err == nil && st.Mode().IsRegular() {
+			if getOrHead(w, r) {
+				s.staticFiles.serve(w, r, file, st)
+			}
+			return true
+		}
 	}
 	switch {
 	case strings.HasPrefix(p, "/js/"), strings.HasPrefix(p, "/images/"):

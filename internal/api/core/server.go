@@ -45,6 +45,9 @@ type State struct {
 	// (FRONTEND_URL) that gets the pages and every unknown path instead.
 	frontendDir   string
 	frontendFiles *staticFiles
+	// staticFiles serves the portal's own files (CBIOPORTAL_STATIC_DIR) at
+	// their path, before the built-in resources and the frontend build.
+	staticFiles *staticFiles
 	frontendProxy http.Handler
 	// PageConfig is the frontend configuration (the /config_service body) a
 	// portal page embeds as window.rawServerConfig; nil embeds none.
@@ -72,6 +75,9 @@ func (s *State) SetMux(mux *http.ServeMux) { s.mux = mux }
 // ConfigureSessions apply the portal properties.
 func NewState(c *ch.Client) *State {
 	s := &State{CH: c, BulkCH: c.WithSettings(DefaultBulkLimits.Settings())}
+	if dir := os.Getenv("CBIOPORTAL_STATIC_DIR"); dir != "" {
+		s.staticFiles = newStaticFiles(dir)
+	}
 	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
 		s.frontendDir, s.frontendFiles = dir, newStaticFiles(dir)
 	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {
