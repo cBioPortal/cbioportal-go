@@ -11,8 +11,8 @@ import (
 )
 
 // The served API descriptions are the Java portal's (apidocs), with the
-// paging parameters go adds (addedPagedEndpoints) laid over them as they
-// are served, so the snapshots stay as scripts/refresh-api-docs.sh fetches
+// parameters go adds (core.AddedPagedEndpoints, core.AddedParams) laid over
+// them as they are served, so the snapshots stay as scripts/refresh-api-docs.sh fetches
 // them. Endpoints a description does not list are left out.
 
 // Descriptions of the added parameters: Java's, with what go adds.
@@ -75,10 +75,50 @@ func openAPIParams(a core.AddedPaging) []openAPIParam {
 	return ps
 }
 
-// swaggerParams are openAPIParams in Swagger 2.0 form.
-func swaggerParams(a core.AddedPaging) []swaggerParam {
+// addedParamDoc is an added parameter (core.AddedParams) as OpenAPI 3
+// describes it: an Integer, or a string enum.
+func addedParamDoc(a core.AddedParam) openAPIParam {
+	p := openAPIParam{Name: a.Param.Name, In: "query", Description: a.Doc, Schema: openAPISchema{Type: "integer", Format: "int32"}}
+	if len(a.Param.Values) > 0 {
+		p.Schema = openAPISchema{Type: "string", Enum: a.Param.Values}
+	}
+	return p
+}
+
+// addedOp is one operation of the API descriptions with the parameters go
+// adds to it: paging (core.AddedPagedEndpoints) and others
+// (core.AddedParams).
+type addedOp struct {
+	Method, Path string
+	Params       []openAPIParam
+}
+
+// addedOperations lists the operations go adds parameters to, each once.
+func addedOperations() []addedOp {
+	var ops []addedOp
+	at := map[string]int{}
+	add := func(method, path string, ps []openAPIParam) {
+		k := method + " " + path
+		if i, ok := at[k]; ok {
+			ops[i].Params = append(ops[i].Params, ps...)
+			return
+		}
+		at[k] = len(ops)
+		ops = append(ops, addedOp{method, path, ps})
+	}
+	for _, a := range core.AddedPagedEndpoints {
+		add(a.Method, a.Path, openAPIParams(a))
+	}
+	for _, a := range core.AddedParams {
+		add(a.Method, a.Path, []openAPIParam{addedParamDoc(a)})
+	}
+	return ops
+}
+
+// swaggerParams are OpenAPI 3 parameters in Swagger 2.0 form.
+func swaggerParams(ps []openAPIParam) []swaggerParam {
 	var out []swaggerParam
-	for _, p := range openAPIParams(a) {
+	for _, p := range ps {
 		out = append(out, swaggerParam{Name: p.Name, In: p.In, Description: p.Description, Type: p.Schema.Type,
 			Default: p.Schema.Default, Maximum: p.Schema.Maximum, Minimum: p.Schema.Minimum, Format: p.Schema.Format,
 			Enum: p.Schema.Enum})
@@ -127,7 +167,7 @@ func memberOf(ms []member, key string) (member, bool) {
 	return member{}, false
 }
 
-// overlayJSONDoc adds the added paging parameters to the operations of a
+// overlayJSONDoc adds the added parameters to the operations of a
 // JSON API description: OpenAPI 3 (paths as served), or Swagger 2.0 with
 // paths below its basePath (swagger2).
 func overlayJSONDoc(doc []byte, swagger2 bool) ([]byte, error) {
@@ -148,7 +188,7 @@ func overlayJSONDoc(doc []byte, swagger2 bool) ([]byte, error) {
 		text string
 	}
 	var inserts []insert
-	for _, a := range core.AddedPagedEndpoints {
+	for _, a := range addedOperations() {
 		key := a.Path
 		if swagger2 {
 			key = strings.TrimPrefix(key, "/api")
@@ -167,11 +207,11 @@ func overlayJSONDoc(doc []byte, swagger2 bool) ([]byte, error) {
 		}
 		var items []any
 		if swagger2 {
-			for _, x := range swaggerParams(a) {
+			for _, x := range swaggerParams(a.Params) {
 				items = append(items, x)
 			}
 		} else {
-			for _, x := range openAPIParams(a) {
+			for _, x := range a.Params {
 				items = append(items, x)
 			}
 		}
@@ -205,7 +245,7 @@ func overlayJSONDoc(doc []byte, swagger2 bool) ([]byte, error) {
 	return out, nil
 }
 
-// overlayYAMLDoc adds the added paging parameters to the operations of a
+// overlayYAMLDoc adds the added parameters to the operations of a
 // springdoc YAML description: paths at indent 2, operations at 4, their
 // fields at 6.
 func overlayYAMLDoc(doc []byte) []byte {
@@ -216,7 +256,7 @@ func overlayYAMLDoc(doc []byte) []byte {
 		text string
 	}
 	var inserts []insert
-	for _, a := range core.AddedPagedEndpoints {
+	for _, a := range addedOperations() {
 		pathAt := slices.IndexFunc(lines, func(l string) bool {
 			return l == "  "+a.Path+":\n" || l == `  "`+a.Path+`":`+"\n"
 		})
@@ -237,7 +277,7 @@ func overlayYAMLDoc(doc []byte) []byte {
 		for end < len(lines) && (indent(lines[end]) > 4 || strings.TrimSpace(lines[end]) == "") {
 			end++
 		}
-		items := yamlParams(a)
+		items := yamlParams(a.Params)
 		paramsAt := -1
 		for i := opAt + 1; i < end; i++ {
 			if lines[i] == "      parameters:\n" {
@@ -269,11 +309,10 @@ func overlayYAMLDoc(doc []byte) []byte {
 	return []byte(strings.Join(lines, ""))
 }
 
-// yamlParams are a's added parameters as springdoc writes parameters in
-// YAML.
-func yamlParams(a core.AddedPaging) string {
+// yamlParams are added parameters as springdoc writes parameters in YAML.
+func yamlParams(ps []openAPIParam) string {
 	var b strings.Builder
-	for _, p := range openAPIParams(a) {
+	for _, p := range ps {
 		desc, _ := json.Marshal(p.Description)
 		fmt.Fprintf(&b, "      - name: %s\n        in: query\n        description: %s\n        required: false\n        schema:\n          type: %s\n",
 			p.Name, desc, p.Schema.Type)
@@ -302,7 +341,7 @@ func yamlParams(a core.AddedPaging) string {
 	return b.String()
 }
 
-// overlayAPIDoc lays the added paging over the description file name.
+// overlayAPIDoc lays the added parameters over the description file name.
 func overlayAPIDoc(name string, doc []byte) ([]byte, error) {
 	switch {
 	case strings.HasSuffix(name, ".yaml"):

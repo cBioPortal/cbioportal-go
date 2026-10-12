@@ -43,6 +43,35 @@ func TestAddedPagingWired(t *testing.T) {
 	}
 }
 
+// TestAddedParamsWired pins that every parameter go adds is checked once,
+// as Java checks a parameter of its type, on its endpoint's contract route.
+func TestAddedParamsWired(t *testing.T) {
+	for _, a := range AddedParams {
+		rt, _ := matchContract(a.Method, strings.ReplaceAll(templatePath(a.Path), "{}", "x"))
+		if rt == nil {
+			t.Errorf("%s %s: no contract route", a.Method, a.Path)
+			continue
+		}
+		n := 0
+		for _, p := range rt.params {
+			if p.Name == a.Param.Name {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s %s: %d %s params", a.Method, a.Path, n, a.Param.Name)
+		}
+		q := map[string][]string{"sampleListId": {"l"}, a.Param.Name: {"TP53"}}
+		if got := CheckParams(rt.params, q); got != MsgIntMismatch("TP53") {
+			t.Errorf("%s %s: %s=TP53 gives %q", a.Method, a.Path, a.Param.Name, got)
+		}
+		q[a.Param.Name] = []string{"7157"}
+		if got := CheckParams(rt.params, q); got != "" {
+			t.Errorf("%s %s: %s=7157 gives %q", a.Method, a.Path, a.Param.Name, got)
+		}
+	}
+}
+
 // TestClaimListPage pins the ORDER BY / LIMIT a handler reads a page with:
 // the stable order alone without a page, the page of an unsorted request
 // in that order, a sorted one by the field first, and no claim for a field

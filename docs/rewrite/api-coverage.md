@@ -205,7 +205,7 @@ These long lists get no paging, on purpose:
 | POST | `/api/custom-driver-annotation-report/fetch` | List&lt;String&gt; |  | implemented | yes |  |
 | GET | `/api/studies/{studyId}/samples/{sampleId}/copy-number-segments` |  | projection, paging, sort, chromosome | implemented | yes |  |
 | POST | `/api/copy-number-segments/fetch` | List&lt;SampleIdentifier&gt; | projection, chromosome | implemented | yes |  |
-| GET | `/api/molecular-profiles/{molecularProfileId}/discrete-copy-number` |  | projection, discreteCopyNumberEventType, sampleListId | implemented | yes |  |
+| GET | `/api/molecular-profiles/{molecularProfileId}/discrete-copy-number` |  | projection, discreteCopyNumberEventType, sampleListId | implemented | yes | go adds `entrezGeneId`, which Java ignores ([Java quirks](java-quirks.md#molecular-data-and-projections)). |
 | POST | `/api/molecular-profiles/{molecularProfileId}/discrete-copy-number/fetch` | DiscreteCopyNumberFilter | projection, discreteCopyNumberEventType | implemented | yes |  |
 | POST | `/api/molecular-profiles/{molecularProfileId}/discrete-copy-number-counts/fetch` | List&lt;CopyNumberCountIdentifier&gt; |  | implemented | yes |  |
 | GET | `/api/gene-panels/` |  | projection, paging, sort | implemented |  |  |

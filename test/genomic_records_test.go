@@ -206,3 +206,30 @@ func mustJSON(t *testing.T, v any) string {
 	}
 	return string(b)
 }
+
+// entrezGeneId on the copy-number GET is a parameter go adds (Java's
+// controller has none and answers every gene): it gives the answer of the
+// POST /fetch naming that gene, for each event type, and without it the
+// answer is every gene's.
+func TestContractDiscreteCopyNumberGetGeneParam(t *testing.T) {
+	requireAPI(t)
+	const list = "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number"
+	for _, ev := range []string{"HOMDEL_AND_AMP", "ALL"} {
+		var all, one, fetched []map[string]any
+		get(t, list+"?sampleListId=study_es_0_all&discreteCopyNumberEventType="+ev, &all)
+		get(t, list+"?sampleListId=study_es_0_all&discreteCopyNumberEventType="+ev+"&entrezGeneId=116983", &one)
+		post(t, list+"/fetch?discreteCopyNumberEventType="+ev,
+			map[string]any{"sampleListId": "study_es_0_all", "entrezGeneIds": []int{116983}}, &fetched)
+		if len(one) == 0 || len(one) >= len(all) {
+			t.Errorf("%s: %d calls for one gene, %d for every gene", ev, len(one), len(all))
+		}
+		wantEq(t, one, fetched)
+		for _, d := range one {
+			if d["entrezGeneId"] != 116983.0 {
+				t.Errorf("%s: call of another gene %v", ev, d)
+			}
+		}
+	}
+	wantError(t, "GET", list+"?sampleListId=study_es_0_all&entrezGeneId=TP53", "", 400,
+		`Request parameter type mismatch: java.lang.NumberFormatException: For input string: "TP53"`)
+}

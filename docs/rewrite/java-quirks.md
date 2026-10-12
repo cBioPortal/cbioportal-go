@@ -16,14 +16,19 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 - Java accepts a paging or sorting parameter (`pageSize`, `pageNumber`,
   `sortBy`, `direction`) and then ignores it. go follows it.
 
-Every fix is listed here, most with a test that keeps it fixed.
+go also adds a few parameters that Java's endpoints do not have. Without
+them, go answers as Java does.
 
-**Summary.** The page has 94 entries:
+Every fix and every added parameter is listed here, most with a test that
+keeps it working.
+
+**Summary.** The page has 95 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 57 | go does the same thing as Java, on purpose. |
 | Fixed in go | 27 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Added in go | 1 | go accepts a parameter that Java's endpoint does not have, so Java ignores it. Without the parameter, go answers as Java does. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
@@ -38,7 +43,8 @@ marker a failed study export writes, which would need an export that fails.
   the place the behaviour was seen instead: "www" means production
   (www.cbioportal.org), and "fixtures" means the Java backend run on the
   test studies.
-- **go** says whether go copies it, fixes it, or can't match it.
+- **go** says whether go copies it, fixes it, adds a parameter for it, or
+  can't match it.
 - **Pinned** names the test that checks go's behaviour, so it cannot
   change by accident. A dash means there is no test. The test can be one
   of these:
@@ -127,6 +133,13 @@ endpoints, their sort fields and the endpoints left out are in
 [API coverage](api-coverage.md#paging-that-go-adds). The tests
 `TestAddedPaging` and `TestAddedPagingParams` pin them.
 
+go also adds a gene parameter, `entrezGeneId`, to the copy-number GET
+(`GET /api/molecular-profiles/{id}/discrete-copy-number`). Java's GET has
+none, ignores one in the address, and answers with every gene's calls.
+With it, go answers with that gene's calls. It is listed under
+[Molecular data and projections](#molecular-data-and-projections) as
+"Added in go", and the served API descriptions list it too.
+
 go also limits what one query of a bulk endpoint may cost ClickHouse:
 memory, time, and the memory a sort may use before it moves to disk.
 Java has no such limits. A request that hits one before any data is sent
@@ -204,6 +217,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
+| `GET /api/molecular-profiles/{id}/discrete-copy-number` has no gene parameter. An `entrezGeneId` in the address is ignored, and Java answers with the calls of every gene, which for `discreteCopyNumberEventType=ALL` can be gigabytes. | DiscreteCopyNumberController | Added in go. go reads `entrezGeneId` (one Entrez Gene ID, checked like Java's Integer parameters) and answers with that gene's calls, the same as the POST `/fetch` naming it. Without it, go answers with every gene's calls. | TestContractDiscreteCopyNumberGetGeneParam, TestAddedParamsWired, known.go |
 | Generic assay data fails with a 500 for `projection=ID`. | GenericAssayDataController; fixtures | Fixed in go. go answers with the data. | — |
 | Some endpoints ignore META and return the records without a total count. They are `sample-lists/fetch`, `gene-panels/fetch`, `resource-definitions/fetch`, the generic assay meta endpoints and `mutation-data-counts/fetch`. | their controllers; fixtures | Fixed in go. go returns an empty body with the total count. `treatments/sample-counts/fetch` returns its records, as Java does. | — |
 | `mutations/fetch` with `sampleMolecularIdentifiers` returns each sample's mutations from every mutation profile of its study, not only from the profile named. For example, asking for `glioma_msk_2018_mutations` also returns the samples' records of `glioma_msk_2018_mutations_uncalled`, and the META total count counts them. | MutationMapper (`whereInMultipleMolecularProfiles` selects the samples, not the profiles) | Fixed in go. go returns the mutations of the profiles named. | TestLiveMutationsUncalledProfile, known.go |

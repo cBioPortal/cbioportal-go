@@ -8,9 +8,10 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// TestAPIDocsOverlay pins the paging parameters laid over the served API
-// descriptions: every added endpoint a description lists gets them once,
-// with its sortBy values, and the description is otherwise unchanged.
+// TestAPIDocsOverlay pins the parameters laid over the served API
+// descriptions: every operation a description lists gets its added paging
+// (with its sortBy values) and added parameters once, and the description
+// is otherwise unchanged.
 func TestAPIDocsOverlay(t *testing.T) {
 	type op struct {
 		Parameters []map[string]any `json:"parameters"`
@@ -35,7 +36,7 @@ func TestAPIDocsOverlay(t *testing.T) {
 			t.Fatalf("%s: served description is no JSON: %v", name, err)
 		}
 		found := 0
-		for _, a := range core.AddedPagedEndpoints {
+		for _, a := range addedOperations() {
 			key := a.Path
 			if name == "legacy-api.json" {
 				key = strings.TrimPrefix(key, "/api")
@@ -48,9 +49,13 @@ func TestAPIDocsOverlay(t *testing.T) {
 			found++
 			got := after.Paths[key][method].Parameters
 			added := got[len(old.Parameters):]
-			want := []string{"pageSize", "pageNumber"}
-			if a.Sorted() {
-				want = append(want, "sortBy", "direction")
+			var want []string
+			var sortValues []string
+			for _, p := range a.Params {
+				want = append(want, p.Name)
+				if p.Name == "sortBy" {
+					sortValues = p.Schema.Enum
+				}
 			}
 			if len(got) != len(old.Parameters)+len(want) {
 				t.Errorf("%s %s %s: %d parameters, want %d more than %d", name, a.Method, key, len(got), len(want), len(old.Parameters))
@@ -61,13 +66,13 @@ func TestAPIDocsOverlay(t *testing.T) {
 					t.Errorf("%s %s %s: parameter %d is %v", name, a.Method, key, i, added[i])
 				}
 			}
-			if a.Sorted() {
+			if sortValues != nil {
 				enum := added[2]["enum"]
 				if s, ok := added[2]["schema"].(map[string]any); ok {
 					enum = s["enum"]
 				}
 				b, _ := json.Marshal(enum)
-				w, _ := json.Marshal(a.Sort.Values)
+				w, _ := json.Marshal(sortValues)
 				if string(b) != string(w) {
 					t.Errorf("%s %s %s: sortBy enum %s, want %s", name, a.Method, key, b, w)
 				}
@@ -114,10 +119,12 @@ func TestAPIDocsOverlayYAML(t *testing.T) {
 		served, _ := overlayAPIDoc(name, raw)
 		jserved, _ := overlayAPIDoc("v3.json", jraw)
 		count := func(b []byte, s string) int { return strings.Count(string(b), s) }
-		for _, p := range []string{"pageSize", "pageNumber", "sortBy", "direction"} {
+		for _, p := range []string{"pageSize", "pageNumber", "sortBy", "direction", "entrezGeneId"} {
 			yamlAdded := count(served, "      - name: "+p+"\n") - count(raw, "      - name: "+p+"\n")
 			jsonAdded := count(jserved, `{"name":"`+p+`"`) - count(jraw, `{"name":"`+p+`"`)
-			if yamlAdded != jsonAdded || jsonAdded == 0 {
+			// The internal description lists none of the endpoints with an
+			// added entrezGeneId.
+			if yamlAdded != jsonAdded || (jsonAdded == 0 && p != "entrezGeneId") {
 				t.Errorf("%s: %d %s parameters added, the JSON description %d", name, yamlAdded, p, jsonAdded)
 			}
 		}
@@ -140,4 +147,31 @@ func TestAPIDocsOverlayYAML(t *testing.T) {
 			t.Errorf("%s: more than the added parameters changed", name)
 		}
 	}
+}
+
+// TestAPIDocsAddedParam pins that the copy-number GET is described with the
+// entrezGeneId parameter go adds, as an optional int32 query parameter.
+func TestAPIDocsAddedParam(t *testing.T) {
+	raw, _ := apiDocsFS.ReadFile("v3.json")
+	served, err := overlayAPIDoc("v3.json", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Paths map[string]map[string]struct {
+			Parameters []openAPIParam `json:"parameters"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(served, &d); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range d.Paths[core.AddedParams[0].Path]["get"].Parameters {
+		if p.Name == "entrezGeneId" {
+			if p.Required || p.Schema.Type != "integer" || p.Schema.Format != "int32" || !strings.Contains(p.Description, "Added in go") {
+				t.Errorf("entrezGeneId %+v", p)
+			}
+			return
+		}
+	}
+	t.Error("no entrezGeneId on the copy-number GET")
 }

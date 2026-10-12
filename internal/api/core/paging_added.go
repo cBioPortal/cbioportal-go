@@ -132,6 +132,27 @@ func templatePath(path string) string {
 	return strings.Join(segs, "/")
 }
 
+// AddedParam is a query parameter go accepts although its Java controller
+// does not declare it, so Java ignores it. It is optional: without it the
+// endpoint answers as Java's. It is validated as Java validates an Integer
+// (or, with Param.Class, an enum) parameter and documented in the served API
+// descriptions (apiDocsOverlay).
+type AddedParam struct {
+	Method string
+	// Path is the endpoint's path as the API descriptions name it.
+	Path  string
+	Param Param
+	// Doc describes the parameter in the API descriptions.
+	Doc string
+}
+
+// AddedParams are the parameters go adds to Java's endpoints.
+var AddedParams = []AddedParam{
+	{Method: "GET", Path: "/api/molecular-profiles/{molecularProfileId}/discrete-copy-number",
+		Param: Param{Name: "entrezGeneId"},
+		Doc:   "Entrez Gene ID of the gene whose calls are returned. Added in go: optional; without it, every gene's calls are returned."},
+}
+
 // addedPagingOf returns the added paging of a pagedEndpoints entry, or nil.
 func addedPagingOf(endpoint string) *AddedPaging {
 	return addedByEndpoint[endpoint]
@@ -158,6 +179,20 @@ func init() {
 		}
 		if !found {
 			contractRoutes = append(contractRoutes, contractRoute{method: a.Method, pattern: a.Path, params: a.params()})
+		}
+	}
+	for _, a := range AddedParams {
+		found := false
+		for j := range contractRoutes {
+			rt := &contractRoutes[j]
+			if rt.method == a.Method && templatePath(rt.pattern) == templatePath(a.Path) {
+				rt.params = append(rt.params, a.Param)
+				found = true
+				break
+			}
+		}
+		if !found {
+			contractRoutes = append(contractRoutes, contractRoute{method: a.Method, pattern: a.Path, params: []Param{a.Param}})
 		}
 	}
 }

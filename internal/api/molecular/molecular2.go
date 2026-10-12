@@ -107,7 +107,9 @@ func (s Server) discreteCopyNumberGet(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, []DiscreteCopyNumberData{})
 		return
 	}
-	s.writeDiscreteCopyNumber(w, r, mpid, nil, nil, q.Get("sampleListId"), q.Get("discreteCopyNumberEventType"), core.ProjectionOf(r))
+	// entrezGeneId is a parameter go adds (core.AddedParams): Java's
+	// controller has none and answers every gene.
+	s.writeDiscreteCopyNumber(w, r, mpid, singleEntrezGeneID(q), nil, q.Get("sampleListId"), q.Get("discreteCopyNumberEventType"), core.ProjectionOf(r))
 }
 
 // homdelOrAmpOnly is DiscreteCopyNumberServiceImpl.isHomdelOrAmpOnly: such
