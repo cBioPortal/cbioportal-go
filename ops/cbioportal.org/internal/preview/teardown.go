@@ -12,8 +12,15 @@ import (
 )
 
 // Teardown drops the databases of pull request n's preview and marks its
-// Deployments inactive.
+// Deployments inactive; with st.DryRun it only logs what it would do.
 func Teardown(ctx context.Context, st *Settings, gh *github.Client, n int) error {
+	if st.DryRun {
+		for _, d := range DatabasesFor(st.Prefix, n).All() {
+			job.Logf("would drop %s", d)
+		}
+		job.Logf("would mark the deployments of #%d inactive", n)
+		return nil
+	}
 	c := ch.New(job.ClickHouseURL(), "default")
 	var errs []error
 	for _, d := range DatabasesFor(st.Prefix, n).All() {

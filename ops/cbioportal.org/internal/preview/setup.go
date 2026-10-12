@@ -41,6 +41,9 @@ type Settings struct {
 	// Rewrite is the cbioportal-rewrite-test binary that clones production
 	// for `preview-data: prod`.
 	Rewrite string
+	// DryRun makes teardown and gc log what they would remove, and
+	// remove nothing.
+	DryRun bool
 }
 
 // SettingsFromEnv reads the Settings; pr is the pull request number (0:
