@@ -200,6 +200,11 @@ to its report. Every night, clean or not, the job posts that night's report as
 a comment and rewrites the description. When the goal is reached, it says so
 and closes the issue. If no issue is open, the next run opens one.
 
+When someone changes a night's result in `nights.txt` by hand (for example,
+marking a night clean after checking its differences), run
+`parity status` with the same `PARITY_STATE` to rewrite the description
+right away. With `--dry-run` it prints the description instead.
+
 | Option | Effect |
 |---|---|
 | `--dry-run` | print the GitHub actions instead of doing them, and do not count the night |

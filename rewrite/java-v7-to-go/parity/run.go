@@ -161,12 +161,7 @@ func trackIssue(o runOptions, run, text, day string, c Counts, nightLines []stri
 		return strings.TrimSpace(out.String()), err
 	}
 	linksPath := filepath.Join(o.state, "night-links.txt")
-	links := map[string]string{}
-	for _, l := range readLines(linksPath) {
-		if d, u, ok := strings.Cut(l, " "); ok {
-			links[d] = u
-		}
-	}
+	links := readLinks(linksPath)
 	status := filepath.Join(run, "status.md")
 	writeStatus := func() error {
 		return os.WriteFile(status, []byte(statusBody(o.issueRepo, nightLines, links, streak, day)), 0o644)
@@ -174,9 +169,7 @@ func trackIssue(o runOptions, run, text, day string, c Counts, nightLines []stri
 
 	issue := o.issue
 	if issue == "" {
-		out, _ := exec.Command("gh", "issue", "list", "-R", o.issueRepo, "--state", "open", "--label", issueLabel,
-			"--json", "number", "-q", ".[].number").Output()
-		issue, _, _ = strings.Cut(strings.TrimSpace(string(out)), "\n")
+		issue = openIssue(o.issueRepo)
 	}
 	if issue == "" {
 		labels, _ := exec.Command("gh", "label", "list", "-R", o.issueRepo, "--search", issueLabel,
@@ -240,6 +233,53 @@ func trackIssue(o runOptions, run, text, day string, c Counts, nightLines []stri
 		return err
 	}
 	return nil
+}
+
+// readLinks reads night-links.txt: one "<date> <report comment URL>" line
+// per night.
+func readLinks(path string) map[string]string {
+	links := map[string]string{}
+	for _, l := range readLines(path) {
+		if d, u, ok := strings.Cut(l, " "); ok {
+			links[d] = u
+		}
+	}
+	return links
+}
+
+// openIssue is the number of the open tracking issue, or "" when there is
+// none.
+func openIssue(repo string) string {
+	out, _ := exec.Command("gh", "issue", "list", "-R", repo, "--state", "open", "--label", issueLabel,
+		"--json", "number", "-q", ".[].number").Output()
+	issue, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return issue
+}
+
+// refreshStatus rewrites the tracking issue's description from nights.txt
+// as it is now, for when a night's record was changed after its run.
+func refreshStatus(o runOptions) error {
+	nightLines := readLines(filepath.Join(o.state, "nights.txt"))
+	if len(nightLines) == 0 {
+		return die("no nights recorded in %s", o.state)
+	}
+	slices.Sort(nightLines)
+	day, _, _ := strings.Cut(nightLines[len(nightLines)-1], " ")
+	body := statusBody(o.issueRepo, nightLines, readLinks(filepath.Join(o.state, "night-links.txt")), streakTo(nightLines, day), day)
+	if o.dry {
+		fmt.Fprint(o.stdout, body)
+		return nil
+	}
+	issue := o.issue
+	if issue == "" {
+		issue = openIssue(o.issueRepo)
+	}
+	if issue == "" {
+		return die("no open issue labelled %s in %s", issueLabel, o.issueRepo)
+	}
+	cmd := exec.Command("gh", "issue", "edit", issue, "-R", o.issueRepo, "--body-file", "-")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(body), o.stdout, o.stderr
+	return cmd.Run()
 }
 
 // runParitydiff replays the corpus, B twice, under the memory cap of

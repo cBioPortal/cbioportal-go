@@ -30,6 +30,9 @@ const usage = `Usage:
       UTC), to redo a past night, and samples the day before it; -dry-run
       prints the GitHub issue actions instead of running gh and records
       nothing in the state directory.
+  parity status [-dry-run] [-root DIR]
+      rewrite the tracking issue's description from nights.txt as it is
+      now, after a night's record was changed by hand; -dry-run prints it.
   parity corpus [-root DIR] [OUT]
       write the logged-traffic corpus (default DIR/.parity/nightly/corpus.txt)
   parity nightly [-home DIR] [-repo DIR] [-- RUN-ARGS]
@@ -108,6 +111,30 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if !clean {
+			return 1
+		}
+		return 0
+	case "status":
+		root := fs.String("root", "", "repository root")
+		dry := fs.Bool("dry-run", false, "print the description instead of editing the issue")
+		if err := fs.Parse(args[1:]); err != nil {
+			return flagStatus(err)
+		}
+		if fs.NArg() > 0 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		r, err := rootDir(*root)
+		if err != nil {
+			fmt.Fprintln(stderr, "parity:", err)
+			return 2
+		}
+		dir := env("PARITY_DIR", filepath.Join(r, ".parity/nightly"))
+		if err := refreshStatus(runOptions{
+			state: env("PARITY_STATE", dir), issueRepo: env("ISSUE_REPO", "cBioPortal/cbioportal-go"),
+			issue: os.Getenv("PARITY_ISSUE"), dry: *dry, stdout: stdout, stderr: stderr,
+		}); err != nil {
+			fmt.Fprintln(stderr, "status:", err)
 			return 1
 		}
 		return 0

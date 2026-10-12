@@ -136,8 +136,13 @@ func nights(lines []string, day string, clean bool) ([]string, int) {
 	}
 	out = append(out, day+" "+night)
 	slices.Sort(out)
+	return out, streakTo(out, day)
+}
+
+// streakTo is the clean nights in a row of nights.txt lines up to day.
+func streakTo(lines []string, day string) int {
 	isClean := map[string]bool{}
-	for _, l := range out {
+	for _, l := range lines {
 		isClean[l] = true
 	}
 	streak := 0
@@ -146,7 +151,7 @@ func nights(lines []string, day string, clean bool) ([]string, int) {
 		streak++
 		d = d.AddDate(0, 0, -1)
 	}
-	return out, streak
+	return streak
 }
 
 // corpusHeader returns the values of the corpus header lines "# <key>…".
