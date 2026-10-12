@@ -83,6 +83,10 @@ It also marks requests whose difference is expected. The list is in
   whole portal (marked only when go answers an empty list).
 - **Paging go adds:** a page of an endpoint whose Java controller has no
   paging parameters, and the API documentation that lists them.
+- **Parameters go adds:** the copy-number GET with an `entrezGeneId`.
+  Java's GET has no gene parameter and answers every gene, while go
+  answers that gene only. The difference is accepted when go's calls are
+  all among Java's (`known-if-a-subset`).
 - **Tied rows:** a page boundary falls among rows that Java leaves in no
   fixed order, such as samples with the same id in several studies.
 
@@ -90,8 +94,9 @@ Three kinds of requests are left out, because they ask for gigabytes,
 too costly to replay every night:
 
 - A profile's whole copy-number matrix (`discreteCopyNumberEventType=ALL`
-  without genes). Only a POST body can name genes there: the GET ignores
-  an `entrezGeneId` in its address and answers every gene.
+  without genes). For Java only a POST body can name genes there. Java's
+  GET has no gene parameter, so it answers every gene even when the
+  address has an `entrezGeneId`, and such a GET is left out too.
 - One page (`pageSize` or `pageNumber`) of a profile's values without
   genes. Java has no paging there and sends the whole matrix, so the
   answers would differ anyway: go sends just the page.

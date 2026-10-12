@@ -54,6 +54,11 @@ func TestExpect(t *testing.T) {
 		// Paging go adds.
 		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l&pageSize=10&pageNumber=1", "", "known="},
 		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l", "", ""},
+		// The gene parameter go adds.
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?entrezGeneId=8626&sampleListId=l", "", "known-if-a-subset="},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number/?sampleListId=l&entrezGeneId=7157&projection=DETAILED", "", "known-if-a-subset="},
+		{"GET", "/api/molecular-profiles/p_gistic/discrete-copy-number?sampleListId=l&entrezGeneId=", "", ""},
+		{"POST", "/api/molecular-profiles/p_gistic/discrete-copy-number/fetch?entrezGeneId=7157", `{"sampleListId":"l"}`, ""},
 		{"GET", "/api/sample-lists/l/sample-ids?pageSize=5", "", "known="},
 		{"GET", "/api/sample-lists/l/sample-ids", "", ""},
 		{"POST", "/api/molecular-data/fetch?pageSize=2&pageNumber=0", `{"molecularProfileIds":["p"]}`, "known="},

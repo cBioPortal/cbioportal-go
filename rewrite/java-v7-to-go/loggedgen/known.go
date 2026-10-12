@@ -184,8 +184,8 @@ var expectations = []expectation{
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool { return isAPIDocs(p) },
-		options: `ignore=host,servers,oauth2RedirectUrl known="go documents the paging and sorting parameters it adds ` +
-			`(Added in go; docs/rewrite/api-coverage.md#paging-that-go-adds)"`,
+		options: `ignore=host,servers,oauth2RedirectUrl known="go documents the parameters it adds: paging and sorting ` +
+			`(docs/rewrite/api-coverage.md#paging-that-go-adds) and the copy-number GET's entrezGeneId (Added in go; docs/rewrite/java-quirks.md)"`,
 		comment: "the API documentation names the origin it is served from",
 	},
 	{
@@ -264,6 +264,12 @@ var expectations = []expectation{
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return usesAddedPaging(m, p, q) },
 		options: `known="go pages and sorts this endpoint (docs/rewrite/api-coverage.md#paging-that-go-adds); Java's controller has no such parameters and answers the whole list, or fails on it"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "GET" && isDiscreteCNAList(p) && q.Get("entrezGeneId") != ""
+		},
+		options: `known-if-a-subset="Java's copy-number GET has no gene parameter and answers every gene's calls; go reads entrezGeneId and answers that gene's (Added in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isTreatmentRows(p) },
