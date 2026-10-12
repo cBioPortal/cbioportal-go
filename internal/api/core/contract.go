@@ -37,6 +37,13 @@ func (s *State) JavaContract(next http.Handler) http.Handler {
 			return
 		}
 		q := r.URL.Query()
+		if IsLegacyAlias(r) && rt.intercepted == "" && (rt.filter == studyViewFilterSchema || rt.filter == studyViewFilterReadSchema) {
+			// The legacy study-view controllers read the filter the
+			// interceptor intercepts, and validate it.
+			legacy := *rt
+			legacy.filter, legacy.intercepted = studyViewFilterSchema, "interceptedStudyViewFilter"
+			rt = &legacy
+		}
 		if rt.filter != nil && r.Method == http.MethodPost {
 			msg, done := rt.checkFilter(w, r, q)
 			if done {
@@ -176,6 +183,8 @@ var (
 	pageSizeParam   = Param{Name: "pageSize", min: 1, max: MaxPageSize, hasMin: true, hasMax: true}
 	pageNumberParam = Param{Name: "pageNumber", min: 0, hasMin: true}
 	directionParam  = enumParam("direction", "org.cbioportal.legacy.web.parameter.Direction", "ASC", "DESC")
+	// tierParam is the treatment endpoints' tier.
+	tierParam = enumParam("tier", "org.cbioportal.legacy.model.ClinicalEventKeyCode", "Agent", "AgentClass", "AgentTarget")
 )
 
 // requiredText is a required String request parameter.
@@ -360,6 +369,10 @@ type contractRoute struct {
 func (rt *contractRoute) checkFilter(w http.ResponseWriter, r *http.Request, q map[string][]string) (msg string, done bool) {
 	raw, _ := io.ReadAll(r.Body)
 	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if t := bytes.TrimSpace(raw); rt.filter.lenient && (len(t) == 0 || string(t) == "null") {
+		// No filter to read: the handler answers.
+		return checkParamsAround(rt.params, q, rt.bodyAt, nil), false
+	}
 	ok, prop, violation := rt.filter.readFilter(raw, rt.intercepted != "")
 	if rt.intercepted != "" {
 		if !ok {
@@ -463,7 +476,7 @@ var contractRoutes = []contractRoute{
 	{method: "POST", pattern: "/api/samples/fetch", params: []Param{projectionParamOf(projectionType)}, body: sampleFilterBody, shape: sampleShape},
 	// The study view's filtered samples carry the ID fields only (the SampleDTO's
 	// other fields are not selected, so null and not serialized).
-	{method: "POST", pattern: "/api/filtered-samples/fetch", fixed: "ID", shape: sampleShape},
+	{method: "POST", pattern: "/api/filtered-samples/fetch", fixed: "ID", shape: sampleShape, filter: studyViewFilterReadSchema},
 
 	// Patients.
 	{method: "GET", pattern: "/api/patients", params: paged(legacyProjection, PatientSort), shape: patientShape, nest: "cancerStudy"},
@@ -554,9 +567,11 @@ var contractRoutes = []contractRoute{
 	{method: "POST", pattern: "/api/molecular-profiles/co-expressions/fetch",
 		params: []Param{requiredText("molecularProfileIdA"), requiredText("molecularProfileIdB")}},
 	{method: "POST", pattern: "/api/clinical-data-density-plot/fetch", params: []Param{requiredText("xAxisAttributeId"),
-		{Name: "xAxisBinCount"}, requiredText("yAxisAttributeId"), {Name: "yAxisBinCount"}}},
+		{Name: "xAxisBinCount"}, requiredText("yAxisAttributeId"), {Name: "yAxisBinCount"}},
+		filter: studyViewFilterReadSchema, bodyAt: 4},
 	{method: "POST", pattern: "/api/clinical-data-violin-plots/fetch",
-		params: []Param{requiredText("categoricalAttributeId"), requiredText("numericalAttributeId")}},
+		params: []Param{requiredText("categoricalAttributeId"), requiredText("numericalAttributeId")},
+		filter: studyViewFilterSchema, bodyAt: 2},
 	{method: "POST", pattern: "/api/geneset-hierarchy/fetch", params: []Param{requiredText("geneticProfileId"), {Name: "percentile"}}},
 	{method: "POST", pattern: "/api/genesets/{genesetId}/expression-correlation/fetch", params: []Param{requiredText("geneticProfileId")}},
 	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/mutation-spectrums/fetch", exists: []string{"profile"},
@@ -583,13 +598,33 @@ var contractRoutes = []contractRoute{
 
 	// The study view's clinical table (StudyViewController): pageSize 0
 	// lists every sample; sortBy is free text.
-	{method: "POST", pattern: "/api/clinical-data-table/fetch", params: clinicalTableParams},
+	{method: "POST", pattern: "/api/clinical-data-table/fetch", params: clinicalTableParams,
+		filter: studyViewFilterSchema, intercepted: "interceptedStudyViewFilter"},
 
 	// Study view counts with a projection.
 	{method: "POST", pattern: "/api/mutation-data-counts/fetch", params: []Param{projectionParamOf(legacyProjection)}},
-	{method: "POST", pattern: "/api/treatments/sample-counts/fetch", params: []Param{
-		enumParam("tier", "org.cbioportal.legacy.model.ClinicalEventKeyCode", "Agent", "AgentClass", "AgentTarget"),
-		projectionParamOf(projectionType)}},
+	{method: "POST", pattern: "/api/treatments/sample-counts/fetch", params: []Param{tierParam, projectionParamOf(projectionType)},
+		filter: studyViewFilterSchema, bodyAt: 2},
+
+	// The study view's other endpoints with a StudyViewFilter body: the
+	// column-store controllers validate it where they declare @Valid, the
+	// legacy ones (InvolvedCancerStudyExtractorInterceptor) always. A filter
+	// that names no studies elsewhere searches every study
+	// (studyview.allStudies).
+	{method: "POST", pattern: "/api/mutated-genes/fetch", filter: studyViewFilterReadSchema},
+	{method: "POST", pattern: "/api/cna-genes/fetch", filter: studyViewFilterReadSchema},
+	{method: "POST", pattern: "/api/structuralvariant-genes/fetch", filter: studyViewFilterSchema},
+	{method: "POST", pattern: "/api/molecular-profile-sample-counts/fetch", filter: studyViewFilterSchema},
+	{method: "POST", pattern: "/api/sample-lists-counts/fetch", filter: studyViewFilterSchema},
+	{method: "POST", pattern: "/api/clinical-event-type-counts/fetch", filter: studyViewFilterSchema},
+	{method: "POST", pattern: "/api/treatments/patient-counts/fetch", params: []Param{tierParam},
+		filter: studyViewFilterSchema, bodyAt: 1},
+	{method: "POST", pattern: "/api/treatments/patient", params: []Param{tierParam},
+		filter: studyViewFilterSchema, intercepted: "interceptedStudyViewFilter"},
+	{method: "POST", pattern: "/api/treatments/sample", params: []Param{tierParam},
+		filter: studyViewFilterSchema, intercepted: "interceptedStudyViewFilter"},
+	{method: "POST", pattern: "/api/structuralvariant-counts/fetch",
+		filter: studyViewFilterSchema, intercepted: "interceptedStudyViewFilter"},
 
 	// Genes.
 	{method: "GET", pattern: "/api/genes", params: paged(legacyProjection, geneSort), shape: geneShape},

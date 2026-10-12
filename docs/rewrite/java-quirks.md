@@ -18,16 +18,16 @@ frontend, may depend on them. But where Java is plainly wrong, go fixes it:
 
 Every fix is listed here, most with a test that keeps it fixed.
 
-**Summary.** The page has 92 entries:
+**Summary.** The page has 94 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
-| Copied | 55 | go does the same thing as Java, on purpose. |
+| Copied | 57 | go does the same thing as Java, on purpose. |
 | Fixed in go | 27 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
-A test checks 53 of the 55 copied entries. The two without a test are the
+A test checks 55 of the 57 copied entries. The two without a test are the
 mutation's genome build, which comes from production's data, and the
 marker a failed study export writes, which would need an export that fails.
 
@@ -224,6 +224,8 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
 | A request body without `studyViewFilter` gives a 500 (a null pointer error). So does a body missing its bin filters or its gene or attribute list, or no body at all. Clinical counts and bins for a filter that names no studies give the error "SQL exception." | ColumnarStoreStudyViewController and its binners | Copied. | TestContractStudyViewBodyWithoutFilter |
+| A filter that names no studies and no samples, but has another filter, searches every study in the portal. For example, `{"clinicalDataFilters":[{"attributeId":"ONCOTREE_CODE","values":[{"value":"OS"}]}]}` to `filtered-samples/fetch` returns the osteosarcoma samples of all studies. This holds for `filtered-samples`, `mutated-genes`, `cna-genes`, the density plot, and the `studyViewFilter` of the count and bin endpoints. A filter with nothing to narrow by selects no samples. | CustomDataFilterUtil.extractInvolvedCancerStudies, ClickhouseStudyViewFilterMapper (no study condition) | Copied. go searches only the studies the user may read. | TestContractStudyViewFilterWithoutStudies, TestWithStudies |
+| Some study-view endpoints check the filter first. The filter must have `studyIds` or `sampleIdentifiers`, not both, and the list must not be empty. Otherwise the answer is a 400, such as "eitherSampleIdentifiersOrStudyIdsPresent must be true". The column-store endpoints that check are `sample-lists-counts`, `molecular-profile-sample-counts`, `structuralvariant-genes`, `clinical-event-type-counts`, the violin plots and the treatment counts. The older endpoints always check, and name the filter `interceptedStudyViewFilter` in the message. They are every `/api/legacy/` study-view endpoint, `structuralvariant-counts`, `clinical-data-table` and `treatments/patient` and `treatments/sample`. | `@Valid` StudyViewFilter (`isEitherSampleIdentifiersOrStudyIdsPresent`, `@Size(min = 1)`) | Copied. | TestContractStudyViewFilterValidation, TestReadStudyViewFilter |
 | A filter value can be a bare string: `"values": ["OS"]` means `"values": [{"value": "OS"}]`. | DataFilterValue(String) constructor, used by Jackson | Copied. | TestDataFilterValueBareString |
 | The `/api/legacy/` gene tables (`mutated-genes`, `cna-genes`, `structuralvariant-genes`) have no `numberOfAlteredCasesOnPanel`, and their `matchingGenePanelIds` lists only real gene panels. A whole-exome study lists none, where the column-store tables list `WES`. | legacy ProfiledCasesCounter | Copied. | TestLegacyGeneCounts |
 | `negateFilters` is accepted and then ignored. | ColumnarStoreStudyViewController.fetchFilteredSamples | Copied. | TestContractFilteredSamplesNegateFiltersIgnored |

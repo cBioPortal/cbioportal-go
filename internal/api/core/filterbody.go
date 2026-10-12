@@ -61,6 +61,9 @@ type filterSchema struct {
 	// order lists the properties (and assertName) in the order Bean
 	// Validation reports their violations.
 	order []string
+	// lenient skips properties the class does not declare, here and in its
+	// nested filters, as Spring's own reader of a request body does.
+	lenient bool
 }
 
 func sizedProp(name string, kind filterKind, min, max int) filterProp {
@@ -177,7 +180,28 @@ var (
 		s.eitherNonEmpty = true
 		return s
 	}()
+
+	// StudyViewFilter, where @Valid: studyIds XOR sampleIdentifiers
+	// (non-null), each list with at least one element. Only these two
+	// properties are read here; the handler reads the rest.
+	studyViewFilterSchema = func() *filterSchema {
+		ids := sizedProp("sampleIdentifiers", fObjects, 1, math.MaxInt32)
+		ids.elem = sampleIdentifierSchema
+		return &filterSchema{props: []filterProp{ids, sizedProp("studyIds", fStrings, 1, math.MaxInt32)},
+			either:     [2]string{"sampleIdentifiers", "studyIds"},
+			assertName: "eitherSampleIdentifiersOrStudyIdsPresent",
+			order:      []string{"eitherSampleIdentifiersOrStudyIdsPresent", "sampleIdentifiers", "studyIds"},
+			lenient:    true}
+	}()
+	// StudyViewFilter, where it is not validated: only the types of its
+	// study and sample lists are read here.
+	studyViewFilterReadSchema = &filterSchema{props: []filterProp{
+		{name: "sampleIdentifiers", kind: fObjects, elem: sampleIdentifierSchema}, {name: "studyIds", kind: fStrings},
+	}, lenient: true}
 )
+
+// sampleIdentifierSchema is a SampleIdentifier.
+var sampleIdentifierSchema = &filterSchema{props: []filterProp{{name: "sampleId", kind: fString}, {name: "studyId", kind: fString}}}
 
 // readFilter reads body as Jackson reads the filter class: ok is false when
 // it fails to (invalid JSON, a property the class does not declare unless
@@ -205,6 +229,7 @@ func (fs *filterSchema) readFilter(body []byte, ignoreUnknown bool) (ok bool, pr
 // read checks obj's properties and their types, skipping properties the
 // class does not declare when ignoreUnknown.
 func (fs *filterSchema) read(obj map[string]any, ignoreUnknown bool) bool {
+	ignoreUnknown = ignoreUnknown || fs.lenient
 	for k, val := range obj {
 		p := fs.prop(k)
 		if p == nil && ignoreUnknown {

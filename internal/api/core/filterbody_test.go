@@ -39,6 +39,37 @@ func TestReadInterceptedFilters(t *testing.T) {
 	}
 }
 
+// StudyViewFilter ignores properties it does not declare; where validated,
+// exactly one of studyIds and sampleIdentifiers is present, and not empty.
+func TestReadStudyViewFilter(t *testing.T) {
+	const size = "size must be between 1 and 2147483647"
+	clinical := `"clinicalDataFilters":[{"attributeId":"ONCOTREE_CODE","values":[{"value":"OS"}]}]`
+	for _, c := range []struct {
+		name string
+		fs   *filterSchema
+		body string
+		ok   bool
+		prop string
+		viol string
+	}{
+		{"studies", studyViewFilterSchema, `{"studyIds":["s"],` + clinical + `,"x":1}`, true, "", ""},
+		{"samples", studyViewFilterSchema, `{"sampleIdentifiers":[{"studyId":"s","sampleId":"a","x":1}]}`, true, "", ""},
+		{"neither", studyViewFilterSchema, `{` + clinical + `}`, true, "eitherSampleIdentifiersOrStudyIdsPresent", "must be true"},
+		{"both", studyViewFilterSchema, `{"studyIds":["s"],"sampleIdentifiers":[{"studyId":"s","sampleId":"a"}]}`, true, "eitherSampleIdentifiersOrStudyIdsPresent", "must be true"},
+		{"both empty", studyViewFilterSchema, `{"studyIds":[],"sampleIdentifiers":[]}`, true, "eitherSampleIdentifiersOrStudyIdsPresent", "must be true"},
+		{"empty studies", studyViewFilterSchema, `{"studyIds":[]}`, true, "studyIds", size},
+		{"empty samples", studyViewFilterSchema, `{"sampleIdentifiers":[]}`, true, "sampleIdentifiers", size},
+		{"scalar studies", studyViewFilterSchema, `{"studyIds":"s"}`, false, "", ""},
+		{"unvalidated neither", studyViewFilterReadSchema, `{` + clinical + `}`, true, "", ""},
+		{"unvalidated scalar studies", studyViewFilterReadSchema, `{"studyIds":"s"}`, false, "", ""},
+	} {
+		ok, prop, viol := c.fs.readFilter([]byte(c.body), false)
+		if ok != c.ok || prop != c.prop || viol != c.viol {
+			t.Errorf("%s: ok=%v %q %q, want %v %q %q", c.name, ok, prop, viol, c.ok, c.prop, c.viol)
+		}
+	}
+}
+
 // go reads an intercepted filter skipping the properties it does not
 // declare, where Java's interceptor gives up; wrong types still fail.
 func TestReadInterceptedFiltersIgnoreUnknown(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 // routeTreatments registers the study-view treatment and clinical-event-type
 // charts, all computed from clinical_event_data_derived over the filtered
 // samples/patients.
-func (s Server) routeTreatments(mux *http.ServeMux) {
+func (s Server) routeTreatments(mux router) {
 	mux.HandleFunc("POST /api/treatments/patient-counts/fetch", s.patientTreatmentCountsFetch)
 	mux.HandleFunc("POST /api/treatments/sample-counts/fetch", s.sampleTreatmentCountsFetch)
 	mux.HandleFunc("POST /api/treatments/patient", s.treatmentsPatient)

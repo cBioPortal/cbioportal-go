@@ -191,15 +191,17 @@ func (s Server) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			core.WriteError(w, http.StatusForbidden, "Access to the specified resource has been forbidden")
 			return
 		}
+		readable := func(study string) bool {
+			groups, ok := idx.groups[study]
+			return !ok || canRead(auth, study, groups)
+		}
+		r = core.WithStudyReadable(r, readable)
 		if r.Method != http.MethodGet || !filteredLists[r.URL.Path] {
 			next.ServeHTTP(w, r)
 			return
 		}
 		keepAll := r.URL.Path == "/api/studies" && policy.showUnauthorized
-		f := studyFilter{readable: func(study string) bool {
-			groups, ok := idx.groups[study]
-			return !ok || canRead(auth, study, groups)
-		}, keepAll: keepAll, studies: r.URL.Path == "/api/studies"}
+		f := studyFilter{readable: readable, keepAll: keepAll, studies: r.URL.Path == "/api/studies"}
 		// A successful array is filtered element by element as it is
 		// written, unless its total-count header must count the kept records.
 		var bw *bufio.Writer
