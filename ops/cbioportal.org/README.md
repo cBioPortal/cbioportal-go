@@ -25,7 +25,7 @@ The image copies them, and the settings files, into `/app/deploy/`.
 |---|---|---|
 | `hub-import.sh` | `cbioportal-ops hub import-pr` | The import job for hub.cbioportal.org. It runs for each datahub pull request labelled `preview` and loads the studies that pull request changes. |
 | `pr-preview-setup.sh` | `cbioportal-ops preview setup` | Builds the databases of a cbioportal-go pull request preview, at pr-&lt;N&gt;.gopreview.cbioportal.org. |
-| `pr-preview-teardown.sh` | `cbioportal-ops preview teardown <N>`, `preview gc` (`--gc`) | Removes the databases of one preview, or of every preview whose pull request is closed or unlabelled. |
+| `pr-preview-teardown.sh` | `cbioportal-ops preview teardown <N>`, `preview gc` (`--gc`) | Removes the databases of one preview, or of every preview whose pull request is closed or unlabelled. With `--dry-run`, it only logs what it would remove. |
 | `mirror-prod.sh` | `cbioportal-rewrite-test java-v7-to-go mirror` | An hourly job. After each new import on production, it rebuilds go.cbioportal.org's databases as a copy (a "mirror") of production. It belongs to the move from Java, see [rewrite/](../../rewrite/). |
 | `public-portal.properties`, `public-portal-frontend-config.json` | | The portal settings of www.cbioportal.org. go.cbioportal.org and the other servers that mirror production use them too, so they look and behave like www. |
 

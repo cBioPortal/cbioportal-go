@@ -14,18 +14,20 @@ sessions, and monitoring.
   - [Website paths](#website-paths)
 - [Portal properties](#portal-properties)
 - [Login and study authorization](#login-and-study-authorization)
-  - [Optional sign-in (optional_oauth2)](#optional-sign-in-optional_oauth2)
+  - [Optional sign-in](#optional-sign-in)
   - [Login sessions in Redis](#login-sessions-in-redis)
   - [Data access tokens](#data-access-tokens)
+  - [Java names](#java-names)
 - [Sessions](#sessions)
 - [Metrics and logs](#metrics-and-logs)
 
 Both programs print all their options with `-h`. To see which build you
-are running, use `-version` (or `cbioportal-import version`). It prints
-something like `cbioportal-api 6b38ed6 (2026-10-02T09:15:00Z)`. That is the
-git commit the program was built from and the time of that commit. A
-`+dirty` after the commit means the build had changes that were not
-committed.
+are running, use `version` (or `-version`). It prints something like
+`cbioportal-api 6b38ed6 (2026-10-02T09:15:00Z)`. That is the git commit the
+program was built from and the time of that commit. A `+dirty` after the
+commit means the build had changes that were not committed. The rules all
+the programs share, such as `--json`, `--dry-run` and the exit codes, are
+in [Command-line conventions](cli.md).
 
 ## cbioportal-import
 
@@ -52,6 +54,7 @@ Commands:
 ```bash
 cbioportal-import plan <study-dir>                                  # no ClickHouse needed
 cbioportal-import ingest <study-dir> --db cbioportal_raw
+cbioportal-import remove-study <study-id>... --db cbioportal_raw --dry-run   # what it would delete
 cbioportal-import remove-study <study-id>... --db cbioportal_raw     # then transform
 cbioportal-import ingest-case-lists <study-dir>... --db cbioportal_raw
 cbioportal-import load-reference <seed.sql.gz> --db cbioportal_ref
@@ -78,15 +81,32 @@ Every command that connects to ClickHouse takes `--url`. Its default is the
 is not set. The ClickHouse user name and password come only from the
 environment variables `CLICKHOUSE_USER` and `CLICKHOUSE_PASSWORD`.
 
+Commands that report a result take `--json` to print it as JSON instead.
+`remove-study` and `import-study` take `--dry-run`, which reports what
+they would change and changes nothing.
+
 The importer exits with one of three codes:
 
 | Code | Meaning |
 |---|---|
 | 0 | The command worked. |
 | 1 | The command failed. It prints `cbioportal-import: <command>: <error>` to stderr. |
-| 2 | The command line was wrong. |
+| 2 | The command line was wrong. A mistyped command or flag gets a suggestion, such as `(did you mean --raw-db?)`. |
 
 ## cbioportal-api
+
+`cbioportal-api` serves the API when it is started without a command. A
+command, given first, does something else:
+
+| Command | What it does |
+|---|---|
+| `cbioportal-api config [flags]` | Prints the settings the server would use, and where each value came from: a flag, an environment variable, the default, the properties file or an argument. Secrets show as `(redacted)`. |
+| `cbioportal-api check [flags]` | Checks the settings, then reaches ClickHouse and its three databases, each sign-in provider and the login session store. It prints one line per check and exits with 1 if any check fails. |
+| `cbioportal-api version` | Prints the version. |
+
+All three take `--json`. The server exits with 0 when it stops normally,
+1 when it fails while running, and 2 when the command line or the settings
+are wrong. Then nothing has started.
 
 Each server setting can come from a command-line flag or from an
 environment variable. A flag wins over the environment variable, and the
@@ -115,6 +135,10 @@ usually easier.
 | `-metrics-addr` | `METRICS_ADDR` | | An address, such as `:9090`, where the server serves Prometheus metrics at `/metrics`. It is separate from the API's port. |
 | `-access-log` | `ACCESS_LOG` | `false` | Writes one JSON line per request to stdout. |
 | `-portal-properties` | `PORTAL_PROPERTIES` | | A portal properties file, see [Portal properties](#portal-properties). |
+
+The login settings (`--login`, `--login-google-client-id` and the others)
+and the login session settings (`--login-session-store`, `--redis-*`) are
+described under [Login and study authorization](#login-and-study-authorization).
 
 Secrets have no flag. Every user on a machine can see the command lines of
 running programs (for example with `ps`), so secrets come only from
@@ -280,36 +304,90 @@ passwords.
 ## Login and study authorization
 
 By default the portal is open. Anyone can read every study, and nobody
-logs in.
+logs in. The `--login` setting changes that:
 
-With `authenticate=oauth2`, users must log in through an OpenID Connect
-provider. OpenID Connect is a standard way to log in through another
-service. cBioPortal deployments usually use Keycloak. You set it up with
-the same properties as the Java portal's login (Spring Security OAuth2):
+| `--login` | What it does |
+|---|---|
+| `off` (the default) | Nobody logs in. Every study is open to everyone. |
+| `optional` | Everyone may use the portal. Signing in lets users save virtual studies, groups and settings to their account. This is how www.cbioportal.org works. See [Optional sign-in](#optional-sign-in). |
+| `required` | Users must log in, and they see only the studies their roles allow. |
+
+Users log in through a sign-in provider, using OpenID Connect, a standard
+way to log in through another service. go knows Google's and Microsoft's
+settings, so these need only a client id and a secret. Any other provider,
+such as Keycloak, needs its issuer address (the address the provider names
+itself by) too:
+
+```bash
+# Keycloak; users must log in
+export CBIOPORTAL_LOGIN_OIDC_CLIENT_SECRET=...
+cbioportal-api --login=required \
+  --login-oidc-name=keycloak \
+  --login-oidc-issuer=https://keycloak.example.org/auth/realms/cbio \
+  --login-oidc-client-id=cbioportal_oauth2 \
+  --login-oidc-scopes=openid,email,roles \
+  --login-oidc-user-name-claim=email
+```
+
+Every setting also has an environment variable, shown in the table. Client
+secrets and the Redis password have no flag, only the variable, because
+every user of a machine can see the command lines of running programs.
+
+| Flag | Environment | Meaning |
+|---|---|---|
+| `--login` | `CBIOPORTAL_LOGIN` | `off`, `optional` or `required`, see above. |
+| `--login-google-client-id` | `CBIOPORTAL_LOGIN_GOOGLE_CLIENT_ID` | Google sign-in: the OAuth client's id. The user name is the user's email address. |
+| | `CBIOPORTAL_LOGIN_GOOGLE_CLIENT_SECRET` | Google sign-in: the client's secret. |
+| `--login-microsoft-client-id` | `CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_ID` | Microsoft sign-in, for work and personal accounts: the app registration's client id. The user name is the email address. |
+| | `CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_SECRET` | Microsoft sign-in: the client secret. |
+| `--login-oidc-issuer` | `CBIOPORTAL_LOGIN_OIDC_ISSUER` | Any other provider: its issuer address. The server reads the provider's other addresses from it. |
+| `--login-oidc-client-id` | `CBIOPORTAL_LOGIN_OIDC_CLIENT_ID` | The client's id at that provider. |
+| | `CBIOPORTAL_LOGIN_OIDC_CLIENT_SECRET` | The client's secret. |
+| `--login-oidc-name` | `CBIOPORTAL_LOGIN_OIDC_NAME` | The provider's name in the sign-in address `/login/oauth2/code/<name>`. The default is `oidc`. |
+| `--login-oidc-scopes` | `CBIOPORTAL_LOGIN_OIDC_SCOPES` | The scopes to ask for, separated by commas. The default is `openid`. |
+| `--login-oidc-user-name-claim` | `CBIOPORTAL_LOGIN_OIDC_USER_NAME_CLAIM` | The field of the login token that names the user, such as `email`. The default is `sub`. |
+| `--login-roles-path` | `CBIOPORTAL_LOGIN_ROLES_PATH` | Where the login token lists the user's roles, as `claim::claim::...`. The default is `resource_access::cbioportal::roles`. |
+| `--study-authorization` | `CBIOPORTAL_STUDY_AUTHORIZATION` | With `--login=optional`, `true` limits studies to the user's roles, as with `required`. |
+| `--login-auto-redirect` | `CBIOPORTAL_LOGIN_AUTO_REDIRECT` | With one provider, `/login` goes straight to it (`true`, the default) instead of listing it. |
+
+The sign-in addresses are `/login/oauth2/code/google` for Google,
+`/login/oauth2/code/azure` for Microsoft, and `/login/oauth2/code/<name>`
+for another provider. Register the full address with the provider, for
+example `https://go.cbioportal.org/login/oauth2/code/azure`. These are the
+same addresses the Java portal uses, so an existing app registration keeps
+working.
+
+`cbioportal-api check` reaches each configured provider and fetches its
+signing keys, so you can test the settings before you start the server.
+
+**The Java portal's names.** Each of these settings stands for one or more
+of the Java portal's properties (Spring Security OAuth2). Those names work
+too, in a properties file or as `--key=value` arguments, so a Java
+portal's setup works unchanged:
 
 ```properties
 authenticate=oauth2
 spring.security.oauth2.client.registration.keycloak.client-id=cbioportal_oauth2
-spring.security.oauth2.client.registration.keycloak.client-secret=<secret>
+spring.security.oauth2.client.registration.keycloak.client-secret=${KEYCLOAK_CLIENT_SECRET}
 spring.security.oauth2.client.registration.keycloak.client-authentication-method=client_secret_post
 spring.security.oauth2.client.registration.keycloak.scope=openid,email,roles
 spring.security.oauth2.client.provider.keycloak.issuer-uri=https://keycloak.example.org/auth/realms/cbio
 spring.security.oauth2.client.provider.keycloak.user-name-attribute=email
-# where the provider puts the user's roles (default shown)
 spring.security.oauth2.client.jwt-roles-path=resource_access::cbioportal::roles
 ```
 
-Keep the client secret off the command line. Put it in the properties
-file, or in an environment variable through a placeholder, such as
-`client-secret=${KEYCLOAK_CLIENT_SECRET}` (see
-[Portal properties](#portal-properties)).
+If a setting is given both ways, the two must agree. Otherwise the server
+stops and names both. `cbioportal-api config` shows each setting and where
+its value came from. The [table of Java names](#java-names) lists every
+pair.
 
 A few more details:
 
+- Some provider settings have only a Java name, such as
+  `client-authentication-method` and a provider's separate addresses
+  (`authorization-uri`, `token-uri`, `user-info-uri` and `jwk-set-uri`).
+  Set them as properties next to the go names.
 - `redirect-uri` defaults to `{baseUrl}/login/oauth2/code/{registrationId}`.
-- The server finds the provider's addresses from `issuer-uri`. You can also
-  set them yourself with `authorization-uri`, `token-uri`, `user-info-uri`
-  and `jwk-set-uri`.
 - Without `issuer-uri`, the server does not check who issued the login
   token, as in Java. It still checks the token's signature, that it is for
   this client, and that it has not expired. This is how Microsoft sign-in
@@ -330,10 +408,9 @@ How login works:
 - An `/api/**` request without a login session gets `401`. `/api/health`
   and `/api/public_virtual_studies` stay open to everyone.
 - `/logout` ends the session at the portal and at the provider.
-- The portal offers every registration that has a `client-id`. If there is
-  only one, `/login` goes straight to it, unless
-  `security.force_redirect_on_one_idp=false`. If there are several, `/login`
-  lists them.
+- The portal offers every provider that has a client id. If there is only
+  one, `/login` goes straight to it, unless `--login-auto-redirect=false`.
+  If there are several, `/login` lists them.
 
 Which studies a user can read:
 
@@ -366,27 +443,25 @@ go does not support the other `authenticate` values (`saml`,
 stored in the database). With any of them, the server stops at startup
 instead of running an open portal by mistake.
 
-### Optional sign-in (optional_oauth2)
+### Optional sign-in
 
-With `authenticate=optional_oauth2`, the portal stays open, as on
-www.cbioportal.org. Users who do not sign in get exactly what they would get
-with `authenticate=false`. Signing in is optional. Signed-in users can save
-virtual studies, groups and page settings to their account.
+With `--login=optional`, the portal stays open, as on www.cbioportal.org.
+Users who do not sign in get exactly what they would get with
+`--login=off`. Signing in is optional. Signed-in users can save virtual
+studies, groups and page settings to their account.
 
-You set up the providers the same way as for `oauth2`. Google needs only a
-client id and secret, because Spring's built-in Google settings apply:
+This is www.cbioportal.org's setup, with Google and Microsoft:
 
-```properties
-authenticate=optional_oauth2
-authorization=false
-security.method_authorization_enabled=false
-spring.security.oauth2.client.registration.google.clientId=${GOOGLE_PLUS_CONSUMER_KEY}
-spring.security.oauth2.client.registration.google.clientSecret=${GOOGLE_PLUS_CONSUMER_SECRET}
-spring.security.oauth2.client.provider.google.user-name-attribute=email
+```bash
+export CBIOPORTAL_LOGIN_GOOGLE_CLIENT_SECRET=... CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_SECRET=...
+cbioportal-api --login=optional \
+  --login-google-client-id=<google client id> \
+  --login-microsoft-client-id=<microsoft client id>
 ```
 
-- A registration (or its `provider`) named `google` gets Google's settings
-  by default. Any of these that you set yourself wins:
+- Google's settings come built in. In the Java portal's names, a
+  registration (or its `provider`) named `google` gets them by default, and
+  any of these that you set yourself wins:
 
   | Setting | Default |
   |---|---|
@@ -396,12 +471,17 @@ spring.security.oauth2.client.provider.google.user-name-attribute=email
   | User info | `https://www.googleapis.com/oauth2/v3/userinfo` |
   | Issuer | `https://accounts.google.com` |
   | Scopes | `openid,profile,email` |
-  | User name | the `sub` field |
+  | User name | the `sub` field (`--login-google-client-id` uses `email`) |
   | Redirect address | `{baseUrl}/login/oauth2/code/google` |
 
   You must register the redirect address with Google, for example
   `https://go.cbioportal.org/login/oauth2/code/google`. GitHub and Facebook
   do not support OpenID Connect, so go does not support them.
+- Microsoft's settings come with `--login-microsoft-client-id`: Microsoft's
+  `common` addresses (for work and personal accounts), the scopes
+  `openid,profile,email`, and the email address as user name. In the Java
+  portal's names, this is a registration named `azure` with these
+  addresses, as on www.cbioportal.org.
 - `/config_service` reports `authenticationMethod: optional_oauth2`, so the
   frontend shows its sign-in button. It also reports the signed-in user in
   `user_display_name` and `user_email_address`, or `anonymousUser` when
@@ -413,33 +493,44 @@ spring.security.oauth2.client.provider.google.user-name-attribute=email
 - `/logout` ends the session and returns to `/`. The user stays logged in
   at the provider, as in Java.
 - Signing in does not change which studies a user can read. Every study
-  stays open to everyone. With `security.method_authorization_enabled=true`,
-  study access works as with `oauth2`: signed-in users by their roles, and
-  everyone else by `always_show_study_group` only.
-- `dat.method=oauth2` needs `authenticate=oauth2`, so it does not work here.
+  stays open to everyone. With `--study-authorization=true`, study access
+  works as with `required`: signed-in users by their roles, and everyone
+  else by `always_show_study_group` only.
+- `dat.method=oauth2` needs `--login=required`, so it does not work here.
 
 ### Login sessions in Redis
 
-Redis is a fast key-value database. If you set Spring Session's Redis
-properties, login sessions (and logins still in progress) are kept in
-Redis. Then they survive a restart, and every copy of the server shares
-them.
+Redis is a fast key-value database. With `--login-session-store=redis`,
+login sessions (and logins still in progress) are kept in Redis. Then they
+survive a restart, and every copy of the server shares them.
 
-```properties
-spring.session.store-type=redis
-spring.data.redis.host=redis.example.org
-spring.data.redis.port=6379
-spring.data.redis.password=${REDIS_SESSION_PASSWORD}
-# optional: spring.data.redis.username, .database, .ssl.enabled=true,
-# .timeout (default 5s), or spring.data.redis.url=rediss://user:pass@host:6380/0
+```bash
+export CBIOPORTAL_REDIS_PASSWORD=...
+cbioportal-api --login=optional ... --login-session-store=redis \
+  --redis-host=redis.example.org --redis-port=6379
 ```
+
+| Flag | Environment | Meaning |
+|---|---|---|
+| `--login-session-store` | `CBIOPORTAL_LOGIN_SESSION_STORE` | `memory` (the default) or `redis`. |
+| `--redis-host`, `--redis-port` | `CBIOPORTAL_REDIS_HOST`, `CBIOPORTAL_REDIS_PORT` | Where Redis runs. The defaults are `localhost` and `6379`. |
+| `--redis-url` | `CBIOPORTAL_REDIS_URL` | Redis as one address instead, such as `rediss://user:pass@host:6380/0`. `rediss://` uses TLS. |
+| `--redis-username` | `CBIOPORTAL_REDIS_USERNAME` | The Redis user, for Redis's access lists. |
+| | `CBIOPORTAL_REDIS_PASSWORD` | The Redis password. |
+| `--redis-database` | `CBIOPORTAL_REDIS_DATABASE` | The Redis database number. The default is `0`. |
+| `--redis-tls` | `CBIOPORTAL_REDIS_TLS` | `true` connects with TLS. |
+| `--redis-timeout` | `CBIOPORTAL_REDIS_TIMEOUT` | How long to wait for Redis, such as `5s` (the default). |
+
+The Java portal's Spring Session properties work too
+(`spring.session.store-type=redis`, `spring.data.redis.host` and so on, see
+the [table of Java names](#java-names)).
 
 - The keys start with `cbioportal-go:login:`. Each one holds JSON and
   expires after 30 minutes. The time starts over each time the session is
   used.
 - go leaves the Java portal's own sessions alone. So go and Java can share
   one Redis, but a login on one does not log you in on the other.
-- Without `spring.session.store-type=redis`, sessions stay in memory.
+- Without `--login-session-store=redis`, sessions stay in memory.
 - The startup log names the store, such as `login sessions: redis
   host:6379`. It never shows the password.
 - When Redis cannot be reached, `optional_oauth2` serves every request as
@@ -516,6 +607,52 @@ Example of using a downloaded token:
 curl -H "Authorization: Bearer $(sed -n 's/^token: //p' cbioportal_data_access_token.txt)" \
   https://cbioportal.example.org/api/studies
 ```
+
+The data access token settings (`dat.*`) are cBioPortal's own names, so
+they have no separate go names.
+
+### Java names
+
+This table is for moving a Java portal's login settings to go's names.
+Each go setting stands for the Java portal's properties on the right. In
+the names below, `<name>` is the value of `--login-oidc-name` (default
+`oidc`), and `spring…` is short for `spring.security.oauth2.client`.
+
+| go setting | Java portal properties |
+|---|---|
+| `--login=off` | `authenticate=false` (or `noauthsessionservice`) |
+| `--login=optional` | `authenticate=optional_oauth2` |
+| `--login=required` | `authenticate=oauth2` |
+| `--login-google-client-id` | `spring….registration.google.client-id`, and `spring….provider.google.user-name-attribute=email` |
+| `CBIOPORTAL_LOGIN_GOOGLE_CLIENT_SECRET` | `spring….registration.google.client-secret` |
+| `--login-microsoft-client-id` | `spring….registration.azure.client-id`, `.scope=openid,profile,email`, and `spring….provider.azure.user-name-attribute=email`, `.authorization-uri`, `.token-uri` and `.jwk-set-uri` at `https://login.microsoftonline.com/common/...` |
+| `CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_SECRET` | `spring….registration.azure.client-secret` |
+| `--login-oidc-issuer` | `spring….provider.<name>.issuer-uri` |
+| `--login-oidc-client-id` | `spring….registration.<name>.client-id` |
+| `CBIOPORTAL_LOGIN_OIDC_CLIENT_SECRET` | `spring….registration.<name>.client-secret` |
+| `--login-oidc-scopes` | `spring….registration.<name>.scope` |
+| `--login-oidc-user-name-claim` | `spring….provider.<name>.user-name-attribute` |
+| `--login-roles-path` | `spring.security.oauth2.client.jwt-roles-path` |
+| `--study-authorization` | `security.method_authorization_enabled` |
+| `--login-auto-redirect` | `security.force_redirect_on_one_idp` |
+| `--login-session-store=memory` | `spring.session.store-type=none` (or unset) |
+| `--login-session-store=redis` | `spring.session.store-type=redis` |
+| `--redis-url`, `--redis-host`, `--redis-port`, `--redis-username`, `--redis-database` | `spring.data.redis.url`, `.host`, `.port`, `.username`, `.database` |
+| `CBIOPORTAL_REDIS_PASSWORD` | `spring.data.redis.password` |
+| `--redis-tls` | `spring.data.redis.ssl.enabled` |
+| `--redis-timeout` | `spring.data.redis.timeout` |
+
+For example, go.cbioportal.org's Google sign-in written in Java names,
+
+```
+--authenticate=optional_oauth2
+--spring.security.oauth2.client.registration.google.clientId=${GOOGLE_PLUS_CONSUMER_KEY}
+--spring.security.oauth2.client.registration.google.clientSecret=${GOOGLE_PLUS_CONSUMER_SECRET}
+--spring.security.oauth2.client.provider.google.user-name-attribute=email
+```
+
+is in go's names `--login=optional --login-google-client-id=$(GOOGLE_PLUS_CONSUMER_KEY)`,
+with the secret in `CBIOPORTAL_LOGIN_GOOGLE_CLIENT_SECRET`.
 
 ## Sessions
 
