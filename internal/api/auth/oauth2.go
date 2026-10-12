@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"io"
 	"log"
 	"net/http"
@@ -91,6 +90,8 @@ type oauth2Config struct {
 	// ForceRedirect sends /login straight to the provider when there is one
 	// registration (security.force_redirect_on_one_idp, default true).
 	ForceRedirect bool
+	// Texts are the login page's title and messages.
+	Texts loginTexts
 	// MethodAuthorization applies study authorization: always with oauth2,
 	// with optional_oauth2 when security.method_authorization_enabled=true.
 	MethodAuthorization bool
@@ -179,6 +180,7 @@ func loadOAuth2Config(props map[string]string) (*oauth2Config, error) {
 	}
 	c := &oauth2Config{Method: method, MethodAuthorization: method == "oauth2"}
 	var err error
+	c.Texts = loginTextsFrom(props)
 	if c.ForceRedirect, err = flag("security.force_redirect_on_one_idp", true); err != nil {
 		return nil, err
 	}
@@ -557,24 +559,25 @@ func (o *oauth2Login) loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/oauth2/authorization/"+o.cfg.Registrations[0].ID, http.StatusFound)
 		return
 	}
+	page := o.cfg.Texts
+	page.LoginError = failed
+	page.LogoutSuccess = r.URL.Query().Has("logout_success")
+	for _, reg := range o.cfg.Registrations {
+		page.Providers = append(page.Providers, loginProvider{ID: reg.ID, URL: "/oauth2/authorization/" + reg.ID})
+	}
+	// Google first, as on www.cbioportal.org.
+	slices.SortStableFunc(page.Providers, func(a, b loginProvider) int {
+		return strings.Compare(strconv.FormatBool(b.ID == "google"), strconv.FormatBool(a.ID == "google"))
+	})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	status := http.StatusOK
 	if failed {
 		status = http.StatusUnauthorized
 	}
 	w.WriteHeader(status)
-	var b strings.Builder
-	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><title>cBioPortal login</title></head>` +
-		`<body style="font-family:sans-serif;margin:3em"><h2>cBioPortal</h2>`)
-	if failed {
-		b.WriteString(`<p>You are not authorized to access this resource.</p>`)
+	if err := writeLoginPage(w, page); err != nil {
+		log.Printf("oauth2: login page: %v", err)
 	}
-	for _, reg := range o.cfg.Registrations {
-		id := html.EscapeString(reg.ID)
-		fmt.Fprintf(&b, `<p><a href="/oauth2/authorization/%s">Sign in with: %s</a></p>`, id, id)
-	}
-	b.WriteString(`</body></html>`)
-	io.WriteString(w, b.String())
 }
 
 // authorize starts the authorization-code flow.

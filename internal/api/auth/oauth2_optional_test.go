@@ -331,3 +331,45 @@ func TestMicrosoftCommonRegistration(t *testing.T) {
 		t.Error("audience not checked without issuer-uri")
 	}
 }
+
+// The login page is Java's login.html: the logo, the portal's
+// skin.authorization_message, Java's Google and Microsoft button images
+// (Google first) and a labelled box for other providers.
+func TestLoginPage(t *testing.T) {
+	p := newFakeProvider(t)
+	props := keycloakProps(p, "optional_oauth2")
+	props["spring.security.oauth2.client.registration.google.client-id"] = "gid"
+	props["spring.security.oauth2.client.registration.google.client-secret"] = "gsecret"
+	props["spring.security.oauth2.client.registration.azure.client-id"] = "mid"
+	props["spring.security.oauth2.client.provider.azure.authorization-uri"] = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+	props["spring.security.oauth2.client.provider.azure.token-uri"] = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+	props["spring.security.oauth2.client.provider.azure.jwk-set-uri"] = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+	props["skin.title"] = "cBioPortal for Cancer Genomics"
+	props["skin.authorization_message"] = `Welcome to cBioPortal - sign in with your <a href="/x">Google or Microsoft</a> account.`
+	props["skin.login.contact_html"] = `contact <a href="mailto:a@b.org">a@b.org</a>`
+	portal := optionalPortal(t, props)
+	page := mustBody(t)(http.Get(portal.URL + "/login"))
+	for _, want := range []string{
+		`<title>cBioPortal for Cancer Genomics</title>`,
+		`src="/images/cbioportal_logo.png"`,
+		`sign in with your <a href="/x">Google or Microsoft</a> account.`,
+		`<a class="provider" href="/oauth2/authorization/google"><img src="/images/login/googleplus_signin.png"`,
+		`<a class="provider" href="/oauth2/authorization/azure"><img src="/images/login/microsoft_signin.png"`,
+		`<span class="other">Sign in with: keycloak</span>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("login page lacks %s:\n%s", want, page)
+		}
+	}
+	if strings.Index(page, "/oauth2/authorization/google") > strings.Index(page, "/oauth2/authorization/azure") {
+		t.Error("Google is not listed first")
+	}
+	if strings.Contains(page, "a@b.org") {
+		t.Error("contact shown without a refused login")
+	}
+	resp, err := http.Get(portal.URL + "/login?logout_failure")
+	if refused := mustBody(t)(resp, err); resp.StatusCode != http.StatusUnauthorized ||
+		!strings.Contains(refused, `You are not authorized to access this resource.&nbsp; contact <a href="mailto:a@b.org">a@b.org</a>`) {
+		t.Errorf("refused login %d:\n%s", resp.StatusCode, refused)
+	}
+}
