@@ -247,7 +247,7 @@ func report(in reportInput) string {
 	p("| error | %d |", c.Error)
 	if c.Retried > 0 {
 		p("")
-		p("%d requests failed in transport, with 502/503/504, or with a Java-only 500 and were sent again after 2 min; the table counts the retry.", c.Retried)
+		p("%d requests failed in transport, with a gateway error (502 to 504, 520 to 524), or with a Java-only 500 and were sent again after 2 min; the table counts the retry.", c.Retried)
 	}
 	if bad > 0 {
 		p("")

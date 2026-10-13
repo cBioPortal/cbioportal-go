@@ -335,3 +335,23 @@ func TestKnownIfSubset(t *testing.T) {
 		}
 	}
 }
+
+func TestTransientGatewayStatuses(t *testing.T) {
+	for _, c := range []struct {
+		a, b int
+		want bool
+	}{
+		{524, 200, true}, // Cloudflare: origin timed out
+		{520, 200, true},
+		{200, 503, true},
+		{200, 500, true},
+		{500, 200, false}, // a go 500 always shows
+		{404, 200, false},
+		{525, 200, false},
+	} {
+		r := result{Outcome: status, StatusA: c.a, StatusB: c.b}
+		if got := transient(r); got != c.want {
+			t.Errorf("transient(a=%d b=%d) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

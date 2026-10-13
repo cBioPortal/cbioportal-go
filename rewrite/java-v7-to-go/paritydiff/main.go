@@ -13,7 +13,8 @@
 // disk (-cache) and fetched at most -rate requests per second, so reruns do
 // not hit the remote origin again. With -retry, requests that failed in
 // transport, with a gateway status (502, 503, 504, as while a deployment
-// rolls out) or with a 500 from -b only are sent once more after the given
+// rolls out, or Cloudflare's 520 to 524 when the origin is unreachable or
+// times out) or with a 500 from -b only are sent once more after the given
 // pause.
 //
 // With -self-check every request is sent to -b a second time (B'), right
@@ -376,9 +377,11 @@ func settleJavaFailed(r result) result {
 	return r
 }
 
-// gateway reports whether a status is a proxy's while the origin is down or
-// rolling out.
-func gateway(code int) bool { return code == 502 || code == 503 || code == 504 }
+// gateway reports whether a status is a proxy's while the origin is down,
+// rolling out or too slow: 502 to 504, and Cloudflare's 520 to 524.
+func gateway(code int) bool {
+	return code == 502 || code == 503 || code == 504 || (code >= 520 && code <= 524)
+}
 
 func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	res := result{Name: rq.Name, StatusA: ra.Status, StatusB: rb.Status}
@@ -539,7 +542,7 @@ func main() {
 	dumpUnexplained := flag.Bool("dump-unexplained", false, "dump only responses that differ without a known reason")
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
 	selfCheckB := flag.Bool("self-check", false, "send every request to B twice and compare the two answers; A/B differences where they differ are \"nondeterministic\"")
-	retry := flag.Duration("retry", -1, "send requests that failed in transport, with 502/503/504, or with 500 from B only once more after this pause (negative: no retry)")
+	retry := flag.Duration("retry", -1, "send requests that failed in transport, with 502/503/504/520-524, or with 500 from B only once more after this pause (negative: no retry)")
 	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
 	flag.IntVar(&streamAbove, "stream-above", streamAbove, "compare top-level arrays element by element when the two bodies together exceed this many bytes, to bound memory")
 	flag.IntVar(&decodeAbove, "decode-above", decodeAbove, "compare bodies that are not arrays only byte for byte when the two together exceed this many bytes")
