@@ -342,6 +342,9 @@ type oauth2Login struct {
 	// dat authenticates API requests that carry an Authorization header
 	// (dat.method=oauth2); nil leaves them to the session.
 	dat *datProvider
+	// basic is the shared username and password login (basic.go); nil
+	// without basic.username.
+	basic *basicLogin
 }
 
 func newOAuth2Login(cfg *oauth2Config, store loginStore) *oauth2Login {
@@ -440,6 +443,12 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 				o.callback(w, r, reg)
 				return
 			}
+		case o.basic != nil && p == "/j_spring_security_check":
+			o.basicCheck(w, r)
+			return
+		case o.basic != nil && p == "/j_spring_security_logout" && r.Method == http.MethodGet:
+			o.basicLogout(w, r)
+			return
 		}
 		if o.dat != nil && core.IsAPIPath(p) && r.Header.Get("Authorization") != "" {
 			o.dat.tokenAuth(w, r, next)
@@ -455,6 +464,10 @@ func (o *oauth2Login) middleware(next http.Handler) http.Handler {
 			}
 		}
 		if sess != nil {
+			if o.basic != nil && p == "/restful_login" {
+				o.restfulLogin(w, r)
+				return
+			}
 			r = o.replay(r, sess, id)
 			next.ServeHTTP(w, core.WithUser(r, core.User{Name: sess.User, Roles: sess.Roles}))
 			return
@@ -851,6 +864,20 @@ func claimRoles(claims map[string]any, path []string) []string {
 // provider's session too when the provider supports it; optional_oauth2
 // returns to / directly, as Java's logoutSuccessUrl("/").
 func (o *oauth2Login) logout(w http.ResponseWriter, r *http.Request) {
+	sess := o.endSession(w, r)
+	target := "/"
+	if reg := o.cfg.registration(sess.Registration); reg != nil && !o.cfg.optional() && sess.IDToken != "" {
+		if meta, _, err := o.provider(reg); err == nil && meta.EndSessionEndpoint != "" {
+			q := url.Values{"id_token_hint": {sess.IDToken}, "post_logout_redirect_uri": {core.BaseURL(r)}}
+			target = meta.EndSessionEndpoint + "?" + q.Encode()
+		}
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// endSession removes the request's session and its cookie, and returns the
+// session that ended (zero when there was none).
+func (o *oauth2Login) endSession(w http.ResponseWriter, r *http.Request) authSession {
 	var sess authSession
 	if c, err := r.Cookie(sessionCookie); err == nil && c.Value != "" {
 		if b, ok, err := o.store.take(r.Context(), sessionKey(c.Value)); err != nil {
@@ -860,14 +887,7 @@ func (o *oauth2Login) logout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	o.setCookie(w, r, sessionCookie, "", -1)
-	target := "/"
-	if reg := o.cfg.registration(sess.Registration); reg != nil && !o.cfg.optional() && sess.IDToken != "" {
-		if meta, _, err := o.provider(reg); err == nil && meta.EndSessionEndpoint != "" {
-			q := url.Values{"id_token_hint": {sess.IDToken}, "post_logout_redirect_uri": {core.BaseURL(r)}}
-			target = meta.EndSessionEndpoint + "?" + q.Encode()
-		}
-	}
-	http.Redirect(w, r, target, http.StatusFound)
+	return sess
 }
 
 func (o *oauth2Login) redirectURI(r *http.Request, reg *oauth2Registration) string {

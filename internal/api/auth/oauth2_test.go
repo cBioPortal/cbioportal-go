@@ -145,7 +145,7 @@ func (p *fakeProvider) sign(t *testing.T, claims map[string]any) string {
 
 // loginPortal is a portal behind the OAuth2 login whose handler echoes the
 // request it receives.
-func loginPortal(t *testing.T, p *fakeProvider) *httptest.Server {
+func loginPortal(t *testing.T, p *fakeProvider, opts ...func(*oauth2Login)) *httptest.Server {
 	cfg, err := loadOAuth2Config(map[string]string{
 		"authenticate": "oauth2",
 		"spring.security.oauth2.client.registration.keycloak.client-id":                    "portal",
@@ -159,6 +159,9 @@ func loginPortal(t *testing.T, p *fakeProvider) *httptest.Server {
 		t.Fatalf("config: %v", err)
 	}
 	login := newOAuth2Login(cfg, nil)
+	for _, opt := range opts {
+		opt(login)
+	}
 	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, _ := core.GetUser(r.Context())
 		r.ParseForm()

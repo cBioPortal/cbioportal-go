@@ -44,7 +44,12 @@ func Configure(props map[string]string) (*Login, error) {
 	if err != nil {
 		return nil, err
 	}
+	basic, err := loadBasicLogin(props)
+	if err != nil {
+		return nil, err
+	}
 	l := &Login{login: newOAuth2Login(cfg, store), access: newAccessPolicy(props)}
+	l.login.basic = basic
 	l.access.anonymous = cfg.optional()
 	for _, reg := range cfg.Registrations {
 		issuer := reg.IssuerURI
@@ -55,6 +60,9 @@ func Configure(props map[string]string) (*Login, error) {
 	}
 	if !cfg.MethodAuthorization {
 		log.Printf("authenticate=%s: every study is open to everyone (security.method_authorization_enabled is off)", cfg.Method)
+	}
+	if basic != nil {
+		log.Printf("authenticate=%s: basic login for user %s at /j_spring_security_check", cfg.Method, basic.user)
 	}
 	log.Printf("login sessions: %s", store.describe())
 	if datCfg != nil {

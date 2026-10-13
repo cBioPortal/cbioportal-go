@@ -18,6 +18,8 @@ sessions, and monitoring.
   - [Optional sign-in](#optional-sign-in)
   - [Login sessions in Redis](#login-sessions-in-redis)
   - [Data access tokens](#data-access-tokens)
+  - [A shared user with a password](#a-shared-user-with-a-password)
+  - [Moving a SAML portal](#moving-a-saml-portal)
   - [Java names](#java-names)
 - [Sessions](#sessions)
 - [Metrics and logs](#metrics-and-logs)
@@ -392,6 +394,9 @@ every user of a machine can see the command lines of running programs.
 | `--login-roles-path` | `CBIOPORTAL_LOGIN_ROLES_PATH` | Where the login token lists the user's roles, as `claim::claim::...`. The default is `resource_access::cbioportal::roles`. |
 | `--study-authorization` | `CBIOPORTAL_STUDY_AUTHORIZATION` | With `--login=optional`, `true` limits studies to the user's roles, as with `required`. |
 | `--login-auto-redirect` | `CBIOPORTAL_LOGIN_AUTO_REDIRECT` | With one provider, `/login` goes straight to it (`true`, the default) instead of listing it. |
+| `--login-basic-user` | `CBIOPORTAL_LOGIN_BASIC_USER` | Also one shared user who signs in with a password, see [A shared user with a password](#a-shared-user-with-a-password). |
+| | `CBIOPORTAL_LOGIN_BASIC_PASSWORD_HASH` | The shared user's password, as a bcrypt hash. |
+| `--login-basic-roles` | `CBIOPORTAL_LOGIN_BASIC_ROLES` | The shared user's roles, separated by commas. |
 
 The sign-in addresses are `/login/oauth2/code/google` for Google,
 `/login/oauth2/code/azure` for Microsoft, and `/login/oauth2/code/<name>`
@@ -484,7 +489,9 @@ instead, see [Login sessions in Redis](#login-sessions-in-redis).
 go does not support the other `authenticate` values (`saml`,
 `saml_plus_basic`) or `authorization=true` (users and their permissions
 stored in the database). With any of them, the server stops at startup
-instead of running an open portal by mistake.
+instead of running an open portal by mistake. A portal that signs in
+with SAML can sign in through the same provider with OpenID Connect
+instead, see [Moving a SAML portal](#moving-a-saml-portal).
 
 ### Optional sign-in
 
@@ -654,6 +661,55 @@ curl -H "Authorization: Bearer $(sed -n 's/^token: //p' cbioportal_data_access_t
 The data access token settings (`dat.*`) are cBioPortal's own names, so
 they have no separate go names.
 
+### A shared user with a password
+
+Some scripts cannot follow a provider's sign-in. For them, the portal can
+also have one shared user who signs in with a username and password. This
+is the "basic" half of the Java portal's `authenticate=saml_plus_basic`,
+and it uses the same addresses:
+
+- `/j_spring_security_check` checks the `j_username` and `j_password`
+  parameters (in a form post or the query string). If they are right, it
+  starts a session and redirects to `/restful_login`. If not, it redirects
+  to `/login?error`.
+- `/j_spring_security_logout` ends the session and redirects to `/`.
+
+The password is stored as a bcrypt hash, never in plain text. A bcrypt hash
+is a scrambled form of the password that can check a password but not
+reveal it. `htpasswd -nbB user password` prints one after the colon. The
+shared user's roles decide which studies it can read, like a signed-in
+user's roles. It works with `--login=required` or `--login=optional`.
+
+```bash
+export CBIOPORTAL_LOGIN_BASIC_PASSWORD_HASH='$2y$10$...'
+cbioportal-api --login=required ... \
+  --login-basic-user=portal-robot \
+  --login-basic-roles=ALL
+```
+
+### Moving a SAML portal
+
+SAML is an older sign-in standard. Providers such as Keycloak offer both
+SAML and OpenID Connect for the same users. So a portal that signs in with
+SAML through Keycloak can move to go by signing in through the same
+Keycloak realm with OpenID Connect:
+
+1. In Keycloak, add an OpenID Connect client to the realm, with the
+   portal's sign-in address `https://<portal>/login/oauth2/code/keycloak`
+   as a valid redirect address.
+2. Make the client put the user's roles in its tokens. For realm roles,
+   that is Keycloak's "realm roles" mapper with "Add to ID token" or "Add
+   to userinfo" turned on. Then set `--login-roles-path=realm_access::roles`.
+   These must be the same roles the SAML client sends, because they decide
+   which studies each user can read.
+3. Start go with `--login=required` and the `--login-oidc-*` settings,
+   naming the provider `keycloak` (`--login-oidc-name=keycloak`).
+
+A data access token setup (`dat.method=oauth2`) for the same realm works
+unchanged. A shared user (`basic.username`, `basic.password` and
+`basic.authorities`) works unchanged too, see
+[A shared user with a password](#a-shared-user-with-a-password).
+
 ### Java names
 
 This table is for moving a Java portal's login and frontend settings to
@@ -679,6 +735,9 @@ the names below, `<name>` is the value of `--login-oidc-name` (default
 | `--login-roles-path` | `spring.security.oauth2.client.jwt-roles-path` |
 | `--study-authorization` | `security.method_authorization_enabled` |
 | `--login-auto-redirect` | `security.force_redirect_on_one_idp` |
+| `--login-basic-user` | `basic.username` |
+| `CBIOPORTAL_LOGIN_BASIC_PASSWORD_HASH` | `basic.password` |
+| `--login-basic-roles` | `basic.authorities` |
 | `--frontend-assets-url` | `frontend.url` |
 | `--frontend-assets-version` | `app.version` |
 | `--login-session-store=memory` | `spring.session.store-type=none` (or unset) |
