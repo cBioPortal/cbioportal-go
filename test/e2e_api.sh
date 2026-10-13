@@ -8,6 +8,7 @@
 #   KEYCLOAK=false test/e2e_api.sh   # anonymous, AUTH_DEFAULT_USER=testuser
 #   DAT=true test/e2e_api.sh    # also data access tokens (dat.method=oauth2)
 #   OPTIONAL=true test/e2e_api.sh   # authenticate=optional_oauth2: open, sign-in optional
+#   BASIC=true test/e2e_api.sh  # also the shared user basicuser / basicpass, role ascn_test_study
 #   REDIS=localhost:16379 REDIS_PASSWORD=pw test/e2e_api.sh   # login sessions in Redis
 #
 # Anonymous mode is the contract tests' backend: it serves study_hg38, which
@@ -46,6 +47,11 @@ if [ "${KEYCLOAK:-true}" != false ]; then
       --spring.data.redis.port=${REDIS##*:}
       '--spring.data.redis.password=${REDIS_PASSWORD}'
     )
+  fi
+  if [ "${BASIC:-false}" = true ]; then
+    # The bcrypt hash of the test password basicpass.
+    export CBIOPORTAL_LOGIN_BASIC_PASSWORD_HASH='$2a$10$q83DQS6tzo78dg94gkIQvOulBL/uUTnkuy8oY9PTq.ZHc7BmpQGfG'
+    auth+=(--login-basic-user=basicuser --login-basic-roles=ascn_test_study)
   fi
   if [ "${DAT:-false}" = true ]; then
     realm=http://localhost:$KC_PORT/auth/realms/cbio
