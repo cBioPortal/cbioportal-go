@@ -120,7 +120,7 @@ itself could not run.`,
 				day: day, dry: dry, stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(),
 			})
 			if err != nil {
-				return cli.Usage(fmt.Errorf("nightly: %w", err))
+				return cli.Exit(2, fmt.Errorf("nightly: %w", err))
 			}
 			if !clean {
 				return cli.ErrReported
@@ -216,7 +216,7 @@ of the ref in <home>/state/ref (default origin/main), logged to
 			case 1:
 				return cli.ErrReported
 			}
-			return cli.Usagef("the check could not run; see the log in %s", filepath.Join(dir, "logs"))
+			return cli.Exit(2, fmt.Errorf("the check could not run; see the log in %s", filepath.Join(dir, "logs")))
 		},
 	}
 	cmd.Flags().StringVar(&dir, "home", filepath.Join(home, ".local/share/cbioportal-go-parity"), "logs, state and checkout `directory`")

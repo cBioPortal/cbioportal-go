@@ -212,7 +212,7 @@ func Execute(root *cobra.Command, args []string, stdout, stderr io.Writer, geten
 	fmt.Fprintf(stderr, "%s: %v\n", where(root, cmd), err)
 	if usage {
 		help := root.Name() + " -h"
-		if cmd != nil && cmd != root {
+		if cmd != nil && cmd != root && cmd.Name() != "help" {
 			help = "help " + strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
 			help = root.Name() + " " + help
 		}

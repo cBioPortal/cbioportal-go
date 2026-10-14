@@ -16,16 +16,21 @@ people. Each program's commands and settings are in
 - [Exit codes](#exit-codes)
 - [Mistakes and suggestions](#mistakes-and-suggestions)
 - [Checking a setup](#checking-a-setup)
+- [Shell completion](#shell-completion)
 
 ## Commands and flags
 
 - The command comes first, then its arguments and flags:
   `cbioportal-import ingest <study-dir> --db cbioportal_raw`.
   `cbioportal-api` serves when it is given no command.
-- A flag can be written `-db x`, `--db x` or `--db=x`. In
-  `cbioportal-import`, flags can come before or after the arguments.
-- `-h`, `--help` or `help <command>` prints the help, with examples.
-- `version` prints the program's version.
+- A flag can be written `-db x`, `--db x` or `--db=x`. Flags can come
+  before or after the arguments.
+- `-h`, `--help` or `help <command>` prints the help, with examples. The
+  help lists each flag with its environment variable and its default.
+- `version` (or `--version`) prints the program's version.
+- The programs use [Cobra](https://github.com/spf13/cobra) for their
+  commands. Each command is one constructor in the program's `main`
+  package that declares its flags and the function that runs it.
 - No program ever asks a question while it runs. Everything comes from
   the command line and the environment.
 
@@ -111,3 +116,14 @@ ok    clickhouse --db: cbioportal_e2e: 34 tables
 ok    clickhouse --raw-db: cbioportal_e2e_raw: 29 tables
 ok    clickhouse --ref-db: cbioportal_ref: 10 tables
 ```
+
+## Shell completion
+
+`completion` prints a script that lets your shell complete the program's
+commands and flags when you press Tab. For example, in bash:
+
+```
+source <(cbioportal-import completion bash)
+```
+
+`cbioportal-import completion -h` lists the shells it supports.

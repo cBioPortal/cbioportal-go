@@ -65,24 +65,6 @@ the arguments.
 		newFetchDatahubCmd(),
 		newTransformCmd(),
 	)
-	root.SetHelpCommand(newHelpCmd(root))
 	cli.AddVersion(root, name)
 	return root
-}
-
-// newHelpCmd is `help [command]`: the help of root or of one of its
-// commands, and a usage error for a command that does not exist.
-func newHelpCmd(root *cobra.Command) *cobra.Command {
-	return &cobra.Command{
-		Use:   "help [command]",
-		Short: "show the help of a command",
-		Args:  cli.ArgsBetween(0, -1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cmd, rest, err := root.Find(args)
-			if err != nil || len(rest) > 0 {
-				return cli.UnknownCommand(root, args[0])
-			}
-			return cmd.Help()
-		},
-	}
 }

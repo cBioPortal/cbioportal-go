@@ -131,8 +131,10 @@ answers are identical, a known difference, or unexplained.
 go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--day YYYY-MM-DD] [--dry-run]
 ```
 
-`test/parity/nightly.sh` runs the same command. `parity -h` lists the
-settings (environment variables such as `PARITY_DIR`, `A`, `B`, `RATE`).
+`test/parity/nightly.sh` runs the same command. `parity run -h` lists
+the settings. Each is a flag that falls back to an environment variable,
+for example `--dir` to `PARITY_DIR`, `--origin-a` to `A` and `--rate` to
+`RATE`.
 
 **The request list.** `parity corpus` (or `test/parity/logged_corpus.sh`)
 builds a list of about 5,000 logged requests. Every run builds a new list
