@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -23,8 +24,41 @@ func stderrLog(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "%s %s\n", time.Now().UTC().Format("15:04:05"), fmt.Sprintf(format, args...))
 }
 
-func setupImportStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
-	url := urlFlag(fs)
+func newImportStudyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "import-study <study-dir>...",
+		Short: "import studies into a portal that is being served",
+		Long: `Import-study stages each study directory in the raw database and then
+rebuilds the portal database once, like ingest followed by transform, but
+safe to run against a portal that is being served:
+
+  - One import at a time: the import holds a lock (a table in the raw
+    database) and refreshes it every minute. Another import waits for it
+    (--lock-wait) and takes over a lock whose holder stopped refreshing it
+    (--lock-stale).
+  - The transform builds the new tables beside the served ones (named
+    __next_*) and swaps them in together at the end (EXCHANGE TABLES), so
+    the portal serves either its previous state or the new one.
+  - A study that fails to stage is removed from the portal. When the
+    transform fails, this run's studies are removed and the portal is
+    rebuilt without them.
+
+The reference database is loaded from --seed when it has no genes yet, and
+the shared gene panels from --gene-panels when the raw database has none
+(or always, with --reload-panels). --raw-db and --ref-db default to the
+portal database's name with _raw and _ref. The exit status is 1 when any
+study failed.
+
+--dry-run reports what the import would do: which studies are new, which
+replace a study the portal already has, and whether the reference data
+and gene panels would be loaded. It changes nothing and takes no lock.`,
+		Example: `  cbioportal-import import-study datahub/public/acbc_mskcc_2015 --db cbioportal --dry-run
+  cbioportal-import import-study datahub/public/acbc_mskcc_2015 --db cbioportal
+  cbioportal-import import-study datahub/public/a datahub/public/b --db portal --seed datahub/seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz --gene-panels datahub/reference_data/gene_panels`,
+		Args: cli.ArgsBetween(1, -1),
+	}
+	fs := cmd.Flags()
+	url := urlFlag(cmd)
 	db := fs.String("db", "cbioportal", "portal `database` to update")
 	rawDB := fs.String("raw-db", "", "raw staging `database` (default: <db>_raw)")
 	refDB := fs.String("ref-db", "", "reference `database` (default: <db>_ref)")
@@ -37,7 +71,8 @@ func setupImportStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
 	owner := fs.String("owner", "", "`name` this import holds the lock as (default: <host>-<pid>)")
 	dryRun := dryRunFlag(fs)
 	asJSON := jsonFlag(fs)
-	return func(args []string, w io.Writer) error {
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		w := cmd.OutOrStdout()
 		o := studyimport.Options{
 			URL: *url, DB: *db, RawDB: orDefault(*rawDB, *db+"_raw"), RefDB: orDefault(*refDB, *db+"_ref"),
 			Seed: *seed, GenePanels: *panels, ReloadPanels: *reloadPanels, Logf: stderrLog,
@@ -110,6 +145,7 @@ func setupImportStudy(fs *flag.FlagSet) func([]string, io.Writer) error {
 		}
 		return nil
 	}
+	return cmd
 }
 
 // printImportPlan prints what import-study would do.
@@ -179,12 +215,29 @@ func orDefault(s, def string) string {
 	return def
 }
 
-func setupFetchDatahub(fs *flag.FlagSet) func([]string, io.Writer) error {
+func newFetchDatahubCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "fetch-datahub <dir> [<study-path>...]",
+		Short: "check out datahub studies with their LFS files",
+		Long: `Fetch-datahub checks out the given studies of cBioPortal/datahub
+(public/<study>, crdc/gdc/<study>) into <dir>, together with the shared gene
+panels (reference_data/gene_panels) and the seed dumps (seedDB). The
+checkout is shallow and sparse, so only these paths are downloaded. Large
+files come from datahub's own Git LFS store (--lfs-url, the store named in
+datahub's .lfsconfig), never from GitHub's LFS. <dir> is replaced.`,
+		Example: `  cbioportal-import fetch-datahub datahub public/acbc_mskcc_2015 public/msk_impact_2017
+  cbioportal-import fetch-datahub datahub --ref pull/2372/head public/brca_tcga`,
+		Args: cli.ArgsBetween(1, -1),
+	}
+	fs := cmd.Flags()
 	ref := fs.String("ref", "master", "datahub `ref` to check out: a branch, a commit or pull/<N>/head")
-	gitURL := fs.String("git", datahub.GitURL(), "datahub git `URL`; defaults to $DATAHUB_GIT if set")
-	lfsURL := fs.String("lfs-url", datahub.LFSURL(), "datahub's LFS store `URL`; defaults to $DATAHUB_LFS_URL if set")
+	gitURL := fs.String("git", datahub.DefaultGit, "datahub git `URL`")
+	cli.Env(fs, "git", "DATAHUB_GIT")
+	lfsURL := fs.String("lfs-url", datahub.DefaultLFSURL, "datahub's LFS store `URL`")
+	cli.Env(fs, "lfs-url", "DATAHUB_LFS_URL")
 	asJSON := jsonFlag(fs)
-	return func(args []string, w io.Writer) error {
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		w := cmd.OutOrStdout()
 		dir, err := filepath.Abs(args[0])
 		if err != nil {
 			return err
@@ -216,4 +269,5 @@ func setupFetchDatahub(fs *flag.FlagSet) func([]string, io.Writer) error {
 		fmt.Fprintf(w, "datahub %s (%s) in %s\n", *ref, commit, dir)
 		return nil
 	}
+	return cmd
 }
