@@ -98,7 +98,7 @@ func liveFixtureState(t *testing.T, comment string) (*State, *ch.Client) {
 	t.Setenv("CLICKHOUSE_LOG_COMMENT", comment)
 	c := ch.New(base, db)
 	c.SetDatabaseAliases(db+"_raw", "")
-	return NewState(c), admin
+	return NewState(c, Options{}), admin
 }
 
 func serve(h http.Handler, r fixtureRequest) *httptest.ResponseRecorder {

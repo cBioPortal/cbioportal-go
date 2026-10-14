@@ -471,7 +471,6 @@ func TestConfigureSessions(t *testing.T) {
 	var logs bytes.Buffer
 	log.SetOutput(&logs)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
-	t.Setenv("SESSION_STORE_FILE", "")
 	t.Setenv("SESSION_SERVICE_URL", "")
 	t.Setenv("SESSION_SERVICE_PASSWORD", "")
 

@@ -33,7 +33,7 @@ func keycloakProps(p *fakeProvider, method string) map[string]string {
 // handler echoes the request's user; /config_service is the real one.
 func optionalPortal(t *testing.T, props map[string]string) *httptest.Server {
 	t.Helper()
-	l, err := Configure(config.EffectiveProperties(props, true))
+	l, err := Configure(config.EffectiveProperties(props, true), false)
 	if err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestOptionalOAuth2StudyAuthorization(t *testing.T) {
 	}
 	props = keycloakProps(p, "optional_oauth2")
 	props["dat.method"] = "oauth2"
-	if _, err := Configure(config.EffectiveProperties(props, true)); err == nil {
+	if _, err := Configure(config.EffectiveProperties(props, true), false); err == nil {
 		t.Error("dat.method=oauth2 accepted with optional_oauth2")
 	}
 }

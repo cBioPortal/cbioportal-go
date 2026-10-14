@@ -46,10 +46,10 @@ func WithUser(r *http.Request, u User) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), userCtxKey{}, u))
 }
 
-// newAccessLog writes one JSON line per request to stdout when ACCESS_LOG is
-// true (for log collection, e.g. Datadog); nil otherwise.
-func newAccessLog() *slog.Logger {
-	if v, _ := strconv.ParseBool(os.Getenv("ACCESS_LOG")); !v {
+// newAccessLog writes one JSON line per request to stdout when on (for log
+// collection, e.g. Datadog); nil otherwise.
+func newAccessLog(on bool) *slog.Logger {
+	if !on {
 		return nil
 	}
 	return slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -58,7 +58,7 @@ func newAccessLog() *slog.Logger {
 // Observe records every request in the metrics and the access log. Requests
 // are labelled by the route pattern they match, so labels stay bounded.
 func (s *State) Observe(next http.Handler) http.Handler {
-	return s.observeWith(next, newAccessLog())
+	return s.observeWith(next, newAccessLog(s.Opts.AccessLog))
 }
 
 // observeWith is observe with the given access log (nil: none).

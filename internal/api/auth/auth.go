@@ -15,7 +15,7 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
-// AuthConfig is read from the environment at startup.
+// AuthConfig is the optional HS256 bearer-token auth.
 type AuthConfig struct {
 	Enabled bool
 	Secret  []byte // HS256 shared secret
@@ -24,20 +24,22 @@ type AuthConfig struct {
 	DefaultUser string
 }
 
-func loadAuthConfig() AuthConfig {
+// bearerConfig is the bearer-token auth the server settings o ask for; its
+// secret comes from $AUTH_JWT_SECRET only, as secrets are never flags.
+func bearerConfig(o core.Options) AuthConfig {
 	return AuthConfig{
-		Enabled:     strings.EqualFold(os.Getenv("AUTH_ENABLED"), "true"),
+		Enabled:     o.BearerAuth,
 		Secret:      []byte(os.Getenv("AUTH_JWT_SECRET")),
-		DefaultUser: os.Getenv("AUTH_DEFAULT_USER"),
+		DefaultUser: o.BearerDefaultUser,
 	}
 }
 
 // auth wraps a handler with bearer-token authentication. It is DISABLED by
-// default (AUTH_ENABLED unset/false), so local and e2e runs — which use no
+// default (--auth-enabled unset), so local and e2e runs — which use no
 // session auth — work unchanged. When enabled it validates an HS256-signed JWT
 // (shared secret) and extracts the user + Keycloak realm roles into the request
 // context. Bearer tokens of the login's OpenID provider are data access
-// tokens instead (dat.method=oauth2, dat.go), which excludes AUTH_ENABLED.
+// tokens instead (dat.method=oauth2, dat.go), which excludes --auth-enabled.
 func auth(cfg AuthConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := core.GetUser(r.Context()); ok {

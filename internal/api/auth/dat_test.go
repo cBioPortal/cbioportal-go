@@ -44,7 +44,7 @@ func datPortal(t *testing.T, p *fakeProvider, extra map[string]string) *httptest
 	for k, v := range extra {
 		props[k] = v
 	}
-	l, err := Configure(config.EffectiveProperties(props, true))
+	l, err := Configure(config.EffectiveProperties(props, true), false)
 	if err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestLoadDATConfig(t *testing.T) {
 	props := map[string]string{"dat.method": "oauth2", "dat.oauth2.clientId": "c", "dat.oauth2.issuer": "i",
 		"dat.oauth2.accessTokenUri": "t", "dat.oauth2.userAuthorizationUri": "a", "dat.oauth2.jwkUrl": "j",
 		"dat.oauth2.redirectUri": "r"}
-	if _, err := Configure(config.EffectiveProperties(props, true)); err == nil || !strings.Contains(err.Error(), "authenticate=oauth2") {
+	if _, err := Configure(config.EffectiveProperties(props, true), false); err == nil || !strings.Contains(err.Error(), "authenticate=oauth2") {
 		t.Errorf("dat.method=oauth2 without login: %v", err)
 	}
 }

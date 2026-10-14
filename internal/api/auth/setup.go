@@ -19,8 +19,9 @@ type Login struct {
 }
 
 // Configure returns the login the portal properties props ask for, nil
-// when they ask for none.
-func Configure(props map[string]string) (*Login, error) {
+// when they ask for none. bearerAuth is whether the server requires HS256
+// bearer tokens (--auth-enabled), which a data access token login excludes.
+func Configure(props map[string]string, bearerAuth bool) (*Login, error) {
 	cfg, err := loadOAuth2Config(props)
 	if err != nil {
 		return nil, err
@@ -33,8 +34,8 @@ func Configure(props map[string]string) (*Login, error) {
 		if cfg == nil || cfg.optional() {
 			return nil, errors.New("dat.method=oauth2 needs authenticate=oauth2")
 		}
-		if loadAuthConfig().Enabled {
-			return nil, errors.New("dat.method=oauth2 verifies bearer tokens itself; unset AUTH_ENABLED")
+		if bearerAuth {
+			return nil, errors.New("dat.method=oauth2 verifies bearer tokens itself; unset --auth-enabled")
 		}
 	}
 	if cfg == nil {
@@ -86,10 +87,10 @@ func (l *Login) Wrap(s *core.State, next http.Handler) http.Handler {
 	return l.login.middleware(h)
 }
 
-// BearerAuth is the optional HS256 bearer-token auth (AUTH_ENABLED) in front
-// of next; loggedIn drops its default user, as users log in.
-func BearerAuth(loggedIn bool, next http.Handler) http.Handler {
-	authCfg := loadAuthConfig()
+// BearerAuth is the optional HS256 bearer-token auth of the server settings
+// o in front of next; loggedIn drops its default user, as users log in.
+func BearerAuth(o core.Options, loggedIn bool, next http.Handler) http.Handler {
+	authCfg := bearerConfig(o)
 	if loggedIn {
 		authCfg.DefaultUser = "" // users log in
 	}

@@ -100,7 +100,11 @@ func New(baseURL, database string) *Client {
 	if user := os.Getenv("CLICKHOUSE_USER"); user != "" {
 		rt = authTransport{base: transport, user: user, password: os.Getenv("CLICKHOUSE_PASSWORD")}
 	}
-	if comment := os.Getenv("CLICKHOUSE_LOG_COMMENT"); comment != "" {
+	comment := logComment
+	if comment == "" {
+		comment = os.Getenv("CLICKHOUSE_LOG_COMMENT")
+	}
+	if comment != "" {
 		rt = commentTransport{base: rt, comment: comment}
 	}
 	rt = observedTransport{base: rt}
@@ -198,6 +202,14 @@ func (c *Client) post(query url.Values, body io.Reader) (string, error) {
 // processSettings are added to every request of this process (see
 // SetProcessSettings).
 var processSettings = map[string]string{}
+
+// logComment tags every query of this process in system.query_log; when
+// empty, $CLICKHOUSE_LOG_COMMENT does.
+var logComment string
+
+// SetLogComment tags every query of the clients New returns from now on with
+// comment (ClickHouse's log_comment), e.g. the deployment's name.
+func SetLogComment(comment string) { logComment = comment }
 
 // SetProcessSettings makes every request of this process run with these
 // settings, unless a request sets them itself. Call it before any request.

@@ -2,106 +2,124 @@ package main
 
 import (
 	"bytes"
-	"errors"
-	"flag"
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/config"
 )
 
 func env(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
 }
 
-func TestParseArgsSplitsPortalProperties(t *testing.T) {
+// effective runs `config --json` with args and returns each setting's
+// value and source, and each portal property's source.
+func effective(t *testing.T, args []string, e func(string) string) (values, sources, props map[string]string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	if code := run(append([]string{"config", "--json"}, args...), &out, &errOut, e); code != 0 {
+		t.Fatalf("%q: exit %d: %s", args, code, errOut.String())
+	}
+	var got struct {
+		Settings, PortalProperties []configEntry
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	values, sources, props = map[string]string{}, map[string]string{}, map[string]string{}
+	for _, s := range got.Settings {
+		values[s.Name], sources[s.Name] = s.Value, s.Source
+	}
+	for _, p := range got.PortalProperties {
+		props[p.Name] = p.Source
+	}
+	return values, sources, props
+}
+
+func TestSplitPortalArgs(t *testing.T) {
 	args := []string{
 		"--skin.title=My portal", "-db", "cbioportal_e2e", "--quick_search.enabled=true",
 		"--port=18113", "-auth-enabled", "--priority_studies=A#x,y", "--frontend-dir", "dist",
+		"-skin.footer=f",
 	}
-	cfg, err := parseArgs(args, env(nil))
-	if err != nil {
-		t.Fatal(err)
+	rest, portal := splitPortalArgs(newRootCmd(&settings{}), args)
+	if want := []string{"--skin.title=My portal", "--quick_search.enabled=true", "--priority_studies=A#x,y", "--skin.footer=f"}; !slices.Equal(portal, want) {
+		t.Errorf("portal args = %q, want %q", portal, want)
 	}
-	want := []string{"--skin.title=My portal", "--quick_search.enabled=true", "--priority_studies=A#x,y"}
-	if !slices.Equal(cfg.portalArgs, want) {
-		t.Errorf("portal args = %q, want %q", cfg.portalArgs, want)
+	if want := []string{"-db", "cbioportal_e2e", "--port=18113", "-auth-enabled", "--frontend-dir", "dist"}; !slices.Equal(rest, want) {
+		t.Errorf("rest = %q, want %q", rest, want)
 	}
+	values, _, props := effective(t, args, env(nil))
 	for k, v := range map[string]string{"db": "cbioportal_e2e", "port": "18113", "auth-enabled": "true", "frontend-dir": "dist"} {
-		if cfg.values[k] != v {
-			t.Errorf("%s = %q, want %q", k, cfg.values[k], v)
+		if values[k] != v {
+			t.Errorf("%s = %q, want %q", k, values[k], v)
 		}
+	}
+	if props["skin.title"] != "argument" || props["priority_studies"] != "argument" {
+		t.Errorf("portal properties: %v", props)
 	}
 }
 
-func TestParseArgsPrecedence(t *testing.T) {
+func TestPrecedence(t *testing.T) {
 	e := env(map[string]string{"CBIOPORTAL_DB": "from_env", "PORT": "9000", "AUTH_ENABLED": "TRUE"})
-	cfg, err := parseArgs([]string{"--db=from_flag"}, e)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for k, v := range map[string]string{
-		"db":             "from_flag",              // flag > env
-		"port":           "9000",                   // env > default
-		"auth-enabled":   "true",                   // env, case-insensitive
-		"clickhouse-url": "http://localhost:18123", // default
-		"raw-db":         "cbioportal_raw",
+	values, sources, _ := effective(t, []string{"--db=from_flag"}, e)
+	for k, v := range map[string][2]string{
+		"db":             {"from_flag", "flag"},                 // flag > env
+		"port":           {"9000", "env $PORT"},                 // env > default
+		"auth-enabled":   {"true", "env $AUTH_ENABLED"},         // env, case-insensitive
+		"clickhouse-url": {"http://localhost:18123", "default"}, // default
+		"raw-db":         {"cbioportal_raw", "default"},         //
+		"oncokb-url":     {"https://public.api.oncokb.org/api/v1", "default"},
 	} {
-		if cfg.values[k] != v {
-			t.Errorf("%s = %q, want %q", k, cfg.values[k], v)
+		if values[k] != v[0] || sources[k] != v[1] {
+			t.Errorf("%s = %q from %q, want %q from %q", k, values[k], sources[k], v[0], v[1])
 		}
 	}
-	cfg, _ = parseArgs([]string{"-auth-enabled=false"}, e)
-	if cfg.values["auth-enabled"] != "false" {
+	values, _, _ = effective(t, []string{"-auth-enabled=false"}, e)
+	if values["auth-enabled"] != "false" {
 		t.Error("-auth-enabled=false did not override AUTH_ENABLED")
 	}
 }
 
-func TestParseArgsBoolDoesNotSwallow(t *testing.T) {
-	cfg, err := parseArgs([]string{"-auth-enabled", "--skin.title=x"}, env(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.values["auth-enabled"] != "true" || !slices.Equal(cfg.portalArgs, []string{"--skin.title=x"}) {
-		t.Errorf("auth-enabled=%s portal=%q", cfg.values["auth-enabled"], cfg.portalArgs)
+func TestBoolDoesNotSwallow(t *testing.T) {
+	values, _, props := effective(t, []string{"-auth-enabled", "--skin.title=x"}, env(nil))
+	if values["auth-enabled"] != "true" || props["skin.title"] != "argument" {
+		t.Errorf("auth-enabled=%s portal=%v", values["auth-enabled"], props)
 	}
 }
 
-func TestParseArgsErrors(t *testing.T) {
-	for _, args := range [][]string{
-		{"--skin.title"},  // a portal property needs =value
-		{"-skin.title=x"}, // portal properties take two dashes
-		{"stray"},         // no positional arguments
-		{"--port"},        // value missing
-		{"--frontend_dir=x", "extra"},
-	} {
-		if _, err := parseArgs(args, env(nil)); err == nil || errors.Is(err, flag.ErrHelp) {
-			t.Errorf("%q: err = %v, want a usage error", args, err)
-		}
-	}
-	for _, args := range [][]string{{"-h"}, {"--help"}, {"--skin.title=x", "-help"}} {
-		if _, err := parseArgs(args, env(nil)); !errors.Is(err, flag.ErrHelp) {
-			t.Errorf("%q: err = %v, want flag.ErrHelp", args, err)
-		}
-	}
-	cfg, err := parseArgs([]string{"-version"}, env(nil))
-	if err != nil || !cfg.showVersion {
-		t.Errorf("-version: %v", err)
+// A portal property that only looks like a flag stays a property.
+func TestPropertiesNearFlags(t *testing.T) {
+	_, portal := splitPortalArgs(newRootCmd(&settings{}), []string{"--authenticate=false", "--app.name=x", "--dat.method=none"})
+	if len(portal) != 3 {
+		t.Fatalf("portal args %q", portal)
 	}
 }
 
 func TestUsageListsEveryOption(t *testing.T) {
-	var b bytes.Buffer
-	printUsage(&b)
-	out := b.String()
-	for _, o := range allOptions() {
-		if !strings.Contains(out, "-"+o.name) || !strings.Contains(out, "$"+o.env) {
-			t.Errorf("usage lacks -%s / $%s", o.name, o.env)
+	var out bytes.Buffer
+	if code := run([]string{"-h"}, &out, &out, env(nil)); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	help := out.String()
+	for _, st := range config.AllSettings() {
+		want := "$" + st.Env
+		if st.Secret {
+			want = st.Env // environment only
+		}
+		if !strings.Contains(help, want) {
+			t.Errorf("usage lacks %s", want)
 		}
 	}
-	for _, s := range append([]string{"--<key>=<value>", "-version", "Examples:"}, "CLICKHOUSE_PASSWORD", "ONCOKB_TOKEN", "AUTH_JWT_SECRET", "PUBLISHER_API_KEY",
-		"CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_SECRET", "CBIOPORTAL_REDIS_PASSWORD") {
-		if !strings.Contains(out, s) {
-			t.Errorf("usage lacks %s", s)
+	for _, want := range []string{"--port", "$PORT", "--clickhouse-bulk-max-memory", "$CLICKHOUSE_BULK_MAX_MEMORY",
+		"--frontend-dir", "--session-store", "--portal-properties", "--key=value", "Examples:",
+		"CLICKHOUSE_PASSWORD", "ONCOKB_TOKEN", "AUTH_JWT_SECRET", "PUBLISHER_API_KEY",
+		"CBIOPORTAL_LOGIN_MICROSOFT_CLIENT_SECRET", "CBIOPORTAL_REDIS_PASSWORD",
+		"ClickHouse:", "Frontend:", "Sessions and auth:", "Login:"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("usage lacks %s", want)
 		}
 	}
 }
@@ -115,14 +133,17 @@ func TestRunCommands(t *testing.T) {
 	}{
 		{[]string{"version", "--json"}, 0, `"name": "cbioportal-api"`, ""},
 		{[]string{"-version"}, 0, "cbioportal-api ", ""},
-		{[]string{"help"}, 0, "Commands (the command comes first", ""},
+		{[]string{"help"}, 0, "Without a\ncommand it serves", ""},
+		{[]string{"help", "config"}, 0, "cbioportal-api config [flags]", ""},
 		{[]string{"config", "--login=optional", "--login-google-client-id=gid"}, 0, "authenticate", "s3cret"},
 		{[]string{"config", "--json", "--spring.data.redis.host=h"}, 0, `"source": "spring.data.redis.host (argument)"`, ""},
 		{[]string{"config", "--json"}, 0, `"source": "env $CBIOPORTAL_DB"`, ""},
+		{[]string{"--db=x", "config"}, 0, "Settings:", ""},
 		{[]string{"confg"}, 2, "did you mean config?", ""},
 		{[]string{"--prot=1"}, 2, "did you mean --port?", ""},
 		{[]string{"-dbb", "x"}, 2, "did you mean --db?", ""},
-		{[]string{"--db=x", "config"}, 2, `the command "config" must come first`, ""},
+		{[]string{"--port"}, 2, "needs an argument", ""},
+		{[]string{"stray"}, 2, `unknown command "stray"`, ""},
 		{[]string{"config", "--login=optional", "--authenticate=oauth2"}, 2, "set it one way", ""},
 		{[]string{"config", "--login=maybe"}, 2, "is not off, optional or required", ""},
 		{[]string{"config", "--clickhouse-bulk-max-time=soon"}, 2, "invalid duration", ""},
@@ -133,13 +154,5 @@ func TestRunCommands(t *testing.T) {
 		if code != tc.code || !strings.Contains(got, tc.out) || (tc.notIn != "" && strings.Contains(got, tc.notIn)) {
 			t.Errorf("%q: exit %d, want %d; output:\n%s", tc.args, code, tc.code, got)
 		}
-	}
-}
-
-// A portal property that only looks like a flag stays a property.
-func TestParseArgsKeepsPropertiesNearFlags(t *testing.T) {
-	cfg, err := parseArgs([]string{"--authenticate=false", "--app.name=x", "--dat.method=none"}, env(nil))
-	if err != nil || len(cfg.portalArgs) != 3 {
-		t.Fatalf("err %v, portal args %q", err, cfg.portalArgs)
 	}
 }

@@ -26,9 +26,8 @@ func TestOncokbProxyStreamsEncodedResponse(t *testing.T) {
 		w.Write([]byte(big))
 	}))
 	defer upstream.Close()
-	t.Setenv("ONCOKB_URL", upstream.URL+"/api/v1")
 	t.Setenv("ONCOKB_TOKEN", "tok")
-	h := NewRouter(newState(&core.State{}))
+	h := NewRouter(newState(&core.State{Opts: core.Options{OncoKBURL: upstream.URL + "/api/v1"}}))
 
 	enc := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
 	body := `[{"gene":{"hugoGeneSymbol":"BRAF"},"proteinChange":"V600E"}]`
@@ -66,8 +65,7 @@ func TestOncokbProxyNoTimeoutButCancels(t *testing.T) {
 		close(cancelled)
 	}))
 	defer upstream.Close()
-	t.Setenv("ONCOKB_URL", upstream.URL)
-	router := NewRouter(newState(&core.State{}))
+	router := NewRouter(newState(&core.State{Opts: core.Options{OncoKBURL: upstream.URL}}))
 	ctx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodGet, "/proxy/dev/oncokb/utils/allCuratedGenes", nil).WithContext(ctx)
 	done := make(chan struct{})

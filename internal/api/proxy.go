@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
@@ -27,8 +26,9 @@ func (s *State) routeProxy(mux *http.ServeMux) {
 	mux.HandleFunc("/proxy/dev/oncokb/", s.oncokbDevProxy)
 }
 
-func oncokbBaseURL() string {
-	if u := os.Getenv("ONCOKB_URL"); u != "" {
+// oncokbBaseURL is the OncoKB API the proxy sends to (Opts.OncoKBURL).
+func (s *State) oncokbBaseURL() string {
+	if u := s.Opts.OncoKBURL; u != "" {
 		return strings.TrimSuffix(u, "/")
 	}
 	return "https://public.api.oncokb.org/api/v1"
@@ -75,7 +75,7 @@ func (s *State) oncokbProxy(w http.ResponseWriter, r *http.Request) {
 			query.Add(decodeB64(k), decodeB64(v))
 		}
 	}
-	resp, err := oncokbExchange(r, path, query.Encode(), body, config.OncoKBToken(config.EffectiveProperties(s.Props, s.PropsReplaceDefaults)))
+	resp, err := oncokbExchange(r, s.oncokbBaseURL(), path, query.Encode(), body, config.OncoKBToken(config.EffectiveProperties(s.Props, s.PropsReplaceDefaults)))
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -105,7 +105,7 @@ func (s *State) oncokbDevProxy(w http.ResponseWriter, r *http.Request) {
 	if token == "" {
 		token = "NA"
 	}
-	resp, err := oncokbExchange(r, strings.TrimPrefix(r.URL.Path, "/proxy/dev/oncokb"), r.URL.RawQuery, body, token)
+	resp, err := oncokbExchange(r, s.oncokbBaseURL(), strings.TrimPrefix(r.URL.Path, "/proxy/dev/oncokb"), r.URL.RawQuery, body, token)
 	if err != nil {
 		core.Fail(w, r, err)
 		return
@@ -127,11 +127,11 @@ var oncokbClient = &http.Client{}
 
 // oncokbExchange sends the request to OncoKB and returns the response with
 // its body unread; the caller closes it.
-func oncokbExchange(r *http.Request, path, query string, body []byte, token string) (*http.Response, error) {
+func oncokbExchange(r *http.Request, base, path, query string, body []byte, token string) (*http.Response, error) {
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	target := oncokbBaseURL() + path
+	target := base + path
 	if query != "" {
 		target += "?" + query
 	}

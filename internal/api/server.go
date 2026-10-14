@@ -22,9 +22,13 @@ type State struct {
 	auth *auth.Login
 }
 
-// NewState returns the API state over ClickHouse client c; ConfigureAuth and
-// ConfigureSessions apply the portal properties.
-func NewState(c *ch.Client) *State { return newState(core.NewState(c)) }
+// NewState returns the API state over ClickHouse client c with the server
+// settings o; ConfigureAuth and ConfigureSessions apply the portal
+// properties.
+func NewState(c *ch.Client, o Options) *State { return newState(core.NewState(c, o)) }
+
+// Options are the server settings the API uses (core.Options).
+type Options = core.Options
 
 // newState returns the API state over cs, without a login.
 func newState(cs *core.State) *State {
@@ -37,7 +41,7 @@ func MetricsHandler() http.Handler { return core.MetricsHandler() }
 // ConfigureAuth sets up the login and study authorization the portal
 // properties ask for.
 func (s *State) ConfigureAuth() error {
-	l, err := auth.Configure(config.EffectiveProperties(s.Props, s.PropsReplaceDefaults))
+	l, err := auth.Configure(config.EffectiveProperties(s.Props, s.PropsReplaceDefaults), s.Opts.BearerAuth)
 	if err != nil || l == nil {
 		return err
 	}
@@ -65,7 +69,7 @@ func (s *State) CheckLogin(ctx context.Context) []auth.CheckResult {
 func NewRouter(s *State) http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	h := auth.BearerAuth(s.auth != nil, core.SpringStringParams(s.StudyAvailability(core.ExtraEndpoints(studies.New(s.State).StudiesMeta, core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
+	h := auth.BearerAuth(s.Opts, s.auth != nil, core.SpringStringParams(s.StudyAvailability(core.ExtraEndpoints(studies.New(s.State).StudiesMeta, core.StudyViewBodyErrors(s.JavaContract(core.PageList(core.MetaProjection(core.BodyErrors(mux)))))))))
 	if s.auth != nil {
 		h = s.auth.Wrap(s.State, h)
 	}

@@ -25,7 +25,7 @@ func (s *State) ConfigureSessions() error {
 	base := strings.TrimSpace(prop("session.service.url", "SESSION_SERVICE_URL"))
 	if base == "" {
 		s.SessionStore()
-		if f := os.Getenv("SESSION_STORE_FILE"); f != "" {
+		if f := s.Opts.SessionStoreFile; f != "" {
 			log.Printf("sessions: built-in store, persisted to %s", f)
 		} else {
 			log.Print("sessions: built-in store, in memory")
@@ -44,18 +44,18 @@ func (s *State) ConfigureSessions() error {
 		auth = " (basic authentication)"
 	}
 	log.Printf("sessions: session service %s%s", sessionstore.RedactURL(base), auth)
-	if os.Getenv("SESSION_STORE_FILE") != "" {
-		log.Print("sessions: SESSION_STORE_FILE is ignored with a session service")
+	if s.Opts.SessionStoreFile != "" {
+		log.Print("sessions: --session-store is ignored with a session service")
 	}
 	return nil
 }
 
 // SessionStore returns the session store, the built-in one
-// (SESSION_STORE_FILE) unless ConfigureSessions set one.
+// (Opts.SessionStoreFile) unless ConfigureSessions set one.
 func (s *State) SessionStore() sessionstore.Store {
 	s.sessionsOnce.Do(func() {
 		if s.Sessions == nil {
-			s.Sessions = sessionstore.NewMemoryStore(os.Getenv("SESSION_STORE_FILE"))
+			s.Sessions = sessionstore.NewMemoryStore(s.Opts.SessionStoreFile)
 		}
 	})
 	return s.Sessions

@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -19,7 +18,7 @@ func (s *State) portal(w http.ResponseWriter, r *http.Request) {
 		cfg = s.PageConfig(r)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(javaPortalPage(r.Host, cfg))
+	w.Write(withSiteBanner(javaPortalPage(r.Host, cfg), s.Opts.SiteBanner, s.Opts.SiteBannerLink))
 }
 
 // javaPortalPage is index.html as the Java portal renders it for host, with
@@ -125,7 +124,7 @@ loadReactApp(window.frontendConfig);
 </body>
 </html>
 `)
-	return withSiteBanner([]byte(b.String()), os.Getenv("SITE_BANNER"), os.Getenv("SITE_BANNER_LINK"))
+	return []byte(b.String())
 }
 
 // CatchAll serves every path no route matches. An /api/ path gets Spring's

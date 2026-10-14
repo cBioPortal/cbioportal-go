@@ -28,25 +28,27 @@ import (
 // State is what the handlers serve from: the ClickHouse client, the portal
 // properties and the shared caches.
 type State struct {
-	CH *ch.Client
+	// Opts are the server settings cbioportal-api starts the API with.
+	Opts Options
+	CH   *ch.Client
 	// BulkCH is CH with the per-query limits of the bulk endpoints (whole
 	// profiles of data, enrichments, the study export): their queries spill
 	// large sorts to disk and stop at a memory and a time limit.
 	BulkCH *ch.Client
 	// Sessions is the session store: ConfigureSessions sets it, and a nil
-	// one is the built-in store (SESSION_STORE_FILE) on first use.
+	// one is the built-in store (Opts.SessionStoreFile) on first use.
 	Sessions     sessionstore.Store
 	sessionsOnce sync.Once
 	meta         metaCache
 	// The portal UI shares the API's origin as in a cBioPortal deployment:
-	// frontendDir is a built frontend (FRONTEND_DIR), whose index.html the
-	// portal pages serve and whose files frontendFiles serves under
+	// frontendDir is a built frontend (Opts.FrontendDir), whose index.html
+	// the portal pages serve and whose files frontendFiles serves under
 	// /reactapp/ and /images/; frontendProxy is a frontend dev server
-	// (FRONTEND_URL) that gets the pages and every unknown path instead.
+	// (Opts.FrontendURL) that gets the pages and every unknown path instead.
 	frontendDir   string
 	frontendFiles *staticFiles
-	// staticFiles serves the portal's own files (CBIOPORTAL_STATIC_DIR) at
-	// their path, before the built-in resources and the frontend build.
+	// staticFiles serves the portal's own files (Opts.StaticDir) at their
+	// path, before the built-in resources and the frontend build.
 	staticFiles   *staticFiles
 	frontendProxy http.Handler
 	// PageConfig is the frontend configuration (the /config_service body) a
@@ -71,16 +73,46 @@ type State struct {
 // and the access log consult.
 func (s *State) SetMux(mux *http.ServeMux) { s.mux = mux }
 
-// NewState returns the API state over ClickHouse client c; ConfigureAuth and
-// ConfigureSessions apply the portal properties.
-func NewState(c *ch.Client) *State {
-	s := &State{CH: c, BulkCH: c.WithSettings(DefaultBulkLimits.Settings())}
-	if dir := os.Getenv("CBIOPORTAL_STATIC_DIR"); dir != "" {
-		s.staticFiles = newStaticFiles(dir)
+// Options are the server settings of cbioportal-api that the API itself
+// uses. The zero value serves the API alone, with in-memory sessions.
+type Options struct {
+	// FrontendDir is a frontend build served for every non-/api/ path;
+	// FrontendURL, used when FrontendDir is empty, is a frontend dev server
+	// those paths are proxied to instead.
+	FrontendDir string
+	FrontendURL string
+	// StaticDir holds the portal's own files (a logo, custom tab scripts),
+	// served at their path before the built-in ones.
+	StaticDir string
+	// OncoKBURL is the OncoKB API behind /proxy/; empty means the public one.
+	OncoKBURL string
+	// SiteBanner is a notice bar at the top of every portal page, linking
+	// to SiteBannerLink when set.
+	SiteBanner     string
+	SiteBannerLink string
+	// SessionStoreFile persists the built-in session store; empty keeps
+	// sessions in memory.
+	SessionStoreFile string
+	// AccessLog writes one JSON line per request to stdout.
+	AccessLog bool
+	// BearerAuth requires HS256 bearer tokens (signed with $AUTH_JWT_SECRET);
+	// BearerDefaultUser is the user of requests without one, for a
+	// single-user development login.
+	BearerAuth        bool
+	BearerDefaultUser string
+}
+
+// NewState returns the API state over ClickHouse client c with the server
+// settings o; ConfigureAuth and ConfigureSessions apply the portal
+// properties.
+func NewState(c *ch.Client, o Options) *State {
+	s := &State{Opts: o, CH: c, BulkCH: c.WithSettings(DefaultBulkLimits.Settings())}
+	if o.StaticDir != "" {
+		s.staticFiles = newStaticFiles(o.StaticDir)
 	}
-	if dir := os.Getenv("FRONTEND_DIR"); dir != "" {
-		s.frontendDir, s.frontendFiles = dir, newStaticFiles(dir)
-	} else if u, err := url.Parse(os.Getenv("FRONTEND_URL")); err == nil && u.Host != "" {
+	if o.FrontendDir != "" {
+		s.frontendDir, s.frontendFiles = o.FrontendDir, newStaticFiles(o.FrontendDir)
+	} else if u, err := url.Parse(o.FrontendURL); err == nil && u.Host != "" {
 		s.frontendProxy = httputil.NewSingleHostReverseProxy(u)
 	}
 	return s
@@ -441,7 +473,7 @@ func (s *State) indexPage(w http.ResponseWriter, r *http.Request) {
 		raw, _ = json.Marshal(s.PageConfig(r))
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(withFrontendConfig(page, r.Host, raw))
+	w.Write(withSiteBanner(withFrontendConfig(page, r.Host, raw), s.Opts.SiteBanner, s.Opts.SiteBannerLink))
 }
 
 // withFrontendConfig sets window.frontendConfig in the frontend's index page
@@ -467,7 +499,6 @@ func withFrontendConfig(page []byte, host string, rawConfig []byte) []byte {
 	} else {
 		page = append(script, page...)
 	}
-	page = withSiteBanner(page, os.Getenv("SITE_BANNER"), os.Getenv("SITE_BANNER_LINK"))
 	// An element after #reactRoot keeps it from being the body's last child:
 	// otherwise every node the frontend appends to the body to measure text
 	// flips :last-child matching and restyles the whole app.

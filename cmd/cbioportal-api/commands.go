@@ -9,6 +9,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
 	"github.com/cbioportal/cbioportal-go/internal/api/auth"
 	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -22,40 +25,77 @@ type configEntry struct {
 	Source string `json:"source"`
 }
 
+func newConfigCmd(s *settings) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "config",
+		Short: "print the effective settings and where each comes from; secrets are shown as (redacted)",
+		Args:  cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ld, err := load(s)
+			if err != nil {
+				return err
+			}
+			return printConfig(cmd.OutOrStdout(), s, ld, asJSON)
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the settings as JSON")
+	return cmd
+}
+
+func newCheckCmd(s *settings) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use: "check",
+		Short: "check the settings and reach ClickHouse, the sign-in providers and the login session store; " +
+			"exit status 1 when a check fails",
+		Args: cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ld, err := load(s)
+			if err != nil {
+				return err
+			}
+			return runCheck(cmd.OutOrStdout(), s, ld, asJSON)
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the checks as JSON")
+	return cmd
+}
+
 // printConfig prints the effective settings, each with where its value
 // came from, and the portal properties; credentials are redacted.
-func printConfig(w io.Writer, cfg *settings, ld *loaded, jsonOut bool) int {
+func printConfig(w io.Writer, s *settings, ld *loaded, jsonOut bool) error {
 	var out struct {
 		Settings         []configEntry `json:"settings"`
 		PortalProperties []configEntry `json:"portalProperties"`
 	}
-	for _, o := range allOptions() {
-		v, src := cfg.values[o.name], cfg.sources[o.name]
-		if o.setting && src == "" {
+	login := s.loginValues()
+	s.flags.VisitAll(func(f *pflag.Flag) {
+		v, src := f.Value.String(), cli.Source(f)
+		if _, isLogin := s.login[f.Name]; isLogin && (src == "" || src == "default") {
 			// Unset under go's name: it may be set by its Java name.
-			st, _ := config.LookupSetting(o.name)
-			if k := config.JavaName(st, cfg.goSettings()); k != "" {
+			st, _ := config.LookupSetting(f.Name)
+			if k := config.JavaName(st, login); k != "" {
 				if pv, ok := ld.props[k]; ok {
 					v, src = pv, k+" ("+ld.propSources[k]+")"
 				}
 			}
 		}
 		if src == "" {
-			continue
+			return
 		}
-		out.Settings = append(out.Settings, configEntry{o.name, config.Redact(o.name, v), src})
-	}
+		out.Settings = append(out.Settings, configEntry{f.Name, config.Redact(f.Name, v), src})
+	})
 	for _, st := range config.AllSettings() {
-		if src := cfg.sources[st.Name]; st.Secret && src != "" {
-			out.Settings = append(out.Settings, configEntry{st.Name, config.Redact(st.Name, cfg.values[st.Name]), src})
+		if v := s.getenv(st.Env); st.Secret && v != "" {
+			out.Settings = append(out.Settings, configEntry{st.Name, config.Redact(st.Name, v), "env $" + st.Env})
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(ld.props)) {
 		out.PortalProperties = append(out.PortalProperties, configEntry{k, config.Redact(k, ld.props[k]), ld.propSources[k]})
 	}
 	if jsonOut {
-		cli.WriteJSON(w, out)
-		return cli.ExitOK
+		return cli.WriteJSON(w, out)
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "Settings:")
@@ -69,14 +109,13 @@ func printConfig(w io.Writer, cfg *settings, ld *loaded, jsonOut bool) int {
 	for _, e := range out.PortalProperties {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\n", e.Name, e.Value, e.Source)
 	}
-	tw.Flush()
-	return cli.ExitOK
+	return tw.Flush()
 }
 
 // runCheck checks the settings and reaches every service they name:
 // ClickHouse and its three databases, and the login's providers and
-// session store. The exit status is 1 when any check fails.
-func runCheck(stdout, stderr io.Writer, cfg *settings, ld *loaded, jsonOut bool) int {
+// session store. It fails (exit status 1) when any check fails.
+func runCheck(stdout io.Writer, s *settings, ld *loaded, jsonOut bool) error {
 	var checks []auth.CheckResult
 	add := func(name string, err error, detail string) {
 		r := auth.CheckResult{Name: name, OK: err == nil, Detail: detail}
@@ -85,35 +124,34 @@ func runCheck(stdout, stderr io.Writer, cfg *settings, ld *loaded, jsonOut bool)
 		}
 		checks = append(checks, r)
 	}
-	state, err := newState(cfg, ld)
+	state, err := newState(s, ld)
 	add("settings", err, "valid")
 	if err == nil {
-		v := cfg.values
-		c := ch.New(v["clickhouse-url"], v["db"])
+		c := ch.New(s.clickhouseURL, s.db)
 		type row struct {
 			V string `json:"v"`
 		}
 		ver, err := ch.Query[row](c, "SELECT version() AS v")
 		detail := ""
 		if err == nil && len(ver) == 1 {
-			detail = fmt.Sprintf("%s, ClickHouse %s", v["clickhouse-url"], ver[0].V)
+			detail = fmt.Sprintf("%s, ClickHouse %s", s.clickhouseURL, ver[0].V)
 		}
 		add("clickhouse", err, detail)
 		if err == nil {
-			for _, db := range []string{"db", "raw-db", "ref-db"} {
+			for _, db := range []struct{ flag, name string }{{"db", s.db}, {"raw-db", s.rawDB}, {"ref-db", s.refDB}} {
 				type count struct {
 					N uint64 `json:"n"`
 				}
 				n, err := ch.QueryP[count](c, "SELECT count() AS n FROM system.tables WHERE database = {db:String}",
-					ch.Params{"db": v[db]})
+					ch.Params{"db": db.name})
 				if err == nil && (len(n) != 1 || n[0].N == 0) {
-					err = fmt.Errorf("database %s has no tables (--%s)", v[db], db)
+					err = fmt.Errorf("database %s has no tables (--%s)", db.name, db.flag)
 				}
 				detail := ""
 				if err == nil {
-					detail = fmt.Sprintf("%s: %d tables", v[db], n[0].N)
+					detail = fmt.Sprintf("%s: %d tables", db.name, n[0].N)
 				}
-				add("clickhouse --"+db, err, detail)
+				add("clickhouse --"+db.flag, err, detail)
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -139,7 +177,7 @@ func runCheck(stdout, stderr io.Writer, cfg *settings, ld *loaded, jsonOut bool)
 		}
 	}
 	if !ok {
-		return cli.ExitFailure
+		return cli.ErrReported
 	}
-	return cli.ExitOK
+	return nil
 }
