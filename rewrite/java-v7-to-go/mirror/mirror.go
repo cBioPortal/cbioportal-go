@@ -28,16 +28,16 @@ package mirror
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
@@ -353,14 +353,12 @@ func (r *Runner) writeState(p Plan) error {
 		[]byte(fmt.Sprintf("CBIOPORTAL_DB=%s\nCBIOPORTAL_RAW_DB=%s\nCBIOPORTAL_REF_DB=%s\n", p.DB, p.RawDB, p.RefDB)), 0o644)
 }
 
-// Main is `cbioportal-rewrite-test java-v7-to-go mirror`.
-func Main(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("mirror", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		fmt.Fprint(stderr, `Usage: cbioportal-rewrite-test java-v7-to-go mirror
-
-Rebuilds go's databases from a zero-copy clone of Java cBioPortal's
+// Command is `cbioportal-rewrite-test java-v7-to-go mirror`.
+func Command() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mirror",
+		Short: "rebuild go's databases from a clone of production's",
+		Long: `Mirror rebuilds go's databases from a zero-copy clone of Java cBioPortal's
 production database (see docs/deployment.md, "Mirroring production").
 Settings come from the environment:
 
@@ -373,31 +371,23 @@ Settings come from the environment:
   PORTAL_DATABASE  the update_status row (public)
   SRC_DB           clone this database instead of the live production color
   TARGET_DB        build into TARGET_DB, its _raw and its _ref instead of
-                   the inactive color
-`)
+                   the inactive color`,
+		Args: cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg := ConfigFromEnv()
+			if cfg.URL == "" {
+				return cli.Usagef("CLICKHOUSE_URL is not set")
+			}
+			stdout := cmd.OutOrStdout()
+			logf := func(format string, a ...any) {
+				fmt.Fprintf(stdout, "[mirror %s] %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, a...))
+			}
+			r := &Runner{Cfg: cfg, C: ch.New(cfg.URL, "default"), Logf: logf, RetryDelay: 10 * time.Second}
+			if _, err := r.Run(context.Background()); err != nil {
+				logf("FAIL: %v", err)
+				return cli.ErrReported
+			}
+			return nil
+		},
 	}
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fs.Usage()
-		return 2
-	}
-	cfg := ConfigFromEnv()
-	if cfg.URL == "" {
-		fmt.Fprintln(stderr, "mirror: CLICKHOUSE_URL is not set")
-		return 2
-	}
-	logf := func(format string, a ...any) {
-		fmt.Fprintf(stdout, "[mirror %s] %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, a...))
-	}
-	r := &Runner{Cfg: cfg, C: ch.New(cfg.URL, "default"), Logf: logf, RetryDelay: 10 * time.Second}
-	if _, err := r.Run(context.Background()); err != nil {
-		logf("FAIL: %v", err)
-		return 1
-	}
-	return 0
 }

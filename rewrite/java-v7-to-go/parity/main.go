@@ -13,168 +13,215 @@
 package parity
 
 import (
-	"errors"
-	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 )
 
-const usage = `Usage:
-  parity run [-day YYYY-MM-DD] [-dry-run] [-root DIR]
-      one comparison from the repository at DIR (default: the go.mod above
-      the working directory), of a new corpus sampled from the previous
-      day's traffic. -day records the run as that night (default: today,
-      UTC), to redo a past night, and samples the day before it; -dry-run
-      prints the GitHub issue actions instead of running gh and records
-      nothing in the state directory.
-  parity status [-dry-run] [-root DIR]
-      rewrite the tracking issue's description from nights.txt as it is
-      now, after a night's record was changed by hand; -dry-run prints it.
-  parity corpus [-root DIR] [OUT]
-      write the logged-traffic corpus (default DIR/.parity/nightly/corpus.txt)
-  parity nightly [-home DIR] [-repo DIR] [-- RUN-ARGS]
-      the cron entry: one run at a time, from a checkout (DIR/src) of the
-      ref in DIR/state/ref (default origin/main), logged to DIR/logs.
-
-Environment of run:
-  PARITY_DIR     corpus.txt, runs/<date>/ (results.json, output.txt,
-                 report.md, issue.md, dump/; kept 14 days) and
-                 last-unexplained.txt; default .parity/nightly
-  PARITY_STATE   nights.txt, one "<date> clean|unclean" line per night, for
-                 the clean nights in a row (7 are the go/no-go for
-                 api.cbioportal.org); default PARITY_DIR
-  A, B           origins (https://go.cbioportal.org, https://api.cbioportal.org)
-  RATE           requests per second to B, both runs together (4)
-  UA             User-Agent (cbioportal-go-parity; api.cbioportal.org refuses browsers)
-  ISSUE_REPO     repository of the alert issue (cBioPortal/cbioportal-go)
-  PARITY_ISSUE   the alert issue's number, instead of looking it up
-  PARITY_MEMORY_MAX  hard memory cap of paritydiff (2G): MemoryMax of a
-                 systemd user scope (found without a login session too, via
-                 /run/user/UID), checked to be in force; where there is none,
-                 an address-space limit (prlimit --as) of PARITY_MEMORY_AS
-                 (twice PARITY_MEMORY_MAX, as Go reserves address space
-                 ahead). With neither, run refuses to start paritydiff.
-                 GOMEMLIMIT (1500MiB) is its collector's soft limit
-Environment of corpus: CORPUS_N (5000), CORPUS_MIN (3), CORPUS_SEED (the
-  night's date), CORPUS_SINCE and CORPUS_UNTIL (the UTC day before the
-  night), CORPUS_API_SHARE (0.25); ClickHouse from
-  CLICKHOUSE_URL/USER/PASSWORD, else CLOUD_ENV (~/.config/cbioportal-go/cloud.env).
-
-Exit status of run: 0 when every request is identical or a known
-difference, 1 on unexplained differences, status mismatches or errors, 2
-when the check itself could not run.
-`
-
-// Main runs a parity subcommand and returns the exit status.
-func Main(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
-		return 2
+// Command is `cbioportal-rewrite-test java-v7-to-go parity`.
+func Command() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "parity",
+		Short: "replay production traffic against go and Java and report",
+		Long: `Parity replays a sample of the previous day's production requests against
+go (A) and Java (B), reports every difference, and keeps the GitHub issue
+that tracks the clean nights up to date. See docs/rewrite/parity.md.`,
 	}
-	fs := flag.NewFlagSet("parity "+args[0], flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() { fmt.Fprint(stderr, usage) }
-	switch args[0] {
-	case "help", "-h", "-help", "--help":
-		fmt.Fprint(stdout, usage)
-		return 0
-	case "run":
-		root := fs.String("root", "", "repository root")
-		day := fs.String("day", "", "record the run as this night, YYYY-MM-DD (default: today, UTC)")
-		dry := fs.Bool("dry-run", false, "print the GitHub issue actions instead of running gh")
-		if err := fs.Parse(args[1:]); err != nil {
-			return flagStatus(err)
-		}
-		if fs.NArg() > 0 {
-			fmt.Fprint(stderr, usage)
-			return 2
-		}
-		r, err := rootDir(*root)
-		if err != nil {
-			fmt.Fprintln(stderr, "parity:", err)
-			return 2
-		}
-		dir := env("PARITY_DIR", filepath.Join(r, ".parity/nightly"))
-		clean, err := nightlyRun(runOptions{
-			root: r, dir: dir, state: env("PARITY_STATE", dir),
-			a: env("A", "https://go.cbioportal.org"), b: env("B", "https://api.cbioportal.org"),
-			rate: env("RATE", "4"), ua: env("UA", "cbioportal-go-parity"),
-			issueRepo: env("ISSUE_REPO", "cBioPortal/cbioportal-go"), issue: os.Getenv("PARITY_ISSUE"),
-			memoryMax: env("PARITY_MEMORY_MAX", "2G"), memoryAS: os.Getenv("PARITY_MEMORY_AS"), goMemLimit: env("GOMEMLIMIT", "1500MiB"),
-			day: *day, dry: *dry, stdout: stdout, stderr: stderr,
-		})
-		if err != nil {
-			fmt.Fprintln(stderr, "nightly:", err)
-			return 2
-		}
-		if !clean {
-			return 1
-		}
-		return 0
-	case "status":
-		root := fs.String("root", "", "repository root")
-		dry := fs.Bool("dry-run", false, "print the description instead of editing the issue")
-		if err := fs.Parse(args[1:]); err != nil {
-			return flagStatus(err)
-		}
-		if fs.NArg() > 0 {
-			fmt.Fprint(stderr, usage)
-			return 2
-		}
-		r, err := rootDir(*root)
-		if err != nil {
-			fmt.Fprintln(stderr, "parity:", err)
-			return 2
-		}
-		dir := env("PARITY_DIR", filepath.Join(r, ".parity/nightly"))
-		if err := refreshStatus(runOptions{
-			state: env("PARITY_STATE", dir), issueRepo: env("ISSUE_REPO", "cBioPortal/cbioportal-go"),
-			issue: os.Getenv("PARITY_ISSUE"), dry: *dry, stdout: stdout, stderr: stderr,
-		}); err != nil {
-			fmt.Fprintln(stderr, "status:", err)
-			return 1
-		}
-		return 0
-	case "corpus":
-		root := fs.String("root", "", "repository root")
-		if err := fs.Parse(args[1:]); err != nil {
-			return flagStatus(err)
-		}
-		r, err := rootDir(*root)
-		if err != nil {
-			fmt.Fprintln(stderr, "parity:", err)
-			return 2
-		}
-		out := filepath.Join(r, ".parity/nightly/corpus.txt")
-		if fs.NArg() > 0 {
-			out = fs.Arg(0)
-		}
-		if err := writeCorpus(r, out, time.Now().UTC(), stderr); err != nil {
-			fmt.Fprintln(stderr, "corpus:", err)
-			return 1
-		}
-		return 0
-	case "nightly":
-		home, _ := os.UserHomeDir()
-		dir := fs.String("home", filepath.Join(home, ".local/share/cbioportal-go-parity"), "logs, state and checkout `directory`")
-		repo := fs.String("repo", filepath.Join(home, "projects/cbioportal-go"), "local clone to fetch unpushed branches from")
-		if err := fs.Parse(args[1:]); err != nil {
-			return flagStatus(err)
-		}
-		return cronNightly(nightlyOptions{home: *dir, repo: *repo, extra: fs.Args()})
-	}
-	fmt.Fprintf(stderr, "parity: unknown command %q\n\n%s", args[0], usage)
-	return 2
+	cmd.AddCommand(runCommand(), statusCommand(), corpusCommand(), nightlyCommand())
+	return cmd
 }
 
-func flagStatus(err error) int {
-	if errors.Is(err, flag.ErrHelp) {
-		return 0
+// stateFlags are the flags that locate the run directory and nights.txt.
+type stateFlags struct {
+	root, dir, state string
+}
+
+func (s *stateFlags) register(fs *pflag.FlagSet) {
+	fs.StringVar(&s.root, "root", "", "repository `directory` (default: the go.mod above the working directory)")
+	fs.StringVar(&s.dir, "dir", "", "`directory` of corpus.txt, runs/<date>/ (kept 14 days) and last-unexplained.txt (default: <root>/.parity/nightly)")
+	fs.StringVar(&s.state, "state", "", "`directory` of nights.txt, one \"<date> clean|unclean\" line per night (default: --dir)")
+	cli.Env(fs, "dir", "PARITY_DIR")
+	cli.Env(fs, "state", "PARITY_STATE")
+}
+
+// resolve fills in the defaults that depend on the repository root.
+func (s *stateFlags) resolve() (root, dir, state string, err error) {
+	if root, err = rootDir(s.root); err != nil {
+		return "", "", "", cli.Usage(err)
 	}
-	return 2
+	dir = s.dir
+	if dir == "" {
+		dir = filepath.Join(root, ".parity/nightly")
+	}
+	state = s.state
+	if state == "" {
+		state = dir
+	}
+	return root, dir, state, nil
+}
+
+// issueFlags name the tracking issue.
+type issueFlags struct {
+	repo, number string
+}
+
+func (i *issueFlags) register(fs *pflag.FlagSet) {
+	fs.StringVar(&i.repo, "issue-repo", "cBioPortal/cbioportal-go", "`repository` of the tracking issue")
+	fs.StringVar(&i.number, "issue", "", "the tracking issue's `number` (default: looked up by its label)")
+	cli.Env(fs, "issue-repo", "ISSUE_REPO")
+	cli.Env(fs, "issue", "PARITY_ISSUE")
+}
+
+func runCommand() *cobra.Command {
+	var st stateFlags
+	var is issueFlags
+	var day, a, b, ua, memoryMax, memoryAS, goMemLimit string
+	var rate float64
+	var dry bool
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "compare a new sample of the previous day's traffic and report",
+		Long: `Run samples a new corpus from the previous day's logged traffic, replays
+it against A and B, writes runs/<date>/ (results.json, output.txt,
+report.md, issue.md, dump/) and updates the tracking issue.
+
+paritydiff runs under a hard memory cap (--memory-max): the MemoryMax of a
+systemd user scope (found without a login session too, via /run/user/UID),
+checked to be in force; where there is none, an address-space limit
+(prlimit --as) of --memory-as (default twice --memory-max, as Go reserves
+address space ahead). With neither, run refuses to start paritydiff.
+
+The corpus is sampled with CORPUS_N (5000), CORPUS_MIN (3), CORPUS_SEED (the
+night's date), CORPUS_SINCE and CORPUS_UNTIL (the UTC day before the night)
+and CORPUS_API_SHARE (0.25), from ClickHouse at CLICKHOUSE_URL/USER/PASSWORD,
+else from the file CLOUD_ENV (~/.config/cbioportal-go/cloud.env).
+
+Exit status: 0 when every request is identical or a known difference, 1 on
+unexplained differences, status mismatches or errors, 2 when the check
+itself could not run.`,
+		Args: cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			root, dir, state, err := st.resolve()
+			if err != nil {
+				return err
+			}
+			clean, err := nightlyRun(runOptions{
+				root: root, dir: dir, state: state,
+				a: a, b: b, rate: strconv.FormatFloat(rate, 'f', -1, 64), ua: ua,
+				issueRepo: is.repo, issue: is.number,
+				memoryMax: memoryMax, memoryAS: memoryAS, goMemLimit: goMemLimit,
+				day: day, dry: dry, stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(),
+			})
+			if err != nil {
+				return cli.Usage(fmt.Errorf("nightly: %w", err))
+			}
+			if !clean {
+				return cli.ErrReported
+			}
+			return nil
+		},
+	}
+	fs := cmd.Flags()
+	st.register(fs)
+	fs.StringVar(&day, "day", "", "record the run as this night, `YYYY-MM-DD`, and sample the day before it (default: today, UTC)")
+	fs.BoolVar(&dry, "dry-run", false, "print the GitHub issue actions instead of running gh, and record nothing in --state")
+	fs.StringVar(&a, "origin-a", "https://go.cbioportal.org", "origin A, the go API")
+	fs.StringVar(&b, "origin-b", "https://api.cbioportal.org", "origin B, Java production")
+	fs.Float64Var(&rate, "rate", 4, "requests per second to B, both of its runs together")
+	fs.StringVar(&ua, "ua", "cbioportal-go-parity", "User-Agent (api.cbioportal.org refuses browsers)")
+	is.register(fs)
+	fs.StringVar(&memoryMax, "memory-max", "2G", "hard memory cap of paritydiff")
+	fs.StringVar(&memoryAS, "memory-as", "", "address-space cap of paritydiff where no systemd scope can be had (default: twice --memory-max)")
+	fs.StringVar(&goMemLimit, "gomemlimit", "1500MiB", "paritydiff's GOMEMLIMIT, its collector's soft limit")
+	for name, env := range map[string]string{"origin-a": "A", "origin-b": "B", "rate": "RATE", "ua": "UA",
+		"memory-max": "PARITY_MEMORY_MAX", "memory-as": "PARITY_MEMORY_AS", "gomemlimit": "GOMEMLIMIT"} {
+		cli.Env(fs, name, env)
+	}
+	return cmd
+}
+
+func statusCommand() *cobra.Command {
+	var st stateFlags
+	var is issueFlags
+	var dry bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "rewrite the tracking issue's description from nights.txt",
+		Long: `Status rewrites the tracking issue's description from nights.txt as it is
+now, after a night's record was changed by hand.`,
+		Args: cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_, _, state, err := st.resolve()
+			if err != nil {
+				return err
+			}
+			return refreshStatus(runOptions{
+				state: state, issueRepo: is.repo, issue: is.number,
+				dry: dry, stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(),
+			})
+		},
+	}
+	fs := cmd.Flags()
+	st.register(fs)
+	is.register(fs)
+	fs.BoolVar(&dry, "dry-run", false, "print the description instead of editing the issue")
+	return cmd
+}
+
+func corpusCommand() *cobra.Command {
+	var root string
+	cmd := &cobra.Command{
+		Use:   "corpus [OUT]",
+		Short: "write the logged-traffic corpus",
+		Long: `Corpus samples the previous day's logged traffic into OUT (default
+<root>/.parity/nightly/corpus.txt), with the CORPUS_* settings of run.`,
+		Args: cli.ArgsBetween(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			r, err := rootDir(root)
+			if err != nil {
+				return cli.Usage(err)
+			}
+			out := filepath.Join(r, ".parity/nightly/corpus.txt")
+			if len(args) > 0 {
+				out = args[0]
+			}
+			return writeCorpus(r, out, time.Now().UTC(), cmd.ErrOrStderr())
+		},
+	}
+	cmd.Flags().StringVar(&root, "root", "", "repository `directory` (default: the go.mod above the working directory)")
+	return cmd
+}
+
+func nightlyCommand() *cobra.Command {
+	home, _ := os.UserHomeDir()
+	var dir, repo string
+	cmd := &cobra.Command{
+		Use:   "nightly [-- RUN-ARGS]",
+		Short: "the cron entry: one run from a fresh checkout, logged",
+		Long: `Nightly is the cron entry: one run at a time, from a checkout (<home>/src)
+of the ref in <home>/state/ref (default origin/main), logged to
+<home>/logs. Arguments after -- go to run.`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			switch cronNightly(nightlyOptions{home: dir, repo: repo, extra: args}) {
+			case 0:
+				return nil
+			case 1:
+				return cli.ErrReported
+			}
+			return cli.Usagef("the check could not run; see the log in %s", filepath.Join(dir, "logs"))
+		},
+	}
+	cmd.Flags().StringVar(&dir, "home", filepath.Join(home, ".local/share/cbioportal-go-parity"), "logs, state and checkout `directory`")
+	cmd.Flags().StringVar(&repo, "repo", filepath.Join(home, "projects/cbioportal-go"), "local clone to fetch unpushed branches from")
+	return cmd
 }
 
 func rootDir(root string) (string, error) {

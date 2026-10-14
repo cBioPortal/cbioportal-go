@@ -13,15 +13,14 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 
-	"github.com/cbioportal/cbioportal-go/internal/buildinfo"
+	"github.com/spf13/cobra"
+
 	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/ops/cbioportal.org/internal/github"
@@ -32,22 +31,6 @@ import (
 
 const name = "cbioportal-ops"
 
-const usage = `cbioportal-ops runs the cBioPortal team's jobs for cbioportal.org.
-
-Usage:
-  cbioportal-ops preview setup                     build the preview of cbioportal-go PR $PR_NUMBER
-  cbioportal-ops preview teardown <N> [--dry-run]  remove the preview of PR N
-  cbioportal-ops preview gc [--dry-run]            remove the previews of closed or unlabelled PRs
-  cbioportal-ops hub import-pr                     import the studies of datahub PR $PR_NUMBER into the hub
-  cbioportal-ops version [--json]
-
---dry-run logs what would be removed and removes nothing.
-Exit status: 0 success, 1 failure, 2 invalid command line or settings.
-Settings come from the environment; see ops/cbioportal.org/README.md.
-ClickHouse: CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD.
-GitHub App: GH_CLIENT_ID, GH_INSTALLATION_ID, GH_APP_KEY (/etc/gh-app/key.pem).
-`
-
 func main() {
 	ch.SetProcessSettings(ch.ReplicaConsistentSettings)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -56,88 +39,127 @@ func main() {
 	os.Exit(code)
 }
 
+// run executes one command line and returns its exit status (cli.Exit*).
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	cmd := strings.Join(args[:min(len(args), 2)], " ")
-	switch {
-	case len(args) == 0:
-		fmt.Fprint(stderr, usage)
-		return 2
-	case args[0] == "help" || args[0] == "-h" || args[0] == "--help":
-		fmt.Fprint(stdout, usage)
-		return 0
-	case args[0] == "version" || args[0] == "--version":
-		if asJSON, _ := cli.JSONFlag(args[1:]); asJSON {
-			cli.WriteJSON(stdout, buildinfo.Get(name))
-		} else {
-			fmt.Fprintln(stdout, buildinfo.String(name))
-		}
-		return 0
-	}
-	rest := args[min(len(args), 2):]
-	dryRun := false
-	if cmd == "preview teardown" || cmd == "preview gc" {
-		var kept []string
-		for _, a := range rest {
-			if a == "--dry-run" || a == "-dry-run" {
-				dryRun = true
-				continue
-			}
-			kept = append(kept, a)
-		}
-		rest = kept
-	}
-	gh := github.FromEnv()
-	var err error
-	switch cmd {
-	case "preview setup", "preview teardown", "preview gc":
-		pr := 0
-		if cmd == "preview teardown" {
-			if len(rest) != 1 {
-				return usageError(stderr, "preview teardown takes a pull request number")
-			}
-			if pr, err = strconv.Atoi(rest[0]); err != nil || pr <= 0 {
-				return usageError(stderr, fmt.Sprintf("not a pull request number: %q", rest[0]))
-			}
-		} else if len(rest) > 0 {
-			return usageError(stderr, fmt.Sprintf("unexpected argument %q", rest[0]))
-		}
-		var st *preview.Settings
-		if st, err = preview.SettingsFromEnv(pr); err != nil {
-			return usageError(stderr, err.Error())
-		}
-		st.DryRun = dryRun
-		switch cmd {
-		case "preview setup":
-			err = preview.Setup(ctx, st, gh)
-		case "preview teardown":
-			err = preview.Teardown(ctx, st, gh, pr)
-		default:
-			err = preview.GC(ctx, st, gh)
-		}
-	case "hub import-pr":
-		if len(rest) > 0 {
-			return usageError(stderr, fmt.Sprintf("unexpected argument %q", rest[0]))
-		}
-		var st *hub.Settings
-		if st, err = hub.SettingsFromEnv(); err != nil {
-			return usageError(stderr, err.Error())
-		}
-		err = hub.ImportPR(ctx, st, gh)
-	default:
-		return usageError(stderr, fmt.Sprintf("unknown command %q%s", cmd,
-			cli.DidYouMean(cli.Suggest(cmd, []string{"preview setup", "preview teardown", "preview gc", "hub import-pr", "version"}))))
-	}
-	switch {
-	case err == nil:
-		return 0
-	case errors.Is(err, preview.ErrFailed), errors.Is(err, hub.ErrFailed):
-		return 1 // reported already
-	}
-	job.Logf("%s: %v", cmd, err)
-	return 1
+	return cli.Execute(newRoot(ctx), args, stdout, stderr, os.Getenv)
 }
 
-func usageError(w io.Writer, msg string) int {
-	fmt.Fprintf(w, "%s: %s\n\n%s", name, msg, usage)
-	return 2
+func newRoot(ctx context.Context) *cobra.Command {
+	root := &cobra.Command{
+		Use:   name,
+		Short: "run the cBioPortal team's jobs for cbioportal.org",
+		Long: `cbioportal-ops runs the cBioPortal team's jobs for cbioportal.org: the
+previews of cbioportal-go pull requests and the imports of datahub pull
+requests into the hub.
+
+Settings come from the environment the cluster's Job manifests set; see
+ops/cbioportal.org/README.md.
+  ClickHouse:  CLICKHOUSE_URL, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD
+  GitHub App:  GH_CLIENT_ID, GH_INSTALLATION_ID, GH_APP_KEY (/etc/gh-app/key.pem)
+
+Exit status: 0 success, 1 failure, 2 invalid command line or settings.`,
+	}
+	previewCmd := &cobra.Command{Use: "preview", Short: "build and remove the previews of cbioportal-go pull requests"}
+	previewCmd.AddCommand(previewSetup(ctx), previewTeardown(ctx), previewGC(ctx))
+	hubCmd := &cobra.Command{Use: "hub", Short: "import datahub pull requests into hub.cbioportal.org"}
+	hubCmd.AddCommand(hubImportPR(ctx))
+	root.AddCommand(previewCmd, hubCmd)
+	cli.AddVersion(root, name)
+	return root
+}
+
+func previewSetup(ctx context.Context) *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup",
+		Short: "build the preview of cbioportal-go pull request $PR_NUMBER",
+		Args:  cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			st, err := preview.SettingsFromEnv(0)
+			if err != nil {
+				return cli.Usage(err)
+			}
+			return finish(cmd, preview.Setup(ctx, st, github.FromEnv()))
+		},
+	}
+}
+
+func previewTeardown(ctx context.Context) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "teardown <N>",
+		Short: "remove the preview of pull request N",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return cli.Usagef("preview teardown takes a pull request number")
+			}
+			if pr, err := strconv.Atoi(args[0]); err != nil || pr <= 0 {
+				return cli.Usagef("not a pull request number: %q", args[0])
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pr, _ := strconv.Atoi(args[0])
+			st, err := preview.SettingsFromEnv(pr)
+			if err != nil {
+				return cli.Usage(err)
+			}
+			st.DryRun = dryRun
+			return finish(cmd, preview.Teardown(ctx, st, github.FromEnv(), pr))
+		},
+	}
+	dryRunFlag(cmd, &dryRun)
+	return cmd
+}
+
+func previewGC(ctx context.Context) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "gc",
+		Short: "remove the previews of closed or unlabelled pull requests",
+		Args:  cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			st, err := preview.SettingsFromEnv(0)
+			if err != nil {
+				return cli.Usage(err)
+			}
+			st.DryRun = dryRun
+			return finish(cmd, preview.GC(ctx, st, github.FromEnv()))
+		},
+	}
+	dryRunFlag(cmd, &dryRun)
+	return cmd
+}
+
+func hubImportPR(ctx context.Context) *cobra.Command {
+	return &cobra.Command{
+		Use:   "import-pr",
+		Short: "import the studies of datahub pull request $PR_NUMBER into the hub",
+		Args:  cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			st, err := hub.SettingsFromEnv()
+			if err != nil {
+				return cli.Usage(err)
+			}
+			return finish(cmd, hub.ImportPR(ctx, st, github.FromEnv()))
+		},
+	}
+}
+
+// dryRunFlag registers --dry-run, which logs what would be removed and
+// removes nothing.
+func dryRunFlag(cmd *cobra.Command, dryRun *bool) {
+	cmd.Flags().BoolVar(dryRun, "dry-run", false, "log what would be removed, and remove nothing")
+}
+
+// finish logs a job's error in the job log's format. A job that failed
+// with preview.ErrFailed or hub.ErrFailed has reported why already.
+func finish(cmd *cobra.Command, err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, preview.ErrFailed), errors.Is(err, hub.ErrFailed):
+		return cli.ErrReported
+	}
+	job.Logf("%s %s: %v", cmd.Parent().Name(), cmd.Name(), err)
+	return cli.ErrReported
 }

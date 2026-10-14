@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 )
 
 func TestCountsAndResult(t *testing.T) {
@@ -214,15 +216,38 @@ func TestPrune(t *testing.T) {
 	}
 }
 
-func TestMainUsage(t *testing.T) {
-	var out, errOut strings.Builder
-	if code := Main(nil, &out, &errOut); code != 2 {
-		t.Errorf("no args: exit %d", code)
+func TestCommandUsage(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		code int
+		out  string
+	}{
+		{nil, 2, "status"},
+		{[]string{"frobnicate"}, 2, `unknown command "frobnicate"`},
+		{[]string{"run", "extra"}, 2, `unexpected argument "extra"`},
+		{[]string{"status", "-dryrun"}, 2, "did you mean --dry-run?"},
+		{[]string{"run", "-h"}, 0, "($PARITY_STATE)"},
+		{[]string{"run", "-h"}, 0, "($PARITY_MEMORY_MAX)"},
+	} {
+		var out strings.Builder
+		code := cli.Execute(Command(), tc.args, &out, &out, func(string) string { return "" })
+		if code != tc.code || !strings.Contains(out.String(), tc.out) {
+			t.Errorf("%q: exit %d, want %d; output:\n%s", tc.args, code, tc.code, out.String())
+		}
 	}
-	if code := Main([]string{"frobnicate"}, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), `unknown command "frobnicate"`) {
-		t.Errorf("unknown: exit %d %q", code, errOut.String())
+}
+
+// The state flags fall back to PARITY_DIR and PARITY_STATE, and nights.txt
+// lives in the run directory when neither --state nor PARITY_STATE is set.
+func TestStatusStateDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "nights.txt"), []byte("2026-10-12 clean\n2026-10-13 clean\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if code := Main([]string{"run", "extra"}, &out, &errOut); code != 2 {
-		t.Errorf("run with an argument: exit %d", code)
+	var out strings.Builder
+	env := map[string]string{"PARITY_DIR": dir, "PARITY_ISSUE": "1"}
+	code := cli.Execute(Command(), []string{"status", "-dry-run", "-root", dir}, &out, &out, func(k string) string { return env[k] })
+	if code != 0 || !strings.Contains(out.String(), "2 of 7") {
+		t.Errorf("exit %d; output:\n%s", code, out.String())
 	}
 }
