@@ -41,7 +41,8 @@ func testProgram(got *map[string]string) *cobra.Command {
 	preview.AddCommand(&cobra.Command{Use: "gc", Short: "remove old previews", Args: ArgsBetween(0, 0),
 		RunE: func(*cobra.Command, []string) error { (*got)["gc"] = "ran"; return nil }})
 	fail := &cobra.Command{Use: "fail", RunE: func(*cobra.Command, []string) error { return errors.New("boom") }}
-	root.AddCommand(ingest, preview, fail)
+	exit3 := &cobra.Command{Use: "exit3", RunE: func(*cobra.Command, []string) error { return Exit(3, errors.New("no data")) }}
+	root.AddCommand(ingest, preview, fail, exit3)
 	AddVersion(root, "prog")
 	return root
 }
@@ -75,6 +76,11 @@ func TestExecute(t *testing.T) {
 		{[]string{"version", "--json"}, 0, `"name": "prog"`, nil},
 		{[]string{"ingest", "-h"}, 0, "ClickHouse:\n      --db string", nil},
 		{[]string{"ingest", "-h"}, 0, "($CBIOPORTAL_DB)", nil},
+		{[]string{"help", "ingest"}, 0, "prog ingest <study-dir> [flags]", nil},
+		{[]string{"help", "ingst"}, 2, `unknown command "ingst" (did you mean ingest?)`, nil},
+		{[]string{"help", "preview", "x"}, 2, `unknown command "x"`, nil},
+		{[]string{"exit3"}, 3, "prog: exit3: no data", nil},
+		{[]string{"-h"}, 0, "ingest      \n  preview", nil},
 	} {
 		got := map[string]string{}
 		var out bytes.Buffer

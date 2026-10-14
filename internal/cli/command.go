@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -51,6 +52,24 @@ func Usage(err error) error {
 // why: the program exits with ExitFailure and prints nothing more.
 var ErrReported = errors.New("failed")
 
+// exitError carries a command's own exit status.
+type exitError struct {
+	code int
+	err  error
+}
+
+func (e exitError) Error() string { return e.err.Error() }
+func (e exitError) Unwrap() error { return e.err }
+
+// Exit makes the program print err, if not nil, and exit with code, for a
+// command whose exit status means more than success or failure.
+func Exit(code int, err error) error {
+	if err == nil {
+		err = ErrReported
+	}
+	return exitError{code: code, err: err}
+}
+
 const (
 	envAnnotation    = "cbioportal_env"
 	groupAnnotation  = "cbioportal_group"
@@ -69,13 +88,18 @@ func Env(fs *pflag.FlagSet, name, env string) {
 	f.Usage += " ($" + env + ")"
 }
 
-// Group lists flags under a heading in the help instead of under "Flags".
+// groups counts the Group calls, which the help lists in order.
+var groups int
+
+// Group lists flags under a heading in the help instead of under "Flags",
+// in the order given; headings follow the order of the Group calls.
 func Group(fs *pflag.FlagSet, title string, names ...string) {
-	for _, n := range names {
+	groups++
+	for i, n := range names {
 		if fs.Lookup(n) == nil {
 			panic("cli.Group: no flag " + n)
 		}
-		fs.SetAnnotation(n, groupAnnotation, []string{title})
+		fs.SetAnnotation(n, groupAnnotation, []string{title, fmt.Sprintf("%04d.%04d", groups, i)})
 	}
 }
 
@@ -170,6 +194,13 @@ func Execute(root *cobra.Command, args []string, stdout, stderr io.Writer, geten
 	if err == nil {
 		return ExitOK
 	}
+	var ee exitError
+	if errors.As(err, &ee) {
+		if !errors.Is(ee.err, ErrReported) {
+			fmt.Fprintf(stderr, "%s: %v\n", where(root, cmd), ee.err)
+		}
+		return ee.code
+	}
 	if errors.Is(err, ErrReported) {
 		return ExitFailure
 	}
@@ -178,11 +209,7 @@ func Execute(root *cobra.Command, args []string, stdout, stderr io.Writer, geten
 	if ue.silent {
 		return ExitUsage
 	}
-	where := root.Name()
-	if cmd != nil && cmd != root {
-		where += ": " + strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
-	}
-	fmt.Fprintf(stderr, "%s: %v\n", where, err)
+	fmt.Fprintf(stderr, "%s: %v\n", where(root, cmd), err)
 	if usage {
 		help := root.Name() + " -h"
 		if cmd != nil && cmd != root {
@@ -195,6 +222,14 @@ func Execute(root *cobra.Command, args []string, stdout, stderr io.Writer, geten
 	return ExitFailure
 }
 
+// where names the program and the command in an error message.
+func where(root, cmd *cobra.Command) string {
+	if cmd == nil || cmd == root {
+		return root.Name()
+	}
+	return root.Name() + ": " + strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
+}
+
 // prepare adds the conventions above to every command of the tree.
 func prepare(root *cobra.Command, getenv func(string) string, ran *bool) {
 	root.SilenceErrors = true
@@ -202,13 +237,26 @@ func prepare(root *cobra.Command, getenv func(string) string, ran *bool) {
 	root.DisableSuggestions = true
 	root.SetFlagErrorFunc(flagError)
 	root.SetUsageTemplate(usageTemplate)
+	cobra.EnableCommandSorting = false
+	root.SetHelpCommand(&cobra.Command{
+		Use:   "help [command]",
+		Short: "show the help of a command",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(_ *cobra.Command, args []string) error {
+			cmd, rest, err := root.Find(args)
+			if err != nil || cmd == nil {
+				cmd = root
+			}
+			if len(rest) > 0 {
+				return UnknownCommand(cmd, rest[0])
+			}
+			return cmd.Help()
+		},
+	})
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
 	for _, c := range root.Commands() {
-		switch c.Name() {
-		case "help":
-			c.Short = "show the help of a command"
-		case "completion":
+		if c.Name() == "completion" {
 			c.Short = "print a shell script that completes this program's commands and flags"
 		}
 	}
@@ -358,7 +406,7 @@ func flagGroups(cmd *cobra.Command) string {
 			return
 		}
 		title := "Flags"
-		if g := f.Annotations[groupAnnotation]; len(g) == 1 {
+		if g := f.Annotations[groupAnnotation]; len(g) == 2 {
 			title = g[0]
 		}
 		if sets[title] == nil {
@@ -368,8 +416,15 @@ func flagGroups(cmd *cobra.Command) string {
 		}
 		sets[title].AddFlag(f)
 	}
-	cmd.LocalFlags().VisitAll(add)
-	cmd.InheritedFlags().VisitAll(add)
+	var flags []*pflag.Flag
+	cmd.LocalFlags().VisitAll(func(f *pflag.Flag) { flags = append(flags, f) })
+	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) { flags = append(flags, f) })
+	slices.SortStableFunc(flags, func(a, b *pflag.Flag) int {
+		return strings.Compare(groupOrder(a), groupOrder(b))
+	})
+	for _, f := range flags {
+		add(f)
+	}
 	var b strings.Builder
 	for _, t := range append(without(titles, "Flags"), "Flags") {
 		if sets[t] == nil {
@@ -378,6 +433,14 @@ func flagGroups(cmd *cobra.Command) string {
 		fmt.Fprintf(&b, "\n%s:\n%s", t, sets[t].FlagUsagesWrapped(100))
 	}
 	return b.String()
+}
+
+// groupOrder is a flag's place in its Group, "" outside one.
+func groupOrder(f *pflag.Flag) string {
+	if g := f.Annotations[groupAnnotation]; len(g) == 2 {
+		return g[1]
+	}
+	return ""
 }
 
 func without(s []string, v string) []string {
