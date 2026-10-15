@@ -1,6 +1,7 @@
 package molecular
 
 import (
+	"encoding/json"
 	"net/url"
 	"slices"
 	"testing"
@@ -48,5 +49,12 @@ func TestGenericAssayMetaSearch(t *testing.T) {
 		if got := genericAssayMetaSearch(c.term, c.idOnly)(m); got != c.want {
 			t.Errorf("%q (ID only %v) = %v, want %v", c.term, c.idOnly, got, c.want)
 		}
+	}
+}
+
+// No matching panel is an empty list, as Java answers it, not null.
+func TestGroupPanelsEmpty(t *testing.T) {
+	if got, _ := json.Marshal(groupPanels(nil)); string(got) != "[]" {
+		t.Errorf("groupPanels(nil) = %s, want []", got)
 	}
 }

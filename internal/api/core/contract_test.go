@@ -114,8 +114,9 @@ func TestMatchContract(t *testing.T) {
 }
 
 // Scalars of the wrong JSON type are read as Jackson coerces them: a quoted
-// number into a number, a number or boolean into a string. Values set before
-// the read stay where the body has no key.
+// number into a number, a decimal into an integer without its fraction, a
+// number or boolean into a string. Values set before the read stay where the
+// body has no key.
 func TestReadBodyCoercesScalars(t *testing.T) {
 	type inner struct {
 		Count int `json:"count"`
@@ -135,12 +136,12 @@ func TestReadBodyCoercesScalars(t *testing.T) {
 		Raw           json.RawMessage  `json:"raw"`
 	}
 	r := httptest.NewRequest("POST", "/api/molecular-data/fetch", strings.NewReader(
-		`{"entrezGeneIds":["7157", 672, " 675 "],"sampleIds":[1, true],"includeSomatic":"true","size":"",`+
+		`{"entrezGeneIds":["7157", 672, " 675 ", 100.0, 1e2, 100.7],"sampleIds":[1, true],"includeSomatic":"true","size":"",`+
 			`"inner":{"count":"3"},"byKey":{"a":"4"},"threshold":"0.5","raw":"7"}`))
 	f := filter{Projection: "SUMMARY"}
 	ReadBody(r, &f)
 	got, _ := json.Marshal(f)
-	want := `{"threshold":0.5,"entrezGeneIds":[7157,672,675],"sampleIds":["1","true"],"projection":"SUMMARY",` +
+	want := `{"threshold":0.5,"entrezGeneIds":[7157,672,675,100,100,100],"sampleIds":["1","true"],"projection":"SUMMARY",` +
 		`"includeSomatic":true,"size":null,"inner":{"count":3},"byKey":{"a":4},"raw":"7"}`
 	if string(got) != want {
 		t.Errorf("got  %s\nwant %s", got, want)

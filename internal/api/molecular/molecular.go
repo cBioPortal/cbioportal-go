@@ -593,7 +593,7 @@ const panelSelect = "SELECT genePanelId, description, hugoGeneSymbol, entrezGene
 	"any(toInt64OrNull(entrez_gene_id)) AS entrezGeneId FROM gene_panel GROUP BY gene_panel_id, hugo_gene_symbol)"
 
 func groupPanels(rows []panelGeneRow) []GenePanel {
-	var out []GenePanel
+	out := []GenePanel{}
 	for _, r := range rows {
 		if len(out) == 0 || out[len(out)-1].GenePanelID != r.GenePanelID {
 			out = append(out, GenePanel{GenePanelID: r.GenePanelID, Description: r.Description})
