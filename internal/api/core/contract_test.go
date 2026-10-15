@@ -114,8 +114,8 @@ func TestMatchContract(t *testing.T) {
 }
 
 // Scalars of the wrong JSON type are read as Jackson coerces them: a quoted
-// number into a number, a decimal into an integer without its fraction, a
-// number or boolean into a string. Values set before the read stay where the
+// number into a number, a whole decimal into an integer, a number or
+// boolean into a string. Values set before the read stay where the
 // body has no key.
 func TestReadBodyCoercesScalars(t *testing.T) {
 	type inner struct {
@@ -136,15 +136,38 @@ func TestReadBodyCoercesScalars(t *testing.T) {
 		Raw           json.RawMessage  `json:"raw"`
 	}
 	r := httptest.NewRequest("POST", "/api/molecular-data/fetch", strings.NewReader(
-		`{"entrezGeneIds":["7157", 672, " 675 ", 100.0, 1e2, 100.7],"sampleIds":[1, true],"includeSomatic":"true","size":"",`+
+		`{"entrezGeneIds":["7157", 672, " 675 ", 100.0, 1e2],"sampleIds":[1, true],"includeSomatic":"true","size":"",`+
 			`"inner":{"count":"3"},"byKey":{"a":"4"},"threshold":"0.5","raw":"7"}`))
 	f := filter{Projection: "SUMMARY"}
 	ReadBody(r, &f)
 	got, _ := json.Marshal(f)
-	want := `{"threshold":0.5,"entrezGeneIds":[7157,672,675,100,100,100],"sampleIds":["1","true"],"projection":"SUMMARY",` +
+	want := `{"threshold":0.5,"entrezGeneIds":[7157,672,675,100,100],"sampleIds":["1","true"],"projection":"SUMMARY",` +
 		`"includeSomatic":true,"size":null,"inner":{"count":3},"byKey":{"a":4},"raw":"7"}`
 	if string(got) != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// A fraction where an integer is wanted is refused, not truncated as Java
+// truncates it.
+func TestReadBodyFraction(t *testing.T) {
+	h := BodyErrors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var f struct {
+			EntrezGeneIDs []int64 `json:"entrezGeneIds"`
+		}
+		ReadBody(r, &f)
+		WriteJSON(w, f.EntrezGeneIDs)
+	}))
+	for body, want := range map[string]string{
+		`{"entrezGeneIds":[100.0, 672]}`: `[100,672]`,
+		`{"entrezGeneIds":[100.7]}`:      `{"message":"` + MsgBadJSON + `"}`,
+		`{"entrezGeneIds":[1e30]}`:       `{"message":"` + MsgBadJSON + `"}`,
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/genes/fetch", strings.NewReader(body)))
+		if got := strings.TrimSpace(rec.Body.String()); got != want {
+			t.Errorf("%s: %d %s, want %s", body, rec.Code, got, want)
+		}
 	}
 }
 

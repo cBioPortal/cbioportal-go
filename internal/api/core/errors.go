@@ -105,7 +105,7 @@ func ReadBody(r *http.Request, v any) {
 		panic(badBody{})
 	}
 	err = DecodeJSON(raw, v)
-	if err != nil && malformedJSON(err) {
+	if err != nil && (malformedJSON(err) || notWholeNumber(err)) {
 		panic(badBody{})
 	}
 }
@@ -146,6 +146,22 @@ func malformedJSON(err error) bool {
 	var typ *json.UnmarshalTypeError
 	if errors.As(err, &typ) {
 		return typ.Value == "object" || typ.Value == "array"
+	}
+	return false
+}
+
+// notWholeNumber reports whether err is a number with a fraction, or too
+// large, where an integer is wanted. Java reads 100.7 as 100; go refuses it
+// (docs/rewrite/java-quirks.md).
+func notWholeNumber(err error) bool {
+	var typ *json.UnmarshalTypeError
+	if !errors.As(err, &typ) || typ.Type == nil || !strings.HasPrefix(typ.Value, "number") {
+		return false
+	}
+	switch typ.Type.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return true
 	}
 	return false
 }

@@ -39,7 +39,7 @@ func DecodeJSON(raw []byte, v any) error {
 // coerceScalars rewrites a JSON body the way Jackson's default scalar
 // coercion reads it into the Go type t: a string holding a number becomes
 // that number where t wants a number ("7157" for an entrez gene id), a
-// decimal loses its fraction where t wants an integer, an empty string
+// whole decimal (100.0) becomes an integer where t wants one, an empty string
 // becomes null where t wants a number, a "true"/"false" string becomes a
 // boolean where t wants one, and a number or boolean becomes a string where
 // t wants a string. Everything else is left as it is. ok is false when the
@@ -94,10 +94,10 @@ func coerceValue(v any, t reflect.Type) any {
 			return x.String()
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			// A decimal where an integer is wanted loses its fraction
-			// (100.0 and 1e2 are 100, 100.7 is 100).
+			// A whole number written as a decimal (100.0, 1e2) is that
+			// integer. A fraction stays, so the read fails (notWholeNumber).
 			if _, err := x.Int64(); err != nil {
-				if f, err := x.Float64(); err == nil && math.Abs(f) < math.MaxInt64 {
+				if f, err := x.Float64(); err == nil && f == math.Trunc(f) && math.Abs(f) < math.MaxInt64 {
 					return json.Number(strconv.FormatInt(int64(f), 10))
 				}
 			}

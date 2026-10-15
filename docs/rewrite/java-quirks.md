@@ -27,7 +27,7 @@ keeps it working.
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 57 | go does the same thing as Java, on purpose. |
-| Fixed in go | 27 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Fixed in go | 28 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Added in go | 1 | go accepts a parameter that Java's endpoint does not have, so Java ignores it. Without the parameter, go answers as Java does. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
@@ -85,7 +85,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 27 fixes in one place. It shows what a client gets
+This table collects all 28 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -93,6 +93,7 @@ stores less where Java stores empty rows.
 | Area | Java | go |
 |---|---|---|
 | POST with a trailing slash to an older multi-study endpoint (`clinical-data/fetch/`, `survival-data/fetch/`, …) | Java fails: a 400 for bad JSON, an empty 400 for `generic_assay_data`, a 500 for any other body. | go answers as it does without the slash. |
+| A number with a fraction where the body wants a whole number (`"entrezGeneIds": [100.7]`) | Java drops the fraction and reads gene 100. | go refuses the request as malformed, as Java does for any other bad value. A whole number written as a decimal (`100.0`, `1e2`) is read as that number by both. |
 | A field the filter does not have in the body of an older fetch endpoint (`molecular-profiles/fetch`, `patients/fetch`, the multi-study filters, …) | Java answers 200 with an empty body. | go skips the field and answers as without it. |
 | Study availability | Java marks a study that is being imported as not readable (`readPermission: false`), whatever the setting says. | go does this only when `study_availability.enabled` is on, as the setting's name says. |
 | `studies/fetch`, `/api/legacy/studies` | Java reports `allSampleCount: 1`. | go reports the number of samples in the study's `_all` sample list. |
@@ -164,6 +165,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | A POST with a trailing slash to an older multi-study endpoint, such as `clinical-data/fetch/`, fails. Bad JSON gives a 400. `generic_assay_data` gives an empty 400. Any other body gives a 500. | InvolvedCancerStudyExtractorInterceptor matches exact paths | Fixed in go. go answers as it does without the slash. | TestContractTrailingSlashPost, TestTrailingSlashMatch, known.go |
 | An older fetch endpoint answers 200 with an empty body when Java cannot read its request body, for example a list sent as a single value or an unknown enum value. This covers the multi-study filters and `patients/fetch`, `molecular-profiles/fetch`, `copy-number-segments/fetch`, `survival-data/fetch` and `clinical-events-meta/fetch`. | InvolvedCancerStudyExtractorInterceptor reads these bodies before the controller | Copied. | TestContractFilterValidation, TestReadInterceptedFilters |
 | The same endpoints also answer 200 with an empty body when the request body has a field the filter does not have. For example, `{"studyIds":["lihc_tcga"],"projection":"DETAILED"}` to `molecular-profiles/fetch` gets an empty answer, because `projection` belongs in the URL. | InvolvedCancerStudyExtractorInterceptor (a plain `ObjectMapper`, which fails on unknown fields) | Fixed in go. go skips the unknown field and answers as without it. | TestContractInterceptedFilterUnknownProperties, TestReadInterceptedFiltersIgnoreUnknown, known.go |
+| A number with a fraction where the body wants a whole number, such as `"entrezGeneIds": [100.7]`, is read without its fraction, as gene 100. A whole number written as a decimal (`100.0`, `1e2`) is read as that number. Python scripts often send gene ids this way. | Jackson's default `ACCEPT_FLOAT_AS_INT` | Fixed in go. go reads `100.0` and `1e2` as Java does, and refuses `100.7` as a malformed body. | TestReadBodyFraction, TestReadBodyCoercesScalars |
 | A structural variant fetch with an empty `sampleMolecularIdentifiers` list returns nothing, even when `molecularProfileIds` is given. Java uses the sample list whenever it is present. | StructuralVariantController | Copied. | TestContractStructuralVariantQueries |
 | An empty text parameter still counts as given. So `sampleListId=` selects no samples. The same happens when a number is turned into a sample list name. | Spring / Jackson | Copied. | TestContractRequiredParams |
 | Paths with `;`, `//`, `.` or `..` segments, or with an encoded `.` or `%`, get a 400 before any endpoint sees them. | StrictHttpFirewall, Tomcat | Copied. | TestContractFirewall, TestJavaFirewall |
