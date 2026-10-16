@@ -314,8 +314,10 @@ func TestContractFilterValidation(t *testing.T) {
 	wantError(t, "POST", mutations, `{"sampleListId":"study_es_0_all","entrezGeneIds":[2147483648]}`, 400, badJSON)
 	wantError(t, "POST", "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number/fetch",
 		`{"sampleListId":"study_es_0_all","entrezGeneIds":[]}`, 400, "entrezGeneIds size must be between 1 and 50000")
-	// Jackson coerces scalars: "672" is an Integer, 5 the sample list "5".
-	for _, body := range []string{`{"sampleListId":"study_es_0_all","entrezGeneIds":["672", 672.9, null]}`, `{"sampleListId":5}`, `{"sampleListId":""}`} {
+	// A fraction where a whole number is wanted is a malformed body.
+	wantError(t, "POST", mutations, `{"sampleListId":"study_es_0_all","entrezGeneIds":[672.9]}`, 400, badJSON)
+	// Jackson coerces scalars: "672" and 672.0 are an Integer, 5 the sample list "5".
+	for _, body := range []string{`{"sampleListId":"study_es_0_all","entrezGeneIds":["672", 672.0, null]}`, `{"sampleListId":5}`, `{"sampleListId":""}`} {
 		if resp, b := rawDo(t, "POST", mutations, body); resp.StatusCode != 200 {
 			t.Errorf("%s: %d %.100s", body, resp.StatusCode, b)
 		}
