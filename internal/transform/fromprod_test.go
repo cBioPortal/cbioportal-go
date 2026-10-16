@@ -29,7 +29,7 @@ func TestFromProdSteps(t *testing.T) {
 		"sample_derived", "clinical_data_derived", "genomic_event_derived", "genetic_alteration_derived",
 		"generic_assay_data_derived", "sample_to_gene_panel_derived", "gene_panel_to_gene_derived",
 		"clinical_event_derived", "clinical_event_data_derived",
-		"resource_definition", "resource_study", "resource_patient", "resource_sample",
+		"resource_definition", "resource", "resource_study", "resource_patient", "resource_sample",
 		"gistic", "gistic_to_gene", "mutsig",
 	}
 	for _, name := range portal {

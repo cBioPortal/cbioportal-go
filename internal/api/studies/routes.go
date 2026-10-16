@@ -30,6 +30,7 @@ func (s Server) Routes(mux *http.ServeMux) {
 	s.routeReference(mux)
 	s.routeBulkList(mux)
 	s.routeResources(mux)
+	s.routeResourceTable(mux)
 	s.routeStudyTags(mux)
 	s.routeCancerTypes(mux)
 }

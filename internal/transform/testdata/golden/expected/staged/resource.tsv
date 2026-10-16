@@ -1,0 +1,6 @@
+display_name	metadata	patient_id	resource_id	resource_scope	row_num	sample_id	source_file	study_id	url
+Nullable(String)	Nullable(String)	Nullable(String)	String	String	UInt64	Nullable(String)	String	String	String
+H&E slide	{"stain": "H&E", "slide_number": 1}	GA-P1	PATHOLOGY_SLIDE	SAMPLE	1	GA-P1-01	data_resource_sample.txt	golden_a	http://slide/1
+\N	\N	GA-P1	PATHOLOGY_SLIDE	SAMPLE	3	GA-P1-01	data_resource_sample.txt	golden_a	http://slide/2
+\N	\N	GA-P1	PATIENT_NOTES	PATIENT	1	\N	data_resource_patient.txt	golden_a	http://notes/p1
+\N	\N	\N	STUDY_SPONSORS	STUDY	1	\N	data_resource_study.txt	golden_a	http://sponsors

@@ -257,3 +257,66 @@ func TestContractStudyCancerType(t *testing.T) {
 	get(t, "/api/studies/study_es_0", &study)
 	wantEq(t, study.CancerType.Name, "Breast Invasive Carcinoma")
 }
+
+// The resource table endpoints over study_es_0, whose resource files carry
+// no display names or metadata.
+func TestContractResourceTable(t *testing.T) {
+	requireAPI(t)
+	type tab struct {
+		ResourceID   string `json:"resourceId"`
+		Label        string `json:"label"`
+		TotalCount   int    `json:"totalCount"`
+		PatientCount int    `json:"patientCount"`
+		SampleCount  int    `json:"sampleCount"`
+	}
+	var tabs []tab
+	post(t, "/api/resource-table/tabs/fetch", map[string]any{"studyIds": []string{"study_es_0"}}, &tabs)
+	want := []tab{
+		{"PATHOLOGY_SLIDE", "Pathology Slide", 3, 3, 3},
+		{"PATIENT_NOTES", "Patient Notes", 3, 3, 0},
+		{"STUDY_SPONSORS", "Study Sponsors", 1, 0, 0},
+	}
+	if len(tabs) != len(want) {
+		t.Fatalf("tabs %+v", tabs)
+	}
+	for i := range want {
+		if tabs[i] != want[i] {
+			t.Errorf("tab %d: got %+v, want %+v", i, tabs[i], want[i])
+		}
+	}
+
+	query := map[string]any{"studyIds": []string{"study_es_0"}, "resourceId": "PATHOLOGY_SLIDE", "pageNumber": 0, "pageSize": 2}
+	var rows []map[string]any
+	post(t, "/api/resource-table/query/fetch", query, &rows)
+	if len(rows) != 2 || rows[0]["patientId"] != "TCGA-A1-A0SK" || rows[0]["url"] != "http://url-to-slide-sample2" ||
+		rows[0]["resourceDisplayName"] != "Pathology Slide" || rows[0]["resourceType"] != "SAMPLE" || rows[1]["patientId"] != "TCGA-A2-A04P" {
+		t.Errorf("rows %v", rows)
+	}
+	if _, ok := rows[0]["displayName"]; ok {
+		t.Errorf("a row without a display name leaves it out: %v", rows[0])
+	}
+	if m, ok := rows[0]["metadata"].(map[string]any); !ok || len(m) != 0 {
+		t.Errorf("a row without metadata has metadata {}: %v", rows[0])
+	}
+
+	var meta struct {
+		Columns []struct {
+			ID     string `json:"id"`
+			Source string `json:"source"`
+		} `json:"columns"`
+		TotalRowCount        int            `json:"totalRowCount"`
+		FilteredPatientCount int            `json:"filteredPatientCount"`
+		FilteredSampleCount  int            `json:"filteredSampleCount"`
+		Facets               map[string]any `json:"facets"`
+		FacetRanges          map[string]any `json:"facetRanges"`
+		DistinctValueCounts  map[string]int `json:"distinctValueCounts"`
+	}
+	query["filters"] = []map[string]any{{"columnId": "sampleId", "operator": "in", "values": []string{"TCGA-A2-A04P-01"}}}
+	post(t, "/api/resource-table/metadata/fetch", query, &meta)
+	if len(meta.Columns) != 4 || meta.Columns[0].ID != "patientId" || meta.Columns[3].ID != "displayName" ||
+		meta.TotalRowCount != 1 || meta.FilteredPatientCount != 1 || meta.FilteredSampleCount != 1 ||
+		meta.Facets == nil || len(meta.Facets) != 0 || meta.FacetRanges == nil ||
+		meta.DistinctValueCounts["resourceType"] != 1 || meta.DistinctValueCounts["displayName"] != 1 {
+		t.Errorf("metadata %+v", meta)
+	}
+}

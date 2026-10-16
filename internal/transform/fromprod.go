@@ -32,6 +32,12 @@ func ApplyFromProd(base *ch.Client, prodDB, rawDB, targetDB string) ([]ViewCount
 		}
 	}
 	b := &prodBuilder{c: base, p: "`" + prodDB + "`", t: "`" + targetDB + "`", r: "`" + rawDB + "`"}
+	text, err := base.Execute(fmt.Sprintf(
+		"SELECT count() FROM system.tables WHERE database = '%s' AND name = 'resource' FORMAT TabSeparated", prodDB))
+	if err != nil {
+		return nil, err
+	}
+	b.unifiedResource = strings.TrimSpace(text) != "0"
 	for _, step := range b.steps() {
 		if err := b.build(step); err != nil {
 			return nil, err
@@ -70,6 +76,9 @@ type prodBuilder struct {
 	c       *ch.Client
 	p, t, r string // quoted production, target and raw database names
 	built   []prodObject
+	// unifiedResource: production has the one resource table of schema
+	// 3.1.0 rather than resource_study, resource_patient and resource_sample.
+	unifiedResource bool
 }
 
 func (o prodObject) full() string { return o.db + ".`" + o.name + "`" }
@@ -104,6 +113,33 @@ func (b *prodBuilder) build(o prodObject) error {
 	}
 	b.built = append(b.built, o)
 	return nil
+}
+
+// resourceTable builds the resource table, with the columns of the staged
+// build: from production's resource table, or with no display name or
+// metadata from the per-level tables of a schema before 3.1.0.
+func (b *prodBuilder) resourceTable() prodObject {
+	const order = "(study_id, resource_id, resource_scope)"
+	if b.unifiedResource {
+		return b.table("resource", order,
+			"SELECT cs.study_id AS study_id, r.resource_id AS resource_id, r.resource_scope AS resource_scope, "+
+				"r.patient_id AS patient_id, r.sample_id AS sample_id, r.url AS url, r.display_name AS display_name, "+
+				"r.metadata AS metadata, '' AS source_file, toUInt64(r.internal_id) AS row_num "+
+				"FROM {p}.resource r INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.cancer_study_id "+
+				"WHERE r.resource_scope IN ('STUDY', 'PATIENT', 'SAMPLE')")
+	}
+	const none = "CAST(NULL AS Nullable(String))"
+	return b.table("resource", order,
+		"SELECT cs.study_id AS study_id, r.resource_id AS resource_id, 'STUDY' AS resource_scope, "+
+			none+" AS patient_id, "+none+" AS sample_id, r.url AS url, "+none+" AS display_name, "+none+" AS metadata, "+
+			"'' AS source_file, toUInt64(0) AS row_num "+
+			"FROM {p}.resource_study r INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.internal_id "+
+			"UNION ALL SELECT p.study_id, r.resource_id, 'PATIENT', CAST(p.patient_id AS Nullable(String)), "+none+", "+
+			"r.url, "+none+", "+none+", '', toUInt64(0) "+
+			"FROM {p}.resource_patient r INNER JOIN {t}.prod_patient p ON p.internal_id = r.internal_id "+
+			"UNION ALL SELECT s.study_id, r.resource_id, 'SAMPLE', CAST(s.patient_id AS Nullable(String)), "+
+			"CAST(s.sample_id AS Nullable(String)), r.url, "+none+", "+none+", '', toUInt64(0) "+
+			"FROM {p}.resource_sample r INNER JOIN {t}.prod_sample s ON s.internal_id = r.internal_id")
 }
 
 // sql substitutes {p} (production clone), {t} (target) and {r} (raw).
@@ -381,16 +417,14 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 				"toUInt8(ifNull(d.open_by_default, 0)) AS open_by_default, toInt32(d.priority) AS priority, "+
 				"d.custom_metadata AS custom_metadata "+
 				"FROM {p}.resource_definition d INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = d.cancer_study_id"),
-		b.table("resource_study", "(study_id, resource_id)",
-			"SELECT cs.study_id AS study_id, r.resource_id AS resource_id, r.url AS url FROM {p}.resource_study r "+
-				"INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.internal_id"),
-		b.table("resource_patient", "(study_id, patient_id, resource_id)",
-			"SELECT p.study_id AS study_id, p.patient_id AS patient_id, r.resource_id AS resource_id, r.url AS url "+
-				"FROM {p}.resource_patient r INNER JOIN {t}.prod_patient p ON p.internal_id = r.internal_id"),
-		b.table("resource_sample", "(study_id, sample_id, resource_id)",
-			"SELECT s.study_id AS study_id, s.patient_id AS patient_id, s.sample_id AS sample_id, "+
-				"r.resource_id AS resource_id, r.url AS url "+
-				"FROM {p}.resource_sample r INNER JOIN {t}.prod_sample s ON s.internal_id = r.internal_id"),
+	)
+	add(b.resourceTable())
+	add(
+		b.view("resource_study", "SELECT study_id, resource_id, url FROM {t}.resource WHERE resource_scope = 'STUDY'"),
+		b.view("resource_patient", "SELECT study_id, assumeNotNull(patient_id) AS patient_id, resource_id, url "+
+			"FROM {t}.resource WHERE resource_scope = 'PATIENT'"),
+		b.view("resource_sample", "SELECT study_id, assumeNotNull(patient_id) AS patient_id, assumeNotNull(sample_id) AS sample_id, "+
+			"resource_id, url FROM {t}.resource WHERE resource_scope = 'SAMPLE'"),
 	)
 
 	// GISTIC regions and their genes, MutSig genes.

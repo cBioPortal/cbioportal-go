@@ -21,6 +21,7 @@ mutation	MergeTree
 mutation_merge	MergeTree
 mutsig	View
 patient	MergeTree
+resource	View
 resource_definition	View
 resource_patient	View
 resource_sample	View

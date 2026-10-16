@@ -55,6 +55,18 @@ func (f JavaFloat) MarshalJSON() ([]byte, error) {
 	return []byte(databin.JavaFloatToString(v)), nil
 }
 
+// JavaDouble is a double field, which Jackson writes as Double.toString
+// does ("1.0", "2024.0").
+type JavaDouble float64
+
+// MarshalJSON writes f as Double.toString does.
+func (f JavaDouble) MarshalJSON() ([]byte, error) {
+	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
+		return json.Marshal(float64(f))
+	}
+	return []byte(databin.JavaDoubleString(float64(f))), nil
+}
+
 // JavaStringMap is a Java HashMap<String, String>: it is written in the
 // iteration order of a HashMap its entries were put into in insertion order.
 type JavaStringMap struct {
