@@ -1,0 +1,5 @@
+display_name	metadata	patient_id	resource_id	resource_scope	row_num	sample_id	source_file	study_id	url
+Nullable(String)	Nullable(String)	Nullable(String)	String	String	UInt64	Nullable(String)	String	String	String
+\N	\N	TCGA-A2-A04P	PATHOLOGY_SLIDE	SAMPLE	0	TCGA-A2-A04P-01		study_es_0	http://url-to-slide-sample1
+\N	\N	TCGA-A2-A04P	PATIENT_NOTES	PATIENT	0	\N		study_es_0	http://url-to-patient-notes-patient1
+\N	\N	\N	STUDY_SPONSORS	STUDY	0	\N		study_es_0	http://url-to-study-sponsors

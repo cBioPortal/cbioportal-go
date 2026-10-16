@@ -725,7 +725,8 @@ func (s Server) cancerTypes(w http.ResponseWriter, r *http.Request) {
 }
 
 // withResourceCounts attaches each study's resource counts (resources shown in
-// the study list's data-type filter).
+// the study list's data-type filter). A patient-level resource counts its
+// patients, with or without samples, and their samples.
 func (s Server) withResourceCounts(studies []CancerStudy) []CancerStudy {
 	if len(studies) == 0 {
 		return studies
@@ -739,7 +740,7 @@ func (s Server) withResourceCounts(studies []CancerStudy) []CancerStudy {
 		"SELECT rd.resource_id AS resourceId, any(rd.display_name) AS displayName, any(rd.description) AS description, "+
 			"any(rd.resource_type) AS resourceType, toString(any(rd.priority)) AS priority, toBool(any(rd.open_by_default) = 1) AS openByDefault, "+
 			"rd.study_id AS cancerStudyIdentifier, ifNull(any(rd.custom_metadata), '') AS customMetaData, "+
-			"toInt64(uniqExact(x.sample_id)) AS sampleCount, toInt64(uniqExact(x.patient_id)) AS patientCount FROM ("+
+			"toInt64(uniqExactIf(x.sample_id, x.sample_id != '')) AS sampleCount, toInt64(uniqExact(x.patient_id)) AS patientCount FROM ("+
 			"SELECT study_id, resource_id, sample_id, patient_id FROM resource_sample "+
 			"UNION ALL SELECT r.study_id, r.resource_id, s.sample_id, r.patient_id FROM resource_patient r "+
 			"LEFT JOIN "+core.ByStudies(ids).Samples(core.ParamsBinder(p))+" s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+

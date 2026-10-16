@@ -4,8 +4,8 @@ This page lists every endpoint of cBioPortal's Java backend and says whether
 go (this project) serves it. Use it to check whether a request you need
 works on go, and which ones are left out on purpose.
 
-**Summary.** The Java backend has 190 endpoints. go serves 176 of them and
-leaves out 14. Tests cover 160. An endpoint here is one method and path,
+**Summary.** The Java backend has 193 endpoints. go serves 179 of them and
+leaves out 14. Tests cover 163. An endpoint here is one method and path,
 such as `GET /api/studies`. The list comes from the request mappings of the
 Java controllers on the `master` branch of
 [cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) (the
@@ -43,11 +43,11 @@ take paging or sorting parameters.
 | [Genes, gene sets, reference genome](#genes-gene-sets-reference-genome) | 15 | 15 | — | 13 | 3 | 2 |
 | [Study view](#study-view) | 31 | 31 | — | 31 | 2 | 1 |
 | [Group comparison](#group-comparison) | 7 | 7 | — | 7 | — | — |
-| [Resources, MutSig / GISTIC](#resources-mutsig--gistic) | 9 | 9 | — | 9 | 8 | 7 |
+| [Resources, MutSig / GISTIC](#resources-mutsig--gistic) | 12 | 12 | — | 12 | 8 | 7 |
 | [Sessions, virtual studies](#sessions-virtual-studies) | 14 | 14 | — | 14 | — | — |
 | [Authentication, data-access tokens](#authentication-data-access-tokens) | 10 | 9 | 1 | 7 | — | — |
 | [Portal, proxies, operations](#portal-proxies-operations) | 35 | 22 | 13 | 15 | — | — |
-| **Total** | **190** | **176** | **14** | **160** | **58** | **36** |
+| **Total** | **193** | **179** | **14** | **163** | **58** | **36** |
 
 ## How to read the tables
 
@@ -320,6 +320,9 @@ These long lists get no paging, on purpose:
 | GET | `/api/studies/{studyId}/resource-definitions` |  | projection, paging, sort | implemented | yes |  |
 | GET | `/api/studies/{studyId}/resource-definitions/{resourceId}` |  |  | implemented | yes |  |
 | POST | `/api/resource-definitions/fetch` | List&lt;String&gt; | projection | implemented | yes |  |
+| POST | `/api/resource-table/tabs/fetch` | ResourceTabsRequest |  | implemented | yes | The resources a cohort has, with row, patient and sample counts. Used by the Files & Links tab of study view and the resource tabs of patient view. |
+| POST | `/api/resource-table/query/fetch` | ResourceTableQuery |  | implemented | yes | One page of a resource's rows, with search, column filters and sort in the body. |
+| POST | `/api/resource-table/metadata/fetch` | ResourceTableQuery |  | implemented | yes | The columns, filter options and counts of a resource's rows. The columns come from the resource's metadata contract (`CUSTOM_METADATA`) or from the keys in the rows. |
 | GET | `/api/studies/{studyId}/significant-copy-number-regions` |  | projection, paging, sort | implemented | yes |  |
 | GET | `/api/studies/{studyId}/significantly-mutated-genes` |  | projection, paging, sort | implemented | yes |  |
 
