@@ -12,10 +12,11 @@ type view struct {
 }
 
 // studyExtraViews builds the views for the study-level side data: resource
-// definitions and resource data (study/patient/sample), GISTIC regions and
-// their genes, MutSig genes, and study tags. Every view is always created —
-// over an empty, correctly-typed SELECT when the study files were never
-// ingested — so the API can query them unconditionally.
+// definitions and resource data (the resource table and its study, patient
+// and sample levels), GISTIC regions and their genes, MutSig genes, and study
+// tags. Every view is always created — over an empty, correctly-typed
+// SELECT when the study files were never ingested — so the API can query
+// them unconditionally.
 func studyExtraViews(c *client, rawDB, targetDB, refDB string, hasRef bool, exists func(string) bool) []view {
 	trim := func(col string) string { return "trimBoth(`" + col + "`)" }
 	var out []view
@@ -57,44 +58,88 @@ func studyExtraViews(c *client, rawDB, targetDB, refDB string, hasRef bool, exis
 	}
 	out = append(out, view{"resource_definition", rdSQL})
 
-	// resource_{study,patient,sample}: cbioportal-core ImportResourceData —
-	// rows with a missing resource id or URL are skipped, each row must refer
-	// to a definition of the matching resource type, and exact duplicates
-	// collapse to one.
-	resource := func(table, kind string, idCols []string) view {
-		sel := []string{"'' AS study_id"}
-		for _, id := range idCols {
-			sel = append(sel, "'' AS "+id)
+	// resource: cbioportal-core ImportResourceData into the one resource
+	// table — rows with a missing resource id or URL are skipped, each row
+	// must refer to a definition of the matching resource type, a repeated
+	// (entity, resource, URL) keeps its first row, and DISPLAY_NAME and
+	// METADATA are trimmed, a missing value stored as NULL. patient_id is
+	// NULL for study-level rows, sample_id for study- and patient-level ones.
+	// source_file and row_num keep the file order (the importer's
+	// internal_id order).
+	optional := func(cols map[string]bool, col string) string {
+		if !cols[col] {
+			return "CAST(NULL AS Nullable(String))"
 		}
-		sel = append(sel, "'' AS resource_id", "'' AS url")
-		empty := "SELECT " + strings.Join(sel, ", ") + " WHERE 0"
+		return fmt.Sprintf("if(%s, CAST(NULL AS Nullable(String)), CAST(%s AS Nullable(String)))",
+			missingClinicalValue(trim(col)), trim(col))
+	}
+	nullID := "CAST(NULL AS Nullable(String))"
+	resourceRows := func(table, kind string, idCols []string) (string, bool) {
 		cols, _ := c.TableColumns(table)
-		need := append([]string{"resource_id", "url"}, idCols...)
-		for _, n := range need {
+		for _, n := range append([]string{"resource_id", "url"}, idCols...) {
 			if !cols[n] {
-				return view{table, empty}
+				return "", false
 			}
 		}
-		sel = []string{"study_id"}
+		patient, sample := nullID, nullID
 		where := []string{
 			"NOT " + missingClinicalValue(trim("resource_id")),
 			"NOT " + missingClinicalValue(trim("url")),
 		}
 		for _, id := range idCols {
-			sel = append(sel, trim(id)+" AS "+id)
 			where = append(where, trim(id)+" != ''")
+			if id == "patient_id" {
+				patient = "CAST(" + trim(id) + " AS Nullable(String))"
+			} else {
+				sample = "CAST(" + trim(id) + " AS Nullable(String))"
+			}
 		}
-		sel = append(sel, trim("resource_id")+" AS resource_id", trim("url")+" AS url")
 		where = append(where, fmt.Sprintf(
 			"(study_id, %s) IN (SELECT study_id, resource_id FROM `%s`.resource_definition WHERE resource_type = '%s')",
 			trim("resource_id"), targetDB, kind))
-		return view{table, fmt.Sprintf("SELECT DISTINCT %s FROM `%s`.`%s` WHERE %s",
-			strings.Join(sel, ", "), rawDB, table, strings.Join(where, " AND "))}
+		rowNum := "toUInt64(0)"
+		if cols["row_num"] {
+			rowNum = "toUInt64(row_num)"
+		}
+		return fmt.Sprintf(
+			"SELECT study_id, %s AS resource_id, '%s' AS resource_scope, %s AS patient_id, %s AS sample_id, "+
+				"%s AS url, %s AS display_name, %s AS metadata, source_file, %s AS row_num FROM `%s`.`%s` WHERE %s",
+			trim("resource_id"), kind, patient, sample, trim("url"), optional(cols, "display_name"),
+			optional(cols, "metadata"), rowNum, rawDB, table, strings.Join(where, " AND ")), true
 	}
+	var parts []string
+	for _, t := range []struct {
+		table, kind string
+		ids         []string
+	}{
+		{"resource_study", "STUDY", nil},
+		{"resource_patient", "PATIENT", []string{"patient_id"}},
+		{"resource_sample", "SAMPLE", []string{"patient_id", "sample_id"}},
+	} {
+		if sql, ok := resourceRows(t.table, t.kind, t.ids); ok {
+			parts = append(parts, sql)
+		}
+	}
+	resourceSQL := "SELECT '' AS study_id, '' AS resource_id, '' AS resource_scope, " + nullID + " AS patient_id, " +
+		nullID + " AS sample_id, '' AS url, " + nullID + " AS display_name, " + nullID + " AS metadata, " +
+		"'' AS source_file, toUInt64(0) AS row_num WHERE 0"
+	if len(parts) > 0 {
+		resourceSQL = "SELECT * FROM (" + strings.Join(parts, " UNION ALL ") + ") " +
+			"ORDER BY study_id, source_file, row_num " +
+			"LIMIT 1 BY study_id, resource_scope, patient_id, sample_id, resource_id, url"
+	}
+	out = append(out, view{"resource", resourceSQL})
+
+	// resource_{study,patient,sample}: the rows of one level of resource.
 	out = append(out,
-		resource("resource_study", "STUDY", nil),
-		resource("resource_patient", "PATIENT", []string{"patient_id"}),
-		resource("resource_sample", "SAMPLE", []string{"patient_id", "sample_id"}))
+		view{"resource_study", fmt.Sprintf(
+			"SELECT study_id, resource_id, url FROM `%s`.resource WHERE resource_scope = 'STUDY'", targetDB)},
+		view{"resource_patient", fmt.Sprintf(
+			"SELECT study_id, assumeNotNull(patient_id) AS patient_id, resource_id, url FROM `%s`.resource "+
+				"WHERE resource_scope = 'PATIENT'", targetDB)},
+		view{"resource_sample", fmt.Sprintf(
+			"SELECT study_id, assumeNotNull(patient_id) AS patient_id, assumeNotNull(sample_id) AS sample_id, resource_id, url "+
+				"FROM `%s`.resource WHERE resource_scope = 'SAMPLE'", targetDB)})
 
 	// gistic_to_gene / gistic: cbioportal-core GisticReader — one region per
 	// row (wide peak = peak_start..peak_end, X/Y = 23/24, amp = 1), genes from

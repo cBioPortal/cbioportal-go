@@ -24,10 +24,11 @@ prod_patient	MergeTree
 prod_profile	MergeTree
 prod_sample	MergeTree
 prod_study	MergeTree
+resource	MergeTree
 resource_definition	MergeTree
-resource_patient	MergeTree
-resource_sample	MergeTree
-resource_study	MergeTree
+resource_patient	View
+resource_sample	View
+resource_study	View
 sample	MergeTree
 sample_derived	View
 sample_list	MergeTree
