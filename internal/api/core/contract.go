@@ -782,13 +782,20 @@ func (s *State) legacyStudies() map[string]json.RawMessage {
 		Groups          string `json:"groups"`
 		ReferenceGenome string `json:"referenceGenome"`
 		Public          int    `json:"public"`
+		Status          int    `json:"status"`
 	}
 	out := map[string]json.RawMessage{}
 	if s.CH == nil {
 		return out
 	}
+	// status is 1 (AVAILABLE) for databases built without the column.
+	status := "toInt64(1)"
+	if s.ModelHasColumn("cancer_study", "status") {
+		status = "toInt64(status)"
+	}
 	rows, err := CachedQuery[row](s, "SELECT study_id AS studyId, cancer_type_id AS cancerTypeId, name, description, "+
-		"pmid, citation, groups, reference_genome AS referenceGenome, "+s.StudyPublicSQL("")+" AS public FROM cancer_study")
+		"pmid, citation, groups, reference_genome AS referenceGenome, "+s.StudyPublicSQL("")+" AS public, "+
+		status+" AS status FROM cancer_study")
 	if err != nil {
 		return out
 	}
@@ -796,7 +803,7 @@ func (s *State) legacyStudies() map[string]json.RawMessage {
 	for _, r := range rows {
 		b, _ := json.Marshal(legacyStudy{
 			StudyID: r.StudyID, CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description,
-			PublicStudy: r.Public != 0, Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups,
+			PublicStudy: r.Public != 0, Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups, Status: r.Status,
 			ImportDate: dates[r.StudyID], ReferenceGenome: ReferenceGenome(r.ReferenceGenome), ReadPermission: true,
 		})
 		out[r.StudyID] = b
