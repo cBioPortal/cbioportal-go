@@ -315,9 +315,45 @@ func TestLiveGoldenFromProd(t *testing.T) {
 	if *extractProd != "" {
 		extractProdSlice(t, base, *extractProd)
 	}
-	prodDB := goldenDatabase(t, base, "prod")
-	rawDB := goldenDatabase(t, base, "prod_raw")
-	db := goldenDatabase(t, base, "prod_portal")
+	testGoldenFromProd(t, base, "prod", nil)
+}
+
+// TestLiveGoldenFromProdUnifiedResources builds from the same slice moved to
+// schema 3.1.0, which keeps every resource in one table, resource: the
+// objects are the same.
+func TestLiveGoldenFromProdUnifiedResources(t *testing.T) {
+	base := goldenServer(t)
+	t.Parallel()
+	testGoldenFromProd(t, base, "prod31", func(c *ch.Client, db string) {
+		for _, stmt := range []string{
+			"CREATE TABLE {db}.resource (internal_id Int64, resource_id String, cancer_study_id Int64, " +
+				"resource_scope String, patient_id Nullable(String), sample_id Nullable(String), url String, " +
+				"display_name Nullable(String), metadata Nullable(String)) ENGINE = MergeTree ORDER BY (cancer_study_id, resource_id)",
+			"INSERT INTO {db}.resource SELECT row_number() OVER (), r.resource_id, r.internal_id, 'STUDY', NULL, NULL, r.url, NULL, NULL " +
+				"FROM {db}.resource_study r",
+			"INSERT INTO {db}.resource SELECT 1000 + row_number() OVER (), r.resource_id, p.cancer_study_id, 'PATIENT', p.stable_id, NULL, r.url, NULL, NULL " +
+				"FROM {db}.resource_patient r INNER JOIN {db}.patient p ON p.internal_id = r.internal_id",
+			"INSERT INTO {db}.resource SELECT 100000 + row_number() OVER (), r.resource_id, p.cancer_study_id, 'SAMPLE', p.stable_id, s.stable_id, r.url, NULL, NULL " +
+				"FROM {db}.resource_sample r INNER JOIN {db}.sample s ON s.internal_id = r.internal_id INNER JOIN {db}.patient p ON p.internal_id = s.patient_id",
+			"DROP TABLE {db}.resource_study",
+			"DROP TABLE {db}.resource_patient",
+			"DROP TABLE {db}.resource_sample",
+		} {
+			if _, err := c.Execute(strings.ReplaceAll(stmt, "{db}", "`"+db+"`")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+}
+
+// testGoldenFromProd loads the production slice into a database named by
+// suffix, lets migrate change it, builds from it and compares the result
+// with the fromprod golden files.
+func testGoldenFromProd(t *testing.T, base, suffix string, migrate func(c *ch.Client, db string)) {
+	t.Helper()
+	prodDB := goldenDatabase(t, base, suffix)
+	rawDB := goldenDatabase(t, base, suffix+"_raw")
+	db := goldenDatabase(t, base, suffix+"_portal")
 	c := ch.New(base, prodDB)
 	if err := c.CreateDatabase(); err != nil {
 		t.Fatal(err)
@@ -346,6 +382,9 @@ func TestLiveGoldenFromProd(t *testing.T) {
 			bytes.NewReader(body)); err != nil {
 			t.Fatalf("loading %s: %v", table.name, err)
 		}
+	}
+	if migrate != nil {
+		migrate(c, prodDB)
 	}
 	if _, err := ApplyFromProd(c, prodDB, rawDB, db); err != nil {
 		t.Fatal(err)

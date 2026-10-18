@@ -32,6 +32,14 @@ func ApplyFromProd(base *ch.Client, prodDB, rawDB, targetDB string) ([]ViewCount
 		}
 	}
 	b := &prodBuilder{c: base, p: "`" + prodDB + "`", t: "`" + targetDB + "`", r: "`" + rawDB + "`"}
+	// Schema 3.1.0 keeps every resource in one table, resource; earlier
+	// schemas have resource_study, resource_patient and resource_sample.
+	n, err := base.Execute(fmt.Sprintf(
+		"SELECT count() FROM system.tables WHERE database = '%s' AND name = 'resource' FORMAT TabSeparated", prodDB))
+	if err != nil {
+		return nil, err
+	}
+	b.unifiedResources = strings.TrimSpace(n) == "1"
 	for _, step := range b.steps() {
 		if err := b.build(step); err != nil {
 			return nil, err
@@ -70,6 +78,8 @@ type prodBuilder struct {
 	c       *ch.Client
 	p, t, r string // quoted production, target and raw database names
 	built   []prodObject
+	// unifiedResources: production has schema 3.1.0's resource table.
+	unifiedResources bool
 }
 
 func (o prodObject) full() string { return o.db + ".`" + o.name + "`" }
@@ -381,17 +391,39 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 				"toUInt8(ifNull(d.open_by_default, 0)) AS open_by_default, toInt32(d.priority) AS priority, "+
 				"d.custom_metadata AS custom_metadata "+
 				"FROM {p}.resource_definition d INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = d.cancer_study_id"),
-		b.table("resource_study", "(study_id, resource_id)",
-			"SELECT cs.study_id AS study_id, r.resource_id AS resource_id, r.url AS url FROM {p}.resource_study r "+
-				"INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.internal_id"),
-		b.table("resource_patient", "(study_id, patient_id, resource_id)",
-			"SELECT p.study_id AS study_id, p.patient_id AS patient_id, r.resource_id AS resource_id, r.url AS url "+
-				"FROM {p}.resource_patient r INNER JOIN {t}.prod_patient p ON p.internal_id = r.internal_id"),
-		b.table("resource_sample", "(study_id, sample_id, resource_id)",
-			"SELECT s.study_id AS study_id, s.patient_id AS patient_id, s.sample_id AS sample_id, "+
-				"r.resource_id AS resource_id, r.url AS url "+
-				"FROM {p}.resource_sample r INNER JOIN {t}.prod_sample s ON s.internal_id = r.internal_id"),
 	)
+	if b.unifiedResources {
+		// One row per resource and entity; resource_scope says which entity.
+		add(
+			b.table("resource_study", "(study_id, resource_id)",
+				"SELECT cs.study_id AS study_id, r.resource_id AS resource_id, r.url AS url FROM {p}.resource r "+
+					"INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.cancer_study_id WHERE r.resource_scope = 'STUDY'"),
+			b.table("resource_patient", "(study_id, patient_id, resource_id)",
+				"SELECT p.study_id AS study_id, p.patient_id AS patient_id, r.resource_id AS resource_id, r.url AS url "+
+					"FROM {p}.resource r INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.cancer_study_id "+
+					"INNER JOIN {t}.prod_patient p ON p.study_id = cs.study_id AND p.patient_id = r.patient_id "+
+					"WHERE r.resource_scope = 'PATIENT'"),
+			b.table("resource_sample", "(study_id, sample_id, resource_id)",
+				"SELECT s.study_id AS study_id, s.patient_id AS patient_id, s.sample_id AS sample_id, "+
+					"r.resource_id AS resource_id, r.url AS url "+
+					"FROM {p}.resource r INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.cancer_study_id "+
+					"INNER JOIN {t}.prod_sample s ON s.study_id = cs.study_id AND s.sample_id = r.sample_id "+
+					"WHERE r.resource_scope = 'SAMPLE'"),
+		)
+	} else {
+		add(
+			b.table("resource_study", "(study_id, resource_id)",
+				"SELECT cs.study_id AS study_id, r.resource_id AS resource_id, r.url AS url FROM {p}.resource_study r "+
+					"INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = r.internal_id"),
+			b.table("resource_patient", "(study_id, patient_id, resource_id)",
+				"SELECT p.study_id AS study_id, p.patient_id AS patient_id, r.resource_id AS resource_id, r.url AS url "+
+					"FROM {p}.resource_patient r INNER JOIN {t}.prod_patient p ON p.internal_id = r.internal_id"),
+			b.table("resource_sample", "(study_id, sample_id, resource_id)",
+				"SELECT s.study_id AS study_id, s.patient_id AS patient_id, s.sample_id AS sample_id, "+
+					"r.resource_id AS resource_id, r.url AS url "+
+					"FROM {p}.resource_sample r INNER JOIN {t}.prod_sample s ON s.internal_id = r.internal_id"),
+		)
+	}
 
 	// GISTIC regions and their genes, MutSig genes.
 	add(
