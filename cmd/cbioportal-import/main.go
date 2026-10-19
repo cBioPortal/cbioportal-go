@@ -1,12 +1,13 @@
 // cbioportal-import — fast ELT loader for cBioPortal datahub studies.
-// Streams raw TSV data files of a study directory straight into ClickHouse
-// staging tables (schema-on-read); transforms run afterwards as SQL views.
+// It streams the raw TSV data files of a study directory straight into
+// ClickHouse staging tables (schema-on-read). The transform then builds the
+// normalized model and the study-view tables from them with SQL in the
+// target database.
 package main
 
 import (
-	"log/slog"
-
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
