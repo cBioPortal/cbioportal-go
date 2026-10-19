@@ -72,7 +72,9 @@ else
   auth=(--study_availability.enabled=false)
 fi
 
-FRONTEND_DIR=${FRONTEND_DIR:-frontend/dist} PUBLISHER_API_KEY=SECRETKEY \
+# The frontend build is served when it exists (the contract tests need none).
+[ -z "${FRONTEND_DIR+x}" ] && [ -d frontend/dist ] && FRONTEND_DIR=frontend/dist
+FRONTEND_DIR=${FRONTEND_DIR:-} PUBLISHER_API_KEY=SECRETKEY \
   SESSION_STORE_FILE=${SESSION_STORE_FILE:-.sessions.json} PORT=$PORT \
   CBIOPORTAL_DB=${CBIOPORTAL_DB:-cbioportal_e2e} CBIOPORTAL_RAW_DB=${CBIOPORTAL_RAW_DB:-cbioportal_e2e_raw} \
   exec bin/cbioportal-api --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties "${auth[@]}"

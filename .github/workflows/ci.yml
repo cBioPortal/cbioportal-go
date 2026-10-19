@@ -69,14 +69,12 @@ jobs:
           curl -fsSL "https://raw.githubusercontent.com/cBioPortal/cbioportal-frontend/$rev/end-to-end-test/local/runtime-config/portal.properties" \
             -o frontend/end-to-end-test/local/runtime-config/portal.properties
       - name: Start API
-        # study_hg38 stays readable: the contract tests read its data.
+        # Anonymous, as testuser, with study_hg38 readable: the contract tests
+        # read its data.
         run: |
-          go build -o bin/cbioportal-api ./cmd/cbioportal-api
-          AUTH_DEFAULT_USER=testuser PUBLISHER_API_KEY=SECRETKEY SESSION_STORE_FILE=sessions.json \
-            PORT=18090 CBIOPORTAL_DB=cbioportal_e2e CBIOPORTAL_RAW_DB=cbioportal_e2e_raw \
-            nohup bin/cbioportal-api --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties \
-            --study_availability.enabled=false > api.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
+          KEYCLOAK=false nohup test/e2e_api.sh > api.log 2>&1 &
+          # The wait includes the script's go build.
+          for i in $(seq 1 180); do curl -sf http://localhost:18090/health && exit 0; sleep 1; done
           cat api.log; exit 1
       - run: go test ./test/
         env:
