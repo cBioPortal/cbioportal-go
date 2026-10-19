@@ -19,7 +19,7 @@ that compare go with the Java backend are on a separate page,
 
 | Tier | What it checks | Command | Needs | Time |
 |---|---|---|---|---|
-| Unit | Single functions and packages | `go test ./internal/...` | nothing (some tests also use ClickHouse) | seconds |
+| Unit | Single functions and packages | `make test` | nothing (some tests also use ClickHouse) | seconds |
 | Contract | Each API endpoint gives exactly the answer the frontend expects | `make contract` | a running API on the test databases | ~5 s |
 | Frontend e2e | The real cBioPortal web pages work, clicked through in a browser | `test/run_e2e.sh` | the API, the built frontend, Docker | 15–20 min for all |
 
@@ -29,7 +29,8 @@ cBioPortal's own test studies, loaded by `test/setup_test_db.sh` (see
 
 ## Unit tests
 
-`go test ./internal/...` runs without any other service. Among other things,
+`make test` runs the unit tests of every package, as CI does. It needs no
+other service. Among other things,
 it checks go's copy of Java's data binning (how chart values are grouped into
 bars) against about 1,800 cases recorded from Java.
 
@@ -131,11 +132,8 @@ The runner uses the same settings as cBioPortal's own CI:
 - `CI=1`: a failed test is retried once. A test that passes on retry is
   reported as flaky.
 - `LOCALDEV=1`, and the 120 s test timeout from the Playwright config.
-- 3 workers locally, which is the most a 4-core machine shared with
-  ClickHouse can handle. The GitHub workflow uses 2, because its runner has
-  2 CPUs and 3 workers make tests miss their 5 s waits there. The
-  study-view download-controls test, which loads IGV, can still be slow on
-  that runner.
+- 3 workers, as in upstream CI. This is also what the GitHub workflow
+  uses on its 4-CPU runner.
 
 `go run ./cmd/e2ereport --fails` summarizes the failures of the last run.
 
@@ -147,8 +145,8 @@ realm `cbio` and the user `testuser` / `P@ssword1`, who has access to every
 test study. It then runs the API with `authenticate=oauth2`. Docker must be
 available. With `KEYCLOAK=false` the API runs without login.
 
-Two more login features have their own tests against this Keycloak. Each is
-skipped unless its variable is set.
+Some login and export features have their own tests. Each is skipped
+unless its variable is set. Two of them use this Keycloak.
 
 **Data access tokens** (`dat.method=oauth2`). The test logs in as `datuser`,
 who can see one study, downloads a token and calls the API with it:
@@ -167,6 +165,25 @@ set, the API keeps login sessions in Redis, a small key-value database:
 docker run -d --name cbioportal-go-redis -p 127.0.0.1:16379:6379 redis:7-alpine
 OPTIONAL=true REDIS=localhost:16379 PORT=18096 test/e2e_api.sh
 OPTIONAL_KEYCLOAK=1 API=http://localhost:18096 go test -run OptionalOAuth2Keycloak ./test/
+```
+
+**Basic login** (a shared user name and password, set with
+`--login-basic-user`). The test signs in as `basicuser` at
+`/j_spring_security_check` and checks that it sees only the study its role
+allows:
+
+```bash
+BASIC=true test/e2e_api.sh
+BASIC_LOGIN=1 API=http://localhost:18090 go test -run BasicLogin ./test/
+```
+
+**Study export** (`feature.study.export=true`). The test downloads study
+exports from an API started with the feature turned on, and checks the
+files in them:
+
+```bash
+bin/cbioportal-api --portal-properties=… --feature.study.export=true   # e.g. PORT=18096
+EXPORT_API=http://localhost:18096 go test -run Export ./test/
 ```
 
 The Redis session store has its own live test:
