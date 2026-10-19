@@ -59,22 +59,15 @@ type Config struct {
 func ConfigFromEnv() Config {
 	return Config{
 		URL:            os.Getenv("CLICKHOUSE_URL"),
-		Prefix:         envOr("PREFIX", "dev_cbioportal_public_go"),
+		Prefix:         cli.EnvOr("PREFIX", "dev_cbioportal_public_go"),
 		ActiveDB:       os.Getenv("ACTIVE_DB"),
 		SrcDB:          os.Getenv("SRC_DB"),
 		TargetDB:       os.Getenv("TARGET_DB"),
-		Workdir:        envOr("WORKDIR", "/work"),
-		MgmtDB:         envOr("MGMT_DB", "publicdb_update_management_database"),
-		SrcPrefix:      envOr("SRC_PREFIX", "cbioportal_public_"),
-		PortalDatabase: envOr("PORTAL_DATABASE", "public"),
+		Workdir:        cli.EnvOr("WORKDIR", "/work"),
+		MgmtDB:         cli.EnvOr("MGMT_DB", "publicdb_update_management_database"),
+		SrcPrefix:      cli.EnvOr("SRC_PREFIX", "cbioportal_public_"),
+		PortalDatabase: cli.EnvOr("PORTAL_DATABASE", "public"),
 	}
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
 
 // Source is the production snapshot a run would clone.

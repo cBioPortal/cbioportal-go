@@ -1,10 +1,12 @@
 // Package cli holds the conventions the command-line programs share: exit
-// statuses, "did you mean" suggestions and JSON output.
+// statuses, "did you mean" suggestions, JSON output and environment
+// settings.
 package cli
 
 import (
 	"encoding/json"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -72,4 +74,13 @@ func WriteJSON(w io.Writer, v any) error {
 	enc.SetIndent("", "  ")
 	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
+}
+
+// EnvOr returns the environment variable k, or def when it is unset or
+// empty.
+func EnvOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
 }

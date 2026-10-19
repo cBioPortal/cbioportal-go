@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 )
 
 // Defaults for the datahub repository.
@@ -31,17 +33,10 @@ const (
 )
 
 // GitURL is DATAHUB_GIT, else DefaultGit.
-func GitURL() string { return envOr("DATAHUB_GIT", DefaultGit) }
+func GitURL() string { return cli.EnvOr("DATAHUB_GIT", DefaultGit) }
 
 // LFSURL is DATAHUB_LFS_URL, else DefaultLFSURL.
-func LFSURL() string { return envOr("DATAHUB_LFS_URL", DefaultLFSURL) }
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
+func LFSURL() string { return cli.EnvOr("DATAHUB_LFS_URL", DefaultLFSURL) }
 
 // Checkout is a sparse checkout of datahub in Dir.
 type Checkout struct {

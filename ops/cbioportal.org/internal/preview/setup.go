@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/datahub"
 	"github.com/cbioportal/cbioportal-go/internal/ingest"
@@ -51,13 +52,13 @@ type Settings struct {
 func SettingsFromEnv(pr int) (*Settings, error) {
 	s := &Settings{
 		HeadSHA:    os.Getenv("HEAD_SHA"),
-		Prefix:     job.Env("DB_PREFIX", "dev_cbioportal_go_pr"),
-		GoRepo:     job.Env("GO_REPO", "cBioPortal/cbioportal-go"),
-		DatahubRef: job.Env("DATAHUB_REF", "master"),
+		Prefix:     cli.EnvOr("DB_PREFIX", "dev_cbioportal_go_pr"),
+		GoRepo:     cli.EnvOr("GO_REPO", "cBioPortal/cbioportal-go"),
+		DatahubRef: cli.EnvOr("DATAHUB_REF", "master"),
 		Force:      os.Getenv("FORCE") == "1",
-		Workdir:    job.Env("WORKDIR", "/tmp/pr-preview"),
-		Label:      job.Env("PREVIEW_LABEL", "preview"),
-		Rewrite:    job.Env("CBIOPORTAL_REWRITE_TEST", "cbioportal-rewrite-test"),
+		Workdir:    cli.EnvOr("WORKDIR", "/tmp/pr-preview"),
+		Label:      cli.EnvOr("PREVIEW_LABEL", "preview"),
+		Rewrite:    cli.EnvOr("CBIOPORTAL_REWRITE_TEST", "cbioportal-rewrite-test"),
 	}
 	s.Body, s.HasBody = os.LookupEnv("PR_BODY")
 	if pr == 0 {
@@ -75,9 +76,9 @@ func SettingsFromEnv(pr int) (*Settings, error) {
 		return nil, err
 	}
 	if pr > 0 {
-		s.PreviewURL = job.Env("PREVIEW_URL", fmt.Sprintf("https://pr-%d.gopreview.cbioportal.org", pr))
+		s.PreviewURL = cli.EnvOr("PREVIEW_URL", fmt.Sprintf("https://pr-%d.gopreview.cbioportal.org", pr))
 	}
-	s.LogURL = job.Env("LOG_URL", s.PreviewURL)
+	s.LogURL = cli.EnvOr("LOG_URL", s.PreviewURL)
 	return s, nil
 }
 
@@ -285,7 +286,7 @@ func (s *setup) buildStudies(cfg Config, dhPR *github.PullRequest) error {
 			studies = job.Intersect(studies, cfg.Studies)
 		}
 		ref = fmt.Sprintf("pull/%d/head", cfg.DatahubPR)
-		fallback = job.Env("DATAHUB_GIT", datahub.DefaultGit)
+		fallback = cli.EnvOr("DATAHUB_GIT", datahub.DefaultGit)
 		if u := dhPR.HeadCloneURL(); u != "" {
 			fallback = u
 		}

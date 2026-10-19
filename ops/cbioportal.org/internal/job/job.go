@@ -10,16 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
-
-// Env returns the environment variable k, or def when unset or empty.
-func Env(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
 
 // EnvSeconds reads a duration given in seconds, as the job manifests set
 // them.
@@ -54,7 +47,7 @@ func Logf(format string, args ...any) {
 }
 
 // ClickHouseURL is CLICKHOUSE_URL, else a local server.
-func ClickHouseURL() string { return Env("CLICKHOUSE_URL", "http://localhost:18123") }
+func ClickHouseURL() string { return cli.EnvOr("CLICKHOUSE_URL", "http://localhost:18123") }
 
 // Query runs a statement and returns its answer without the final newline.
 func Query(c *ch.Client, sql string) (string, error) {

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 )
 
 // Client calls the GitHub API, as the App when ClientID, InstallationID and
@@ -44,18 +46,11 @@ type Client struct {
 // GH_INSTALLATION_ID and GH_APP_KEY (default /etc/gh-app/key.pem).
 func FromEnv() *Client {
 	return &Client{
-		API:            envOr("GITHUB_API", "https://api.github.com"),
+		API:            cli.EnvOr("GITHUB_API", "https://api.github.com"),
 		ClientID:       os.Getenv("GH_CLIENT_ID"),
 		InstallationID: os.Getenv("GH_INSTALLATION_ID"),
-		KeyFile:        envOr("GH_APP_KEY", "/etc/gh-app/key.pem"),
+		KeyFile:        cli.EnvOr("GH_APP_KEY", "/etc/gh-app/key.pem"),
 	}
-}
-
-func envOr(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
 }
 
 // ErrNoApp is returned for writes when the App is not configured.

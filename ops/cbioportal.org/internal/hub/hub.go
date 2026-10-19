@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/datahub"
 	"github.com/cbioportal/cbioportal-go/internal/studyimport"
@@ -61,20 +62,20 @@ func SettingsFromEnv() (*Settings, error) {
 	s := &Settings{
 		PR:         pr,
 		HeadSHA:    os.Getenv("HEAD_SHA"),
-		DB:         job.Env("HUB_DB", "dev_cbioportal_hub_go"),
-		Base:       job.Env("HUB_BASE", "https://hub.cbioportal.org"),
-		Workdir:    job.Env("WORKDIR", "/tmp/hub-import"),
-		DatahubGit: job.Env("DATAHUB_GIT", datahub.DefaultGit),
+		DB:         cli.EnvOr("HUB_DB", "dev_cbioportal_hub_go"),
+		Base:       cli.EnvOr("HUB_BASE", "https://hub.cbioportal.org"),
+		Workdir:    cli.EnvOr("WORKDIR", "/tmp/hub-import"),
+		DatahubGit: cli.EnvOr("DATAHUB_GIT", datahub.DefaultGit),
 	}
-	s.Raw = job.Env("HUB_RAW_DB", s.DB+"_raw")
-	s.Ref = job.Env("HUB_REF_DB", s.DB+"_ref")
-	s.LogURL = job.Env("LOG_URL", s.Base)
-	s.HubAPI = job.Env("HUB_API", s.Base)
-	s.Validator = job.Env("VALIDATOR", DefaultValidator)
+	s.Raw = cli.EnvOr("HUB_RAW_DB", s.DB+"_raw")
+	s.Ref = cli.EnvOr("HUB_REF_DB", s.DB+"_ref")
+	s.LogURL = cli.EnvOr("LOG_URL", s.Base)
+	s.HubAPI = cli.EnvOr("HUB_API", s.Base)
+	s.Validator = cli.EnvOr("VALIDATOR", DefaultValidator)
 	if s.Validator == "off" {
 		s.Validator = ""
 	}
-	s.Python = job.Env("PYTHON", "python3")
+	s.Python = cli.EnvOr("PYTHON", "python3")
 	if s.ValidateTimeout, err = job.EnvSeconds("VALIDATE_TIMEOUT", time.Hour); err != nil {
 		return nil, err
 	}
