@@ -150,7 +150,7 @@ then builds the portal database there:
 ```bash
 export CLICKHOUSE_URL=https://<host>:8443 CLICKHOUSE_USER=go_import
 read -rs CLICKHOUSE_PASSWORD && export CLICKHOUSE_PASSWORD
-deploy/publish-local-studies.sh dev_cbioportal_public_go_blue \
+deploy/publish-local-studies.sh my_portal \
   seed-cbioportal_hg19_hg38_v2.14.5.sql.gz msk_impact_2017 acbc_mskcc_2015
 ```
 
@@ -200,9 +200,10 @@ the LibreChat copy job:
 #### What `transform --from-prod` builds
 
 `transform --from-prod` starts from production's tables instead of study
-files. Like the mirror, it exists only for the move from Java. Those are the Java importer's tables plus the `*_derived` tables
+files. Those are the Java importer's tables plus the `*_derived` tables
 production builds for the study view. From them it builds every table and
-view the API reads, with the same shape and meaning as a normal import. It
+view the API reads, with the same shape and meaning as a normal import.
+Like the mirror, it exists only for the move from Java. It
 takes about a minute on ClickHouse Cloud and copies little data.
 
 **Views (no copy).** The largest tables are read in place through views,
@@ -237,16 +238,10 @@ profile's pivot threshold, sort order and patient level.
 #### Known differences from www
 
 On the mirror, any difference from www.cbioportal.org comes from the API
-code, not from the data. `paritydiff` measures them (see
+code, not from the data. [Java quirks](rewrite/java-quirks.md) lists them:
+the Java bugs that go fixes, and the answers go cannot match, such as rows
+that tie at the edge of a page. `paritydiff` measures the differences (see
 [Parity with Java](rewrite/parity.md#api-parity-with-wwwcbioportalorg)).
-
-| Where | What happens |
-|---|---|
-| Study list on www | It also shows resource definitions of other studies that share a resource id (a www bug). |
-| `studies/fetch` on www | It reports `allSampleCount: 1` (a www bug). |
-| `clinical-events-meta`, `survival-data` on www | They answer HTTP 500. |
-| Multi-filter study-view requests | Java attaches one NA count (or bin) to whichever gene or entity it happens to process first, so the result depends on Java's internal order. Panels added to a shared list in `ProfiledCasesCounter` have the same problem. |
-| Page boundaries | Where only ClickHouse decides the order, the rows at the edge of a page can differ. This affects the clinical tab's samples when no sort column is chosen (production itself returns different pages), a study's clinical data paged by internal id, and the label of a case list or profile type merged across studies. |
 
 Java returns many lists in import order: studies, patients, clinical data,
 segments, clinical events, and sample lists and their members. The mirror
@@ -271,28 +266,29 @@ the cluster) starts a job that runs
 [`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh),
 which calls `cbioportal-ops hub import-pr`. The job:
 
-1. checks out the studies the pull request changes;
-2. checks each study with cbioportal-core's validator (`validateData.py`),
-   in the background, starting when the study is imported; validation does
-   not need the import lock, which is released as soon as the import is
-   done, and the job then waits for it (up to an hour per study) before
-   reporting;
-3. imports them as `cbioportal-import import-study` does (see
-   [Loading studies](#loading-studies));
-4. reports a Check Run and a Deployment on the pull request.
+1. It checks out the studies the pull request changes.
+2. It imports them as `cbioportal-import import-study` does (see
+   [Loading studies](#loading-studies)). As each study is imported, the job
+   also starts checking it with cbioportal-core's validator
+   (`validateData.py`). The check runs in the background, so it does not
+   slow the import down.
+3. When the import is done, it releases the import lock, so other pull
+   requests can import. Then it waits for the checks to finish, up to an
+   hour per study.
+4. It reports a Check Run and a Deployment on the pull request.
 
 **Validation.** The validator compares each study with the hub's reference
 data: cancer types, genes, gene sets and gene panels. The job reads these
 once from the hub's own API and saves them as files for the validator (its
 `-p` option). If the pull request adds or changes gene panel files, those
-panels replace the hub's, because the hub loads them only during the import;
-their genes are matched by Hugo symbol or Entrez id only. Gene aliases are
+panels replace the hub's, because the hub loads them only during the import.
+Their genes are matched by Hugo symbol or Entrez id only. Gene aliases are
 not checked, as when the validator asks a portal's API directly.
 
 A study is imported whatever the validator finds, so the preview can always
 be looked at. The Check Run shows, for each study, whether validation passed
 or how many errors and warnings it found, and lists the messages under the
-summary (up to GitHub's size limit; the job's log has the full output). When
+summary, up to GitHub's size limit. The job's log has the full output. When
 any study has validation errors, the Check Run fails, as datahub's own
 validation does, while the Deployment still links to the preview. A commit
 whose studies all imported is not imported again, even if validation failed.

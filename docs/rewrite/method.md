@@ -36,9 +36,19 @@ The production site (www.cbioportal.org and api.cbioportal.org) is the
 second reference. It settles questions the code leaves open. For example,
 when two rows tie in a sort, production shows which one comes first.
 
-Sometimes Java gives different answers each time, or has a bug. Then go
-copies what production returns, if production is consistent. If it is not,
-we write the difference down in [Java quirks](java-quirks.md).
+Where Java is plainly wrong, go fixes it instead of copying it:
+
+- Java answers a valid request with an error (often a 500). go answers with
+  the data.
+- Java answers with wrong data, such as another study's rows or a wrong
+  count. go answers with the right data.
+- Java accepts a paging or sorting parameter and then ignores it. go
+  follows it.
+
+Row order only has to match when the request asks for a sort. Without one,
+go may list rows in any order that stays the same from one request to the
+next. When Java gives a different answer each time, go cannot match it.
+[Java quirks](java-quirks.md) lists every fix and every such difference.
 
 ## Design choices
 
@@ -49,7 +59,7 @@ we write the difference down in [Java quirks](java-quirks.md).
 | API | Go's standard `net/http` server, with one handler per Java endpoint. | It is small and needs no extra libraries. Each handler matches one Java endpoint, so the two are easy to compare. |
 | Database client | ClickHouse's official Go driver. Answers are sent row by row as they are read. | Memory stays flat even for answers with 2 to 4 million rows. |
 | Statistics | Copied by hand from the Java libraries commons-math and Datumbox. | Results must match Java down to the last digit. |
-| Dependencies | The standard library first. Official vendor libraries only when they are worth it. | Fewer outside packages means fewer security risks and simpler builds. |
+| Dependencies | The standard library first. Official, well-maintained libraries, and a few small and widely used ones, only when they are worth it. Seven in all, listed in [Architecture](../architecture.md#dependencies). | Fewer outside packages means fewer security risks and simpler builds. |
 
 ## Verification layers
 
@@ -58,11 +68,11 @@ catches problems the earlier ones cannot.
 
 | Layer | What it checks | Where |
 |---|---|---|
-| Unit tests | Small pieces of code: statistics, chart binning, SQL builders and request parsing. | `internal/...`, `make test` |
+| Unit tests | Small pieces of code: statistics, chart binning, SQL builders and request parsing. | `make test` |
 | Contract tests | Every endpoint's status code, fields, order and errors. They run on cBioPortal's small test studies (its "fixture" studies). | `test/`, `make contract`, CI on every push |
 | Java oracle | The same requests sent to the latest Java version, loaded with the same test studies by Java's own importer. This settles which fields appear, their order, and how bad input is rejected. | `test/java_oracle.sh` |
 | Importer contracts | What the importer stores, checked rule by rule against cbioportal-core (case lists, default values, ids). | `test/import_parity_test.go` |
-| Website e2e tests | cBioPortal's own Playwright test suite (about 365 test files). It drives the real website in a browser against go, logs in through Keycloak, and uses the same settings as cBioPortal's CI. | `test/e2e_api.sh`, `test/run_e2e.sh` |
+| Website e2e tests | cBioPortal's own Playwright test suite (about 90 test files). It drives the real website in a browser against go, logs in through Keycloak, and uses the same settings as cBioPortal's CI. | `test/e2e_api.sh`, `test/run_e2e.sh` |
 | Before/after replay | The same requests sent to a changed build and to the previous build, and the answers compared byte by byte. Used on test data and on production requests. | Refactoring and speed work |
 | Production traffic | Real requests sent to both go and Java, and the answers compared. See [the next section](#production-traffic). | `rewrite/java-v7-to-go/paritydiff`, nightly job |
 | Mirrored live traffic | A share of real traffic is copied to go to measure load, speed, errors and database cost. See [Running next to production](#running-next-to-production). | go.cbioportal.org |
@@ -88,8 +98,8 @@ four steps:
    evens out things Java does not promise to keep the same, such as the
    order of keys, the order of unsorted lists, and tiny differences in
    decimal numbers.
-4. **Repeat every night.** A nightly job replays about 5,000 requests,
-   right after the mirror database is rebuilt. When it finds a new
+4. **Repeat every night.** A nightly job replays about 5,000 requests
+   against go.cbioportal.org, which reads a copy of production's data. When it finds a new
    difference that has no explanation yet, it opens or updates a GitHub
    issue with the label `parity`. ("Parity" means go and Java give the same
    answer.) See [Parity with Java](parity.md).

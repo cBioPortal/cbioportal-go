@@ -54,11 +54,11 @@ GitHub API, `DATAHUB_GIT` and `DATAHUB_LFS_URL` at another datahub.
 | `PYTHON` | `python3` | the validator's Python |
 | `VALIDATE_TIMEOUT` | 3600 | seconds one study's validation may take |
 
-Each study is validated in the background from when it is imported; the
-import lock is released when the import is done, and the job waits for the
-validations before its final report. Studies are imported whatever
-the result. Validation errors make the Check Run fail; its summary gives each
-study's error and warning counts and its text the messages (see
+Each study is validated in the background, starting when it is imported.
+The import lock is released when the import is done. The job then waits for
+the validations before its final report. Studies are imported whatever the
+result. Validation errors make the Check Run fail. Its summary gives each
+study's error and warning counts, and its text lists the messages (see
 [docs/deployment.md](../../docs/deployment.md#hubcbioportalorg)).
 
 A `hub-import-only:` list in the pull request description (`- public/<study>`

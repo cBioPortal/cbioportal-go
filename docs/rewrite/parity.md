@@ -59,9 +59,9 @@ go run ./rewrite/java-v7-to-go/paritydiff -a http://localhost:18091 -b https://w
 The command fails (non-zero exit status) when a request differs without a
 `known` reason.
 
-On 2026-10-03, 257 of 275 requests were identical and the other 18 were known
-differences. These are listed in
-[Deployment](../deployment.md#mirroring-production).
+A request whose difference is expected is marked `known` in the corpus,
+with its reason. [Java quirks](java-quirks.md) explains each kind of
+difference: the Java bugs go fixes, and the answers go cannot match.
 
 ### Logged production requests
 
@@ -76,11 +76,9 @@ It also marks requests whose difference is expected. The list is in
   store.
 - **Server-specific fields:** version numbers in `/api/info` and the address
   in the API documentation.
-- **Bugs in www:** the study list shows resource definitions of other
-  studies, `studies/fetch` and the legacy studies report
-  `allSampleCount: 1`, and other Java bugs that go fixes
-  ([Java quirks](java-quirks.md)), such as 500s and the treatments of the
-  whole portal (marked only when go answers an empty list).
+- **Bugs in www:** Java bugs that go fixes, listed in
+  [Java quirks](java-quirks.md#what-go-fixes). The treatments of the whole
+  portal are marked only when go answers an empty list.
 - **Paging go adds:** a page of an endpoint whose Java controller has no
   paging parameters, and the API documentation that lists them.
 - **Parameters go adds:** the copy-number GET with an `entrezGeneId`.
@@ -212,8 +210,10 @@ right away. With `--dry-run` it prints the description instead.
 | `--dry-run` | print the GitHub actions instead of doing them, and do not count the night |
 | `--day` | record the run as that night instead of today, to redo a past night; the list then comes from the day before it |
 
-**Where it runs.** On the parity host, cron starts it at 15:17 UTC, after the
-mirror is rebuilt at 14:00:
+**Where it runs.** On the parity host, cron starts it every day at 15:17
+UTC. The mirror is rebuilt within an hour after each import on production
+(see [Deployment](../deployment.md#mirroring-production)), so the job
+compares go and Java on the same data unless an import is still running.
 
 ```bash
 go build -o ~/.local/bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrite-test
@@ -243,7 +243,7 @@ and its derived-table script. This takes about 2 minutes.
 (`clickhouse_mode=true`, `authenticate=false`, 2 GB memory).
 
 ```bash
-test/java_oracle.sh db cbioportal-test      # needs ClickHouse on :18123 (container ch-dge)
+test/java_oracle.sh db cbioportal-test      # needs ClickHouse on :18123
 test/java_oracle.sh start
 go run ./rewrite/java-v7-to-go/paritydiff -a http://localhost:18090 -b http://localhost:18095 \
   -corpus test/parity/fixtures.txt -cache '' -rate 0 -q -dump .parity/oracle
@@ -281,17 +281,9 @@ is checked separately by the `TestOracleProjection*` contract tests. Java
 writes a model's fields in the order they are declared, parent class first,
 and renamed fields last.
 
-[Java quirks](java-quirks.md) lists every Java oddity that go copies, leaves
-out or cannot match. These Java behaviours are left as they are:
-
-- Generic assay data answers 500 for `projection=ID`.
-- Some endpoints ignore `projection=META` and return a body instead of only a
-  total count: `/sample-lists/fetch`, `/gene-panels/fetch`,
-  `/resource-definitions/fetch`, the generic assay meta endpoints,
-  `/mutation-data-counts/fetch` and `/treatments/sample-counts/fetch`.
-- `/genes` answers 500 for `sortBy=cytoband` or `sortBy=length`, because the
-  gene table has no such columns. It also re-sorts every page by symbol, so
-  `sortBy` only decides which genes land on the page.
-- Studies share mutation records in the importer's `mutation_event` table. A
-  mutation therefore reports the genome build of the study that first
-  imported it.
+[Java quirks](java-quirks.md) lists every Java oddity that go copies,
+fixes or cannot match. One of them shows up only on a copy of production's
+data. Studies share mutation records in the Java importer's
+`mutation_event` table, so a mutation reports the genome build of the study
+that first imported it. go copies this on the mirror. go's own importer
+keeps each study's own build.
