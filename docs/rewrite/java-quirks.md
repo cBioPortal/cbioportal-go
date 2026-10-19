@@ -22,7 +22,7 @@ them, go answers as Java does.
 Every fix and every added parameter is listed here, most with a test that
 keeps it working.
 
-**Summary.** The page has 95 entries:
+**Summary.** The page has 100 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
