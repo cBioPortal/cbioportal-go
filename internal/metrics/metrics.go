@@ -177,24 +177,6 @@ func (c *CounterVec) write(w io.Writer) {
 
 // ---- gauges ----
 
-// GaugeFunc reports a value read at scrape time.
-type GaugeFunc struct {
-	name, help string
-	fn         func() float64
-}
-
-// NewGaugeFunc registers a gauge read from fn in Default.
-func NewGaugeFunc(name, help string, fn func() float64) *GaugeFunc {
-	g := &GaugeFunc{name: name, help: help, fn: fn}
-	Default.add(g)
-	return g
-}
-
-func (g *GaugeFunc) write(w io.Writer) {
-	header(w, g.name, g.help, "gauge")
-	fmt.Fprintf(w, "%s %s\n", g.name, formatFloat(g.fn()))
-}
-
 // Gauge is a value that goes up and down.
 type Gauge struct {
 	name, help string

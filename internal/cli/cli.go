@@ -73,25 +73,3 @@ func WriteJSON(w io.Writer, v any) error {
 	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
-
-// JSONFlag reports whether args hold --json (or -json, --json=true), and
-// returns args without it.
-func JSONFlag(args []string) (bool, []string) {
-	on := false
-	var rest []string
-	for i, a := range args {
-		if a == "--" {
-			rest = append(rest, args[i:]...)
-			break
-		}
-		switch a {
-		case "--json", "-json", "--json=true", "-json=true":
-			on = true
-		case "--json=false", "-json=false":
-			on = false
-		default:
-			rest = append(rest, a)
-		}
-	}
-	return on, rest
-}

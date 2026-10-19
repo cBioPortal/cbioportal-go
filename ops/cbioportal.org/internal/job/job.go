@@ -62,12 +62,6 @@ func Query(c *ch.Client, sql string) (string, error) {
 	return strings.TrimRight(out, "\n"), err
 }
 
-// TableExists reports whether db.name exists.
-func TableExists(c *ch.Client, db, name string) (bool, error) {
-	out, err := Query(c, fmt.Sprintf("SELECT count() FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TSV", ch.SQLLit(db), ch.SQLLit(name)))
-	return out == "1", err
-}
-
 // Summary is the Markdown summary of a job, one list item per line.
 type Summary struct{ b strings.Builder }
 

@@ -265,7 +265,6 @@ type MatrixUnpivotReader struct {
 	sampleNames [][]byte
 	out         bytes.Buffer
 	num         []byte // the last cell's number, in decimal
-	line        []byte
 	eof         bool
 	emitted     *uint64
 	seen        map[string]struct{} // identifier fields of the lines read

@@ -183,22 +183,6 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"study_availability.enabled", "study_availability_enabled", strPtr("false")},
 }
 
-// specialFrontendNames lists frontend property names that require special
-// processing (matching the Java switch statement).
-var specialFrontendNames = map[string]bool{
-	"frontendConfigOverride":                           true, // readFile
-	"query_sets_of_genes":                              true, // readFile
-	"skin_patient_view_custom_sample_type_colors_json": true, // readFile
-	"oncoprint_clinical_tracks_config_json":            true, // readFile
-	"download_custom_buttons_json":                     true, // readFile
-	"oncoprintOncoKbHotspotsDefault":                   true, // enableOncoKBandHotspotsParamValue
-	"oncoKbTokenDefined":                               true, // non-empty check (ONCOKB_TOKEN or oncokb.token) -> bool string
-	"skin_hide_download_controls":                      true, // true/false -> hide/show
-	"sessionServiceEnabled":                            true, // non-empty check -> bool string
-	"frontendUrl":                                      true, // URL normalization
-	"mskWholeSlideViewerToken":                         true, // set at runtime, not from props
-}
-
 // ParseApplicationProperties reads a Java-style application.properties file.
 // Supports # comments, blank lines, key=value and key: value formats,
 // backslash line continuations, and java.util.Properties escapes.

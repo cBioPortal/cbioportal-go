@@ -19,7 +19,6 @@ func TestExposition(t *testing.T) {
 	g := NewGauge("test_in_flight", "In flight.")
 	g.Add(3)
 	g.Add(-1)
-	NewGaugeFunc("test_sessions", "Sessions.", func() float64 { return 7 })
 
 	w := httptest.NewRecorder()
 	Default.Handler().ServeHTTP(w, httptest.NewRequest("GET", "/metrics", nil))
@@ -35,7 +34,6 @@ func TestExposition(t *testing.T) {
 		`test_duration_seconds_sum{route="r"} 5.55` + "\n",
 		`test_duration_seconds_count{route="r"} 3` + "\n",
 		"test_in_flight 2\n",
-		"test_sessions 7\n",
 		"# TYPE go_goroutines gauge\n",
 		"# TYPE process_cpu_seconds_total counter\n",
 	} {

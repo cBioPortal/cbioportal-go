@@ -20,13 +20,6 @@ func strPtr(s string) *string { return &s }
 
 func decPtr(d Decimal) *Decimal { return &d }
 
-func (b *dataBin) special() string {
-	if b.specialValue == nil {
-		return ""
-	}
-	return *b.specialValue
-}
-
 func (b *dataBin) hasSpecial(s string) bool {
 	return b.specialValue != nil && *b.specialValue == s
 }
