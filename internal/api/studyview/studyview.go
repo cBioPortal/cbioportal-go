@@ -75,11 +75,16 @@ func (s Server) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	for i, a := range f.Attributes {
 		ids[i] = a.AttributeID
 	}
+	counts := s.clinicalDataCountsWithMissing
 	if core.IsLegacyAlias(r) {
-		core.WriteJSON(w, s.legacyClinicalDataCounts(svf, ids))
+		counts = s.legacyClinicalDataCounts
+	}
+	out, err := counts(svf, ids)
+	if err != nil {
+		core.Fail(w, r, err)
 		return
 	}
-	core.WriteJSON(w, s.clinicalDataCountsWithMissing(svf, ids))
+	core.WriteJSON(w, out)
 }
 
 // legacyClinicalDataCounts is the legacy ClinicalDataServiceImpl
@@ -88,9 +93,13 @@ func (s Server) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 // patient attribute: NA for every filtered patient when some requested
 // attribute is a patient attribute (Java loads the patients only then), and
 // no counts otherwise.
-func (s Server) legacyClinicalDataCounts(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+func (s Server) legacyClinicalDataCounts(f studyViewFilter, attrIDs []string) ([]ClinicalDataCountItem, error) {
+	items, err := s.clinicalDataCounts(f, attrIDs)
+	if err != nil {
+		return nil, err
+	}
 	byID := map[string]ClinicalDataCountItem{}
-	for _, item := range s.clinicalDataCounts(f, attrIDs) {
+	for _, item := range items {
 		byID[item.AttributeID] = item
 	}
 	unique := map[string]bool{}
@@ -115,7 +124,10 @@ func (s Server) legacyClinicalDataCounts(f studyViewFilter, attrIDs []string) []
 			continue
 		}
 		if patients == nil {
-			n := s.legacyPatientCount(f, attrIDs)
+			n, err := s.legacyPatientCount(f, attrIDs)
+			if err != nil {
+				return nil, err
+			}
 			patients = &n
 		}
 		item := ClinicalDataCountItem{AttributeID: id, Counts: []ClinicalDataCount{}}
@@ -124,16 +136,16 @@ func (s Server) legacyClinicalDataCounts(f studyViewFilter, attrIDs []string) []
 		}
 		out = append(out, item)
 	}
-	return out
+	return out, nil
 }
 
 // legacyPatientCount is the number of filtered patients when one of the
 // attributes is a patient attribute only, in every involved study that
 // defines it, and 0 otherwise.
-func (s Server) legacyPatientCount(f studyViewFilter, attrIDs []string) uint64 {
+func (s Server) legacyPatientCount(f studyViewFilter, attrIDs []string) (uint64, error) {
 	studies := f.studyIDs()
 	if len(attrIDs) == 0 || len(studies) == 0 {
-		return 0
+		return 0, nil
 	}
 	type row struct {
 		N uint64 `json:"n"`
@@ -144,13 +156,13 @@ func (s Server) legacyPatientCount(f studyViewFilter, attrIDs []string) uint64 {
 			"GROUP BY clinical_attribute_id HAVING max(patient_attribute = 0) = 0)",
 		args.Strs(studies), args.Strs(attrIDs)), args)
 	if err != nil || len(levels) == 0 || levels[0].N == 0 {
-		return 0
+		return 0, err
 	}
 	n, err := core.QueryA[row](s.CH, "SELECT uniqExact(patient_unique_id) AS n FROM "+s.filterFrom(args, f), args)
 	if err != nil || len(n) == 0 {
-		return 0
+		return 0, err
 	}
-	return n[0].N
+	return n[0].N, nil
 }
 
 // clinicalDataCountsWithMissing is GetClinicalDataCountsUseCase: the counts of
@@ -160,8 +172,11 @@ func (s Server) legacyPatientCount(f studyViewFilter, attrIDs []string) uint64 {
 // (StudyViewColumnarServiceUtil.addClinicalDataCountsForMissingAttributes):
 // all filtered patients for a patient attribute, all filtered samples
 // otherwise, once per study defining it.
-func (s Server) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
-	all := s.clinicalDataCounts(f, attrIDs)
+func (s Server) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []string) ([]ClinicalDataCountItem, error) {
+	all, err := s.clinicalDataCounts(f, attrIDs)
+	if err != nil {
+		return nil, err
+	}
 	out := []ClinicalDataCountItem{}
 	withData := map[string]bool{}
 	for _, item := range all {
@@ -175,7 +190,7 @@ func (s Server) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 	}
 	studies := f.studyIDs()
 	if len(out) == len(attrIDs) || len(studies) == 0 {
-		return out
+		return out, nil
 	}
 	type defRow struct {
 		AttrID  string `json:"attrId"`
@@ -187,13 +202,16 @@ func (s Server) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 			"WHERE study_id IN %s AND clinical_attribute_id IN %s ORDER BY clinical_attribute_id, study_id",
 		args.Strs(studies), args.Strs(attrIDs)), args)
 	if err != nil {
-		return out
+		return nil, err
 	}
 	type c struct {
 		Samples  uint64 `json:"samples"`
 		Patients uint64 `json:"patients"`
 	}
-	n, _ := core.QueryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM "+s.filterFrom(args, f), args)
+	n, err := core.QueryA[c](s.CH, "SELECT count() AS samples, uniqExact(patient_unique_id) AS patients FROM "+s.filterFrom(args, f), args)
+	if err != nil {
+		return nil, err
+	}
 	var total c
 	if len(n) > 0 {
 		total = n[0]
@@ -208,18 +226,18 @@ func (s Server) clinicalDataCountsWithMissing(f studyViewFilter, attrIDs []strin
 		}
 		out = append(out, ClinicalDataCountItem{AttributeID: d.AttrID, Counts: []ClinicalDataCount{{Value: "NA", Count: count}}})
 	}
-	return out
+	return out, nil
 }
 
 // clinicalDataCounts counts the values of each attribute over the filtered
 // samples (sample attributes) or patients (patient attributes), with the
 // remainder reported as NA. An attribute defined at both levels in the
 // involved studies is counted per sample.
-func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) ([]ClinicalDataCountItem, error) {
 	out := []ClinicalDataCountItem{}
 	studies := f.studyIDs()
 	if len(attrIDs) == 0 || len(studies) == 0 {
-		return out
+		return out, nil
 	}
 	type levelRow struct {
 		AttrID  string `json:"attrId"`
@@ -227,10 +245,13 @@ func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		Sample  uint8  `json:"sample"`
 	}
 	args := core.NewArgs()
-	levels, _ := core.QueryA[levelRow](s.CH, fmt.Sprintf(
+	levels, err := core.QueryA[levelRow](s.CH, fmt.Sprintf(
 		"SELECT clinical_attribute_id AS attrId, max(patient_attribute = 1) AS patient, max(patient_attribute = 0) AS sample "+
 			"FROM clinical_attribute_meta WHERE study_id IN %s AND clinical_attribute_id IN %s GROUP BY clinical_attribute_id",
 		args.Strs(studies), args.Strs(attrIDs)), args)
+	if err != nil {
+		return nil, err
+	}
 	var sampleAttrs, patientAttrs, conflicting []string
 	isPatient := map[string]bool{}
 	for _, l := range levels {
@@ -283,7 +304,7 @@ func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 	for _, q := range queries {
 		rows, err := core.QueryA[countRow](s.CH, q, args)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for _, r := range rows {
 			byLower := counts[r.AttrID]
@@ -303,14 +324,20 @@ func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 			sums[r.AttrID] += r.C
 		}
 	}
-	nSamples := s.scopeSampleCount(f)
+	nSamples, err := s.scopeSampleCount(f)
+	if err != nil {
+		return nil, err
+	}
 	var nPatients uint64
 	if len(patientAttrs) > 0 {
 		type c struct {
 			N uint64 `json:"n"`
 		}
-		rows, _ := core.QueryA[c](s.CH, fmt.Sprintf(
+		rows, err := core.QueryA[c](s.CH, fmt.Sprintf(
 			"SELECT uniqExact(patient_unique_id) AS n FROM %s AND sample_unique_id IN (%s)", samples, filtered), args)
+		if err != nil {
+			return nil, err
+		}
 		if len(rows) > 0 {
 			nPatients = rows[0].N
 		}
@@ -339,7 +366,7 @@ func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 		}
 		out = append(out, item)
 	}
-	return out
+	return out, nil
 }
 
 // ---------- Genomic data counts ----------

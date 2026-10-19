@@ -92,7 +92,11 @@ func (s Server) genericAssayDataEach(r *http.Request, profileIDs []string, sampl
 		}
 		matrix := core.RawMatrix("generic_assay_matrix")
 		join := "s.sample_id = m.sample_id"
-		if s.GAProfilePatientLevel(meta) {
+		patient, err := s.GAProfilePatientLevel(meta)
+		if err != nil {
+			return err
+		}
+		if patient {
 			join = "s.patient_id = m.sample_id"
 			patientLevel[mpid] = true
 		}
@@ -492,7 +496,7 @@ var geneMatrixCols = []string{"study_id", "profile_stable_id", "sample_id", "hug
 
 // GAProfilePatientLevel reports whether the profile's meta file declares
 // patient_level: true (its matrix columns are then patient ids).
-func (s Server) GAProfilePatientLevel(meta core.ProfileMeta) bool {
+func (s Server) GAProfilePatientLevel(meta core.ProfileMeta) (bool, error) {
 	type row struct {
 		P string `json:"p"`
 	}
@@ -500,5 +504,8 @@ func (s Server) GAProfilePatientLevel(meta core.ProfileMeta) bool {
 		"SELECT toString(patient_level) AS p FROM cbioportal_raw.genetic_profile "+
 			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} LIMIT 1",
 		ch.Params{"study": meta.StudyID, "profile": meta.StableID})
-	return err == nil && len(rows) > 0 && strings.EqualFold(strings.TrimSpace(rows[0].P), "true")
+	if err != nil {
+		return false, err
+	}
+	return len(rows) > 0 && strings.EqualFold(strings.TrimSpace(rows[0].P), "true"), nil
 }

@@ -109,7 +109,11 @@ func (s Server) streamMolecularData(w http.ResponseWriter, r *http.Request, mpid
 	projection := core.ProjectionOf(r)
 	if projection == "META" {
 		args := core.NewArgs()
-		sel, _, ok := s.molecularDataSelect(args, mpid, f, "")
+		sel, _, ok, err := s.molecularDataSelect(args, mpid, f, "")
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		if !ok {
 			sel = "SELECT '' AS value WHERE 0"
 		}
@@ -175,9 +179,9 @@ func (s Server) molecularDataPage(r *http.Request, mpid string, f molecularDataF
 		extra = fmt.Sprintf(", tuple(%s) AS pageSampleRank, rg.genetic_entity_id AS pageEntityRank", sampleOrder)
 	}
 	args := core.NewArgs()
-	sel, meta, ok := s.molecularDataSelect(args, mpid, f, extra)
-	if !ok {
-		return nil
+	sel, meta, ok, err := s.molecularDataSelect(args, mpid, f, extra)
+	if err != nil || !ok {
+		return err
 	}
 	query := fmt.Sprintf("%s ORDER BY %s, rg.genetic_entity_id, m.entrez", sel, sampleOrder)
 	if sp != nil {
@@ -199,16 +203,16 @@ func (s Server) molecularDataPage(r *http.Request, mpid string, f molecularDataF
 // aliases m (the values), s (their sample) and rg (their reference gene),
 // plus extra columns if any. ok is false for a profile without gene-keyed
 // values. Values are bound in args.
-func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecularDataFilter, extra string) (string, core.ProfileMeta, bool) {
+func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecularDataFilter, extra string) (string, core.ProfileMeta, bool, error) {
 	meta, ok := s.ProfileMeta(mpid)
 	if !ok {
-		return "", meta, false
+		return "", meta, false, nil
 	}
 	table := meta.DataTable()
 	// Gene-keyed data only: geneset scores and generic assays have their own
 	// endpoints.
 	if table == "" || table == "geneset_score_matrix" || table == "generic_assay_matrix" {
-		return "", meta, false
+		return "", meta, false, nil
 	}
 	where := core.ByStudy(meta.StudyID).Cond(args, core.RawMatrix(table), "") + " AND profile_stable_id = " + args.Str(meta.StableID)
 	if len(f.SampleIDs) > 0 {
@@ -219,7 +223,10 @@ func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecular
 	// Every value row is of the profile's study, so only that study's
 	// samples (a key range) are joined; rows resolved through gene_key_map
 	// carry one of the requested genes, so only those are joined.
-	keyMapped := s.GeneKeyMapped(table)
+	keyMapped, err := s.GeneKeyMapped(table)
+	if err != nil {
+		return "", meta, false, err
+	}
 	genes := "cbioportal_ref.gene"
 	if keyMapped && len(f.EntrezGeneIDs) > 0 {
 		genes = "(SELECT * FROM cbioportal_ref.gene WHERE entrez_gene_id IN (" + core.IntListSQL(f.EntrezGeneIDs) + "))"
@@ -233,7 +240,7 @@ func (s Server) molecularDataSelect(args *core.SQLArgs, mpid string, f molecular
 			"WHERE m.entrez IS NOT NULL",
 		core.JavaTruncatedValueSQL("m.value"), extra,
 		resolvedEntrezSQL(args, table, keyMapped, s.GeneKeySource(table, geneMatrixCols...), meta, where, f.EntrezGeneIDs),
-		core.ByStudy(meta.StudyID).Samples(args), genes), meta, true
+		core.ByStudy(meta.StudyID).Samples(args), genes), meta, true, nil
 }
 
 // geneKeyMapSources are the staging tables whose gene identifiers the
@@ -245,17 +252,20 @@ var geneKeyMapSources = map[string]bool{
 
 // GeneKeyMapped reports whether gene_key_map resolves the genes of a staging
 // table: always for geneKeyMapSources, and for another table when
-// gene_key_map holds keys of it.
-func (s Server) GeneKeyMapped(table string) bool {
+// gene_key_map holds keys of it. A database without gene_key_map maps none.
+func (s Server) GeneKeyMapped(table string) (bool, error) {
 	if geneKeyMapSources[table] {
-		return true
+		return true, nil
 	}
 	type keyRow struct {
 		N uint8 `json:"n"`
 	}
 	rows, err := core.CachedQueryP[keyRow](s.State, "SELECT toUInt8(1) AS n FROM gene_key_map WHERE source = {source:String} LIMIT 1",
 		ch.Params{"source": table})
-	return err == nil && len(rows) > 0
+	if err != nil && !strings.Contains(err.Error(), "UNKNOWN_TABLE") {
+		return false, err
+	}
+	return len(rows) > 0, nil
 }
 
 // resolvedEntrezSQL selects a profile's rows of a staged per-gene table (read

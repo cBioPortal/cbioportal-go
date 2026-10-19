@@ -340,7 +340,12 @@ func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 		out[i] = toCancerStudy(r, shape, dates)
 		out[i].ReadPermission = studyReadable(availability, r.Status)
 	}
-	core.WriteJSON(w, s.withResourceCounts(out))
+	out, err = s.withResourceCounts(out)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	core.WriteJSON(w, out)
 }
 
 // studySortCols maps the studies' sortBy values (StudySortBy) to columns.
@@ -413,7 +418,10 @@ func (s Server) legacyStudies(w http.ResponseWriter, r *http.Request) {
 		out[i].ReadPermission = studyReadable(availability, r.Status)
 	}
 	if shape.summary {
-		out = s.withResourceCounts(out)
+		if out, err = s.withResourceCounts(out); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 	}
 	for _, r := range extra {
 		st := toCancerStudy(r, studyShape{summary: true}, dates)
@@ -517,7 +525,12 @@ func (s Server) study(w http.ResponseWriter, r *http.Request) {
 	}
 	shape := studyShape{summary: true, detailed: true, columnStore: !core.IsLegacyAlias(r)}
 	st := toCancerStudy(rows[0], shape, s.StudyImportDates())
-	core.WriteJSON(w, s.withResourceCounts([]CancerStudy{st})[0])
+	withCounts, err := s.withResourceCounts([]CancerStudy{st})
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	core.WriteJSON(w, withCounts[0])
 }
 
 // studiesFetch serves POST /api/studies/fetch (legacy StudyController
@@ -543,7 +556,10 @@ func (s Server) studiesFetch(w http.ResponseWriter, r *http.Request) {
 		out[i] = toCancerStudy(r, shape, dates)
 	}
 	if shape.summary {
-		out = s.withResourceCounts(out)
+		if out, err = s.withResourceCounts(out); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 	}
 	core.WriteJSON(w, out)
 }
@@ -727,9 +743,9 @@ func (s Server) cancerTypes(w http.ResponseWriter, r *http.Request) {
 // withResourceCounts attaches each study's resource counts (resources shown in
 // the study list's data-type filter). A patient-level resource counts its
 // patients, with or without samples, and their samples.
-func (s Server) withResourceCounts(studies []CancerStudy) []CancerStudy {
+func (s Server) withResourceCounts(studies []CancerStudy) ([]CancerStudy, error) {
 	if len(studies) == 0 {
-		return studies
+		return studies, nil
 	}
 	ids := make([]string, len(studies))
 	for i, st := range studies {
@@ -746,8 +762,12 @@ func (s Server) withResourceCounts(studies []CancerStudy) []CancerStudy {
 			"LEFT JOIN "+core.ByStudies(ids).Samples(core.ParamsBinder(p))+" s ON s.study_id = r.study_id AND s.patient_id = r.patient_id) x "+
 			"JOIN resource_definition rd ON rd.study_id = x.study_id AND rd.resource_id = x.resource_id "+
 			"WHERE x.study_id IN {ids:Array(String)} GROUP BY rd.study_id, rd.resource_id ORDER BY resourceId", p)
+	if unknownTable(err) {
+		// A database transformed before the resource tables has no resources.
+		rows, err = nil, nil
+	}
 	if err != nil {
-		rows = nil
+		return nil, err
 	}
 	byStudy := map[string][]ResourceCount{}
 	for _, r := range rows {
@@ -765,7 +785,7 @@ func (s Server) withResourceCounts(studies []CancerStudy) []CancerStudy {
 		}
 		studies[i].ResourceCounts = &rc
 	}
-	return studies
+	return studies, nil
 }
 
 // studyReadable is a listed study's readPermission before the permission

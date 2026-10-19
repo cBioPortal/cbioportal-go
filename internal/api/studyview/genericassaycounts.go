@@ -41,7 +41,11 @@ func (s Server) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 			entities = append(entities, g.StableID)
 		}
 	}
-	unit := s.GACountUnit(profileType)
+	unit, err := s.GACountUnit(profileType)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	args := core.NewArgs()
 	scope := fmt.Sprintf("profile_type = %s AND sample_unique_id IN (%s)", args.Str(profileType), s.filterSQL(args, svf))
 	entityClause := ""
@@ -67,28 +71,43 @@ func (s Server) genericAssayDataCountsFetch(w http.ResponseWriter, r *http.Reque
 			type c struct {
 				N uint64 `json:"n"`
 			}
-			t, _ := core.QueryA[c](s.CH,
+			t, err := core.QueryA[c](s.CH,
 				"SELECT uniqExact(patient_unique_id) AS n FROM "+s.filterFrom(args, svf), args)
+			if err != nil {
+				core.Fail(w, r, err)
+				return
+			}
 			if len(t) > 0 {
 				total = t[0].N
 			}
 		} else {
-			total = s.scopeSampleCount(svf)
+			if total, err = s.scopeSampleCount(svf); err != nil {
+				core.Fail(w, r, err)
+				return
+			}
 		}
 	} else {
 		type c struct {
 			N uint64 `json:"n"`
 		}
-		t, _ := core.QueryA[c](s.CH, fmt.Sprintf(
+		t, err := core.QueryA[c](s.CH, fmt.Sprintf(
 			"SELECT uniqExact(%s) AS n FROM generic_assay_data_derived WHERE %s", unit, scope), args)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		if len(t) > 0 {
 			total = t[0].N
 		}
 		type e struct {
 			StableID string `json:"stableId"`
 		}
-		es, _ := core.QueryA[e](s.CH,
+		es, err := core.QueryA[e](s.CH,
 			"SELECT DISTINCT entity_stable_id AS stableId FROM generic_assay_data_derived WHERE "+scope, args)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		for _, x := range es {
 			entities = append(entities, x.StableID)
 		}

@@ -43,7 +43,12 @@ func (s Server) allStudies(h http.HandlerFunc, whole bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			studies := func() ([]string, error) { return s.readableStudies(r) }
-			if body, ok := withStudies(core.BufferedBody(r), whole, studies); ok {
+			body, ok, err := withStudies(core.BufferedBody(r), whole, studies)
+			if err != nil {
+				core.Fail(w, r, err)
+				return
+			}
+			if ok {
 				r.Body = io.NopCloser(bytes.NewReader(body))
 				r.ContentLength = int64(len(body))
 			}
@@ -53,28 +58,29 @@ func (s Server) allStudies(h http.HandlerFunc, whole bool) http.HandlerFunc {
 }
 
 // withStudies returns the body with the filter's studyIds set to studies(),
-// when the filter names no studies or samples and has another filter. The
-// filter is the body when whole, else its studyViewFilter.
-func withStudies(body []byte, whole bool, studies func() ([]string, error)) ([]byte, bool) {
+// when the filter names no studies or samples and has another filter; err is
+// studies()'s error. The filter is the body when whole, else its
+// studyViewFilter.
+func withStudies(body []byte, whole bool, studies func() ([]string, error)) ([]byte, bool, error) {
 	var outer map[string]json.RawMessage
 	if json.Unmarshal(body, &outer) != nil || outer == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	target, raw := outer, body
 	if !whole {
 		raw, target = outer["studyViewFilter"], nil
 		if json.Unmarshal(raw, &target) != nil || target == nil {
-			return nil, false
+			return nil, false, nil
 		}
 	}
 	var f studyViewFilter
 	core.DecodeJSON(raw, &f)
 	if len(f.StudyIDs) > 0 || len(f.SampleIdentifiers) > 0 || !f.hasSubFilters() {
-		return nil, false
+		return nil, false, nil
 	}
 	ids, err := studies()
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	target["studyIds"], _ = json.Marshal(ids)
 	delete(target, "sampleIdentifiers")
@@ -82,7 +88,7 @@ func withStudies(body []byte, whole bool, studies func() ([]string, error)) ([]b
 		outer["studyViewFilter"], _ = json.Marshal(target)
 	}
 	out, err := json.Marshal(outer)
-	return out, err == nil
+	return out, err == nil, nil
 }
 
 // readableStudies are the ids of the portal's studies the caller may read.

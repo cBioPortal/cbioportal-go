@@ -33,7 +33,7 @@ func groupMemberSQL(args *core.SQLArgs, cg []contGroup, table string) string {
 // table is read once for all the groups it serves, held to their samples
 // and, where the staging records each profile's file (source_file), to the
 // requested profiles' files, which lead its sort key after the study.
-func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, withGene bool) string {
+func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, withGene bool) (string, error) {
 	var tables []string
 	for _, g := range cg {
 		if g.table != "" && !slices.Contains(tables, g.table) {
@@ -70,7 +70,14 @@ func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, w
 		}
 		grp := "toUInt32(arrayJoin(" + groupMemberSQL(args, cg, table) + ")) AS grp"
 		x := "toFloat64OrNull(" + core.JavaTruncatedValueSQL("value") + ") AS x"
-		if withGene && s.GeneKeyMapped(table) {
+		keyMapped := false
+		if withGene {
+			var err error
+			if keyMapped, err = s.GeneKeyMapped(table); err != nil {
+				return "", err
+			}
+		}
+		if keyMapped {
 			// Values are those of the genes the importer stored each line
 			// under (gene_key_map); lines it skipped are left out.
 			ent := "''"
@@ -95,7 +102,7 @@ func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, w
 			key, s.RawFileOrder(table, ""), x, grp, table, where))
 	}
 	return "SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSampStable(v) AS var, min(pos_) AS pos FROM (" +
-		strings.Join(parts, " UNION ALL ") + ") GROUP BY symbol, entrez, grp"
+		strings.Join(parts, " UNION ALL ") + ") GROUP BY symbol, entrez, grp", nil
 }
 
 // profileSampleRow is a sample of a profile with its position in the

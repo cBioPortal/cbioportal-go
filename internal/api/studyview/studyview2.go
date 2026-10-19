@@ -57,7 +57,11 @@ func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 			core.WriteJSON(w, out)
 			return
 		}
-		total := s.scopeSampleCount(svf)
+		total, err := s.scopeSampleCount(svf)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		genes := make([]string, len(f.GenomicDataFilters))
 		for i, g := range f.GenomicDataFilters {
 			genes[i] = g.HugoGeneSymbol
@@ -130,12 +134,16 @@ func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		U      uint64 `json:"u"`
 		Sample string `json:"samples"`
 	}
-	rows, _ := core.QueryA[typeRow](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[typeRow](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, mutation_type AS type, count() AS c, uniqExact(sample_unique_id) AS u, "+
 			"arrayStringConcat(groupUniqArray(sample_unique_id), ',') AS samples FROM %s "+
 			"AND sample_unique_id IN (%s) AND variant_type = 'mutation' %s"+
 			"GROUP BY hugo_gene_symbol, mutation_type ORDER BY hugo_gene_symbol, mutation_type",
 		svf.scope().From(args, core.TGenomicEventDerived), filtered, geneCond), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	for _, r := range rows {
@@ -176,14 +184,18 @@ func (s Server) mutationDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 		// not-mutated and not-profiled rows (always present, counts possibly
 		// 0) are items of their own, with the label as profile type.
 		for _, e := range extra {
-			r, err := core.QueryA[idsRow](s.CH, e.sql, args)
-			if err != nil || len(r) == 0 {
+			res, err := core.QueryA[idsRow](s.CH, e.sql, args)
+			if err != nil {
+				core.Fail(w, r, err)
+				return
+			}
+			if len(res) == 0 {
 				continue
 			}
-			n := r[0].N
+			n := res[0].N
 			c := GenomicDataCount{Label: e.label, Value: e.value, Count: n, UniqueCount: &n}
-			if r[0].IDs != "" {
-				c.SampleIDs = strings.Split(r[0].IDs, ",")
+			if res[0].IDs != "" {
+				c.SampleIDs = strings.Split(res[0].IDs, ",")
 			}
 			out = append(out, GenomicDataCountItem{HugoGeneSymbol: genes[0], ProfileType: e.label, Counts: []GenomicDataCount{c}})
 		}
@@ -222,13 +234,21 @@ func (s Server) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		C     uint64 `json:"c"`
 	}
 	args := core.NewArgs()
-	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT hugo_gene_symbol AS gene, toString(alteration_value) AS value, count() AS c FROM %s "+
 			"AND NOT %s AND profile_type = %s AND sample_unique_id IN (%s) AND hugo_gene_symbol IN %s "+
 			"GROUP BY hugo_gene_symbol, alteration_value ORDER BY hugo_gene_symbol, alteration_value",
 		svf.scope().From(args, core.TGeneticAlterationDerived), isNASQL("assumeNotNull(alteration_value)"), args.Str(profileType),
 		s.filterSQL(args, svf), args.Strs(genes)), args)
-	total := s.scopeSampleCount(svf)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	total, err := s.scopeSampleCount(svf)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	byGene := map[string]*GenomicDataCountItem{}
 	var order []string
 	// As in ClickhouseGenomicDataMapper.getCNACounts, a single NA count is

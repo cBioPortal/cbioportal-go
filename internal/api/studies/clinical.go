@@ -106,7 +106,11 @@ func (s Server) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 		if patient {
 			view = "clinical_patient"
 		}
-		rows, _ := core.QueryA[c](s.CH, fmt.Sprintf("SELECT count() AS n FROM %s WHERE %s", view, where), args)
+		rows, err := core.QueryA[c](s.CH, fmt.Sprintf("SELECT count() AS n FROM %s WHERE %s", view, where), args)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		var n uint64
 		if len(rows) > 0 {
 			n = rows[0].N
@@ -117,7 +121,11 @@ func (s Server) writeClinical(w http.ResponseWriter, r *http.Request, patient bo
 	}
 	var attrs map[string]ClinicalAttribute
 	if projection == "DETAILED" {
-		attrs = s.clinicalAttributes(studies)
+		var err error
+		if attrs, err = s.clinicalAttributes(studies); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 	}
 	out := core.NewJSONArray(w, r)
 	sql := clinicalSQL(r, args, patient, s.ImportOrdered(), where, studies)
@@ -206,17 +214,20 @@ func (s Server) clinicalDataFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 // clinicalAttributes indexes the studies' attribute metadata by study and id.
-func (s Server) clinicalAttributes(studyIDs []string) map[string]ClinicalAttribute {
+func (s Server) clinicalAttributes(studyIDs []string) (map[string]ClinicalAttribute, error) {
 	out := map[string]ClinicalAttribute{}
-	rows, _ := ch.QueryP[ClinAttrRow](s.CH,
+	rows, err := ch.QueryP[ClinAttrRow](s.CH,
 		"SELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
 			"ORDER BY clinical_attribute_id, study_id",
 		ch.Params{"studies": studyIDs})
+	if err != nil {
+		return nil, err
+	}
 	for _, r := range rows {
 		out[r.StudyID+"\x00"+r.ClinicalAttributeID] = r.toAttribute()
 	}
-	return out
+	return out, nil
 }
 
 // ClinAttrRow is a clinical attribute as read from ClickHouse.

@@ -27,7 +27,11 @@ func (s Server) routeReference(mux *http.ServeMux) {
 // id or a Hugo symbol; it is resolved via cbioportal_ref.gene. Shape: []string.
 func (s Server) geneAliases(w http.ResponseWriter, r *http.Request) {
 	geneID := r.PathValue("geneId")
-	entrez, _, ok := s.resolveRefGene(geneID)
+	entrez, _, ok, err := s.resolveRefGene(geneID)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	if !ok {
 		core.WriteJSON(w, []string{})
 		return
@@ -50,7 +54,7 @@ func (s Server) geneAliases(w http.ResponseWriter, r *http.Request) {
 
 // resolveRefGene resolves a gene identifier (Entrez id or Hugo symbol) to its
 // canonical (entrez, hugo) pair from cbioportal_ref.gene.
-func (s Server) resolveRefGene(geneID string) (int64, string, bool) {
+func (s Server) resolveRefGene(geneID string) (int64, string, bool, error) {
 	var where string
 	p := ch.Params{}
 	if n, err := strconv.ParseInt(geneID, 10, 64); err == nil {
@@ -66,9 +70,9 @@ func (s Server) resolveRefGene(geneID string) (int64, string, bool) {
 	rows, err := ch.QueryP[geneRow](s.CH,
 		"SELECT entrez_gene_id AS entrez, hugo_gene_symbol AS hugo FROM cbioportal_ref.gene WHERE "+where+" LIMIT 1", p)
 	if err != nil || len(rows) == 0 {
-		return 0, "", false
+		return 0, "", false, err
 	}
-	return rows[0].Entrez, rows[0].Hugo, true
+	return rows[0].Entrez, rows[0].Hugo, true, nil
 }
 
 // ---------- 6/7. reference-genome-genes ----------

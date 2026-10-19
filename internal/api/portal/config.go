@@ -54,10 +54,14 @@ func (s Server) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	p := ch.Params{}
-	rows, _ := ch.QueryP[row](s.CH,
+	rows, err := ch.QueryP[row](s.CH,
 		"SELECT toUInt8(countIf(driver_filter IN ('Putative_Driver', 'Putative_Passenger')) > 0) AS hasBinary, "+
 			"arraySort(groupUniqArrayIf(driver_tiers_filter, driver_tiers_filter NOT IN ('', 'NA'))) AS tiers "+
 			"FROM "+core.ByProfiles(ids).From(core.ParamsBinder(p), core.TGenomicEventDerived), p)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	if len(rows) > 0 {
 		report["hasBinary"] = rows[0].HasBinary == 1
 		if len(rows[0].Tiers) > 0 {

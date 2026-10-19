@@ -59,6 +59,9 @@ func CachedQuery[T any](s *State, sql string) ([]T, error) {
 
 // CachedQueryA is CachedQuery for a statement whose values are bound in a.
 func CachedQueryA[T any](s *State, sql string, a *SQLArgs) ([]T, error) {
+	if err := a.Err(); err != nil {
+		return nil, err
+	}
 	return CachedQueryP[T](s, sql, a.Params(sql))
 }
 

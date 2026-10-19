@@ -181,7 +181,9 @@ func (s Server) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		return nil, err
 	}
 	if !ok {
-		agg = s.matrixStats(args, cg, keyCol, withGene)
+		if agg, err = s.matrixStats(args, cg, keyCol, withGene); err != nil {
+			return nil, err
+		}
 	}
 	query := agg + " ORDER BY pos, symbol, grp"
 	if withGene {
@@ -277,7 +279,11 @@ func (s Server) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
-		groups = s.patientCasesToSamples(groups)
+		var err error
+		if groups, err = s.patientCasesToSamples(groups); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 	}
 	if len(groups) < 2 {
 		core.WriteJSON(w, []GenomicEnrichment{})
@@ -310,7 +316,11 @@ func (s Server) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if strings.EqualFold(r.URL.Query().Get("enrichmentType"), "PATIENT") {
-		groups = s.patientCasesToSamples(groups)
+		var err error
+		if groups, err = s.patientCasesToSamples(groups); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 	}
 	if len(groups) < 2 {
 		core.WriteJSON(w, []GenericAssayEnrichment{})
@@ -385,7 +395,7 @@ func (s Server) groupProfilePairs(groups []casesGroup) [][2]string {
 // patientCasesToSamples rewrites groups whose case ids are patient ids
 // (enrichmentType=PATIENT) to the samples of those patients, as the Java
 // backend compares every sample of a patient.
-func (s Server) patientCasesToSamples(groups []casesGroup) []casesGroup {
+func (s Server) patientCasesToSamples(groups []casesGroup) ([]casesGroup, error) {
 	metaCache := map[string]core.ProfileMeta{}
 	var pairs [][2]string
 	for _, g := range groups {
@@ -401,9 +411,12 @@ func (s Server) patientCasesToSamples(groups []casesGroup) []casesGroup {
 	samplesOf := map[string][]string{}
 	if len(pairs) > 0 {
 		p := ch.Params{"ids": pairs}
-		rows, _ := ch.QueryP[studies.IDRow](s.CH,
+		rows, err := ch.QueryP[studies.IDRow](s.CH,
 			"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(core.PairStudies(pairs)).From(core.ParamsBinder(p), core.TSample)+
 				" AND (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY study_id, sample_id", p)
+		if err != nil {
+			return nil, err
+		}
 		for _, r := range rows {
 			k := molecular.JoinKey(r.StudyID, r.PatientID)
 			samplesOf[k] = append(samplesOf[k], r.SampleID)
@@ -419,7 +432,7 @@ func (s Server) patientCasesToSamples(groups []casesGroup) []casesGroup {
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (s Server) routeEnrichment2(mux *http.ServeMux) {

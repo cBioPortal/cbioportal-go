@@ -307,8 +307,12 @@ func (s Server) geneCounts(args *core.SQLArgs, f studyViewFilter, variantType, a
 	if len(out) == 0 {
 		return []GeneAlterationCount{}, nil
 	}
-	s.populateProfiled(args, f, filtered, alterationType, out)
-	s.populateQValues(args, f, alterationType, out)
+	if err := s.populateProfiled(args, f, filtered, alterationType, out); err != nil {
+		return nil, err
+	}
+	if err := s.populateQValues(args, f, alterationType, out); err != nil {
+		return nil, err
+	}
 	for i := range out {
 		out[i] = out[i].withEventKeys()
 	}
@@ -320,14 +324,14 @@ func (s Server) geneCounts(args *core.SQLArgs, f studyViewFilter, variantType, a
 // by symbol, for mutated and structural-variant genes) and
 // GetCnaAlterationCountByGeneUseCase (GISTIC by symbol and amplification or
 // deep deletion, the region with the lowest q-value) do.
-func (s Server) populateQValues(args *core.SQLArgs, f studyViewFilter, alterationType string, counts []GeneAlterationCount) {
+func (s Server) populateQValues(args *core.SQLArgs, f studyViewFilter, alterationType string, counts []GeneAlterationCount) error {
 	type study struct {
 		ID string `json:"id"`
 	}
 	filtered, err := core.QueryA[study](s.CH,
 		"SELECT DISTINCT cancer_study_identifier AS id FROM "+s.filterFrom(args, f)+" LIMIT 2", args)
 	if err != nil || len(filtered) != 1 {
-		return
+		return err
 	}
 	p := ch.Params{"study": filtered[0].ID}
 	type significance struct {
@@ -344,7 +348,7 @@ func (s Server) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 				"FROM gistic r INNER JOIN gistic_to_gene gg ON gg.study_id = r.study_id AND gg.gistic_roi_id = r.gistic_roi_id "+
 				"WHERE r.study_id = {study:String}", p)
 		if err != nil {
-			return
+			return err
 		}
 		for _, r := range rows {
 			alteration := int64(-2)
@@ -361,7 +365,7 @@ func (s Server) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 		rows, err := studies.QueryView[significance](s.CH,
 			"SELECT hugo_gene_symbol AS hugo, q_value AS q, q_value_text AS qText FROM mutsig WHERE study_id = {study:String}", p)
 		if err != nil {
-			return
+			return err
 		}
 		for _, r := range rows {
 			best[key(r.Hugo, 0)] = molecular.ImporterFloat(r.QText, r.Q)
@@ -379,19 +383,23 @@ func (s Server) populateQValues(args *core.SQLArgs, f studyViewFilter, alteratio
 			counts[i].QValue = &q
 		}
 	}
+	return nil
 }
 
-func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) {
+func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered, alterationType string, counts []GeneAlterationCount) error {
 	// First non-continuous profile of the type per study.
 	type prof struct {
 		ID    string `json:"id"`
 		Study string `json:"study"`
 	}
-	profs, _ := core.QueryA[prof](s.CH, fmt.Sprintf(
+	profs, err := core.QueryA[prof](s.CH, fmt.Sprintf(
 		"SELECT molecular_profile_id AS id, study_id AS study FROM molecular_profile "+
 			"WHERE molecular_alteration_type = '%s' AND datatype NOT IN ('CONTINUOUS', 'LOG2-VALUE') AND study_id IN %s "+
 			"ORDER BY study_id, molecular_profile_id",
 		alterationType, args.Strs(f.studyIDs())), args)
+	if err != nil {
+		return err
+	}
 	first := map[string]string{}
 	for _, p := range profs {
 		if _, ok := first[p.Study]; !ok {
@@ -406,13 +414,16 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 		Gene string `json:"gene"`
 		N    uint64 `json:"n"`
 	}
-	panelCounts, _ := core.QueryA[geneCount](s.CH, fmt.Sprintf(
+	panelCounts, err := core.QueryA[geneCount](s.CH, fmt.Sprintf(
 		"SELECT gptg.gene AS gene, sum(p.n) AS n FROM ("+
 			"SELECT gene_panel_id, count() AS n FROM sample_to_gene_panel_derived "+
 			"WHERE alteration_type = '%s' AND gene_panel_id != 'WES' AND genetic_profile_id IN %s "+
 			"AND sample_unique_id IN (%s) GROUP BY gene_panel_id) p "+
 			"INNER JOIN gene_panel_to_gene_derived gptg ON p.gene_panel_id = gptg.gene_panel_id GROUP BY gptg.gene",
 		alterationType, args.Strs(profileIDs), filtered), args)
+	if err != nil {
+		return err
+	}
 	profiled := map[string]uint64{}
 	for _, c := range panelCounts {
 		profiled[c.Gene] = c.N
@@ -421,11 +432,14 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 		N   uint64 `json:"n"`
 		All uint64 `json:"all"`
 	}
-	wes, _ := core.QueryA[n](s.CH, fmt.Sprintf(
+	wes, err := core.QueryA[n](s.CH, fmt.Sprintf(
 		"SELECT uniqExactIf(sample_unique_id, gene_panel_id = 'WES') AS n, "+
 			"uniqExactIf(sample_unique_id, genetic_profile_id IN %s) AS all FROM sample_to_gene_panel_derived "+
 			"WHERE alteration_type = '%s' AND sample_unique_id IN (%s)",
 		args.Strs(profileIDs), alterationType, filtered), args)
+	if err != nil {
+		return err
+	}
 	var wesCount, allCount uint64
 	if len(wes) > 0 {
 		wesCount, allCount = wes[0].N, wes[0].All
@@ -438,11 +452,14 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 	for i, c := range counts {
 		genes[i] = c.HugoGeneSymbol
 	}
-	panels, _ := core.QueryA[panel](s.CH, fmt.Sprintf(
+	panels, err := core.QueryA[panel](s.CH, fmt.Sprintf(
 		"SELECT gene, gene_panel_id AS panel FROM gene_panel_to_gene_derived WHERE gene_panel_id IN "+
 			"(SELECT DISTINCT gene_panel_id FROM sample_to_gene_panel_derived WHERE alteration_type = '%s' AND sample_unique_id IN (%s)) "+
 			"AND gene IN %s GROUP BY gene, gene_panel_id",
 		alterationType, filtered, args.Strs(genes)), args)
+	if err != nil {
+		return err
+	}
 	matching := map[string][]string{}
 	for _, p := range panels {
 		matching[p.Gene] = append(matching[p.Gene], p.Panel)
@@ -458,6 +475,7 @@ func (s Server) populateProfiled(args *core.SQLArgs, f studyViewFilter, filtered
 		}
 		counts[i].MatchingGenePanelIDs = m
 	}
+	return nil
 }
 
 func (s Server) mutatedGenesFetch(w http.ResponseWriter, r *http.Request) {
@@ -620,9 +638,13 @@ func (s Server) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 	type prof struct {
 		ID string `json:"id"`
 	}
-	profs, _ := core.QueryA[prof](s.CH,
+	profs, err := core.QueryA[prof](s.CH,
 		"SELECT min(molecular_profile_id) AS id FROM molecular_profile WHERE molecular_alteration_type = 'STRUCTURAL_VARIANT' "+
 			"AND study_id IN "+args.Strs(f.studyIDs())+" GROUP BY study_id", args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	profileIDs := make([]string, len(profs))
 	for i, p := range profs {
 		profileIDs[i] = p.ID
@@ -631,10 +653,14 @@ func (s Server) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Panel string `json:"panel"`
 		N     uint64 `json:"n"`
 	}
-	panelCounts, _ := core.QueryA[panelCount](s.CH, fmt.Sprintf(
+	panelCounts, err := core.QueryA[panelCount](s.CH, fmt.Sprintf(
 		"SELECT gene_panel_id AS panel, count() AS n FROM sample_to_gene_panel_derived "+
 			"WHERE alteration_type = 'STRUCTURAL_VARIANT' AND gene_panel_id != 'WES' AND genetic_profile_id IN %s "+
 			"AND sample_unique_id IN (%s) GROUP BY gene_panel_id", args.Strs(profileIDs), filtered), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	perPanel := map[string]uint64{}
 	var panelIDs []string
 	for _, p := range panelCounts {
@@ -644,11 +670,16 @@ func (s Server) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 	type n struct {
 		N uint64 `json:"n"`
 	}
-	var wesCount uint64
-	if wes, _ := core.QueryA[n](s.CH, fmt.Sprintf(
+	wes, err := core.QueryA[n](s.CH, fmt.Sprintf(
 		"SELECT uniqExact(sample_unique_id) AS n FROM sample_to_gene_panel_derived "+
 			"WHERE alteration_type = 'STRUCTURAL_VARIANT' AND gene_panel_id = 'WES' AND sample_unique_id IN (%s)",
-		filtered), args); len(wes) > 0 {
+		filtered), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	var wesCount uint64
+	if len(wes) > 0 {
 		wesCount = wes[0].N
 	}
 	genes := map[string]bool{}
@@ -659,9 +690,13 @@ func (s Server) svCountsFetch(w http.ResponseWriter, r *http.Request) {
 		Gene  string `json:"gene"`
 		Panel string `json:"panel"`
 	}
-	panelGenes, _ := core.QueryA[panelGene](s.CH, fmt.Sprintf(
+	panelGenes, err := core.QueryA[panelGene](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT gene, gene_panel_id AS panel FROM gene_panel_to_gene_derived WHERE gene_panel_id IN %s AND gene IN %s",
 		args.Strs(panelIDs), args.Strs(core.SortedKeys(genes))), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	panelsOf := map[string][]string{}
 	for _, pg := range panelGenes {
 		panelsOf[pg.Gene] = append(panelsOf[pg.Gene], pg.Panel)

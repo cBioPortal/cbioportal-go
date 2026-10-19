@@ -135,8 +135,12 @@ func (s Server) writeDiscreteCopyNumber(w http.ResponseWriter, r *http.Request, 
 		// The values discreteCopyNumberFromValues keeps: integers among the
 		// alterations.
 		args := core.NewArgs()
-		sel, _, ok := s.molecularDataSelect(args, mpid, molecularDataFilter{
+		sel, _, ok, err := s.molecularDataSelect(args, mpid, molecularDataFilter{
 			EntrezGeneIDs: entrez, SampleIDs: sampleIDs, SampleListID: sampleListID}, "")
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		if !ok {
 			sel = "SELECT '' AS value WHERE 0"
 		}
@@ -267,13 +271,14 @@ func (s Server) discreteCopyNumberFromValues(r *http.Request, mpid string, meta 
 // data file's sample columns that are samples of the study, or the samples of
 // a discrete-long file. A profile without such a list counts its profiled
 // samples.
-func (s Server) profileSampleCount(meta core.ProfileMeta, mpid string) int64 {
+func (s Server) profileSampleCount(meta core.ProfileMeta, mpid string) (int64, error) {
 	p := ch.Params{"study": meta.StudyID, "profile": meta.StableID, "mp": mpid}
 	inStudy := " AND sample_id IN (SELECT sample_id FROM " + core.ByStudy(meta.StudyID).From(core.ParamsBinder(p), core.TSample) + ")"
 	if len(s.RawColumns("profile_sample")) > 0 {
-		if n := s.countQuery("SELECT uniqExact(sample_id) AS n FROM cbioportal_raw.profile_sample "+
-			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND kind = 'header'"+inStudy, p); n > 0 {
-			return n
+		n, err := s.countQuery("SELECT uniqExact(sample_id) AS n FROM cbioportal_raw.profile_sample "+
+			"WHERE study_id = {study:String} AND profile_stable_id = {profile:String} AND kind = 'header'"+inStudy, p)
+		if err != nil || n > 0 {
+			return n, err
 		}
 	}
 	if strings.EqualFold(meta.Datatype, "DISCRETE_LONG") && len(s.RawColumns("cna_discrete_long")) > 0 {
@@ -287,24 +292,25 @@ func (s Server) profileSampleCount(meta core.ProfileMeta, mpid string) int64 {
 // variantSampleCount is VariantCountServiceImpl.getNumberOfSamplesInMolecularProfile:
 // the size of the study's sequenced sample list, else the number of samples
 // with a mutation in the profile.
-func (s Server) variantSampleCount(meta core.ProfileMeta, mpid string) int64 {
+func (s Server) variantSampleCount(meta core.ProfileMeta, mpid string) (int64, error) {
 	p := ch.Params{"study": meta.StudyID, "mp": mpid}
-	if n := s.countQuery("SELECT count() AS n FROM "+s.BySampleList(meta.StudyID+"_sequenced").From(core.ParamsBinder(p), core.TSampleList), p); n > 0 {
-		return n
+	n, err := s.countQuery("SELECT count() AS n FROM "+s.BySampleList(meta.StudyID+"_sequenced").From(core.ParamsBinder(p), core.TSampleList), p)
+	if err != nil || n > 0 {
+		return n, err
 	}
 	return s.countQuery("SELECT uniqExact(sample_id) AS n FROM mutation WHERE study_id = {study:String} AND molecular_profile_id = {mp:String}", p)
 }
 
-// countQuery runs a query returning one count column n; 0 on error.
-func (s Server) countQuery(sql string, p ch.Params) int64 {
+// countQuery runs a query returning one count column n; 0 for no row.
+func (s Server) countQuery(sql string, p ch.Params) (int64, error) {
 	type c struct {
 		N int64 `json:"n"`
 	}
 	rows, err := ch.QueryP[c](s.CH, sql, p)
 	if err != nil || len(rows) == 0 {
-		return 0
+		return 0, err
 	}
-	return rows[0].N
+	return rows[0].N, nil
 }
 
 // DerefInt returns *p, 0 for nil.
@@ -352,7 +358,11 @@ func (s Server) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	total := s.profileSampleCount(meta, mpid)
+	total, err := s.profileSampleCount(meta, mpid)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 
 	pairs := make([]string, len(ids))
 	for i, id := range ids {
@@ -428,7 +438,11 @@ func (s Server) mutationSpectrumsFetch(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, []struct{}{})
 		return
 	}
-	study := s.profileStudy(mpid)
+	study, err := s.profileStudy(mpid)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	// MutationSpectrumServiceImpl reads the profile's mutations with snpOnly:
 	// reference and tumor allele are both single bases.
 	where := "m.study_id = {study:String} AND m.molecular_profile_id = {profile:String} " +
@@ -521,7 +535,11 @@ func (s Server) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(mpid))
 		return
 	}
-	total := s.variantSampleCount(meta, mpid)
+	total, err := s.variantSampleCount(meta, mpid)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 
 	// Per-gene sample counts.
 	geneCount := map[int64]int64{}
@@ -530,10 +548,14 @@ func (s Server) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 			EntrezGeneID *int64 `json:"entrezGeneId"`
 			N            int64  `json:"n"`
 		}
-		rows, _ := ch.QueryP[gr](s.CH, fmt.Sprintf(
+		rows, err := ch.QueryP[gr](s.CH, fmt.Sprintf(
 			"SELECT toInt64OrNull(entrez_gene_id) AS entrezGeneId, uniqExact(sample_id) AS n "+
 				"FROM mutation WHERE molecular_profile_id = {profile:String} AND toInt64OrNull(entrez_gene_id) IN (%s) "+
 				"GROUP BY entrezGeneId", core.IntListSQL(entrez)), ch.Params{"profile": mpid})
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		for _, r := range rows {
 			geneCount[DerefInt(r.EntrezGeneID)] = r.N
 		}
@@ -554,13 +576,17 @@ func (s Server) variantCountsFetch(w http.ResponseWriter, r *http.Request) {
 			ProteinChange  string `json:"proteinChange"`
 			MutationType   string `json:"mutationType"`
 		}
-		rows, _ := ch.QueryP[kr](s.CH, fmt.Sprintf(
+		rows, err := ch.QueryP[kr](s.CH, fmt.Sprintf(
 			"SELECT DISTINCT toInt64OrNull(m.entrez_gene_id) AS entrezGeneId, m.sample_id AS sampleId, "+
 				"if(rg.hugo_gene_symbol != '', rg.hugo_gene_symbol, m.hugo_symbol) AS hugoGeneSymbol, "+
 				"m.protein_change AS proteinChange, m.variant_classification AS mutationType "+
 				"FROM mutation m LEFT JOIN cbioportal_ref.gene rg ON rg.entrez_gene_id = toInt64OrNull(m.entrez_gene_id) "+
 				"WHERE m.molecular_profile_id = {profile:String} AND toInt64OrNull(m.entrez_gene_id) IN (%s)",
 			core.IntListSQL(entrez)), ch.Params{"profile": mpid})
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		samples := map[string]map[string]bool{}
 		for _, r := range rows {
 			kw := core.MutationKeyword(r.HugoGeneSymbol, r.ProteinChange, core.NAString(r.MutationType))

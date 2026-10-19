@@ -181,7 +181,12 @@ func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 		where += " AND (" + strings.Join(geneOrs, " OR ") + ")"
 	}
 
-	cols := SVSelectColumns(s.SVViewColumns())
+	viewCols, err := s.SVViewColumns()
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	cols := SVSelectColumns(viewCols)
 	order := " ORDER BY site1HugoSymbol, site2HugoSymbol, studyId, sampleId"
 	if sp, expr := core.ClaimListPage(r, structuralVariantSortable); sp != nil {
 		// Records of one gene pair in a sample tie in that order; a page
@@ -202,7 +207,7 @@ func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 			"WHERE %s%s",
 		strings.Join(cols, ", "), SVSiteEntrezSQL, core.ByStudies(studies).Samples(args), where, order)
 	out := core.NewJSONArray(w, r)
-	err := ch.QueryEachP(s.CH, query, args.Params(query), func(r *map[string]any) error {
+	err = ch.QueryEachP(s.CH, query, args.Params(query), func(r *map[string]any) error {
 		return out.Add(ToStructuralVariant(*r))
 	})
 	out.Finish(err)
@@ -359,18 +364,21 @@ type PanelProfile struct {
 
 // ResolvePanelProfiles looks up the molecular profiles ids (cached), keyed
 // by id; unknown ids are left out.
-func (s Server) ResolvePanelProfiles(ids []string) map[string]PanelProfile {
+func (s Server) ResolvePanelProfiles(ids []string) (map[string]PanelProfile, error) {
 	out := map[string]PanelProfile{}
 	if len(ids) == 0 {
-		return out
+		return out, nil
 	}
-	rows, _ := core.CachedQueryP[PanelProfile](s.State,
+	rows, err := core.CachedQueryP[PanelProfile](s.State,
 		"SELECT molecular_profile_id AS molecularProfileId, study_id AS studyId, profile_stable_id AS stableId "+
 			"FROM molecular_profile WHERE molecular_profile_id IN {ids:Array(String)}", ch.Params{"ids": ids})
+	if err != nil {
+		return nil, err
+	}
 	for _, r := range rows {
 		out[r.MolecularProfileID] = r
 	}
-	return out
+	return out, nil
 }
 
 // JoinKey joins parts into one map key.
@@ -393,13 +401,22 @@ func (s Server) genePanelDataFetch(w http.ResponseWriter, r *http.Request) {
 			reqs = append(reqs, gpReq{profileID: id.MolecularProfileID, sampleID: id.SampleID})
 		}
 	case len(f.MolecularProfileIDs) > 0:
-		profs := s.ResolvePanelProfiles(f.MolecularProfileIDs)
+		profs, err := s.ResolvePanelProfiles(f.MolecularProfileIDs)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		for _, pid := range f.MolecularProfileIDs {
 			study := profs[pid].StudyID
 			if study == "" {
 				continue
 			}
-			for _, sid := range s.studySampleIDs(study) {
+			sampleIDs, err := s.studySampleIDs(study)
+			if err != nil {
+				core.Fail(w, r, err)
+				return
+			}
+			for _, sid := range sampleIDs {
 				reqs = append(reqs, gpReq{profileID: pid, sampleID: sid})
 			}
 		}
@@ -441,14 +458,25 @@ func (s Server) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 			// Pages need a stable order.
 			sql += " ORDER BY sample_id"
 		}
-		rows, _ := ch.QueryP[sr](s.CH, sql, p)
+		rows, err := ch.QueryP[sr](s.CH, sql, p)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		for _, x := range rows {
 			samples = append(samples, x.SampleID)
 		}
 	default:
-		study := s.ResolvePanelProfiles([]string{mpid})[mpid].StudyID
-		if study != "" {
-			samples = s.studySampleIDs(study)
+		profs, err := s.ResolvePanelProfiles([]string{mpid})
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
+		if study := profs[mpid].StudyID; study != "" {
+			if samples, err = s.studySampleIDs(study); err != nil {
+				core.Fail(w, r, err)
+				return
+			}
 		}
 	}
 	reqs := make([]gpReq, len(samples))
@@ -458,17 +486,20 @@ func (s Server) genePanelDataProfileFetch(w http.ResponseWriter, r *http.Request
 	s.writeGenePanelData(w, r, reqs)
 }
 
-func (s Server) studySampleIDs(study string) []string {
+func (s Server) studySampleIDs(study string) ([]string, error) {
 	type sr struct {
 		SampleID string `json:"sampleId"`
 	}
 	p := ch.Params{}
-	rows, _ := core.CachedQueryP[sr](s.State, "SELECT sample_id AS sampleId FROM "+core.ByStudy(study).From(core.ParamsBinder(p), core.TSample)+" ORDER BY sample_id", p)
+	rows, err := core.CachedQueryP[sr](s.State, "SELECT sample_id AS sampleId FROM "+core.ByStudy(study).From(core.ParamsBinder(p), core.TSample)+" ORDER BY sample_id", p)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]string, len(rows))
 	for i, r := range rows {
 		out[i] = r.SampleID
 	}
-	return out
+	return out, nil
 }
 
 // genePanelDataEach resolves each (profile, sample) request against
@@ -486,14 +517,20 @@ func (s Server) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 		profSet[q.profileID] = true
 	}
 	profIDs := core.SortedKeys(profSet)
-	profs := s.ResolvePanelProfiles(profIDs)
+	profs, err := s.ResolvePanelProfiles(profIDs)
+	if err != nil {
+		return err
+	}
 	type typeRow struct {
 		ID   string `json:"id"`
 		Type string `json:"type"`
 	}
-	types, _ := ch.QueryP[typeRow](s.CH,
+	types, err := ch.QueryP[typeRow](s.CH,
 		"SELECT molecular_profile_id AS id, molecular_alteration_type AS type FROM molecular_profile WHERE molecular_profile_id IN {ids:Array(String)}",
 		ch.Params{"ids": profIDs})
+	if err != nil {
+		return err
+	}
 	isMutation := map[string]bool{}
 	for _, t := range types {
 		isMutation[t.ID] = t.Type == "MUTATION_EXTENDED"
@@ -508,12 +545,15 @@ func (s Server) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	}
 	patientOf := map[string]string{}
 	sp := ch.Params{}
-	ch.QueryEachP(s.CH,
+	err = ch.QueryEachP(s.CH,
 		"SELECT study_id AS studyId, sample_id AS sampleId, patient_id AS patientId FROM "+core.ByStudies(studyIDs).From(core.ParamsBinder(sp), core.TSample), sp,
 		func(r *studies.IDRow) error {
 			patientOf[JoinKey(r.StudyID, r.SampleID)] = r.PatientID
 			return nil
 		})
+	if err != nil {
+		return err
+	}
 	type memberRow struct {
 		Profile  string  `json:"profile"`
 		SampleID string  `json:"sampleId"`
@@ -521,7 +561,7 @@ func (s Server) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 	}
 	type membership struct{ panel string }
 	member := map[string]membership{}
-	ch.QueryEachP(s.CH,
+	err = ch.QueryEachP(s.CH,
 		"SELECT molecular_profile_id AS profile, sample_id AS sampleId, gene_panel_id AS panel FROM sample_profile "+
 			"WHERE study_id IN {studies:Array(String)} AND molecular_profile_id IN {ids:Array(String)}",
 		ch.Params{"studies": studyIDs, "ids": profIDs},
@@ -533,14 +573,20 @@ func (s Server) genePanelDataEach(reqs []gpReq, fn func(GenePanelData) error) er
 			member[JoinKey(m.Profile, m.SampleID)] = membership{panel}
 			return nil
 		})
+	if err != nil {
+		return err
+	}
 	sequenced := map[string]bool{}
 	sequencedLists := make([]string, len(studyIDs))
 	for i, st := range studyIDs {
 		sequencedLists[i] = st + "_sequenced"
 	}
 	seqP := ch.Params{}
-	seqRows, _ := ch.QueryP[studies.IDRow](s.CH,
+	seqRows, err := ch.QueryP[studies.IDRow](s.CH,
 		"SELECT study_id AS studyId, sample_id AS sampleId FROM "+s.BySampleLists(sequencedLists...).From(core.ParamsBinder(seqP), core.TSampleList), seqP)
+	if err != nil {
+		return err
+	}
 	for _, r := range seqRows {
 		sequenced[JoinKey(r.StudyID, r.SampleID)] = true
 	}
@@ -639,7 +685,12 @@ func (s Server) molecularDataMultipleStudyFetch(w http.ResponseWriter, r *http.R
 		}
 		extra := fmt.Sprintf(", %s AS molecularProfileId, %s AS studyId, %s AS sampleRank, rg.genetic_entity_id AS entityRank",
 			args.Str(p), args.Str(study), sampleRank)
-		if sel, _, ok := s.molecularDataSelect(args, p, molecularDataFilter{EntrezGeneIDs: f.EntrezGeneIDs, SampleIDs: sampleIDs}, extra); ok {
+		sel, _, ok, err := s.molecularDataSelect(args, p, molecularDataFilter{EntrezGeneIDs: f.EntrezGeneIDs, SampleIDs: sampleIDs}, extra)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
+		if ok {
 			parts = append(parts, sel)
 		}
 	}
@@ -705,16 +756,19 @@ type molecularDataMultiRow struct {
 
 // SVViewColumns lists the columns of the structural_variant view (the staged
 // detail columns vary by dataset).
-func (s Server) SVViewColumns() map[string]bool {
+func (s Server) SVViewColumns() (map[string]bool, error) {
 	type col struct {
 		Name string `json:"name"`
 	}
-	rows, _ := ch.Query[col](s.CH, "SELECT name FROM system.columns WHERE database = currentDatabase() AND table = 'structural_variant'")
+	rows, err := ch.Query[col](s.CH, "SELECT name FROM system.columns WHERE database = currentDatabase() AND table = 'structural_variant'")
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]bool{}
 	for _, r := range rows {
 		out[r.Name] = true
 	}
-	return out
+	return out, nil
 }
 
 // JoinPreds joins the non-empty SQL predicates with AND ("1 = 1" for none).

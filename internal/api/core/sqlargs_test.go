@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"testing"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -31,5 +32,20 @@ func TestCacheKey(t *testing.T) {
 	two2, _ := cacheKey(sql, ch.Params{"y": "b", "x": "a"})
 	if two1 != two2 {
 		t.Error("key depends on map order")
+	}
+}
+
+// A statement whose fragment could not be built fails without running.
+func TestSQLArgsFail(t *testing.T) {
+	a := NewArgs()
+	first := errors.New("lookup failed")
+	a.Fail(first)
+	a.Fail(errors.New("later"))
+	type row struct{}
+	if _, err := QueryA[row](nil, "SELECT 1", a); err != first {
+		t.Fatalf("QueryA error %v, want %v", err, first)
+	}
+	if _, err := CachedQueryA[row](nil, "SELECT 1", a); err != first {
+		t.Fatalf("CachedQueryA error %v, want %v", err, first)
 	}
 }

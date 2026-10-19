@@ -17,6 +17,7 @@ type SQLArgs struct {
 	mu   sync.Mutex
 	p    ch.Params
 	seen map[string]string
+	err  error
 }
 
 // NewArgs returns an empty SQLArgs.
@@ -82,8 +83,30 @@ func (a *SQLArgs) Params(sql string) ch.Params {
 	return out
 }
 
-// QueryA runs a SELECT with the values bound in a.
+// Fail records that a fragment bound in a could not be built, for a
+// builder that returns SQL text only: the statements run with a then fail
+// with err (the first one recorded).
+func (a *SQLArgs) Fail(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.err == nil {
+		a.err = err
+	}
+}
+
+// Err returns the error recorded by Fail, or nil.
+func (a *SQLArgs) Err() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.err
+}
+
+// QueryA runs a SELECT with the values bound in a; it fails without running
+// when a fragment of it could not be built (Fail).
 func QueryA[T any](c *ch.Client, sql string, a *SQLArgs) ([]T, error) {
+	if err := a.Err(); err != nil {
+		return nil, err
+	}
 	return ch.QueryP[T](c, sql, a.Params(sql))
 }
 

@@ -114,15 +114,18 @@ func (s Server) genericAssayMetaByIDGet(w http.ResponseWriter, r *http.Request) 
 // profile type: patients when, as GenericAssayMapper's profile_level has it,
 // any profile of this type in any study is declared patient_level, else
 // samples.
-func (s Server) GACountUnit(profileType string) string {
+func (s Server) GACountUnit(profileType string) (string, error) {
 	type lvl struct {
 		P uint64 `json:"p"`
 	}
-	lv, _ := core.CachedQueryP[lvl](s.State,
+	lv, err := core.CachedQueryP[lvl](s.State,
 		"SELECT count() AS p FROM cbioportal_raw.genetic_profile WHERE profile_stable_id = {profile:String} AND lower(toString(patient_level)) = 'true'",
 		ch.Params{"profile": profileType})
-	if len(lv) > 0 && lv[0].P > 0 {
-		return "patient_unique_id"
+	if err != nil {
+		return "", err
 	}
-	return "sample_unique_id"
+	if len(lv) > 0 && lv[0].P > 0 {
+		return "patient_unique_id", nil
+	}
+	return "sample_unique_id", nil
 }

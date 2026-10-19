@@ -58,7 +58,11 @@ func (s Server) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	if body.AlterationEventTypes != nil {
 		a.Filter = *body.AlterationEventTypes
 	}
-	profileStudy := s.profileStudies(body.Groups)
+	profileStudy, err := s.profileStudies(body.Groups)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	type geneRow struct {
 		Gene   string `json:"gene"`
 		Entrez *int64 `json:"entrez"`
@@ -194,18 +198,22 @@ func enrichmentPValue(counts []CountSummary) float64 {
 }
 
 // profileStudies maps each molecular profile referenced by the groups to its study.
-func (s Server) profileStudies(groups []casesGroup) map[string]string {
+func (s Server) profileStudies(groups []casesGroup) (map[string]string, error) {
 	set := map[string]bool{}
 	for _, g := range groups {
 		for _, c := range g.MolecularProfileCaseIdentifiers {
 			set[c.MolecularProfileID] = true
 		}
 	}
+	profs, err := s.ResolvePanelProfiles(core.SortedKeys(set))
+	if err != nil {
+		return nil, err
+	}
 	out := map[string]string{}
-	for id, p := range s.ResolvePanelProfiles(core.SortedKeys(set)) {
+	for id, p := range profs {
 		out[id] = p.StudyID
 	}
-	return out
+	return out, nil
 }
 
 func (s Server) routeEnrichment(mux *http.ServeMux) {

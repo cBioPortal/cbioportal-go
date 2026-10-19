@@ -569,16 +569,20 @@ func (c filterCompiler) genomicData(g genomicDataFilter) string {
 
 // genericAssayData filters on one generic-assay entity: numeric (LIMIT-VALUE)
 // profiles by range, categorical ones by value, at sample or patient level as
-// the profile declares.
+// the profile declares. A failed lookup of the profile's kind fails the
+// statements built with c's args.
 func (c filterCompiler) genericAssayData(g genericAssayDataFilter) string {
 	type kind struct {
 		Datatype     string `json:"datatype"`
 		PatientLevel uint8  `json:"patientLevel"`
 	}
-	rows, _ := ch.QueryP[kind](c.s.CH,
+	rows, err := ch.QueryP[kind](c.s.CH,
 		"SELECT datatype, toUInt8(patient_level) AS patientLevel FROM generic_assay_data_derived "+
 			"WHERE profile_type = {profileType:String} AND entity_stable_id = {stableID:String} LIMIT 1",
 		ch.Params{"profileType": g.ProfileType, "stableID": g.StableID})
+	if err != nil {
+		c.a.Fail(err)
+	}
 	numeric, patient := true, false
 	if len(rows) > 0 {
 		numeric = rows[0].Datatype == "LIMIT-VALUE"
@@ -975,14 +979,14 @@ func (s Server) sampleScope(a *core.SQLArgs, f studyViewFilter) string {
 	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.scope().Key(a, core.TSample, ""), s.filterSQL(a, f))
 }
 
-func (s Server) scopeSampleCount(f studyViewFilter) uint64 {
+func (s Server) scopeSampleCount(f studyViewFilter) (uint64, error) {
 	type c struct {
 		N uint64 `json:"n"`
 	}
 	a := core.NewArgs()
-	rows, _ := core.QueryA[c](s.CH, "SELECT count() AS n FROM "+s.filterFrom(a, f), a)
-	if len(rows) > 0 {
-		return rows[0].N
+	rows, err := core.QueryA[c](s.CH, "SELECT count() AS n FROM "+s.filterFrom(a, f), a)
+	if err != nil || len(rows) == 0 {
+		return 0, err
 	}
-	return 0
+	return rows[0].N, nil
 }

@@ -128,8 +128,17 @@ func (s Server) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 		ids[i] = a.AttributeID
 	}
 	method := r.URL.Query().Get("dataBinMethod")
-	unfiltered := countsByAttr(s.clinicalDataCounts(svf.partial(), ids))
-	filtered := countsByAttr(s.clinicalDataCounts(svf, ids))
+	unfilteredItems, err := s.clinicalDataCounts(svf.partial(), ids)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	filteredItems, err := s.clinicalDataCounts(svf, ids)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	unfiltered, filtered := countsByAttr(unfilteredItems), countsByAttr(filteredItems)
 	out := []databin.Bin{}
 	for i, a := range f.Attributes {
 		if _, known := unfiltered[a.AttributeID]; !known {
@@ -155,7 +164,7 @@ func (s Server) clinicalDataBinCountsFetch(w http.ResponseWriter, r *http.Reques
 // predicate that marks a value as NA; unit is the case column counted
 // (sample_unique_id, or patient_unique_id for a patient-level profile).
 func (s Server) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, unit string, keys [][2]string,
-	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value) {
+	unfilteredScope, filteredScope studyViewFilter) (unfiltered, filtered map[[2]string][]databin.Value, err error) {
 	unfiltered, filtered = map[[2]string][]databin.Value{}, map[[2]string][]databin.Value{}
 	if len(keys) == 0 {
 		return
@@ -175,7 +184,10 @@ func (s Server) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, un
 		total = "SELECT (SELECT uniqExact(patient_unique_id) FROM " + samples + " AND sample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, " +
 			"(SELECT uniqExact(patient_unique_id) FROM " + samples + " AND sample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f"
 	}
-	totals, _ := core.QueryA[totalRow](s.CH, scopes+total, args)
+	totals, err := core.QueryA[totalRow](s.CH, scopes+total, args)
+	if err != nil {
+		return nil, nil, err
+	}
 	var totalU, totalF uint64
 	if len(totals) > 0 {
 		totalU, totalF = totals[0].U, totals[0].F
@@ -198,7 +210,7 @@ func (s Server) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, un
 	if t.Study != "" {
 		from = both.From(args, t)
 	}
-	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(scopes+
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(scopes+
 		"SELECT %[1]s AS key, profile_type AS profileType, %[2]s AS value, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM unfiltered)) AS u, "+
 		"%[6]ssample_unique_id IN (SELECT sample_unique_id FROM filtered)) AS f "+
@@ -206,6 +218,9 @@ func (s Server) scopedValueCounts(t core.KeyedTable, keyCol, valueCol, naSQL, un
 		"AND (sample_unique_id IN (SELECT sample_unique_id FROM unfiltered) OR sample_unique_id IN (SELECT sample_unique_id FROM filtered)) "+
 		"GROUP BY key, profileType, value",
 		keyCol, valueCol, from, args.Pairs(keys), naSQL, countIf), args)
+	if err != nil {
+		return nil, nil, err
+	}
 	sumU, sumF := map[[2]string]uint64{}, map[[2]string]uint64{}
 	for _, r := range rows {
 		k := [2]string{r.Key, r.ProfileType}
@@ -262,8 +277,12 @@ func (s Server) genomicDataBinCountsFetch(w http.ResponseWriter, r *http.Request
 	for i, g := range f.GenomicDataBinFilters {
 		keys[i] = [2]string{g.HugoGeneSymbol, g.ProfileType}
 	}
-	unfiltered, filtered := s.scopedValueCounts(core.TGeneticAlterationDerived, "hugo_gene_symbol", "alteration_value",
+	unfiltered, filtered, err := s.scopedValueCounts(core.TGeneticAlterationDerived, "hugo_gene_symbol", "alteration_value",
 		isNASQL("assumeNotNull(alteration_value)"), "sample_unique_id", keys, svf.partial(), svf)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenomicDataBin{}
 	for i, g := range f.GenomicDataBinFilters {
@@ -310,10 +329,18 @@ func (s Server) genericAssayDataBinCountsFetch(w http.ResponseWriter, r *http.Re
 	}
 	unit := "sample_unique_id"
 	if len(f.GenericAssayDataBinFilters) > 0 {
-		unit = s.GACountUnit(f.GenericAssayDataBinFilters[0].ProfileType)
+		var err error
+		if unit, err = s.GACountUnit(f.GenericAssayDataBinFilters[0].ProfileType); err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 	}
-	unfiltered, filtered := s.scopedValueCounts(core.TGenericAssayDataDerived, "entity_stable_id", "value",
+	unfiltered, filtered, err := s.scopedValueCounts(core.TGenericAssayDataDerived, "entity_stable_id", "value",
 		isNASQL("value"), unit, keys, svf.partial(), svf)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []GenericAssayDataBin{}
 	for i, g := range f.GenericAssayDataBinFilters {
@@ -350,17 +377,29 @@ func (s Server) customDataBinCountsFetch(w http.ResponseWriter, r *http.Request)
 		StudyID  string `json:"studyId"`
 		SampleID string `json:"sampleId"`
 	}
-	inScope := func(scope studyViewFilter) map[string]bool {
+	inScope := func(scope studyViewFilter) (map[string]bool, error) {
 		args := core.NewArgs()
-		rows, _ := core.QueryA[sample](s.CH,
+		rows, err := core.QueryA[sample](s.CH,
 			"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId FROM "+s.filterFrom(args, scope), args)
+		if err != nil {
+			return nil, err
+		}
 		m := map[string]bool{}
 		for _, r := range rows {
 			m[r.StudyID+"\x00"+r.SampleID] = true
 		}
-		return m
+		return m, nil
 	}
-	unfilteredSamples, filteredSamples := inScope(svf.partial()), inScope(svf)
+	unfilteredSamples, err := inScope(svf.partial())
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	filteredSamples, err := inScope(svf)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	method := r.URL.Query().Get("dataBinMethod")
 	out := []databin.Bin{}
 	for i, a := range f.Attributes {

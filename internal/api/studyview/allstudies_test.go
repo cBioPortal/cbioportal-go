@@ -31,7 +31,10 @@ func TestWithStudies(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			out, ok := withStudies([]byte(c.body), !c.nested, studies)
+			out, ok, err := withStudies([]byte(c.body), !c.nested, studies)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if c.want == nil {
 				if ok {
 					t.Fatalf("changed the body: %s", out)

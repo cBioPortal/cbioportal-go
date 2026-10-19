@@ -396,8 +396,13 @@ func (s Server) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	type countRow struct {
 		N uint64 `json:"n"`
 	}
+	cr, err := core.QueryA[countRow](s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s)", inner), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	total := uint64(0)
-	if cr, _ := core.QueryA[countRow](s.CH, fmt.Sprintf("SELECT count() AS n FROM (%s)", inner), args); len(cr) > 0 {
+	if len(cr) > 0 {
 		total = cr[0].N
 	}
 	w.Header().Set("total-count", strconv.FormatUint(total, 10))
@@ -421,12 +426,22 @@ func (s Server) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Samples without the attribute sort last; NUMBER attributes sort
 		// numerically (non-numbers as missing), as ClinicalDataMapper does.
+		patientLevel, err := s.attrIsPatientLevel(f.studyIDs(), sortBy)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
+		numeric, err := s.attrIsNumber(f.studyIDs(), sortBy)
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		view, keyCol := "clinical_sample", "sample_id"
-		if s.attrIsPatientLevel(f.studyIDs(), sortBy) {
+		if patientLevel {
 			view, keyCol = "clinical_patient", "patient_id"
 		}
 		sortExpr := "v.sortval"
-		if s.attrIsNumber(f.studyIDs(), sortBy) {
+		if numeric {
 			sortExpr = "toFloat64OrNull(v.sortval)"
 		}
 		pageSQL = fmt.Sprintf(
@@ -463,10 +478,14 @@ func (s Server) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sample-level clinical data for the page.
-	sampleData, _ := ch.QueryP[studies.ClinicalRow](s.CH,
+	sampleData, err := ch.QueryP[studies.ClinicalRow](s.CH,
 		"SELECT study_id AS studyId, sample_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
 			"FROM clinical_sample WHERE (study_id, sample_id) IN {ids:Array(Tuple(String, String))} ORDER BY attr_id",
 		ch.Params{"ids": samplePairs})
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	sampleToPatient := map[string]string{}
 	for _, pr := range pageRows {
 		sampleToPatient[pr.StudyID+"\x00"+pr.SampleID] = pr.PatientID
@@ -482,10 +501,14 @@ func (s Server) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 	// Patient-level clinical data, mapped onto each of the patient's page samples.
 	if len(patientPairs) > 0 {
-		patientData, _ := ch.QueryP[studies.ClinicalRow](s.CH,
+		patientData, err := ch.QueryP[studies.ClinicalRow](s.CH,
 			"SELECT study_id AS studyId, patient_id AS id, attr_id AS clinicalAttributeId, attr_value AS value "+
 				"FROM clinical_patient WHERE (study_id, patient_id) IN {ids:Array(Tuple(String, String))} ORDER BY attr_id",
 			ch.Params{"ids": patientPairs})
+		if err != nil {
+			core.Fail(w, r, err)
+			return
+		}
 		for _, cr := range patientData {
 			for _, sm := range patientToSamples[cr.StudyID+"\x00"+cr.ID] {
 				key := core.UniqueKey(sm.StudyID, sm.SampleID)
@@ -502,34 +525,34 @@ func (s Server) clinicalDataTableFetch(w http.ResponseWriter, r *http.Request) {
 
 // attrIsPatientLevel reports whether a clinical attribute is patient-level in any
 // of the given studies.
-func (s Server) attrIsPatientLevel(studyIDs []string, attrID string) bool {
+func (s Server) attrIsPatientLevel(studyIDs []string, attrID string) (bool, error) {
 	if len(studyIDs) == 0 || attrID == "" {
-		return false
+		return false, nil
 	}
 	type r struct {
 		Flag uint8 `json:"flag"`
 	}
-	rows, _ := ch.QueryP[r](s.CH,
+	rows, err := ch.QueryP[r](s.CH,
 		"SELECT max(patient_attribute) AS flag FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
 			"AND clinical_attribute_id = {attr:String}",
 		ch.Params{"studies": studyIDs, "attr": attrID})
-	return len(rows) > 0 && rows[0].Flag != 0
+	return len(rows) > 0 && rows[0].Flag != 0, err
 }
 
 // attrIsNumber reports whether a clinical attribute has the NUMBER datatype
 // in any of the given studies.
-func (s Server) attrIsNumber(studyIDs []string, attrID string) bool {
+func (s Server) attrIsNumber(studyIDs []string, attrID string) (bool, error) {
 	if len(studyIDs) == 0 || attrID == "" {
-		return false
+		return false, nil
 	}
 	type r struct {
 		N uint64 `json:"n"`
 	}
-	rows, _ := ch.QueryP[r](s.CH,
+	rows, err := ch.QueryP[r](s.CH,
 		"SELECT count() AS n FROM clinical_attribute_meta WHERE study_id IN {studies:Array(String)} "+
 			"AND clinical_attribute_id = {attr:String} AND datatype = 'NUMBER'",
 		ch.Params{"studies": studyIDs, "attr": attrID})
-	return len(rows) > 0 && rows[0].N > 0
+	return len(rows) > 0 && rows[0].N > 0, err
 }
 
 // customDataCountsFetch counts the values of user-defined (custom chart) data
@@ -554,9 +577,13 @@ func (s Server) customDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 		PatientID string `json:"patientId"`
 	}
 	args := core.NewArgs()
-	samples, _ := core.QueryA[sample](s.CH,
+	samples, err := core.QueryA[sample](s.CH,
 		"SELECT cancer_study_identifier AS studyId, sample_stable_id AS sampleId, patient_stable_id AS patientId "+
 			"FROM "+s.filterFrom(args, svf), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	if len(samples) == 0 {
 		core.WriteJSON(w, out)
 		return

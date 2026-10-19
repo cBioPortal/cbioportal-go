@@ -798,7 +798,11 @@ func (e *studyExport) structuralVariants() error {
 	if err != nil || len(profiles) == 0 {
 		return err
 	}
-	cols := molecular.SVSelectColumns(e.s.SVViewColumns())
+	viewCols, err := e.s.SVViewColumns()
+	if err != nil {
+		return err
+	}
+	cols := molecular.SVSelectColumns(viewCols)
 	for i := range profiles {
 		p := &profiles[i]
 		metaFile, dataFile := profileFileNames("STRUCTURAL_VARIANT", "SV", p.stableSuffix(e.studyID))

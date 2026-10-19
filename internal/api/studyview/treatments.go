@@ -37,19 +37,22 @@ func treatmentTierKey(r *http.Request) string {
 
 // studiesWithTreatments returns the studies (of studyIDs) having treatment
 // events with the given key.
-func (s Server) studiesWithTreatments(studyIDs []string, key string) []string {
+func (s Server) studiesWithTreatments(studyIDs []string, key string) ([]string, error) {
 	type row struct {
 		Study string `json:"study"`
 	}
 	p := ch.Params{"key": key}
-	rows, _ := ch.QueryP[row](s.CH,
+	rows, err := ch.QueryP[row](s.CH,
 		"SELECT DISTINCT cancer_study_identifier AS study FROM "+core.ByStudies(studyIDs).From(core.ParamsBinder(p), core.TClinicalEventDataDerived)+
 			" AND lower(event_type) = 'treatment' AND lower(key) = lower({key:String})", p)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]string, len(rows))
 	for i, r := range rows {
 		out[i] = r.Study
 	}
-	return out
+	return out, nil
 }
 
 // treatmentsDisplayPatient serves POST /api/treatments/display-patient (body:
@@ -57,7 +60,12 @@ func (s Server) studiesWithTreatments(studyIDs []string, key string) []string {
 func (s Server) treatmentsDisplayPatient(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
-	core.WriteJSON(w, len(s.studiesWithTreatments(studyIDs, treatmentTierKey(r))) > 0)
+	treated, err := s.studiesWithTreatments(studyIDs, treatmentTierKey(r))
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
+	core.WriteJSON(w, len(treated) > 0)
 }
 
 // treatmentsDisplaySample serves POST /api/treatments/display-sample (body:
@@ -66,7 +74,11 @@ func (s Server) treatmentsDisplayPatient(w http.ResponseWriter, r *http.Request)
 func (s Server) treatmentsDisplaySample(w http.ResponseWriter, r *http.Request) {
 	var studyIDs []string
 	core.ReadBody(r, &studyIDs)
-	treated := s.studiesWithTreatments(studyIDs, treatmentTierKey(r))
+	treated, err := s.studiesWithTreatments(studyIDs, treatmentTierKey(r))
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	if len(treated) == 0 {
 		core.WriteJSON(w, false)
 		return
@@ -157,15 +169,18 @@ func (s Server) treatmentEventsByTier(a *core.SQLArgs, f studyViewFilter, tier t
 		value, core.ByStudies(f.studyIDs()).From(a, core.TClinicalEventDataDerived), a.Str(tier.key), s.filterFrom(a, f))
 }
 
-func (s Server) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
+func (s Server) patientTreatments(f studyViewFilter) ([]PatientTreatment, int, error) {
 	type row struct {
 		Treatment string `json:"treatment"`
 		Count     int    `json:"count"`
 	}
 	args := core.NewArgs()
-	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT value AS treatment, toInt64(uniqExact(patient_unique_id)) AS count FROM (%s) GROUP BY value ORDER BY value",
 		s.treatmentEvents(args, f)), args)
+	if err != nil {
+		return nil, 0, err
+	}
 	out := make([]PatientTreatment, len(rows))
 	for i, r := range rows {
 		out[i] = PatientTreatment{Treatment: r.Treatment, Count: r.Count}
@@ -173,26 +188,33 @@ func (s Server) patientTreatments(f studyViewFilter) ([]PatientTreatment, int) {
 	type total struct {
 		N int `json:"n"`
 	}
-	t, _ := core.QueryA[total](s.CH, fmt.Sprintf(
+	t, err := core.QueryA[total](s.CH, fmt.Sprintf(
 		"SELECT toInt64(uniqExact(patient_unique_id)) AS n FROM (%s)", s.treatmentEvents(args, f)), args)
+	if err != nil {
+		return nil, 0, err
+	}
 	n := 0
 	if len(t) > 0 {
 		n = t[0].N
 	}
-	return out, n
+	return out, n, nil
 }
 
 func (s Server) patientTreatmentCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
-	treatments, total := s.patientTreatments(f)
+	treatments, total, err := s.patientTreatments(f)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	core.WriteJSON(w, PatientTreatmentReport{TotalPatients: total, PatientTreatments: treatments})
 }
 
 // sampleTreatmentRows pairs every filtered sample's acquisition time with the
 // first dose of each treatment its patient received: Pre when the sample was
 // taken on or before that dose, Post otherwise.
-func (s Server) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treatmentTier) []SampleTreatmentRow {
+func (s Server) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treatmentTier) ([]SampleTreatmentRow, error) {
 	args := core.NewArgs()
 	events := core.ByStudies(f.studyIDs()).From(args, core.TClinicalEventDataDerived)
 	value := "value"
@@ -207,7 +229,7 @@ func (s Server) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 		Time      int    `json:"time"`
 		Pre       uint8  `json:"pre"`
 	}
-	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT t.treatment AS treatment, ced.sample_id AS sampleId, ced.patient_unique_id AS patient, "+
 			"ced.cancer_study_identifier AS study, toInt64(ced.time_taken) AS time, toUInt8(ced.time_taken <= t.treatment_time_taken) AS pre "+
 			"FROM (SELECT value AS sample_id, patient_unique_id, min(start_date) AS time_taken, cancer_study_identifier "+
@@ -221,6 +243,9 @@ func (s Server) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 			"ON t.patient_unique_id = ced.patient_unique_id "+
 			"WHERE concat(ced.cancer_study_identifier, '_', ced.sample_id) IN (%[2]s)",
 		events, s.filterSQL(args, f), value, args.Str(tier.key)), args)
+	if err != nil {
+		return nil, err
+	}
 	byKey := map[string]*SampleTreatmentRow{}
 	for _, r := range rows {
 		time := "Post"
@@ -252,24 +277,32 @@ func (s Server) sampleTreatmentRows(f studyViewFilter, detailed bool, tier treat
 		}
 		return out[i].Time == "Pre" && out[j].Time == "Post"
 	})
-	return out
+	return out, nil
 }
 
 func (s Server) sampleTreatmentCountsFetch(w http.ResponseWriter, r *http.Request) {
 	var f studyViewFilter
 	core.ReadBody(r, &f)
 	detailed := strings.EqualFold(r.URL.Query().Get("projection"), "DETAILED")
-	rows := s.sampleTreatmentRows(f, detailed, treatmentTiers["Agent"])
+	rows, err := s.sampleTreatmentRows(f, detailed, treatmentTiers["Agent"])
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	type total struct {
 		N int `json:"n"`
 	}
 	args := core.NewArgs()
-	t, _ := core.QueryA[total](s.CH, fmt.Sprintf(
+	t, err := core.QueryA[total](s.CH, fmt.Sprintf(
 		"SELECT toInt64(uniqExact(value)) AS n FROM %s "+
 			"AND (event_type ILIKE 'Sample Acquisition' OR event_type ILIKE 'SPECIMEN') AND key = 'SAMPLE_ID' "+
 			"AND concat(cancer_study_identifier, '_', value) IN (%s) "+
 			"AND patient_unique_id IN (SELECT patient_unique_id FROM (%s))",
 		core.ByStudies(f.studyIDs()).From(args, core.TClinicalEventDataDerived), s.filterSQL(args, f), s.treatmentEvents(args, f)), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	n := 0
 	if len(t) > 0 {
 		n = t[0].N
@@ -295,11 +328,15 @@ func (s Server) treatmentsPatient(w http.ResponseWriter, r *http.Request) {
 		SampleID  string `json:"sampleId"`
 	}
 	args := core.NewArgs()
-	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT DISTINCT t.value AS treatment, sd.patient_stable_id AS patient, sd.cancer_study_identifier AS study, "+
 			"sd.sample_stable_id AS sampleId FROM (%s) t JOIN (SELECT * FROM %s) sd ON sd.patient_unique_id = t.patient_unique_id "+
 			"ORDER BY treatment, study, patient, sampleId",
 		s.treatmentEventsByTier(args, f, tier), s.filterFrom(args, f)), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	type patientRow struct {
 		Treatment string                `json:"treatment"`
 		Count     int                   `json:"count"`
@@ -337,7 +374,11 @@ func (s Server) treatmentsSample(w http.ResponseWriter, r *http.Request) {
 	}
 	var f studyViewFilter
 	core.ReadBody(r, &f)
-	rows := s.sampleTreatmentRows(f, true, tier)
+	rows, err := s.sampleTreatmentRows(f, true, tier)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	byKey := map[string]SampleTreatmentRow{}
 	keys := make([]string, len(rows))
 	for i, row := range rows {
@@ -364,10 +405,14 @@ func (s Server) clinicalEventTypeCountsFetch(w http.ResponseWriter, r *http.Requ
 		Count     int    `json:"count"`
 	}
 	args := core.NewArgs()
-	rows, _ := core.QueryA[row](s.CH, fmt.Sprintf(
+	rows, err := core.QueryA[row](s.CH, fmt.Sprintf(
 		"SELECT event_type AS eventType, toInt64(uniqExact(patient_unique_id)) AS count FROM %s "+
 			"AND patient_unique_id IN (SELECT patient_unique_id FROM %s) GROUP BY event_type ORDER BY event_type",
 		f.scope().From(args, core.TClinicalEventDataDerived), s.filterFrom(args, f)), args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	out := make([]ClinicalEventTypeCount, len(rows))
 	for i, r := range rows {
 		out[i] = ClinicalEventTypeCount{EventType: r.EventType, Count: r.Count}

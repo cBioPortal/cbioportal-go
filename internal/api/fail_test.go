@@ -69,3 +69,43 @@ func TestFailHidesDatabaseErrors(t *testing.T) {
 		}
 	}
 }
+
+// A query that fails partway through a handler answers 500 instead of an
+// answer built from the rows the other queries returned. The fake
+// ClickHouse answers every statement with no rows except those naming
+// failing, which it fails.
+func TestFailedQueryAnswers500(t *testing.T) {
+	cases := []struct {
+		path, body, failing string
+	}{
+		{"/api/clinical-data-counts/fetch",
+			`{"attributes":[{"attributeId":"SEX"}],"studyViewFilter":{"studyIds":["s"]}}`, "clinical_attribute_meta"},
+		{"/api/clinical-event-type-counts/fetch", `{"studyIds":["s"]}`, "clinical_event_data_derived"},
+		{"/api/treatments/patient-counts/fetch", `{"studyIds":["s"]}`, "clinical_event_data_derived"},
+		{"/api/custom-driver-annotation-report/fetch", `["s_mutations"]`, "genomic_event_derived"},
+	}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer slog.SetDefault(prev)
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, _ := io.ReadAll(r.Body)
+				if strings.Contains(string(body)+r.URL.RawQuery, c.failing) {
+					w.Header().Set("X-ClickHouse-Exception-Code", "210")
+					http.Error(w, "Code: 210. DB::Exception: Connection refused. (NETWORK_ERROR)", http.StatusInternalServerError)
+				}
+			}))
+			defer fake.Close()
+
+			h := NewRouter(newState(&core.State{CH: ch.New(fake.URL, "cbioportal")}))
+			req := httptest.NewRequest(http.MethodPost, c.path, strings.NewReader(c.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status %d, body %q", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}

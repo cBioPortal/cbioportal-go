@@ -121,9 +121,16 @@ func (s Server) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 			cases[i] = append(cases[i], c.CaseID)
 		}
 	}
-	patientLevel := s.GAProfilePatientLevel(meta)
+	patientLevel, err := s.GAProfilePatientLevel(meta)
+	if err != nil {
+		core.Fail(w, r, err)
+		return nil
+	}
 	if patientLevel {
-		cases = s.gaOneCasePerPatient(meta.StudyID, cases)
+		if cases, err = s.gaOneCasePerPatient(meta.StudyID, cases); err != nil {
+			core.Fail(w, r, err)
+			return nil
+		}
 	}
 	keys, err := s.gaCaseMatrixKeys(meta.StudyID, profileID, cases, patient, patientLevel)
 	if err != nil {
@@ -145,7 +152,7 @@ func (s Server) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 // gaOneCasePerPatient keeps, per group, the first case of every patient, as
 // filterMolecularProfileCaseSets does for patient-level profiles. Case ids
 // that are no sample of the study share one (null) patient.
-func (s Server) gaOneCasePerPatient(studyID string, cases [][]string) [][]string {
+func (s Server) gaOneCasePerPatient(studyID string, cases [][]string) ([][]string, error) {
 	var all []string
 	for _, c := range cases {
 		all = append(all, c...)
@@ -153,8 +160,11 @@ func (s Server) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 	patientOf := map[string]string{}
 	if len(all) > 0 {
 		p := ch.Params{}
-		rows, _ := ch.QueryP[studies.IDRow](s.CH,
+		rows, err := ch.QueryP[studies.IDRow](s.CH,
 			"SELECT sample_id AS sampleId, patient_id AS patientId FROM "+core.BySamples(studyID, all).From(core.ParamsBinder(p), core.TSample), p)
+		if err != nil {
+			return nil, err
+		}
 		for _, r := range rows {
 			patientOf[r.SampleID] = "p:" + r.PatientID
 		}
@@ -171,7 +181,7 @@ func (s Server) gaOneCasePerPatient(studyID string, cases [][]string) [][]string
 			out[i] = append(out[i], id)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // gaCaseMatrixKeys maps each group's cases to the profiled samples they

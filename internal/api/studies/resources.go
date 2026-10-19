@@ -112,10 +112,16 @@ func PagingClause(r *http.Request, sortCols map[string]string, defaultOrder stri
 // were added) as empty. p holds the values of sql's placeholders.
 func QueryView[T any](c *ch.Client, sql string, p ch.Params) ([]T, error) {
 	rows, err := ch.QueryP[T](c, sql, p)
-	if err != nil && strings.Contains(err.Error(), "UNKNOWN_TABLE") {
+	if unknownTable(err) {
 		return []T{}, nil
 	}
 	return rows, err
+}
+
+// unknownTable reports whether err is ClickHouse's answer for a table that
+// does not exist.
+func unknownTable(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNKNOWN_TABLE")
 }
 
 // ExistsIn reports whether a SELECT count() query, with placeholder values p,

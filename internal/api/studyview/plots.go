@@ -32,9 +32,9 @@ type scopedAttrRow struct {
 // scope to its sample- and patient-level values of attributes A and B, and
 // returns only the samples that have some value for both, ordered by study and
 // sample id. Precedence between the two levels is resolved by the caller.
-func (s Server) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scopedAttrRow {
+func (s Server) scopedAttrPairs(f studyViewFilter, attrA, attrB string) ([]scopedAttrRow, error) {
 	if attrA == "" || attrB == "" {
-		return nil
+		return nil, nil
 	}
 	args := core.NewArgs()
 	studyClause := ""
@@ -45,7 +45,7 @@ func (s Server) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 		return fmt.Sprintf("(SELECT study_id, %s, toNullable(attr_value) AS v FROM %s WHERE attr_id = %s%s)",
 			keyCol, view, args.Str(attrID), studyClause)
 	}
-	rows, _ := core.QueryA[scopedAttrRow](s.CH, fmt.Sprintf(
+	return core.QueryA[scopedAttrRow](s.CH, fmt.Sprintf(
 		"SELECT s.study_id AS studyId, s.sample_id AS sampleId, sa.v AS sa, pa.v AS pa, sb.v AS sb, pb.v AS pb "+
 			"FROM (SELECT study_id, sample_id, patient_id FROM %s) AS s "+
 			"LEFT JOIN %s AS sa ON sa.study_id = s.study_id AND sa.sample_id = s.sample_id "+
@@ -57,7 +57,6 @@ func (s Server) scopedAttrPairs(f studyViewFilter, attrA, attrB string) []scoped
 		s.sampleScopeFrom(args, f, core.TSample),
 		attr("clinical_sample", "sample_id", attrA), attr("clinical_patient", "patient_id", attrA),
 		attr("clinical_sample", "sample_id", attrB), attr("clinical_patient", "patient_id", attrB)), args)
-	return rows
 }
 
 // clinicalNumber resolves a sample's numeric attribute value: the sample-level
@@ -149,8 +148,13 @@ func (s Server) clinicalDataDensityPlotFetch(w http.ResponseWriter, r *http.Requ
 
 	xScale := logScale(r, "xAxisLogScale", xAttr)
 	yScale := logScale(r, "yAxisLogScale", yAttr)
+	pairs, err := s.scopedAttrPairs(f, xAttr, yAttr)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	var xs, ys []float64
-	for _, row := range s.scopedAttrPairs(f, xAttr, yAttr) {
+	for _, row := range pairs {
 		xv, okX := clinicalNumber(row.SampleA, row.PatientA)
 		yv, okY := clinicalNumber(row.SampleB, row.PatientB)
 		if okX && okY {
@@ -304,7 +308,11 @@ func (s Server) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	}
 	inFilter := map[string]bool{}
 	args := core.NewArgs()
-	keys, _ := core.QueryA[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(args, f)+")", args)
+	keys, err := core.QueryA[sampleKey](s.CH, "SELECT sample_unique_id AS k FROM ("+s.filterSQL(args, f)+")", args)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	for _, k := range keys {
 		inFilter[k.K] = true
 	}
@@ -322,7 +330,11 @@ func (s Server) clinicalDataViolinPlotsFetch(w http.ResponseWriter, r *http.Requ
 	// The service walks its sampleId-keyed HashMap of clinical data and adds
 	// categories to another HashMap as it meets them, so both maps' Java
 	// iteration orders decide the row order.
-	pairs := s.scopedAttrPairs(f.withoutClinical(numAttr), numAttr, catAttr)
+	pairs, err := s.scopedAttrPairs(f.withoutClinical(numAttr), numAttr, catAttr)
+	if err != nil {
+		core.Fail(w, r, err)
+		return
+	}
 	bySample := map[string][]int{}
 	sampleIDs := make([]string, 0, len(pairs))
 	for i, row := range pairs {
