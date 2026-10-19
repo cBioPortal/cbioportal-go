@@ -2,8 +2,7 @@
 # Fast, reliable e2e runner for cbioportal-go.
 #
 #   test/run_e2e.sh [WORKERS] [spec ...]
-#     WORKERS   parallel workers (default 2; the box's swap is tight — 3 is the
-#               practical ceiling before OOM with other sessions running).
+#     WORKERS   parallel workers (default 3, as upstream CI).
 #     spec      one or more spec paths/patterns (default: the whole tests/local/).
 #
 # Examples:
@@ -18,7 +17,7 @@
 set -u
 GO="$(cd "$(dirname "$0")/.." && pwd)"
 E2E="${E2E_DIR:-$GO/frontend/end-to-end-test-playwright}"
-WORKERS="${1:-2}"; shift 2>/dev/null || true
+WORKERS="${1:-3}"; shift 2>/dev/null || true
 SPECS=("$@"); [ "${#SPECS[@]}" -eq 0 ] && SPECS=("tests/local/")
 
 # The suite drives the portal through the API origin, which serves the UI — a
@@ -33,7 +32,7 @@ URL="${E2E_URL:-http://localhost:18090}"
 
 # Preflight: frontend + API must be up (fail fast rather than a slow all-red run).
 curl -sf -o /dev/null --max-time 30 "$URL/" || { echo "portal UI not served at $URL (FRONTEND_DIR or FRONTEND_URL on the API)"; exit 2; }
-curl -sf -o /dev/null http://localhost:18090/health || { echo "api :18090 not up"; exit 2; }
+curl -sf -o /dev/null "$URL/health" || { echo "api not up at $URL"; exit 2; }
 
 cd "$E2E" || exit 1
 # Stop a leftover run of this checkout's suite (its browsers exit with it).
@@ -50,5 +49,5 @@ CI=1 CBIOPORTAL_URL="$URL" LOCALDEV=1 PW_LOCAL=1 HEADLESS_CHROME=true \
 rc=$?
 
 echo "======================================================================"
-(cd "$GO" && PATH="$PATH:$HOME/go/bin:$HOME/go-local/go/bin" go run ./cmd/e2ereport --by-spec "$E2E/test-results/report.json") 2>/dev/null || echo "(no report.json — run may have crashed/OOMed)"
+(cd "$GO" && go run ./cmd/e2ereport --by-spec "$E2E/test-results/report.json") 2>/dev/null || echo "(no report.json — run may have crashed/OOMed)"
 exit $rc
