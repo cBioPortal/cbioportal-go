@@ -18,23 +18,6 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
-// QueryJSONLines runs a SELECT and returns each result row as raw JSON. The
-// statement must NOT include a FORMAT clause — JSONEachRow is appended. 64-bit
-// integers are emitted as numbers, not quoted strings.
-func (c *Client) QueryJSONLines(sql string) ([][]byte, error) {
-	return c.QueryJSONLinesP(sql, nil)
-}
-
-// QueryJSONLinesP is QueryJSONLines with query parameters.
-func (c *Client) QueryJSONLinesP(sql string, p Params) ([][]byte, error) {
-	var lines [][]byte
-	err := c.eachJSONLine(sql, p, func(line []byte) error {
-		lines = append(lines, append([]byte(nil), line...))
-		return nil
-	})
-	return lines, err
-}
-
 // eachJSONLine runs a SELECT as JSONEachRow and calls fn with each row as it
 // arrives (the slice is reused).
 func (c *Client) eachJSONLine(sql string, p Params, fn func([]byte) error) error {
@@ -79,7 +62,7 @@ func Query[T any](c *Client, sql string) ([]T, error) {
 // through the driver's columnar format; results it cannot reproduce exactly,
 // and any error, go through JSONEachRow.
 func QueryP[T any](c *Client, sql string, p Params) ([]T, error) {
-	out, ok, err := queryNativeErr[T](c, sql, p)
+	out, ok, err := queryNative[T](c, sql, p)
 	if ok {
 		return out, nil
 	}
@@ -167,14 +150,9 @@ func logFallback(reason string, k planKey, err error) {
 var logFallbacks = os.Getenv("CLICKHOUSE_DECODE") == "log"
 
 // queryNative decodes the rows of a struct type T from the driver. ok is
-// false when the JSON path must answer instead.
-func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool) {
-	out, ok, _ = queryNativeErr[T](c, sql, p)
-	return out, ok
-}
-
-// queryNativeErr is queryNative also returning the driver's error.
-func queryNativeErr[T any](c *Client, sql string, p Params) (out []T, ok bool, err error) {
+// false when the JSON path must answer instead; err is the driver's error,
+// if any.
+func queryNative[T any](c *Client, sql string, p Params) (out []T, ok bool, err error) {
 	out = []T{}
 	err, ok = eachNative(c, sql, p, nil, func(v *T) error {
 		out = append(out, *v)

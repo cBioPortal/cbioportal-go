@@ -82,7 +82,7 @@ func TestDriverRequests(t *testing.T) {
 		type row struct {
 			N int64 `json:"n"`
 		}
-		if _, ok := queryNative[row](c, "SELECT 1 AS n", nil); ok {
+		if _, ok, _ := queryNative[row](c, "SELECT 1 AS n", nil); ok {
 			t.Fatal("a failing server must send the query to the JSON path")
 		}
 		srv.Close()

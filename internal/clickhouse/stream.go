@@ -11,15 +11,11 @@ import (
 	"net/url"
 )
 
-// QueryStream runs a SELECT in the given output format (the statement must
-// not include a FORMAT clause) and returns the response body unread, so large
-// results can be decoded as they arrive. The request is bound to ctx:
-// cancelling it aborts the query. The caller closes the body.
-func (c *Client) QueryStream(ctx context.Context, sql, format string) (io.ReadCloser, error) {
-	return c.QueryStreamP(ctx, sql, format, nil)
-}
-
-// QueryStreamP is QueryStream with query parameters.
+// QueryStreamP runs a SELECT with query parameters in the given output
+// format (the statement must not include a FORMAT clause) and returns the
+// response body unread, so large results can be decoded as they arrive. The
+// request is bound to ctx: cancelling it aborts the query. The caller closes
+// the body.
 func (c *Client) QueryStreamP(ctx context.Context, sql, format string, p Params) (io.ReadCloser, error) {
 	req, err := c.newRequest(ctx, url.Values{"database": {c.database}}, c.rewrite(sql)+" FORMAT "+format, p)
 	if err != nil {
@@ -67,11 +63,6 @@ func (b *RowBinaryReader) Int64() (int64, error) {
 		return 0, noEOF(err)
 	}
 	return int64(binary.LittleEndian.Uint64(b.buf[:8])), nil
-}
-
-func (b *RowBinaryReader) UInt64() (uint64, error) {
-	v, err := b.Int64()
-	return uint64(v), err
 }
 
 func (b *RowBinaryReader) Float64() (float64, error) {

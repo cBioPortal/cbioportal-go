@@ -362,20 +362,3 @@ func (c *Client) do(req *http.Request, sql string) (io.ReadCloser, error) {
 	}
 	return resp.Body, nil
 }
-
-// ExecuteP runs a statement with query parameters and returns the text
-// response.
-func (c *Client) ExecuteP(sql string, p Params) (string, error) {
-	sql = c.rewrite(sql)
-	req, err := c.newRequest(context.Background(), url.Values{"database": {c.database}}, sql, p)
-	if err != nil {
-		return "", err
-	}
-	body, err := c.do(req, sql)
-	if err != nil {
-		return "", err
-	}
-	defer body.Close()
-	out, err := io.ReadAll(body)
-	return string(out), err
-}

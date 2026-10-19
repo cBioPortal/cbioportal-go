@@ -240,7 +240,7 @@ func TestDriverQuery(t *testing.T) {
 func compareLive[T any](t *testing.T, c *Client, sql string, p Params, wantJSON bool) []T {
 	t.Helper()
 	want, wantErr := queryJSON[T](c, sql, p)
-	got, ok := queryNative[T](c, sql, p)
+	got, ok, _ := queryNative[T](c, sql, p)
 	if ok == wantJSON {
 		t.Fatalf("%.80s: native ok=%v", sql, ok)
 	}
@@ -517,7 +517,7 @@ func BenchmarkLiveDecode(b *testing.B) {
 			for b.Loop() {
 				var err error
 				if name == "native" {
-					_, ok := queryNative[row](c, sql, nil)
+					_, ok, _ := queryNative[row](c, sql, nil)
 					if !ok {
 						b.Fatal("fallback")
 					}

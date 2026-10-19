@@ -72,10 +72,10 @@ func TestWithSettings(t *testing.T) {
 	check("QueryEachP", err, 1)
 	_, err = QueryP[row](c, "SELECT 1 AS n", nil)
 	check("QueryP", err, 1)
-	_, err = c.QueryJSONLines("SELECT 1 AS n")
-	check("QueryJSONLines", err, 1)
-	_, err = c.QueryStream(t.Context(), "SELECT 1 AS n", "RowBinary")
-	check("QueryStream", err, 1)
+	_, err = queryJSON[row](c, "SELECT 1 AS n", nil)
+	check("queryJSON", err, 1)
+	_, err = c.QueryStreamP(t.Context(), "SELECT 1 AS n", "RowBinary", nil)
+	check("QueryStreamP", err, 1)
 
 	// A query's own setting wins over the client's.
 	c.QueryStreamP(t.Context(), "SELECT 1", "RowBinary", nil)
