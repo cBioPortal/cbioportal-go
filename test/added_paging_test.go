@@ -321,3 +321,22 @@ func TestAddedPagingRows(t *testing.T) {
 		t.Errorf("not by treatment DESC: %v", desc)
 	}
 }
+
+// TestContractMetaWhereJavaIgnoresIt pins projection=META on fetch
+// endpoints whose Java controllers have no projection parameter and return
+// the records: go returns an empty body with the total count.
+func TestContractMetaWhereJavaIgnoresIt(t *testing.T) {
+	requireAPI(t)
+	for _, c := range []struct{ path, body string }{
+		{"/api/sample-lists/fetch", `["study_es_0_all","study_es_0_sequenced"]`},
+		{"/api/gene-panels/fetch", `["TESTPANEL1","TESTPANEL2"]`},
+		{"/api/structural-variant/fetch", `{"molecularProfileIds":["study_es_0_structural_variants"]}`},
+	} {
+		all := rawList(t, "POST", c.path, c.body)
+		if len(all) == 0 {
+			t.Fatalf("%s: no records", c.path)
+		}
+		resp, b := rawDo(t, "POST", c.path+"?projection=META", c.body)
+		wantEq(t, []any{c.path, resp.StatusCode, resp.Header.Get("total-count"), len(b)}, []any{c.path, 200, itoa(len(all)), 0})
+	}
+}

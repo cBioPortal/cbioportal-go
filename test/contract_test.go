@@ -475,3 +475,70 @@ func TestContractPublicVirtualStudiesArray(t *testing.T) {
 		t.Errorf("want a JSON array, got null")
 	}
 }
+
+// TestContractAlterationEnrichmentsProfiledPerGene pins that a group's
+// profiled count is per gene: the samples whose gene panel has the gene.
+// Java uses the whole group's count when no sample of the group has the
+// gene altered, so a gene off the group's panel counts every sample as
+// profiled.
+func TestContractAlterationEnrichmentsProfiledPerGene(t *testing.T) {
+	requireAPI(t)
+	group := func(name string, ids ...string) map[string]any {
+		var cs []map[string]any
+		for _, id := range ids {
+			cs = append(cs, map[string]any{"caseId": id, "molecularProfileId": "study_es_0_mutations"})
+		}
+		return map[string]any{"name": name, "molecularProfileCaseIdentifiers": cs}
+	}
+	// TESTPANEL2 has no BRCA1 or BRCA2; the whole-exome samples are profiled
+	// for every gene.
+	body := map[string]any{
+		"molecularProfileCasesGroupFilter": []map[string]any{
+			group("panel", "TCGA-A1-A0SB-02", "TEST_SAMPLE_14", "TEST_SAMPLE_15"),
+			group("wes", "TCGA-A1-A0SK-01", "TCGA-A2-A04P-01", "TCGA-A2-A0CM-01", "TCGA-AR-A1AR-01", "TCGA-B6-A0I6-01",
+				"TCGA-B6-A0WX-01", "TCGA-BH-A0E0-01", "TCGA-BH-A0HL-01", "TCGA-BH-A18K-01", "TCGA-BH-A18V-01", "TCGA-BH-A1F0-01"),
+		},
+		"alterationEventTypes": map[string]any{"mutationEventTypes": map[string]any{"any": true}},
+	}
+	for _, path := range []string{"/api/alteration-enrichments/fetch", "/api/legacy/alteration-enrichments/fetch"} {
+		var d []struct {
+			HugoGeneSymbol string  `json:"hugoGeneSymbol"`
+			PValue         float64 `json:"pValue"`
+			Counts         []struct {
+				Name          string `json:"name"`
+				AlteredCount  int    `json:"alteredCount"`
+				ProfiledCount int    `json:"profiledCount"`
+			} `json:"counts"`
+		}
+		post(t, path+"?enrichmentType=SAMPLE", body, &d)
+		found := false
+		for _, r := range d {
+			if r.HugoGeneSymbol != "BRCA2" {
+				continue
+			}
+			found = true
+			for _, c := range r.Counts {
+				if c.Name == "panel" {
+					wantEq(t, []any{path, c.AlteredCount, c.ProfiledCount, r.PValue}, []any{path, 0, 0, 0.0})
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: no BRCA2 row", path)
+		}
+	}
+}
+
+// TestContractClinicalTableWithoutPageSize pins that the clinical table
+// without pageSize lists every sample. Java's default page size 0 means no
+// paging, but its paging cuts the list to 0 samples.
+func TestContractClinicalTableWithoutPageSize(t *testing.T) {
+	requireAPI(t)
+	var d struct {
+		ByUniqueSampleKey map[string]json.RawMessage `json:"byUniqueSampleKey"`
+	}
+	post(t, "/api/clinical-data-table/fetch", map[string]any{"studyIds": []string{"study_es_0"}}, &d)
+	var samples []json.RawMessage
+	post(t, "/api/samples/fetch?projection=ID", map[string]any{"sampleListIds": []string{"study_es_0_all"}}, &samples)
+	wantEq(t, len(d.ByUniqueSampleKey), len(samples))
+}

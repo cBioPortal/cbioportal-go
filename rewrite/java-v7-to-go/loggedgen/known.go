@@ -55,6 +55,8 @@ var (
 	isKeywordSorted   = pathIs(`^/api/(legacy/studies|genes|(studies/[^/]+/)?patients)/?$`)
 	isMutationsFetch  = pathIs(`^/api/(legacy/)?mutations/fetch$`)
 	isDataBinCounts   = pathIs(`^/api/(legacy/)?(genomic|generic-assay)-data-bin-counts/fetch$`)
+	isAltEnrichments  = pathIs(`^/api/(legacy/)?alteration-enrichments/fetch$`)
+	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
 
 // paged reports a request for one page of a list.
@@ -119,6 +121,43 @@ func patientCount(body string) int {
 	seen := map[string]bool{}
 	for _, p := range f.PatientIdentifiers {
 		seen[p.PatientID] = true
+	}
+	return len(seen)
+}
+
+// studyCount is the number of distinct study ids in a body's studyIds.
+func studyCount(body string) int {
+	var f struct {
+		StudyIDs []string `json:"studyIds"`
+	}
+	if json.Unmarshal([]byte(body), &f) != nil {
+		return 0
+	}
+	seen := map[string]bool{}
+	for _, s := range f.StudyIDs {
+		seen[s] = true
+	}
+	return len(seen)
+}
+
+// groupProfileCount is the number of distinct molecular profiles in an
+// enrichment body's groups.
+func groupProfileCount(body string) int {
+	var f struct {
+		Groups []struct {
+			Cases []struct {
+				ProfileID string `json:"molecularProfileId"`
+			} `json:"molecularProfileCaseIdentifiers"`
+		} `json:"molecularProfileCasesGroupFilter"`
+	}
+	if json.Unmarshal([]byte(body), &f) != nil {
+		return 0
+	}
+	seen := map[string]bool{}
+	for _, g := range f.Groups {
+		for _, c := range g.Cases {
+			seen[c.ProfileID] = true
+		}
 	}
 	return len(seen)
 }
@@ -226,6 +265,12 @@ var expectations = []expectation{
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
+			return isClinicalTable(p) && (!q.Has("pageSize") || q.Get("pageSize") == "0")
+		},
+		options: `known="Java's default pageSize 0 means no paging, but ClinicalDataServiceImpl cuts the list at offset plus 0 and answers no samples; go answers every sample (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
 			return isClinicalTable(p) && q.Get("sortBy") != "" && q.Has("pageSize")
 		},
 		options: `known="Java orders by the sort value only; which of the tied samples fill the page is unspecified"`,
@@ -270,6 +315,24 @@ var expectations = []expectation{
 			return m == "GET" && isDiscreteCNAList(p) && q.Get("entrezGeneId") != ""
 		},
 		options: `known-if-a-subset="Java's copy-number GET has no gene parameter and answers every gene's calls; go reads entrezGeneId and answers that gene's (Added in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isTreatmentRows(p) && strings.HasSuffix(p, "/patient") && studyCount(b) > 1
+		},
+		options: `known="Java's TreatmentServiceImpl groups samples by patient id alone, so a patient id used in two of the studies gets the other study's samples and is counted once; go keeps the studies apart (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isAltEnrichments(p) && groupProfileCount(b) > 1
+		},
+		options: `known="Java's AlterationEnrichmentUtil gives a group with no altered sample the whole group's profiled count, also for samples whose gene panel lacks the gene; go counts the samples profiled for the gene (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isMetaIgnored(p) && strings.EqualFold(q.Get("projection"), "META")
+		},
+		options: `known="Java's controller has no projection parameter and answers the records; go answers META with the total count (Fixed in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isTreatmentRows(p) },
