@@ -11,7 +11,7 @@ importer or the API.
 - [Code layout](#code-layout)
 - [The ClickHouse client](#the-clickhouse-client)
 - [Dependencies](#dependencies)
-- [Notes learned porting](#notes-learned-porting)
+- [ClickHouse rules](#clickhouse-rules)
 
 ## Data flow
 
@@ -184,43 +184,47 @@ project builds with a plain `go build`.
 Outside libraries are fine when they are official and well maintained and
 pull in few other packages. Examples are vendor libraries such as
 ClickHouse's Go driver, and the Go team's own `golang.org/x/...` packages.
-The project avoids community packages for things the standard library
-already does.
+A small, widely used community package is also fine when it saves real code
+and brings almost no other packages with it. The project does not add
+packages for things the standard library already does well, such as
+routing, logging or validation.
 
 Statistics code is copied by hand from Java, not taken from a Go library.
 The results must match the Java backend (which uses commons-math and
 Datumbox) down to the last digit. CI runs `govulncheck`, which checks
 dependencies for known security problems, on every push.
 
-The project uses these libraries directly:
+The project uses these seven libraries directly:
 
 | Library | What it is for |
 |---|---|
 | `github.com/ClickHouse/clickhouse-go/v2` | ClickHouse's official driver. It reads rows in the Native format over HTTP (see [the client](#the-clickhouse-client)). It brings along ch-go, compression (lz4, zstd, brotli), its Decimal type, and a few small packages. |
+| `github.com/KimMachineGun/automemlimit` | Sets Go's memory limit to 80% of the container's memory limit when the API or the importer starts, so Go frees memory before the container runs out. |
+| `github.com/spf13/cobra` | The subcommands of each program (such as `cbioportal-import ingest`), their help text, shell completion, and "did you mean" suggestions for a mistyped command. |
+| `github.com/spf13/pflag` | GNU-style flags (`--db X` or `--db=X`), which may come before or after a folder name. Go's standard `flag` package stops reading flags at the first argument that is not a flag. |
 | `go.yaml.in/yaml/v3` | Reading YAML files: study tags and the gene set hierarchy. This is the YAML organization's maintained version of yaml.v3. |
-| `golang.org/x/sync` | `singleflight`, so that many requests for the same metadata share one database query. |
+| `golang.org/x/crypto` | `bcrypt`, to check passwords for basic login against their stored hashes. |
+| `golang.org/x/sync` | `singleflight`, so that many requests for the same data share one database query. |
 
-## Notes learned porting
+## ClickHouse rules
 
-These are problems we hit while building the project, and how we solved
-them.
+These rules come from how ClickHouse works. Each one says what the code
+does and why.
 
-- **Flags after a folder name were ignored.** Go's standard `flag` package
-  stops reading flags at the first argument that is not a flag. So in
-  `ingest <dir> --db X`, the `--db` would be ignored without warning. The
-  importer moves all flags to the front before it reads them.
-- **Deletes finish later.** In ClickHouse, `ALTER … DELETE` runs in the
-  background. When a study is ingested again, the importer adds
-  `SETTINGS mutations_sync = 2`. This makes ClickHouse wait until the old
+- **Deletes wait until they are done.** In ClickHouse, `ALTER … DELETE`
+  runs in the background. So when a study is ingested again, the importer
+  adds `SETTINGS mutations_sync = 2`. ClickHouse then waits until the old
   rows are gone before the importer counts the new ones.
-- **ClickHouse Cloud has several copies of the database.** Two requests in a
-  row can reach different copies. Once, an `INSERT` right after
-  `ALTER … ADD COLUMN` failed because that copy did not have the new column
-  yet. Also, Cloud skips an inserted block of rows when it is identical to an
-  earlier one. So a study file that was ingested again without changes
-  stayed deleted. The importer sends every request with
-  `alter_sync = 2`, `mutations_sync = 2`,
-  `select_sequential_consistency = 1` and `insert_deduplicate = 0`.
-- **Tiny writes are slow.** If a reader hands over one line at a time, the
-  HTTP client sends many tiny pieces. `BodyReader.Read` fills its whole
-  buffer each time. That made loading the segment file 12 times faster.
+- **Every request asks for consistent copies.** ClickHouse Cloud keeps
+  several copies of the database, and two requests in a row can reach
+  different copies. An `INSERT` right after `ALTER … ADD COLUMN` could reach
+  a copy that does not have the new column yet. Cloud also skips an inserted
+  block of rows that is identical to an earlier one, so a file ingested
+  again without changes would stay deleted. To avoid both problems, the
+  importer sends every request with `alter_sync = 2`, `mutations_sync = 2`,
+  `select_sequential_consistency = 1` and `insert_deduplicate = 0`. A
+  single-server ClickHouse ignores these settings.
+- **Writes are sent in large pieces.** If a reader hands over one line at a
+  time, the HTTP client sends many tiny pieces, which is slow. So
+  `BodyReader.Read` fills its whole buffer each time. This makes loading a
+  large file, such as a copy-number segment file, many times faster.
