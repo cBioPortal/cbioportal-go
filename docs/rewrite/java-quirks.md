@@ -222,3 +222,97 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | Alteration enrichments give a group in which no sample has a gene altered the profiled count of the whole group. Samples whose gene panel lacks the gene count as profiled, so the p-value compares against samples that were never tested for it. For example, MSK-IMPACT samples count as profiled for genes off the panel when compared with whole-exome samples. | AlterationEnrichmentUtil.createAlterationEnrichments | Fixed in go. go counts, for every group and gene, the samples profiled for the gene. | TestContractAlterationEnrichmentsProfiledPerGene, known.go |
 | The clinical table without `pageSize` returns no samples, though the `total-count` header has the full count. The default page size 0 is meant to mean no paging, but the list is cut at offset plus page size, which is 0. | ClinicalDataServiceImpl, PaginationCalculator.lastIndex | Fixed in go. go returns every sample. | TestContractClinicalTableWithoutPageSize, known.go |
 | The `/api/legacy/` study view endpoints drop a clinical data filter on an attribute that none of the asked studies has, and answer for every sample. For example, a filter `CANCER_STUDY = glioma_mskcc_2019` on glioma_mskcc_2019 and lgg_tcga_pan_can_atlas_2018 counts the samples of both studies. The newer endpoints apply the filter, so no sample matches. | legacy StudyViewFilterApplier (filters split by the attributes found) | Fixed in go. go applies the filter on both, so no sample matches. An error would break saved study view links when a study loses an attribute. | TestContractClinicalFilterOnMissingAttribute, known.go |
+
+## Molecular data and projections
+
+| Behaviour | Java source | go | Pinned |
+|---|---|---|---|
+| `GET /api/molecular-profiles/{id}/discrete-copy-number` has no gene parameter. An `entrezGeneId` in the address is ignored, and Java answers with the calls of every gene, which for `discreteCopyNumberEventType=ALL` can be gigabytes. | DiscreteCopyNumberController | Added in go. go reads `entrezGeneId` (one Entrez Gene ID, checked like Java's Integer parameters) and answers with that gene's calls, the same as the POST `/fetch` naming it. Without it, go answers with every gene's calls. | TestContractDiscreteCopyNumberGetGeneParam, TestAddedParamsWired, known.go |
+| Generic assay data fails with a 500 for `projection=ID`. | GenericAssayDataController; fixtures | Fixed in go. go answers with the data. | — |
+| Some endpoints ignore META and return the records without a total count. They are `sample-lists/fetch`, `gene-panels/fetch`, `resource-definitions/fetch`, `structural-variant/fetch`, the generic assay meta endpoints and `mutation-data-counts/fetch`. | their controllers; fixtures | Fixed in go. go returns an empty body with the total count. `treatments/sample-counts/fetch` returns its records, as Java does. | TestContractMetaWhereJavaIgnoresIt, known.go |
+| `mutations/fetch` with `sampleMolecularIdentifiers` returns each sample's mutations from every mutation profile of its study, not only from the profile named. For example, asking for `glioma_msk_2018_mutations` also returns the samples' records of `glioma_msk_2018_mutations_uncalled`, and the META total count counts them. | MutationMapper (`whereInMultipleMolecularProfiles` selects the samples, not the profiles) | Fixed in go. go returns the mutations of the profiles named. | TestLiveMutationsUncalledProfile, known.go |
+| META on the resource-data and resource-definitions GET endpoints gives a 501 ("not implemented"). | controllers throw UnsupportedOperationException | Copied. | TestOracleResourceMetaNotImplemented |
+| In `mutation-data-counts`, only SUMMARY counts samples as mutated or not mutated. ID counts by mutation type, the same as DETAILED. | ColumnarStoreStudyViewController | Copied. | TestOracleProjectionBehaviour |
+| A sample's molecular data come in the order of Java's internal entity ids, not in Entrez id order. | MolecularDataServiceImpl (`genetic_alteration` key order) | Copied. | TestContractMolecularDataGeneticEntityOrder |
+| A `sampleListId` of another study selects no mutations, no copy-number calls (the default `HOMDEL_AND_AMP` events) and no mutation spectrum, even when the list's sample ids are also samples of the profile's study. Java matches the list to the rows by its internal sample number. Molecular data and the other copy-number events read the list's sample ids instead, so there the same ids do match. | MutationMapper, DiscreteCopyNumberMapper (`sample_list_list`), MolecularDataServiceImpl | Copied. | TestContractSampleListOfAnotherStudy |
+| In variant counts, a missing keyword is stored as the text `"null"`, so a search for an empty keyword never matches. A gene and keyword with no mutations get no row. | VariantCountMapper, `mutation_count_by_keyword` | Copied. | TestContractVariantCountsRows, TestOracleVariantCountsOnlyExistingKeywords |
+| Generic assay entities are sorted by the number their id starts with, then by text. For example, 17-AAG comes last. | GenericAssayMapper | Copied. | TestContractGenericAssayMeta |
+| `generic-assay-meta/fetch` with `searchTerm` keeps the entities whose stable id, NAME or DESCRIPTION contains the term, ignoring case. The term is trimmed first. `%` and `_` in it work as wildcards (`_` is any one character). With `projection=ID` only the stable id is searched, and the wildcards are plain characters. A page's total count counts the matches. The `/api/legacy/` alias ignores `searchTerm`. | GetGenericAssayMetaUseCase, GenericAssayMapper (`ILIKE`) | Copied. | TestGenericAssayMetaSearchTerm, TestGenericAssayMetaSearch |
+| Asking for the gene set hierarchy of a profile that is not a GSVA profile gives a 500. | GenesetHierarchyServiceImpl (IllegalArgumentException) | Copied. | TestContractGenesetHierarchyBody |
+| A mutation reports the genome build (NCBI build) of whichever study imported that mutation first. Java's importer shares one mutation record across studies. | the importer shares `mutation_event` across studies | Copied on a copy of production's database. go's own importer keeps each study's own build. | — |
+| A correlation that cannot be computed is written as `"NaN"`. An empty violin plot's axis runs from `Infinity` to `-Infinity`. | Jackson, ViolinPlotServiceImpl | Copied. | TestOracleNonFiniteDoubles |
+| Some lists come in the order of a Java `HashMap`, which looks random but is fixed. These are enrichment groups, generic assay meta properties, treatment rows, mutation spectrum samples and copy-number namespaces. | the services' HashMaps | Copied. go rebuilds the same order (`javaHashMapOrder`). | TestOracleGenericAssayMetaProperties, TestContractTreatmentsSample, TestContractMutationSpectrums, TestOracleProjectionBehaviour |
+
+## Study view and group comparison
+
+| Behaviour | Java source | go | Pinned |
+|---|---|---|---|
+| A request body without `studyViewFilter` gives a 500 (a null pointer error). So does a body missing its bin filters or its gene or attribute list, or no body at all. Clinical counts and bins for a filter that names no studies give the error "SQL exception." | ColumnarStoreStudyViewController and its binners | Copied. | TestContractStudyViewBodyWithoutFilter |
+| A filter that names no studies and no samples, but has another filter, searches every study in the portal. For example, `{"clinicalDataFilters":[{"attributeId":"ONCOTREE_CODE","values":[{"value":"OS"}]}]}` to `filtered-samples/fetch` returns the osteosarcoma samples of all studies. This holds for `filtered-samples`, `mutated-genes`, `cna-genes`, the density plot, and the `studyViewFilter` of the count and bin endpoints. A filter with nothing to narrow by selects no samples. | CustomDataFilterUtil.extractInvolvedCancerStudies, ClickhouseStudyViewFilterMapper (no study condition) | Copied. go searches only the studies the user may read. | TestContractStudyViewFilterWithoutStudies, TestWithStudies |
+| Some study-view endpoints check the filter first. The filter must have `studyIds` or `sampleIdentifiers`, not both, and the list must not be empty. Otherwise the answer is a 400, such as "eitherSampleIdentifiersOrStudyIdsPresent must be true". The column-store endpoints that check are `sample-lists-counts`, `molecular-profile-sample-counts`, `structuralvariant-genes`, `clinical-event-type-counts`, the violin plots and the treatment counts. The older endpoints always check, and name the filter `interceptedStudyViewFilter` in the message. They are every `/api/legacy/` study-view endpoint, `structuralvariant-counts`, `clinical-data-table` and `treatments/patient` and `treatments/sample`. | `@Valid` StudyViewFilter (`isEitherSampleIdentifiersOrStudyIdsPresent`, `@Size(min = 1)`) | Copied. | TestContractStudyViewFilterValidation, TestReadStudyViewFilter |
+| A filter value can be a bare string: `"values": ["OS"]` means `"values": [{"value": "OS"}]`. | DataFilterValue(String) constructor, used by Jackson | Copied. | TestDataFilterValueBareString |
+| The `/api/legacy/` gene tables (`mutated-genes`, `cna-genes`, `structuralvariant-genes`) have no `numberOfAlteredCasesOnPanel`, and their `matchingGenePanelIds` lists only real gene panels. A whole-exome study lists none, where the column-store tables list `WES`. | legacy ProfiledCasesCounter | Copied. | TestLegacyGeneCounts |
+| `negateFilters` is accepted and then ignored. | ColumnarStoreStudyViewController.fetchFilteredSamples | Copied. | TestContractFilteredSamplesNegateFiltersIgnored |
+| `genomic-data-counts` reports one NA ("not available") count, attached to one gene. It equals the filtered samples minus that gene's counts. | ClickhouseGenomicDataMapper.getCNACounts | Copied. go attaches it to the first gene. Java picks a gene at random (see [Nondeterminism](#nondeterminism)). | TestContractGenomicDataCountsNA |
+| `generic-assay-data-counts` with entity filters adds an NA row, even when its count is 0. | getGenericAssayDataCounts | Copied. | TestContractGenericAssayDataCounts |
+| `mutation-data-counts` with sample ids lists "Not Mutated" and "Not Profiled" as their own items, even when they are empty. | StudyViewColumnarServiceUtil | Copied. | TestContractMutationDataCountsWithSampleIDs |
+| `mutation-data-counts` without `genomicDataFilters` counts every mutated gene by mutation type (DETAILED and ID). SUMMARY returns an empty list. | ClickhouseGenomicDataMapper.getMutationCountsByType (an empty gene condition) | Copied. | TestContractMutationDataCountsWithoutFilters |
+| Clinical enrichments decide whether a value is a number with Java's `NumberUtils.isCreatable`. A whole number with a leading zero counts only if it is a valid octal number: `07` counts, `08` does not. | ClinicalDataEnrichmentUtil | Copied. | TestDecimalCreatable |
+| `genomic-data-bin-counts` with two profiles puts every gene in the first filter's profile type and adds one NA bin. | GetGenomicDataBinCountsUseCase; www | Fixed in go. go puts each gene in its own profile. | corpus `genomic-data-bin-counts-two-profiles` |
+| `genomic-data-bin-counts` and `generic-assay-data-bin-counts` add one NA bin for the whole request. It goes to whichever gene or entity ClickHouse lists first, so the others get no NA bin. | StudyViewMapper (`getGenomicDataBinCounts`, `getGenericAssayDataBinCounts`) | Fixed in go. go gives each gene or entity its own NA bin. | TestBinCountsNAPerGene, known.go |
+| Structural variant pair counts add gene2's panels to gene1's panel list, which later pairs share. So later pairs report extra panels and more profiled cases. | ProfiledCasesCounter.getGenePanelsForAlterationCount | Fixed in go. go reports each pair's own panels. | corpus `sv-counts-msk`, known.go |
+| A numeric filter on a patient-level generic assay profile is ignored. | column-store study-view filter; fixtures | Fixed in go. go filters by patient. | — |
+| Categorical enrichments of a patient-level profile give a 500. | GenericAssayEnrichmentController; fixtures | Fixed in go. go answers with the enrichment. | TestContractGenericAssayCategoricalEnrichmentPatientLevelHLA |
+| Namespace attributes are read from one record per table and study, picked at random. | NamespaceMapper | Fixed in go. go reads every record. | TestContractNamespaceAttributes |
+
+## Sessions and export
+
+| Behaviour | Java source | go | Pinned |
+|---|---|---|---|
+| Adding or removing a user on a session that does not exist gives a 500. | SessionServiceController | Copied. | TestVirtualStudyAuthorized |
+| When a study export fails, Java breaks the zip file on purpose by adding `ERROR: <error message>` to the end. | ZipOutputStreamWriterService.fail | Copied in part. go also breaks the zip, but writes `ERROR: study export failed` and puts the message in the server log. | — |
+| The groups in `meta_study.txt` are upper-cased and come in a `HashSet`'s order. | cbioportal-core | Copied. | TestJavaGroups |
+
+## Importer
+
+| Behaviour | Java source | go | Pinned |
+|---|---|---|---|
+| `clinical_data_derived` gets a row for every attribute and every sample or patient, and keeps the empty values. | the derived-table script (`clickhouse.sql`) | Fixed in go. go stores only real values. A copy of production's database drops the empty values too. The API answers the same. | — |
+| A file counts as a meta file when `_meta_` appears anywhere in its name. So ascn's `*_meta_cna_hg19_seg.txt` is imported. | cbioportal-core | Copied. | TestOracleMetaFileNamePattern |
+| `MUTATION_COUNT` skips samples that are profiled only through the `_sequenced` case list. | cbioportal-core (`sample_profile`) | Copied. | TestOracleMutationCountSkipsCaseListOnlySamples |
+| Chromosome X in a mutation file is stored and served as 23. | DaoGeneOptimized.normalizeChr | Copied. | TestOracleMutationChromosomeNormalized |
+| Empty text fields of a structural variant become `"NA"`, and empty number fields become -1. | StructuralVariantUtil | Copied. | TestContractStructuralVariantImportDefaults |
+| Timeline event data are keyed by the column header exactly as written, such as `Treatment_TYPE` or `ICD DESCRIPTION`. When a header appears twice, the last non-empty cell wins. | ImportTimelineData (`HashMap` per event) | Copied. The clinical-events endpoints and the study export use the same keys, so an exported timeline file has the original headers. Studies staged by an older go importer did not record headers, so go uses the upper-cased column name for them. | golden `staged/clinical_event_data_derived`, TestLiveTimelineHeaders |
+| A copy-number segment whose start is not below its end (a single-base segment) is skipped with a warning. | ImportCopyNumberSegmentData | Fixed in go. go keeps it. | import benchmark row counts |
+| Timeline rows for a patient not in the study, or with more fields than the header, are dropped. | ImportTimelineData | Fixed in go. go keeps them. | — |
+| A protein file keyed by `Composite.Element.REF` (an RPPA file, with values like `AKT1 AKT2 AKT3\|Akt_pS473`) is stored once for each gene named before the `\|`. When the antibody after the `\|` names a phosphorylation site such as `pS473`, the line is stored under a phosphoprotein gene such as `AKT1_PS473` instead. The importer adds that gene to the gene table when it is missing, with the next unused negative Entrez id. A line is skipped when it repeats an earlier line's antibody. | ImportTabDelimData (`parseRPPAGenes`) | Copied. The negative ids follow the order in which studies add phosphoproteins, so they can differ from production's ids for the same gene. | golden `staged/gene_key_map`, `staged_ref/gene` |
+| An empty `Center`, `Mutation_Status` or `Validation_Status` in a mutation file is stored as the text `NA`, not left empty. The study view's filter for an unknown mutation status looks for `NA`. | MafUtil (`getPartString`) | Copied. | golden `staged/mutation` |
+| A mutation listed more than once for the same sample (for example once per sequencing center) is stored once. The importer keeps the record with a blood normal, else the validated one, else the germline or somatic one, and joins the centers with `;`. | ImportExtendedMutationData (`mergeMutationData`) | Copied. | golden `staged/mutation_merge` |
+| `MUTATION_COUNT` is computed while the mutation file loads. A sample that only a gene panel matrix adds to the mutation profile gets no count at all, not 0. | DaoMutation (`createMutationCountClinicalData`) | Copied. | golden `staged/clinical_sample_computed` |
+
+## Nondeterminism
+
+"Nondeterministic" means Java can give different answers to the same
+request. Usually it lets the database return rows in any order. go cannot
+copy an answer that changes, so these entries are "can't match". This is
+not a bug in either server. When a request does not ask for a sort order,
+any order is a correct answer.
+
+The parity tool (paritydiff) handles them so they do not show up as
+failures. It can compare lists without caring about order (`unordered`),
+sort rows that tie (`ties=`), skip a field (`ignore=`), or mark a known
+difference (`known=`). The nightly parity job sends each request to Java
+twice. When Java's two answers differ, the job reports the request as
+"Java nondeterministic" instead of as a go failure.
+
+| Behaviour | Java source | go | Pinned |
+|---|---|---|---|
+| Sample and patient pages without `sortBy` or `keyword` have no sort order. Production can return different pages for the same request. | ClickhouseSampleMapper, PatientMapper | Can't match. go uses import order. | known.go |
+| Clinical table pages without `sortBy` have no sort order. | getVisibleSampleInternalIdsForClinicalTable | Can't match. | known.go |
+| Rows that tie at a page boundary can fall on either page. This happens with clinical table sort values, a study's clinical data by internal id, a profile's mutations by profile, sample and gene, a sample id used in several studies, and resource data by resource id. | ClinicalDataMapper, MutationMapper, ClickhouseSampleMapper, ResourceDataMapper | Can't match. | known.go; corpus `clinical-data-*`, `resource-data-study-all` |
+| Profile-type and case-list-type labels use whichever name the database returns first. | mergeCaseListCounts, profile sample counts | Can't match. | known.go (`ignore=label`) |
+| Rows from database grouping or joining come in any order (study-view counts, gene panel data). Rows that tie in a sort can swap. | ClickHouse | Can't match. | corpus `unordered` / `ties=`; fixtures (about 180 requests) |
+| The single NA count or bin of a request for several genes or entities goes to a gene or entity picked at random. | ClickhouseGenomicDataMapper, generic assay counts and bins | Can't match. | corpus `genomic-data-counts-two-genes`, `generic-assay-*-two` |
+| The clinical table's `byUniqueSampleKey` map is filled in the order the database returns rows. | StudyViewController | Can't match. | TestOracleFieldOrder (skips this field) |
+| When a request breaks several validation rules at once, Java reports one of them at random. | Hibernate Validator | Can't match. go always reports the same one. | TestContractFilterValidation (one broken rule only) |
+| A study's `groups` come in a `HashSet`'s order, which depends on the import. | cbioportal-core | Can't match on go's own import. A copy of production's database keeps production's order. | fixtures |
