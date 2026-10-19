@@ -84,7 +84,7 @@ func (s Server) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 
 // legacyClinicalDataCounts is the legacy ClinicalDataServiceImpl
 // .fetchClinicalDataCounts: one item per distinct requested attribute, in
-// Java's HashSet order. An attribute no involved study defines counts as a
+// Java's HashSet order, with NA after the values. An attribute no involved study defines counts as a
 // patient attribute: NA for every filtered patient when some requested
 // attribute is a patient attribute (Java loads the patients only then), and
 // no counts otherwise.
@@ -101,6 +101,16 @@ func (s Server) legacyClinicalDataCounts(f studyViewFilter, attrIDs []string) []
 	var patients *uint64
 	for _, id := range core.JavaHashMapOrder(core.SortedKeys(unique)) {
 		if item, ok := byID[id]; ok {
+			counts := make([]ClinicalDataCount, 0, len(item.Counts))
+			var na []ClinicalDataCount
+			for _, c := range item.Counts {
+				if c.Value == "NA" {
+					na = append(na, c)
+				} else {
+					counts = append(counts, c)
+				}
+			}
+			item.Counts = append(counts, na...)
 			out = append(out, item)
 			continue
 		}
