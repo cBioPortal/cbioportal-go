@@ -92,7 +92,10 @@ Statistics stay hand-ported: exact Java parity requires it. CI runs
 
 A small, widely used community package is fine when it saves real code
 and brings almost no dependencies, e.g. `KimMachineGun/automemlimit`
-(sets Go's memory limit from the container's).
+(sets Go's memory limit from the container's). The commands use
+`spf13/cobra` and `spf13/pflag` for subcommands, GNU-style flags, help,
+shell completion and "did you mean" suggestions, which the stdlib `flag`
+package does not offer.
 
 ## GitHub
 
