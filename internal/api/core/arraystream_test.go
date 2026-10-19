@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -291,5 +292,19 @@ func TestStreamedReshape(t *testing.T) {
 		if got.Body.String() != string(want) || got.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("%s: got %.200s", proj, got.Body.String())
 		}
+	}
+}
+
+// sortItems sorts JSON objects by one top-level field as page.before orders
+// them.
+func sortItems(items []json.RawMessage, field string, desc bool) {
+	pg := page{SortBy: field, Desc: desc}
+	ks := make([]sortItem, len(items))
+	for i, it := range items {
+		ks[i] = newSortItem(it, field, i)
+	}
+	slices.SortFunc(ks, pg.compare)
+	for i, k := range ks {
+		items[i] = k.raw
 	}
 }

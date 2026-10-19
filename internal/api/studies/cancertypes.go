@@ -23,12 +23,6 @@ const cancerTypesSQL = refCancerTypesSQL + " UNION ALL " +
 	"SELECT type_of_cancer_id, name, dedicated_color, short_name, parent FROM type_of_cancer " +
 	"WHERE type_of_cancer_id NOT IN (SELECT type_of_cancer_id FROM cbioportal_ref.type_of_cancer)"
 
-// studyCancerTypesSQL is cancerTypesSQL restricted to the columns the study
-// list joins on.
-const studyCancerTypesSQL = "SELECT type_of_cancer_id, name, dedicated_color, parent FROM cbioportal_ref.type_of_cancer UNION ALL " +
-	"SELECT type_of_cancer_id, name, dedicated_color, parent FROM type_of_cancer " +
-	"WHERE type_of_cancer_id NOT IN (SELECT type_of_cancer_id FROM cbioportal_ref.type_of_cancer)"
-
 type typeOfCancerRow struct {
 	TypeOfCancerID string `json:"type_of_cancer_id"`
 	Name           string `json:"name"`

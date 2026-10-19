@@ -47,20 +47,8 @@ type NumericGeneMolecularData struct {
 	Value              json.Number `json:"value"`
 }
 
-// numericMolecularData is MolecularDataController.filterNonNumberMolecularData:
-// records whose value is not a number are dropped.
-func numericMolecularData(data []MolecularData, projection string) []NumericGeneMolecularData {
-	out := make([]NumericGeneMolecularData, 0, len(data))
-	for _, d := range data {
-		if rec, ok := numericRecord(d, projection); ok {
-			out = append(out, rec)
-		}
-	}
-	return out
-}
-
-// numericRecord is one record of numericMolecularData; ok is false for a
-// value that is not a number.
+// numericRecord is one record of MolecularDataController.filterNonNumberMolecularData:
+// ok is false for a value that is not a number, which Java drops.
 func numericRecord(d MolecularData, projection string) (NumericGeneMolecularData, bool) {
 	v, ok := core.JavaDecimal(d.Value)
 	if !ok {

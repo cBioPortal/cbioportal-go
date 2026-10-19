@@ -975,21 +975,6 @@ func (s Server) sampleScope(a *core.SQLArgs, f studyViewFilter) string {
 	return fmt.Sprintf("%sconcat(study_id, '_', sample_id) IN (%s)", f.scope().Key(a, core.TSample, ""), s.filterSQL(a, f))
 }
 
-// sampleDerivedScope is the filter as a predicate over a *_derived view's
-// sample_unique_id or patient_unique_id column.
-func (s Server) sampleDerivedScope(a *core.SQLArgs, f studyViewFilter, uniqueCol string) string {
-	if !f.hasSubFilters() && len(f.SampleIdentifiers) == 0 {
-		if len(f.StudyIDs) > 0 {
-			return core.ByStudies(f.StudyIDs).Cond(a, core.TSampleDerived, "")
-		}
-		return core.FalseClause
-	}
-	if uniqueCol == "patient_unique_id" {
-		return fmt.Sprintf("patient_unique_id IN (SELECT patient_unique_id FROM %s)", s.filterFrom(a, f))
-	}
-	return fmt.Sprintf("%s IN (%s)", uniqueCol, s.filterSQL(a, f))
-}
-
 func (s Server) scopeSampleCount(f studyViewFilter) uint64 {
 	type c struct {
 		N uint64 `json:"n"`

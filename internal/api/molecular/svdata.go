@@ -81,16 +81,6 @@ type StructuralVariant struct {
 	NamespaceColumns         json.RawMessage `json:"namespaceColumns,omitempty"`
 }
 
-type svDataRow struct {
-	StudyID           string `json:"studyId"`
-	SampleID          string `json:"sampleId"`
-	PatientID         string `json:"patientId"`
-	Site1HugoSymbol   string `json:"site1HugoSymbol"`
-	Site1EntrezGeneID *int64 `json:"site1EntrezGeneId"`
-	Site2HugoSymbol   string `json:"site2HugoSymbol"`
-	Site2EntrezGeneID *int64 `json:"site2EntrezGeneId"`
-}
-
 // SVResolvedSQL is the structural_variant view with each site's missing entrez
 // id resolved from its Hugo symbol through the reference genes, as the Java
 // importer does.

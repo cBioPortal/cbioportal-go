@@ -203,24 +203,8 @@ func IdentifierStudies(ids []Identifier) []string {
 
 // ByProfiles holds a read to molecular profiles, by their ids alone: for
 // the tables keyed by profile across studies (genomic_event_derived,
-// sample_to_gene_panel_derived). inStudies adds the studies when known.
+// sample_to_gene_panel_derived).
 func ByProfiles(ids []string) Scope { return Scope{profile: anyOf(ids)} }
-
-// byProfile holds a read to one molecular profile within its study, false
-// when the profile does not exist.
-func (s *State) byProfile(id string) (Scope, ProfileMeta, bool) {
-	meta, ok := s.ProfileMeta(id)
-	if !ok {
-		return Scope{}, meta, false
-	}
-	return Scope{study: oneOf(meta.StudyID), profile: oneOf(id)}, meta, true
-}
-
-// inStudies restricts the scope to studies as well.
-func (sc Scope) inStudies(ids []string) Scope {
-	sc.study = anyOf(ids)
-	return sc
-}
 
 // BySampleList holds a read to one sample list, within the studies whose
 // lists carry its id (from the cached list index).

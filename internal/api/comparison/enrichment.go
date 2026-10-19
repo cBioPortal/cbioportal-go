@@ -21,33 +21,6 @@ type casesGroup struct {
 	MolecularProfileCaseIdentifiers []caseIdentifier `json:"molecularProfileCaseIdentifiers"`
 }
 
-// study/sample pairs for a group's cases.
-func (g casesGroup) pairs() [][2]string {
-	out := make([][2]string, 0, len(g.MolecularProfileCaseIdentifiers))
-	for _, c := range g.MolecularProfileCaseIdentifiers {
-		out = append(out, [2]string{molecularProfileStudy(c.MolecularProfileID), c.CaseID})
-	}
-	return out
-}
-
-// molecularProfileStudy strips a known molecular-profile suffix to get the study.
-func molecularProfileStudy(mpid string) string {
-	for _, suf := range []string{"_mutations", "_gistic", "_cna", "_structural_variants", "_log2CNA"} {
-		if before, ok := strings.CutSuffix(mpid, suf); ok {
-			return before
-		}
-	}
-	// fall back: strip after the last underscore-delimited profile token isn't
-	// reliable, so use profileMeta lookup as a last resort.
-	return mpid
-}
-
-type geneAlteredRow struct {
-	HugoGeneSymbol string `json:"hugoGeneSymbol"`
-	EntrezGeneID   *int64 `json:"entrezGeneId"`
-	Altered        int    `json:"altered"`
-}
-
 type CountSummary struct {
 	AlteredCount  int    `json:"alteredCount"`
 	Name          string `json:"name"`

@@ -342,41 +342,7 @@ func (s Server) clinicalDataCounts(f studyViewFilter, attrIDs []string) []Clinic
 	return out
 }
 
-// ---------- Gene alteration counts ----------
-
-type geneCountRow struct {
-	HugoGeneSymbol       string `json:"hugoGeneSymbol"`
-	EntrezGeneID         *int64 `json:"entrezGeneId"`
-	Alteration           *int64 `json:"alteration"`
-	NumberOfAlteredCases uint64 `json:"numberOfAlteredCases"`
-	TotalCount           uint64 `json:"totalCount"`
-}
-
-type AlterationCountByGene struct {
-	EntrezGeneID          *int64 `json:"entrezGeneId,omitempty"`
-	HugoGeneSymbol        string `json:"hugoGeneSymbol"`
-	Alteration            *int64 `json:"alteration,omitempty"`
-	NumberOfAlteredCases  uint64 `json:"numberOfAlteredCases"`
-	NumberOfProfiledCases uint64 `json:"numberOfProfiledCases"`
-	TotalCount            uint64 `json:"totalCount"`
-}
-
-func toAlterationCounts(rows []geneCountRow, profiled uint64, keepAlteration bool) []AlterationCountByGene {
-	out := make([]AlterationCountByGene, len(rows))
-	for i, r := range rows {
-		a := AlterationCountByGene{
-			EntrezGeneID: r.EntrezGeneID, HugoGeneSymbol: r.HugoGeneSymbol,
-			NumberOfAlteredCases: r.NumberOfAlteredCases, NumberOfProfiledCases: profiled, TotalCount: r.TotalCount,
-		}
-		if keepAlteration {
-			a.Alteration = r.Alteration
-		}
-		out[i] = a
-	}
-	return out
-}
-
-// ---------- Data types + structural variants ----------
+// ---------- Genomic data counts ----------
 
 type GenomicDataCount struct {
 	Label       string   `json:"label"`
@@ -384,26 +350,4 @@ type GenomicDataCount struct {
 	Count       uint64   `json:"count"`
 	UniqueCount *uint64  `json:"uniqueCount,omitempty"`
 	SampleIDs   []string `json:"sampleIds,omitempty"`
-}
-
-type svRow struct {
-	Gene1                string `json:"gene1"`
-	Gene1Entrez          *int64 `json:"gene1Entrez"`
-	Gene2                string `json:"gene2"`
-	Gene2Entrez          *int64 `json:"gene2Entrez"`
-	NumberOfAlteredCases uint64 `json:"numberOfAlteredCases"`
-	TotalCount           uint64 `json:"totalCount"`
-}
-
-type AlterationCountByStructuralVariant struct {
-	Gene1HugoGeneSymbol   string   `json:"gene1HugoGeneSymbol"`
-	Gene1EntrezGeneID     *int64   `json:"gene1EntrezGeneId,omitempty"`
-	Gene2HugoGeneSymbol   string   `json:"gene2HugoGeneSymbol"`
-	Gene2EntrezGeneID     *int64   `json:"gene2EntrezGeneId,omitempty"`
-	HugoGeneSymbols       []string `json:"hugoGeneSymbols"`
-	EntrezGeneIDs         []int64  `json:"entrezGeneIds"`
-	NumberOfAlteredCases  uint64   `json:"numberOfAlteredCases"`
-	NumberOfProfiledCases uint64   `json:"numberOfProfiledCases"`
-	TotalCount            uint64   `json:"totalCount"`
-	UniqueEventKey        string   `json:"uniqueEventKey"`
 }

@@ -82,7 +82,7 @@ func TestPagedEndpoint(t *testing.T) {
 		{"POST", "/api/molecular-profiles/x_mutations/mutations/fetch", true},
 		{"GET", "/api/molecular-profiles/x_mutations/mutations/fetch", false},
 	} {
-		if got := pagedEndpoint(c.method, c.path); got != c.want {
+		if got := pagedEndpointOf(c.method, c.path) != ""; got != c.want {
 			t.Errorf("%s %s: %v, want %v", c.method, c.path, got, c.want)
 		}
 	}

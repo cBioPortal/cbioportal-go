@@ -94,12 +94,6 @@ var countedEndpoints = map[string]bool{
 	"POST /api/generic-assay-meta/fetch": true,
 }
 
-// pagedEndpoint reports whether the request is for one of pagedEndpoints
-// ({} matches one path segment).
-func pagedEndpoint(method, path string) bool {
-	return pagedEndpointOf(method, path) != ""
-}
-
 // pagedEndpointOf returns the pagedEndpoints entry the request is for, or "".
 func pagedEndpointOf(method, path string) string {
 	segs := strings.Split(strings.TrimSuffix(path, "/"), "/")
@@ -787,18 +781,4 @@ func (pg page) compare(a, b sortItem) int {
 		return -1
 	}
 	return 1
-}
-
-// sortItems sorts JSON objects by one top-level field as page.before orders
-// them.
-func sortItems(items []json.RawMessage, field string, desc bool) {
-	pg := page{SortBy: field, Desc: desc}
-	ks := make([]sortItem, len(items))
-	for i, it := range items {
-		ks[i] = newSortItem(it, field, i)
-	}
-	slices.SortFunc(ks, pg.compare)
-	for i, k := range ks {
-		items[i] = k.raw
-	}
 }

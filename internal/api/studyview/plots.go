@@ -615,13 +615,6 @@ func (d jacksonDouble) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v)
 }
 
-func safeFloat(v float64) float64 {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0
-	}
-	return v
-}
-
 // percentile computes the p-th percentile (0-100) using Apache-commons-style
 // linear interpolation, matching the Java Percentile default.
 func percentile(values []float64, p float64) float64 {
