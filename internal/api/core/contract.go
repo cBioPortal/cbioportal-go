@@ -59,8 +59,7 @@ func (s *State) JavaContract(next http.Handler) http.Handler {
 			return
 		}
 		if rt.body != nil && r.Method == http.MethodPost {
-			raw, _ := io.ReadAll(r.Body)
-			r.Body = io.NopCloser(bytes.NewReader(raw))
+			raw := BufferedBody(r)
 			if msg := rt.body(raw); msg != "" {
 				WriteError(w, http.StatusBadRequest, msg)
 				return
@@ -367,8 +366,7 @@ type contractRoute struct {
 // checkFilter checks the parameters and filter body of a POST with a
 // filter: msg is the 400 message, done reports an answered request.
 func (rt *contractRoute) checkFilter(w http.ResponseWriter, r *http.Request, q map[string][]string) (msg string, done bool) {
-	raw, _ := io.ReadAll(r.Body)
-	r.Body = io.NopCloser(bytes.NewReader(raw))
+	raw := BufferedBody(r)
 	if t := bytes.TrimSpace(raw); rt.filter.lenient && (len(t) == 0 || string(t) == "null") {
 		// No filter to read: the handler answers.
 		return checkParamsAround(rt.params, q, rt.bodyAt, nil), false

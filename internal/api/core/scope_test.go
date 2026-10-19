@@ -200,3 +200,13 @@ func TestScopeRendering(t *testing.T) {
 	}()
 	ByStudy("s1").Cond(NewArgs(), TGenericAssayDataDerived, "")
 }
+
+// SortedKeys of an empty map is an empty list, which encodes as [].
+func TestSortedKeys(t *testing.T) {
+	if got := SortedKeys(map[string]int{"b": 1, "a": 2}); strings.Join(got, ",") != "a,b" {
+		t.Fatalf("SortedKeys = %v", got)
+	}
+	if got := SortedKeys(map[string]bool{}); got == nil || len(got) != 0 {
+		t.Fatalf("SortedKeys of an empty map = %#v", got)
+	}
+}

@@ -26,7 +26,7 @@ func (s Server) routeStudyView3(mux router) {
 // naFilter is the cBioPortal rule for excluding "not available" clinical values,
 // mirroring the backend's isAttributeValueNA SQL fragment.
 func naFilter(col string) string {
-	return fmt.Sprintf("NOT (%s = '' OR upperUTF8(%s) = 'NA' OR upperUTF8(%s) = 'NAN' OR upperUTF8(%s) = 'N/A')", col, col, col, col)
+	return "NOT " + isNASQL(col)
 }
 
 // ---------- Clinical data enrichments ----------

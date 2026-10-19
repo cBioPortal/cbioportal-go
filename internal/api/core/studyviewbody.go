@@ -3,7 +3,6 @@ package core
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 )
 
@@ -45,8 +44,7 @@ func StudyViewBodyErrors(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		raw, _ := io.ReadAll(r.Body)
-		r.Body = io.NopCloser(bytes.NewReader(raw))
+		raw := BufferedBody(r)
 		if status, msg, failed := spec.check(raw); failed {
 			ReadBody(r, nil)
 			if msg != "" {

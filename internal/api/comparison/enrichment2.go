@@ -3,6 +3,7 @@ package comparison
 import (
 	"math"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -347,17 +348,17 @@ var expressionAlterationTypes = map[string]bool{
 }
 
 // enrichmentProfileValid checks the groups' molecular profile as Java's
-// validateMolecularProfile does: an unknown profile or one of another
-// alteration type is reported (as not found) with its id.
+// validateMolecularProfile does: it looks at the first case identifier only,
+// and an unknown profile or one of another alteration type is reported (as
+// not found) with its id.
 func (s Server) enrichmentProfileValid(groups []casesGroup, types map[string]bool) (string, bool) {
-	for _, g := range groups {
-		for _, c := range g.MolecularProfileCaseIdentifiers {
-			m, ok := s.ProfileMeta(c.MolecularProfileID)
-			if !ok || !types[strings.ToUpper(m.AlterationType)] {
-				return c.MolecularProfileID, false
-			}
-			return "", true
-		}
+	i := slices.IndexFunc(groups, func(g casesGroup) bool { return len(g.MolecularProfileCaseIdentifiers) > 0 })
+	if i < 0 {
+		return "", true
+	}
+	id := groups[i].MolecularProfileCaseIdentifiers[0].MolecularProfileID
+	if m, ok := s.ProfileMeta(id); !ok || !types[strings.ToUpper(m.AlterationType)] {
+		return id, false
 	}
 	return "", true
 }

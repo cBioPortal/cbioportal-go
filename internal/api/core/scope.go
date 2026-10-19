@@ -2,8 +2,8 @@ package core
 
 import (
 	"fmt"
+	"maps"
 	"slices"
-	"sort"
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -394,12 +394,10 @@ func (i Identifier) ID() string {
 	return ""
 }
 
-// SortedKeys returns the map's keys in order.
+// SortedKeys returns the map's keys in order; never nil, so the keys of an
+// empty map encode as [].
 func SortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := slices.AppendSeq(make([]string, 0, len(m)), maps.Keys(m))
+	slices.Sort(out)
 	return out
 }

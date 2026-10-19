@@ -105,5 +105,7 @@ var restfulLoginTemplate = template.Must(template.New("restful_login").Parse(`<!
 // Java's SamlAndBasicLoginController.
 func (o *oauth2Login) restfulLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html;charset=UTF-8")
-	restfulLoginTemplate.Execute(w, o.cfg.Texts.Title)
+	if err := restfulLoginTemplate.Execute(w, o.cfg.Texts.Title); err != nil {
+		log.Printf("basic: writing the login page: %v", err)
+	}
 }

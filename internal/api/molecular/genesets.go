@@ -1,10 +1,8 @@
 package molecular
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 	"net/http"
 	"sort"
@@ -139,12 +137,11 @@ func (s Server) genesetsList(w http.ResponseWriter, r *http.Request) {
 
 // genesetsFetch serves POST /api/genesets/fetch: the named gene sets by id.
 func (s Server) genesetsFetch(w http.ResponseWriter, r *http.Request) {
-	raw, _ := io.ReadAll(r.Body)
+	raw := core.BufferedBody(r)
 	if core.EmptyJSONArray(raw) {
 		core.WriteError(w, http.StatusBadRequest, core.MsgListSize("genesetIds"))
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewReader(raw))
 	var ids []string
 	core.ReadBody(r, &ids)
 	if ids == nil {

@@ -3,7 +3,7 @@ package core
 import (
 	"bytes"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -204,7 +204,7 @@ func (e *elementWriter) Finish() bool {
 		e.err = errors.New("unterminated JSON array")
 	}
 	if e.err != nil {
-		log.Printf("streamed response aborted: %v", e.err)
+		slog.Error("streamed response aborted", slog.Any("error", e.err))
 		panic(http.ErrAbortHandler)
 	}
 	return true

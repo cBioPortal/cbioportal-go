@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"maps"
 	"math"
 	"net/http"
@@ -690,7 +690,7 @@ func (p *pageWindow) finish() {
 		return
 	}
 	if err := p.close(); err != nil {
-		log.Printf("paged response aborted: %v", err)
+		slog.Error("paged response aborted", slog.Any("error", err))
 		panic(http.ErrAbortHandler)
 	}
 }
