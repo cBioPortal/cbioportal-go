@@ -79,6 +79,12 @@ jobs:
         # Two workers: the private repo's runner has 2 vCPUs shared with the
         # API, ClickHouse and Keycloak; three overload it and specs miss the
         # tests' 5s waits.
+        # hide-download-controls' patient and study view groups wait for the
+        # "Files & Links" tab, which frontend v7.2.0 replaces with one tab
+        # per resource when the resource table has data. They fail against
+        # Java too (cbioportal-frontend's e2e_localdb since v7.2.0).
+        env:
+          E2E_SKIP: 'hide download controls feature (patient view|study view) '
         run: test/run_e2e.sh 2
       - uses: actions/upload-artifact@v4
         if: always()
