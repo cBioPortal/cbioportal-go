@@ -2,15 +2,15 @@ package transform
 
 import "fmt"
 
-// genomicEventDerivedSQL builds prod's `genomic_event_derived` table as a view:
+// genomicEventDerivedSQL builds prod's `genomic_event_derived` table:
 // the unified alteration table combining mutations, discrete CNA, and structural
 // variants into one row-per-alteration shape. Column names/order match prod's
 // clickhouse.sql (genomic_event_derived) so the column-store API can read it
 // unchanged. Genes are the reference genes the importers store each record
 // under (gene_key_map); records whose gene does not resolve are absent.
 //
-// Divergences from prod (which builds from OLTP mirror tables we do not have):
-//   - gene_panel_stable_id comes from the target-DB sample_profile view per
+// Where some columns come from:
+//   - gene_panel_stable_id comes from the target-DB sample_profile table per
 //     (sample, profile), 'WES' when the panel is NULL or the pair is absent.
 //   - discrete CNA events come from the target-DB `cna` view (long and wide
 //     DISCRETE profiles); like cna_event, only AMP/HOMDEL are events.

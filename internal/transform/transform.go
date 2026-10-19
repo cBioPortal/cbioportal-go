@@ -1,8 +1,16 @@
-// Package transform builds the normalized cBioPortal model as ClickHouse views
-// over the raw staging tables. Nothing is copied — the transform runs on read —
-// except the small sample_profile membership table, materialized per run.
-// The headline view is `mutation`: cBioPortal's default MutationFilter as a
-// WHERE clause, with Hugo→Entrez resolution against the reference DB.
+// Package transform builds the normalized cBioPortal model in a portal
+// database from the raw staging tables, with SQL run in ClickHouse.
+//
+// Tables are built for what is expensive to derive or read on every request:
+// the gene-symbol resolution (gene_key_map), the mutation filters and merged
+// MAF rows (variant_classification_filter, mutation_merge), samples and
+// patients with their internal ids, sample_profile, the computed clinical
+// attributes (clinical_sample_computed) and the study-view `*_derived`
+// tables. The rest of the model starts as views over staging; the views the
+// API filters per request (mutation, cna, the clinical data and others, see
+// snapshotted) are copied into tables once everything reading them is built.
+// The `mutation` view applies cBioPortal's default MutationFilter and
+// resolves Hugo symbols to Entrez ids against the reference database.
 package transform
 
 import (
@@ -100,7 +108,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			}
 		}
 	}
-	make := func(name, sel string) error {
+	createView := func(name, sel string) error {
 		if _, err := c.Execute(fmt.Sprintf("CREATE OR REPLACE VIEW `%s`.`%s` AS %s", targetDB, name, sel)); err != nil {
 			return fmt.Errorf("creating view %s: %w", name, err)
 		}
@@ -108,16 +116,17 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		return nil
 	}
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
-	// materialize builds a table (atomically replaced) instead of a view, for
-	// the derived tables the API reads on every request — as prod does.
-	materialize := func(name, sel string) error {
+	// materialize builds a table sorted by orderBy (atomically replaced)
+	// instead of a view, for what the API reads on every request, as prod
+	// does.
+	materialize := func(name, orderBy, sel string) error {
 		if engineOf(name) == "View" {
 			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, name)); err != nil {
 				return err
 			}
 		}
 		if _, err := c.Execute(fmt.Sprintf(
-			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY tuple() AS %s", targetDB, name, sel)); err != nil {
+			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s AS %s", targetDB, name, orderBy, sel)); err != nil {
 			return fmt.Errorf("creating table %s: %w", name, err)
 		}
 		created = append(created, name)
@@ -127,7 +136,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	// status is cbioportal-core's DaoCancerStudy.Status ordinal: 1 (AVAILABLE)
 	// once a study is loaded, unless staging marks it otherwise; internal_id
 	// numbers the studies in import order.
-	if err := make("cancer_study", fmt.Sprintf(
+	if err := createView("cancer_study", fmt.Sprintf(
 		"SELECT c.study_id AS study_id, c.name AS name, c.short_name AS short_name, c.description AS description, "+
 			"c.type_of_cancer AS cancer_type_id, c.groups AS groups, c.pmid AS pmid, c.citation AS citation, "+
 			"c.reference_genome AS reference_genome, c.add_global_case_list = 'true' AS add_global_case_list, "+
@@ -146,7 +155,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 				"trimBoth(type_of_cancer) AS short_name, lower(trimBoth(parent)) AS parent FROM `%s`.type_of_cancer "+
 				"WHERE type_of_cancer_id != '' ORDER BY study_id LIMIT 1 BY type_of_cancer_id", rawDB)
 	}
-	if err := make("type_of_cancer", tocSQL); err != nil {
+	if err := createView("type_of_cancer", tocSQL); err != nil {
 		return nil, err
 	}
 	// Samples and patients carry the internal ids cbioportal-core assigns
@@ -155,16 +164,9 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"sample", "(study_id, sample_id)", sampleSQL(rawDB)},
 		{"patient", "(study_id, patient_id)", patientSQL(rawDB)},
 	} {
-		if engineOf(t.name) == "View" {
-			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, t.name)); err != nil {
-				return nil, err
-			}
+		if err := materialize(t.name, t.key, t.sql); err != nil {
+			return nil, err
 		}
-		if _, err := c.Execute(fmt.Sprintf(
-			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s AS %s", targetDB, t.name, t.key, t.sql)); err != nil {
-			return nil, fmt.Errorf("creating table %s: %w", t.name, err)
-		}
-		created = append(created, t.name)
 	}
 	for _, v := range []view{
 		{"clinical_attribute_meta", fmt.Sprintf(
@@ -175,19 +177,19 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"mutation", mutationSQL(c, rawDB, targetDB)},
 		{"structural_variant", structuralVariantSQL(c, rawDB, targetDB)},
 	} {
-		if err := make(v.name, v.sql); err != nil {
+		if err := createView(v.name, v.sql); err != nil {
 			return nil, err
 		}
 	}
 	// Discrete CNA comes from the wide matrices and the long files; with
 	// neither staged, the long-file stand-in yields the empty view.
 	cnaMatrix, cnaLong := exists("cna_matrix"), exists("cna_discrete_long")
-	if err := make("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong || !cnaMatrix)); err != nil {
+	if err := createView("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong || !cnaMatrix)); err != nil {
 		return nil, err
 	}
 	// seg_id numbers the segments as the importer stores them: in file order,
 	// study by study.
-	if err := make("seg", fmt.Sprintf(
+	if err := createView("seg", fmt.Sprintf(
 		"SELECT g.study_id AS study_id, g.id AS sample_id, g.chrom AS chrom, g.loc_start AS start, g.loc_end AS end, "+
 			"g.num_mark AS num_probes, g.seg_mean AS segment_mean, "+
 			"toUInt64(row_number() OVER (ORDER BY r.study_rank, g.pos)) AS seg_id "+
@@ -208,17 +210,9 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	// every study-view and alteration query, and expensive to derive (it scans
 	// every profile's staging table), like prod's own sample_profile table.
 	spSQL, hasSampleProfile := sampleProfileSQL(c, rawDB, targetDB)
-	if engineOf("sample_profile") == "View" {
-		if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`sample_profile`", targetDB)); err != nil {
-			return nil, err
-		}
+	if err := materialize("sample_profile", "(study_id, profile_stable_id, sample_id)", spSQL); err != nil {
+		return nil, err
 	}
-	if _, err := c.Execute(fmt.Sprintf(
-		"CREATE OR REPLACE TABLE `%s`.`sample_profile` ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, sample_id) AS %s",
-		targetDB, spSQL)); err != nil {
-		return nil, fmt.Errorf("creating table sample_profile: %w", err)
-	}
-	created = append(created, "sample_profile")
 	if hasSampleProfile && exists("clinical_sample") && exists("clinical_attribute_meta") {
 		if err := computedClinicalAttributes(c, rawDB, targetDB, exists("mutation_extended"), exists("cna_seg")); err != nil {
 			return nil, err
@@ -240,13 +234,13 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"clinical_event_derived", clinicalEventDerivedSQL(rawDB, refDB)},
 		{"clinical_event_data_derived", clinicalEventDataDerivedSQL(c, rawDB)},
 	} {
-		if err := materialize(d.name, d.sql); err != nil {
+		if err := materialize(d.name, "tuple()", d.sql); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, v := range studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists) {
-		if err := make(v.name, v.sql); err != nil {
+		if err := createView(v.name, v.sql); err != nil {
 			return nil, err
 		}
 	}

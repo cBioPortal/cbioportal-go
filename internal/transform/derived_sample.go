@@ -5,17 +5,16 @@ import (
 	"strings"
 )
 
-// sampleDerivedSQL reproduces prod's `sample_derived` column-store table as a
-// SELECT over our transform views. Prod sources sample/patient from OLTP-mirror
-// tables; we source them from the target-DB `sample` view (study_id, sample_id,
-// patient_id). sample_type follows the importer: TCGA barcode code, else a valid
-// SAMPLE_TYPE clinical value, else Primary Solid Tumor (long
-// target-DB view `clinical_sample`), sequenced from membership in the
-// `<study>_sequenced` sample list, and copy_number_segment_present from the
-// presence of the sample id in the raw cna_seg staging table.
-//
-// internal_id / patient_internal_id are the sample's and patient's internal
-// ids (the `sample` and `patient` tables).
+// sampleDerivedSQL builds prod's `sample_derived` column-store table as a
+// SELECT over the target-DB tables and views:
+//   - samples and patients come from the `sample` and `patient` tables
+//     (internal_id and patient_internal_id are their internal ids);
+//   - sample_type follows the importer: the TCGA barcode's code, else a valid
+//     SAMPLE_TYPE value from the `clinical_sample` view, else Primary Solid
+//     Tumor;
+//   - sequenced is membership in the `<study>_sequenced` sample list;
+//   - copy_number_segment_present is whether the sample has rows in the raw
+//     cna_seg staging table.
 func sampleDerivedSQL(rawDB, refDB, targetDB string) string {
 	return inTarget(targetDB, fmt.Sprintf(`SELECT
   concat(s.study_id, '_', s.sample_id) AS sample_unique_id,
