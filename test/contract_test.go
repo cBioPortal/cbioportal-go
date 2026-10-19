@@ -386,8 +386,6 @@ func TestContractAlterationEnrichmentsProfileTyped(t *testing.T) {
 	}
 }
 
-var _ = fmt.Sprintf // keep fmt imported for future cases
-
 // Session service: a main_session posted by the results view is served back
 // under the same id with the session envelope.
 func TestContractMainSessionRoundTrip(t *testing.T) {

@@ -277,7 +277,7 @@ func TestContractExpressionEnrichmentPatientType(t *testing.T) {
 	var samples []map[string]any
 	get(t, "/api/studies/study_es_0/samples", &samples)
 	if len(samples) < 60 {
-		t.Skip("need 60 samples")
+		t.Fatalf("study_es_0 has %d samples, want at least 60", len(samples))
 	}
 	groups := func(field string) []map[string]any {
 		g := func(rows []map[string]any) []map[string]string {

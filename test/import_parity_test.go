@@ -8,6 +8,7 @@ import "testing"
 // and name/description "All cases in study"; a study's own _all list is kept
 // as given, once.
 func TestContractGlobalCaseListFromAddCaseList(t *testing.T) {
+	requireAPI(t)
 	var sl struct {
 		Category, Name, Description string
 		SampleCount                 int
@@ -26,6 +27,7 @@ func TestContractGlobalCaseListFromAddCaseList(t *testing.T) {
 
 // ImportSampleList: an empty case_list_category is stored as "other".
 func TestContractCaseListEmptyCategoryIsOther(t *testing.T) {
+	requireAPI(t)
 	var sl struct{ Category string }
 	get(t, "/api/sample-lists/study_es_0_cna", &sl)
 	wantEq(t, sl.Category, "other")
@@ -33,6 +35,7 @@ func TestContractCaseListEmptyCategoryIsOther(t *testing.T) {
 
 // StructuralVariantUtil: empty text fields are "NA", empty integer fields -1.
 func TestContractStructuralVariantImportDefaults(t *testing.T) {
+	requireAPI(t)
 	var svs []map[string]any
 	post(t, "/api/structural-variant/fetch", map[string]any{
 		"molecularProfileIds": []string{"study_es_0_structural_variants"},
@@ -52,6 +55,7 @@ func TestContractStructuralVariantImportDefaults(t *testing.T) {
 // Discrete CNA keeps every level per gene x sample (genetic_alteration), so
 // ALL includes diploid calls, while the default reads AMP/HOMDEL events only.
 func TestContractDiscreteCopyNumberLevels(t *testing.T) {
+	requireAPI(t)
 	levels := func(eventType string) map[int]int {
 		var rows []struct{ Alteration int }
 		get(t, "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number?sampleListId=study_es_0_all&discreteCopyNumberEventType="+eventType, &rows)
@@ -73,6 +77,7 @@ func TestContractDiscreteCopyNumberLevels(t *testing.T) {
 // ImportTabDelimData resolves a symbol without an Entrez id through the gene
 // aliases and stores the line under the current gene (HIST1H3I -> H3C11).
 func TestContractCnaAliasResolvedToCurrentGene(t *testing.T) {
+	requireAPI(t)
 	var rows []struct {
 		EntrezGeneID int64 `json:"entrezGeneId"`
 		Gene         struct {
@@ -92,6 +97,7 @@ func TestContractCnaAliasResolvedToCurrentGene(t *testing.T) {
 
 // ReferenceGenomeGeneMapper: genes carry their chromosome and cytoband.
 func TestContractReferenceGenomeGeneLocation(t *testing.T) {
+	requireAPI(t)
 	var g struct {
 		Chromosome, Cytoband string
 		ReferenceGenomeID    int `json:"referenceGenomeId"`
