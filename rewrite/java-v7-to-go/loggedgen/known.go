@@ -56,6 +56,7 @@ var (
 	isMutationsFetch  = pathIs(`^/api/(legacy/)?mutations/fetch$`)
 	isDataBinCounts   = pathIs(`^/api/(legacy/)?(genomic|generic-assay)-data-bin-counts/fetch$`)
 	isAltEnrichments  = pathIs(`^/api/(legacy/)?alteration-enrichments/fetch$`)
+	isLegacyPost      = pathIs(`^/api/legacy/`)
 	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
 
@@ -160,6 +161,32 @@ func groupProfileCount(body string) int {
 		}
 	}
 	return len(seen)
+}
+
+// filtersMissingAttribute reports a study view filter, at the top of the
+// body or under studyViewFilter, with a clinical data filter on a name that
+// is no clinical attribute: CANCER_STUDY, which API clients send for the
+// study a sample belongs to.
+func filtersMissingAttribute(body string) bool {
+	f := bodyObject(body)
+	if inner, ok := f["studyViewFilter"]; ok {
+		var g map[string]json.RawMessage
+		if json.Unmarshal(inner, &g) == nil {
+			f = g
+		}
+	}
+	var filters []struct {
+		AttributeID string `json:"attributeId"`
+	}
+	if json.Unmarshal(f["clinicalDataFilters"], &filters) != nil {
+		return false
+	}
+	for _, c := range filters {
+		if c.AttributeID == "CANCER_STUDY" {
+			return true
+		}
+	}
+	return false
 }
 
 // hasGenes reports a request that names genes, in its query or its body.
@@ -315,6 +342,12 @@ var expectations = []expectation{
 			return m == "GET" && isDiscreteCNAList(p) && q.Get("entrezGeneId") != ""
 		},
 		options: `known-if-a-subset="Java's copy-number GET has no gene parameter and answers every gene's calls; go reads entrezGeneId and answers that gene's (Added in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isLegacyPost(p) && filtersMissingAttribute(b)
+		},
+		options: `known="Java's legacy StudyViewFilterApplier drops a clinical data filter on an attribute none of the studies has and answers every sample; go applies it and matches none, as Java's newer endpoints do (Fixed in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {

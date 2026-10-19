@@ -542,3 +542,20 @@ func TestContractClinicalTableWithoutPageSize(t *testing.T) {
 	post(t, "/api/samples/fetch?projection=ID", map[string]any{"sampleListIds": []string{"study_es_0_all"}}, &samples)
 	wantEq(t, len(d.ByUniqueSampleKey), len(samples))
 }
+
+// TestContractClinicalFilterOnMissingAttribute pins that a clinical data
+// filter on an attribute none of the studies has matches no sample. Java's
+// legacy endpoints drop such a filter and answer every sample; its newer
+// endpoints and go apply it.
+func TestContractClinicalFilterOnMissingAttribute(t *testing.T) {
+	requireAPI(t)
+	filter := map[string]any{
+		"studyIds":            []string{"study_es_0"},
+		"clinicalDataFilters": []map[string]any{{"attributeId": "CANCER_STUDY", "values": []map[string]any{{"value": "study_es_0"}}}},
+	}
+	for _, path := range []string{"/api/filtered-samples/fetch", "/api/legacy/filtered-samples/fetch"} {
+		var d []json.RawMessage
+		post(t, path, filter, &d)
+		wantEq(t, []any{path, len(d)}, []any{path, 0})
+	}
+}
