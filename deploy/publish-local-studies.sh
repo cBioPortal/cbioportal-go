@@ -17,7 +17,7 @@
 # Example:
 #   export CLICKHOUSE_URL=https://<host>:8443 CLICKHOUSE_USER=go_import
 #   read -rs CLICKHOUSE_PASSWORD && export CLICKHOUSE_PASSWORD
-#   deploy/publish-local-studies.sh dev_cbioportal_public_go_blue \
+#   deploy/publish-local-studies.sh my_portal \
 #     seed-cbioportal_hg19_hg38_v2.14.5.sql.gz msk_impact_2017 acbc_mskcc_2015
 set -euo pipefail
 

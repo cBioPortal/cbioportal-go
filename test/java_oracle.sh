@@ -12,21 +12,33 @@
 # Env: IMAGE (cbioportal/cbioportal:master), CLICKHOUSE_URL
 # (http://localhost:18123; reached from the containers over the host
 # network), CLICKHOUSE_CONTAINER (the ClickHouse server container, for
-# clickhouse-client), JAVA_PORT (18095), PORTAL_PROPERTIES (the frontend
+# clickhouse-client; found by its image when only one runs), JAVA_PORT (18095), PORTAL_PROPERTIES (the frontend
 # submodule's e2e portal.properties).
 set -euo pipefail
 IMAGE=${IMAGE:-cbioportal/cbioportal:master}
 CH=${CLICKHOUSE_URL:-http://localhost:18123}
-CH_CONTAINER=${CLICKHOUSE_CONTAINER:-ch-dge}
 PORT=${JAVA_PORT:-18095}
 DB=java_e2e
 WORK="$(cd "$(dirname "$0")/.." && pwd)/bin/java-oracle"
 mkdir -p "$WORK"
 chq() { curl -sf "$CH" --data-binary "$1"; }
+# The ClickHouse server container, for clickhouse-client: CLICKHOUSE_CONTAINER,
+# or else the one running container with a ClickHouse image.
+ch_container() {
+  if [ -n "${CLICKHOUSE_CONTAINER:-}" ]; then echo "$CLICKHOUSE_CONTAINER"; return; fi
+  local found
+  found=$(docker ps --format '{{.Names}} {{.Image}}' | awk '$2 ~ /clickhouse/ { print $1 }')
+  if [ "$(printf '%s' "$found" | grep -c .)" -ne 1 ]; then
+    echo "set CLICKHOUSE_CONTAINER to the ClickHouse server container (running: ${found:-none})" >&2
+    return 1
+  fi
+  echo "$found"
+}
 
 case "${1:-}" in
 db)
   FIX="$(cd "${2:?usage: test/java_oracle.sh db <cbioportal-test checkout>}" && pwd)/data"
+  CH_CONTAINER=$(ch_container)
   chq "DROP DATABASE IF EXISTS $DB"
   chq "CREATE DATABASE $DB"
   chq "CREATE USER IF NOT EXISTS java_oracle IDENTIFIED WITH plaintext_password BY 'oracle'"
@@ -75,7 +87,7 @@ start)
   echo "Java backend on :$PORT"
   ;;
 stop)
-  # `docker stop` can be refused under snap's AppArmor profile; end PID 1.
+  # Some Docker installs (e.g. snap under AppArmor) refuse `docker stop`; end PID 1.
   docker exec java-oracle sh -c 'kill 1' 2>/dev/null || docker stop java-oracle
   docker wait java-oracle >/dev/null
   docker rm java-oracle

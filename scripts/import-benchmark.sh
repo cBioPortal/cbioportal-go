@@ -13,7 +13,8 @@
 # `fetch` checks out datahub's master (DATAHUB_REF) into <dir>/datahub with
 # `cbioportal-import fetch-datahub` (LFS files from datahub's own store
 # only), and writes <dir>/panels-<study> with the gene panels each study
-# uses. Keep <dir> outside /tmp: snap Docker cannot see it.
+# uses. Keep <dir> outside /tmp: some Docker installs (e.g. snap) cannot see
+# it.
 #
 # Java: validateData.py, then cbioportalImporter.py (one JVM per data file)
 # in a container capped at 8 GiB, -Xmx6g; then populate_derived_tables.sql
@@ -24,11 +25,10 @@
 # Env: SEED (go: datahub's seedDB/seed-cbioportal_hg19_hg38_v2.14.5.sql.gz,
 # in `fetch`'s checkout; the MySQL dump of the seed in Java's image), IMAGE
 # (cbioportal/cbioportal:v7.1.2), CLICKHOUSE_URL (http://localhost:18123),
-# CLICKHOUSE_CONTAINER (ch-dge), JAVA_XMX (6g).
+# CLICKHOUSE_CONTAINER (found by its image when only one runs), JAVA_XMX (6g).
 set -euo pipefail
 IMAGE=${IMAGE:-cbioportal/cbioportal:v7.1.2}
 CH=${CLICKHOUSE_URL:-http://localhost:18123}
-CH_CONTAINER=${CLICKHOUSE_CONTAINER:-ch-dge}
 XMX=${JAVA_XMX:-6g}
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/bin/import-benchmark"
@@ -39,6 +39,18 @@ now() { date +%s.%N; }
 secs() { awk -v a="$1" -v b="$2" 'BEGIN { printf "%.1f", b - a }'; }
 maxrss() { awk -F': ' '/Maximum resident set size/ { printf "%d", $2 / 1024 }' "$1"; }
 record() { printf '%s\n' "$(IFS=$'\t'; echo "$*")" >> "$RESULTS"; }
+# The ClickHouse server container, for clickhouse-client: CLICKHOUSE_CONTAINER,
+# or else the one running container with a ClickHouse image.
+ch_container() {
+  if [ -n "${CLICKHOUSE_CONTAINER:-}" ]; then echo "$CLICKHOUSE_CONTAINER"; return; fi
+  local found
+  found=$(docker ps --format '{{.Names}} {{.Image}}' | awk '$2 ~ /clickhouse/ { print $1 }')
+  if [ "$(printf '%s' "$found" | grep -c .)" -ne 1 ]; then
+    echo "set CLICKHOUSE_CONTAINER to the ClickHouse server container (running: ${found:-none})" >&2
+    return 1
+  fi
+  echo "$found"
+}
 
 # Java's ClickHouse scripts (schema, seed, derived tables), from the image.
 scripts() {
@@ -47,7 +59,8 @@ scripts() {
     docker cp import-bench-extract:/cbioportal/db-scripts/clickhouse "$WORK/scripts"
     docker rm import-bench-extract >/dev/null
   fi
-  # GNU time for the container; snap Docker cannot mount /usr/bin.
+  # GNU time for the container; some Docker installs (e.g. snap) cannot
+  # mount /usr/bin.
   cp /usr/bin/time "$WORK/time"
 }
 
@@ -83,6 +96,7 @@ fetch)
   ;;
 java)
   STUDY="$(cd "$2" && pwd)" PANELS="$(cd "$3" && pwd)" DB=bench_java_$4
+  CH_CONTAINER=$(ch_container)
   scripts
   chq "DROP DATABASE IF EXISTS $DB"
   chq "CREATE DATABASE $DB"

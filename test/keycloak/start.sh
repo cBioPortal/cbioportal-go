@@ -18,8 +18,8 @@ PORT=${KEYCLOAK_PORT:-8084}
 # The studies upstream CI grants the test user (.circleci/config.yml).
 STUDIES=${STUDIES:-ascn_test_study study_hg38 teststudy_genepanels study_es_0 lgg_ucsf_2014_test_generic_assay}
 
-# Stop from inside when the daemon may not signal containers (snap Docker
-# under AppArmor).
+# Stop from inside when the daemon may not signal containers (some Docker
+# installs, e.g. snap under AppArmor).
 docker rm -f "$NAME" >/dev/null 2>&1 ||
   { docker exec "$NAME" sh -c 'kill 1' >/dev/null 2>&1; sleep 3; docker rm "$NAME" >/dev/null 2>&1; } || true
 for _ in $(seq 1 30); do docker inspect "$NAME" >/dev/null 2>&1 || break; sleep 1; done
