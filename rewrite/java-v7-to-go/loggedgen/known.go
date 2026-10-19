@@ -56,6 +56,8 @@ var (
 	isMutationsFetch  = pathIs(`^/api/(legacy/)?mutations/fetch$`)
 	isDataBinCounts   = pathIs(`^/api/(legacy/)?(genomic|generic-assay)-data-bin-counts/fetch$`)
 	isAltEnrichments  = pathIs(`^/api/(legacy/)?alteration-enrichments/fetch$`)
+	isEntityClinical  = pathIs(`^/api/studies/[^/]+/(patients|samples)/[^/]+/clinical-data$`)
+	isClinicalEvents  = pathIs(`^/api/studies/[^/]+/(patients/[^/]+/)?clinical-events$`)
 	isLegacyPost      = pathIs(`^/api/legacy/`)
 	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
@@ -313,6 +315,18 @@ var expectations = []expectation{
 			return m == "GET" && isStudyClinical(p) && q.Has("pageSize")
 		},
 		options: `known="Java orders by the sample's or patient's internal id only; which of the attributes of the entity at a page boundary fall on the page follows ClickHouse's unstable sort"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "GET" && isEntityClinical(p) && paged(q) && q.Get("sortBy") == ""
+		},
+		options: `known="without sortBy Java's ClinicalDataMapper lists a patient's or sample's clinical data in no set order, so which attributes fill a page is unspecified"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "GET" && isClinicalEvents(p) && paged(q) && q.Get("sortBy") != ""
+		},
+		options: `known="Java orders by the sort value only; which of the events that tie at a page boundary fall on the page is unspecified"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {

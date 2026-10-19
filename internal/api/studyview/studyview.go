@@ -75,7 +75,72 @@ func (s Server) clinicalDataCountsFetch(w http.ResponseWriter, r *http.Request) 
 	for i, a := range f.Attributes {
 		ids[i] = a.AttributeID
 	}
+	if core.IsLegacyAlias(r) {
+		core.WriteJSON(w, s.legacyClinicalDataCounts(svf, ids))
+		return
+	}
 	core.WriteJSON(w, s.clinicalDataCountsWithMissing(svf, ids))
+}
+
+// legacyClinicalDataCounts is the legacy ClinicalDataServiceImpl
+// .fetchClinicalDataCounts: one item per distinct requested attribute, in
+// Java's HashSet order. An attribute no involved study defines counts as a
+// patient attribute: NA for every filtered patient when some requested
+// attribute is a patient attribute (Java loads the patients only then), and
+// no counts otherwise.
+func (s Server) legacyClinicalDataCounts(f studyViewFilter, attrIDs []string) []ClinicalDataCountItem {
+	byID := map[string]ClinicalDataCountItem{}
+	for _, item := range s.clinicalDataCounts(f, attrIDs) {
+		byID[item.AttributeID] = item
+	}
+	unique := map[string]bool{}
+	for _, id := range attrIDs {
+		unique[id] = true
+	}
+	out := []ClinicalDataCountItem{}
+	var patients *uint64
+	for _, id := range core.JavaHashMapOrder(core.SortedKeys(unique)) {
+		if item, ok := byID[id]; ok {
+			out = append(out, item)
+			continue
+		}
+		if patients == nil {
+			n := s.legacyPatientCount(f, attrIDs)
+			patients = &n
+		}
+		item := ClinicalDataCountItem{AttributeID: id, Counts: []ClinicalDataCount{}}
+		if *patients > 0 {
+			item.Counts = append(item.Counts, ClinicalDataCount{Value: "NA", Count: *patients})
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// legacyPatientCount is the number of filtered patients when one of the
+// attributes is a patient attribute only, in every involved study that
+// defines it, and 0 otherwise.
+func (s Server) legacyPatientCount(f studyViewFilter, attrIDs []string) uint64 {
+	studies := f.studyIDs()
+	if len(attrIDs) == 0 || len(studies) == 0 {
+		return 0
+	}
+	type row struct {
+		N uint64 `json:"n"`
+	}
+	args := core.NewArgs()
+	levels, err := core.QueryA[row](s.CH, fmt.Sprintf(
+		"SELECT count() AS n FROM (SELECT clinical_attribute_id FROM clinical_attribute_meta WHERE study_id IN %s AND clinical_attribute_id IN %s "+
+			"GROUP BY clinical_attribute_id HAVING max(patient_attribute = 0) = 0)",
+		args.Strs(studies), args.Strs(attrIDs)), args)
+	if err != nil || len(levels) == 0 || levels[0].N == 0 {
+		return 0
+	}
+	n, err := core.QueryA[row](s.CH, "SELECT uniqExact(patient_unique_id) AS n FROM "+s.filterFrom(args, f), args)
+	if err != nil || len(n) == 0 {
+		return 0
+	}
+	return n[0].N
 }
 
 // clinicalDataCountsWithMissing is GetClinicalDataCountsUseCase: the counts of

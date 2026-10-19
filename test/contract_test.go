@@ -559,3 +559,40 @@ func TestContractClinicalFilterOnMissingAttribute(t *testing.T) {
 		wantEq(t, []any{path, len(d)}, []any{path, 0})
 	}
 }
+
+// TestContractLegacyClinicalDataCounts pins the legacy clinical data counts:
+// one item per distinct attribute, also when no filtered case has a value
+// and several studies define the attribute (the column-store endpoint adds
+// an NA item per study), and an item for an attribute no study defines,
+// with NA for every filtered patient when a patient attribute is also
+// asked for.
+func TestContractLegacyClinicalDataCounts(t *testing.T) {
+	requireAPI(t)
+	filter := map[string]any{"sampleIdentifiers": []map[string]string{
+		{"studyId": "study_es_0", "sampleId": "TCGA-A2-A04P-01"},
+		{"studyId": "lgg_ucsf_2014_test_generic_assay", "sampleId": "P02_Pri"},
+	}}
+	counts := func(attrs ...string) map[string]string {
+		var as []map[string]string
+		for _, a := range attrs {
+			as = append(as, map[string]string{"attributeId": a})
+		}
+		var d []struct {
+			AttributeID string            `json:"attributeId"`
+			Counts      []json.RawMessage `json:"counts"`
+		}
+		post(t, "/api/legacy/clinical-data-counts/fetch", map[string]any{"attributes": as, "studyViewFilter": filter}, &d)
+		out := map[string]string{}
+		for _, item := range d {
+			if _, dup := out[item.AttributeID]; dup {
+				t.Errorf("%v: %s twice", attrs, item.AttributeID)
+			}
+			b, _ := json.Marshal(item.Counts)
+			out[item.AttributeID] = string(b)
+		}
+		return out
+	}
+	wantEq(t, counts("OS_STATUS"), map[string]string{"OS_STATUS": `[{"value":"NA","count":2}]`})
+	wantEq(t, counts("NO_SUCH", "OS_STATUS")["NO_SUCH"], `[{"value":"NA","count":2}]`)
+	wantEq(t, counts("NO_SUCH", "MUTATION_COUNT")["NO_SUCH"], `[]`)
+}
