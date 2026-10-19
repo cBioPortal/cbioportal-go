@@ -16,7 +16,11 @@ e2ereport
 # Local secrets / env (never commit)
 *.env
 .secrets/
-*secret*
+*.secret
+*secret*.json
+*secret*.txt
+*secret*.yaml
+*secret*.yml
 
 # Editor / OS
 .DS_Store

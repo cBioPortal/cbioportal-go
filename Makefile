@@ -4,7 +4,7 @@ CBIOPORTAL_DB ?= cbioportal
 PORT ?= 8080
 API ?= http://localhost:18090
 
-.PHONY: build test fmt vet lint contract e2e run frontend testdb clean
+.PHONY: build test fmt vet lint contract e2e run frontend testdb clean help
 
 build: ## build the programs into bin/
 	go build -o bin/cbioportal-import ./cmd/cbioportal-import
@@ -18,7 +18,7 @@ test: ## unit tests (no services needed)
 fmt: ## format the code
 	gofmt -w cmd internal ops rewrite test
 
-vet:
+vet: ## go vet every package
 	go vet ./...
 
 lint: vet ## gofmt check + go vet (what CI runs)

@@ -1,4 +1,18 @@
 # Build context: Go sources, the frontend submodule sources and deploy/.
+# Local build output, caches and per-machine files stay out.
+/cbioportal-import
+/cbioportal-api
+/cbioportal-ops
+/cbioportal-rewrite-test
+/paritydiff
+/loggedgen
+/apibench
+/e2ereport
+*.test
+*.out
+.claude/
+.parity/
+CLAUDE.local.md
 **/node_modules
 **/.turbo
 bin/
