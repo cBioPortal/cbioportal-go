@@ -41,17 +41,21 @@ genes and cancer types, goes into a third database (the "ref" database).
 
 ```
 $ cbioportal-import help
+...
 Commands:
-  plan               list a study's data files and the staging tables they load into
-  ingest             stage a study's data files in the raw database
-  remove-study       delete studies' staged rows from the raw database
-  ingest-case-lists  restage only the case lists of one or more studies
-  load-reference     load genes, gene aliases and cancer types from a seed dump
-  load-genesets      load gene sets and their hierarchy into the reference database
-  load-gene-panels   load gene panel definitions into the raw database
-  transform          build the portal database's tables from the raw and reference databases
-  version            print the version
-  help               show help for a command
+  plan              list a study's data files and the staging tables they load into
+  ingest            stage a study's data files in the raw database
+  remove-study      delete studies' staged rows from the raw database
+  ingest-case-lists restage only the case lists of one or more studies
+  load-reference    load genes, gene aliases and cancer types from a seed dump
+  load-genesets     load gene sets and their hierarchy into the reference database
+  load-gene-panels  load gene panel definitions into the raw database
+  import-study      import studies into a portal that is being served
+  fetch-datahub     check out datahub studies with their LFS files
+  transform         build the portal database's tables from the raw and reference databases
+  version           print the version
+  completion        print a shell script that completes this program's commands and flags
+  help              show the help of a command
 ```
 
 ```bash
@@ -65,7 +69,16 @@ cbioportal-import load-genesets <genesets.gmt> --version msigdb_7.5.1 \
   [--supp <supp-genesets.txt>] [--hierarchy <tree.yaml>] --db cbioportal_ref
 cbioportal-import load-gene-panels <panels-dir> --db cbioportal_raw
 cbioportal-import transform --raw-db cbioportal_raw --db cbioportal --ref-db cbioportal_ref
+cbioportal-import fetch-datahub <dir> <study-path>...               # e.g. public/acbc_mskcc_2015
+cbioportal-import import-study <study-dir>... --db cbioportal        # ingest + transform on a served portal
+cbioportal-import completion bash > /etc/bash_completion.d/cbioportal-import
 ```
+
+`import-study` does what `ingest` and then `transform` do, but it is safe
+to run against a portal that people are using. It runs one import at a
+time, and the portal keeps serving its old tables until the new ones are
+ready. [Loading studies](deployment.md#loading-studies) shows it together
+with `fetch-datahub`, which downloads studies from cBioPortal/datahub.
 
 `load-genesets` replaces all gene sets. Gene sets are the reference data
 for GSVA profiles. It does the same job as two scripts of the Java importer

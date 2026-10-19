@@ -1,8 +1,10 @@
 # Command-line conventions
 
-go has three programs: `cbioportal-import` loads studies, `cbioportal-api`
-serves the portal, and `cbioportal-ops` runs the cBioPortal team's own jobs
-for cbioportal.org. This page lists the rules they share. The rules make
+go has four programs. `cbioportal-import` loads studies, and
+`cbioportal-api` serves the portal. `cbioportal-ops` runs the cBioPortal
+team's own jobs for cbioportal.org. `cbioportal-rewrite-test` compares go
+with the Java cBioPortal it replaces, for example by copying production's
+database and replaying production's requests. This page lists the rules they share. The rules make
 the programs easy to use from scripts and by AI agents, as well as by
 people. Each program's commands and settings are in
 [Configuration](configuration.md).

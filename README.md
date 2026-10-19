@@ -61,7 +61,7 @@ get pnpm). You also need two downloads from
 docker run -d --name cbioportal-clickhouse -p 18123:8123 \
   -e CLICKHOUSE_SKIP_USER_SETUP=1 clickhouse/clickhouse-server:25.3
 
-# 2. Build the two programs
+# 2. Build the programs (into bin/)
 make build
 
 # 3. Load the reference data (genes, gene aliases, cancer types). Do this once.
