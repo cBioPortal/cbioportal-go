@@ -1,7 +1,6 @@
 package contract
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"sort"
 	"testing"
@@ -41,8 +40,8 @@ func TestContractUniqueKeysAreIdColonStudy(t *testing.T) {
 	requireAPI(t)
 	var samples []map[string]any
 	get(t, "/api/studies/study_es_0/samples?pageSize=1", &samples)
-	wantEq(t, samples[0]["uniqueSampleKey"], base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB-01:study_es_0")))
-	wantEq(t, samples[0]["uniquePatientKey"], base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB:study_es_0")))
+	wantEq(t, samples[0]["uniqueSampleKey"], javaKey("TCGA-A1-A0SB-01", "study_es_0"))
+	wantEq(t, samples[0]["uniquePatientKey"], javaKey("TCGA-A1-A0SB", "study_es_0"))
 
 	var patients []map[string]any
 	get(t, "/api/studies/study_es_0/patients?pageSize=1", &patients)

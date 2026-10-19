@@ -4,34 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"slices"
-	"strings"
+	"strconv"
 	"testing"
-	"time"
 )
 
 // Contracts for the Java endpoints served outside the main route table: the
 // /api/legacy/ and /api/not-ready-yet/ aliases, GET /api/studies/meta, and the
 // cache-statistics endpoints of a portal without a cache.
-
-func rawDo(t *testing.T, method, path, body string) (*http.Response, []byte) {
-	t.Helper()
-	var r io.Reader
-	if body != "" {
-		r = strings.NewReader(body)
-	}
-	req, _ := http.NewRequest(method, apiBase()+path, r)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return resp, b
-}
 
 func TestContractStudiesMeta(t *testing.T) {
 	requireAPI(t)
@@ -40,17 +20,17 @@ func TestContractStudiesMeta(t *testing.T) {
 	resp, body := rawDo(t, "GET", "/api/studies/meta", "")
 	wantEq(t, resp.StatusCode, 200)
 	wantEq(t, len(body), 0)
-	wantEq(t, resp.Header.Get("total-count"), itoa(len(all)))
-	wantEq(t, resp.Header.Get("X-Total-Count"), itoa(len(all)))
+	wantEq(t, resp.Header.Get("total-count"), strconv.Itoa(len(all)))
+	wantEq(t, resp.Header.Get("X-Total-Count"), strconv.Itoa(len(all)))
 
 	var kw []map[string]any
 	get(t, "/api/studies?keyword=study_es_0", &kw)
 	resp, _ = rawDo(t, "GET", "/api/studies/meta?keyword=study_es_0&sortBy=name&direction=DESC", "")
-	wantEq(t, resp.Header.Get("X-Total-Count"), itoa(len(kw)))
+	wantEq(t, resp.Header.Get("X-Total-Count"), strconv.Itoa(len(kw)))
 
 	resp, _ = rawDo(t, "GET", "/api/studies?projection=META", "")
-	wantEq(t, resp.Header.Get("X-Total-Count"), itoa(len(all)))
-	wantEq(t, resp.Header.Get("total-count"), itoa(len(all)))
+	wantEq(t, resp.Header.Get("X-Total-Count"), strconv.Itoa(len(all)))
+	wantEq(t, resp.Header.Get("total-count"), strconv.Itoa(len(all)))
 }
 
 func TestContractNotReadyYetAliases(t *testing.T) {
@@ -102,11 +82,6 @@ func TestContractCacheStatsDisabled(t *testing.T) {
 		wantEq(t, e["path"], p)
 		wantEq(t, e["error"], "Not Found")
 	}
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }
 
 // The legacy study endpoints write the legacy model: the nested cancer type

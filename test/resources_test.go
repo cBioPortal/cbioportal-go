@@ -2,23 +2,9 @@ package contract
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"testing"
-	"time"
 )
-
-// statusOf returns the HTTP status of a GET.
-func statusOf(t *testing.T, path string) int {
-	t.Helper()
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Get(apiBase() + path)
-	if err != nil {
-		t.Fatalf("GET %s: %v", path, err)
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-	return resp.StatusCode
-}
 
 type resourceDefinition struct {
 	ResourceID     string  `json:"resourceId"`

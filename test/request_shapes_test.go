@@ -1,7 +1,6 @@
 package contract
 
 import (
-	"encoding/base64"
 	"io"
 	"net/http"
 	"sort"
@@ -71,7 +70,7 @@ func TestContractPagingSortByDirection(t *testing.T) {
 
 func TestContractSamplesFetchByUniqueSampleKeys(t *testing.T) {
 	requireAPI(t)
-	key := base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB-01:study_es_0"))
+	key := javaKey("TCGA-A1-A0SB-01", "study_es_0")
 	var d []map[string]any
 	post(t, "/api/samples/fetch", map[string]any{"uniqueSampleKeys": []string{key}}, &d)
 	wantEq(t, ids(d, "sampleId"), []string{"TCGA-A1-A0SB-01"})

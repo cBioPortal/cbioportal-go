@@ -103,20 +103,6 @@ var addedLists = []addedList{
 		[]string{"hugoGeneSymbol", "pValue"}, nil},
 }
 
-// rawList requests a list and returns its items as raw JSON.
-func rawList(t *testing.T, method, path, body string) []json.RawMessage {
-	t.Helper()
-	resp, b := rawDo(t, method, path, body)
-	if resp.StatusCode != 200 {
-		t.Fatalf("%s %s -> %d: %s", method, path, resp.StatusCode, b)
-	}
-	var out []json.RawMessage
-	if err := json.Unmarshal(b, &out); err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	return out
-}
-
 // sameItems reports whether a and b hold the same items in the same order.
 func sameItems(a, b []json.RawMessage) bool {
 	if len(a) != len(b) {
@@ -171,8 +157,8 @@ func TestAddedPaging(t *testing.T) {
 		}
 		n := max(1, len(all)/5)
 		pages := func(kv ...string) []json.RawMessage {
-			p0 := rawList(t, l.method, withQuery(l.path, append(kv, "pageSize", itoa(n), "pageNumber", "0")...), l.body)
-			p1 := rawList(t, l.method, withQuery(l.path, append(kv, "pageSize", itoa(n), "pageNumber", "1")...), l.body)
+			p0 := rawList(t, l.method, withQuery(l.path, append(kv, "pageSize", strconv.Itoa(n), "pageNumber", "0")...), l.body)
+			p1 := rawList(t, l.method, withQuery(l.path, append(kv, "pageSize", strconv.Itoa(n), "pageNumber", "1")...), l.body)
 			return append(p0, p1...)
 		}
 		if !sameItems(pages(), all[:min(2*n, len(all))]) {
@@ -294,7 +280,7 @@ func TestAddedPagingMeta(t *testing.T) {
 	body := `{"entrezGeneIds":[116983],"sampleListId":"study_es_0_all"}`
 	all := rawList(t, "POST", path, body)
 	resp, _ := rawDo(t, "POST", path+"?projection=META&pageSize=2&pageNumber=1&sortBy=value", body)
-	wantEq(t, resp.Header.Get("total-count"), itoa(len(all)))
+	wantEq(t, resp.Header.Get("total-count"), strconv.Itoa(len(all)))
 }
 
 // TestAddedPagingRows pins treatments/sample pages by the rows' treatment
@@ -337,6 +323,6 @@ func TestContractMetaWhereJavaIgnoresIt(t *testing.T) {
 			t.Fatalf("%s: no records", c.path)
 		}
 		resp, b := rawDo(t, "POST", c.path+"?projection=META", c.body)
-		wantEq(t, []any{c.path, resp.StatusCode, resp.Header.Get("total-count"), len(b)}, []any{c.path, 200, itoa(len(all)), 0})
+		wantEq(t, []any{c.path, resp.StatusCode, resp.Header.Get("total-count"), len(b)}, []any{c.path, 200, strconv.Itoa(len(all)), 0})
 	}
 }

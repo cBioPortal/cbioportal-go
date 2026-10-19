@@ -1,7 +1,6 @@
 package contract
 
 import (
-	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -67,13 +66,6 @@ func requireLgg(t *testing.T) {
 	}
 }
 
-func wantClose(t *testing.T, what string, got, want float64) {
-	t.Helper()
-	if got != want && math.Abs(got-want) > 1e-12*math.Abs(want) {
-		t.Errorf("%s = %v, want %v", what, got, want)
-	}
-}
-
 type gaGroupStat struct {
 	Name              string   `json:"name"`
 	MeanExpression    *float64 `json:"meanExpression"`
@@ -129,8 +121,8 @@ func TestContractGenericAssayCategoricalEnrichmentArmLevelCNA(t *testing.T) {
 		{0.2565679723337805, 0.9341323757068193},
 	}
 	for i, w := range want {
-		wantClose(t, rows[i].StableID+" pValue", rows[i].PValue, w.p)
-		wantClose(t, rows[i].StableID+" qValue", rows[i].QValue, w.q)
+		wantNear(t, rows[i].StableID+" pValue", rows[i].PValue, w.p, 1e-12)
+		wantNear(t, rows[i].StableID+" qValue", rows[i].QValue, w.q, 1e-12)
 	}
 	for _, r := range rows {
 		// Groups in Java HashMap order; categorical statistics carry only the name.
@@ -159,8 +151,8 @@ func TestContractGenericAssayCategoricalEnrichmentPatientLevelHLA(t *testing.T) 
 	wantQ := []float64{0.7080334340351231, 0.7080334340351231, 0.7080334340351231, 0.7080334340351231,
 		0.7080334340351231, 0.7080334340351231, 0.7080334340351231, 0.7303103382513572}
 	for i, r := range rows {
-		wantClose(t, r.StableID+" pValue", r.PValue, wantP[i])
-		wantClose(t, r.StableID+" qValue", r.QValue, wantQ[i])
+		wantNear(t, r.StableID+" pValue", r.PValue, wantP[i], 1e-12)
+		wantNear(t, r.StableID+" qValue", r.QValue, wantQ[i], 1e-12)
 		wantEq(t, groupNames(r), []string{"A", "B", "C"})
 	}
 
@@ -207,8 +199,8 @@ func TestContractGenericAssayBinaryEnrichment(t *testing.T) {
 	}
 	for i, e := range exp {
 		r := rows[i]
-		wantClose(t, r.StableID+" pValue", r.PValue, e.p)
-		wantClose(t, r.StableID+" qValue", r.QValue, e.q)
+		wantNear(t, r.StableID+" pValue", r.PValue, e.p, 1e-12)
+		wantNear(t, r.StableID+" qValue", r.QValue, e.q, 1e-12)
 		if len(r.GroupsStatistics) != len(e.stats) || len(r.Counts) != len(e.stats) {
 			t.Fatalf("%s: %d stats / %d counts", r.StableID, len(r.GroupsStatistics), len(r.Counts))
 		}
@@ -218,8 +210,8 @@ func TestContractGenericAssayBinaryEnrichment(t *testing.T) {
 			if g.MeanExpression == nil || g.StandardDeviation == nil {
 				t.Fatalf("%s: missing mean/sd", r.StableID)
 			}
-			wantClose(t, r.StableID+" mean", *g.MeanExpression, s.mean)
-			wantClose(t, r.StableID+" sd", *g.StandardDeviation, s.sd)
+			wantNear(t, r.StableID+" mean", *g.MeanExpression, s.mean, 1e-12)
+			wantNear(t, r.StableID+" sd", *g.StandardDeviation, s.sd, 1e-12)
 			wantEq(t, r.Counts[j], s.count)
 		}
 	}
@@ -230,8 +222,8 @@ func TestContractGenericAssayBinaryEnrichment(t *testing.T) {
 	post(t, "/api/generic-assay-binary-enrichments/fetch", gaBody("mutational_signature_binary_SBS", lggThirds()), &rows)
 	wantEq(t, len(rows), 24)
 	wantEq(t, rows[0].StableID, p+"19")
-	wantClose(t, "SBS19 pValue", rows[0].PValue, 0.0538727129030554)
-	wantClose(t, "SBS19 qValue", rows[0].QValue, 0.625527941179875)
+	wantNear(t, "SBS19 pValue", rows[0].PValue, 0.0538727129030554, 1e-12)
+	wantNear(t, "SBS19 qValue", rows[0].QValue, 0.625527941179875, 1e-12)
 	wantEq(t, rows[0].Counts, []gaCount{{5, "A", 20}, {0, "B", 20}, {5, "C", 21}})
 }
 

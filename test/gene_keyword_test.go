@@ -1,6 +1,9 @@
 package contract
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 // GeneServiceImpl completes a keyword page with the genes having the keyword
 // as an alias, drops symbols with several entrez ids and, without a sortBy,
@@ -21,7 +24,7 @@ func TestOracleGeneKeywordSearch(t *testing.T) {
 		}
 	}
 	resp, _ := rawDo(t, "GET", "/api/genes?keyword=TP&pageSize=5&projection=META", "")
-	wantEq(t, resp.Header.Get("total-count"), itoa(len(genes)))
+	wantEq(t, resp.Header.Get("total-count"), strconv.Itoa(len(genes)))
 	genes = nil
 	get(t, "/api/genes?keyword=TP&pageSize=5", &genes)
 	wantEq(t, len(genes), 5)

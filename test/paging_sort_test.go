@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -58,20 +59,6 @@ var sortedLists = []sortedList{
 	{"GET", "/api/studies/lgg_ucsf_2014_test_generic_assay/clinical-events", "",
 		[]string{"eventType", "startNumberOfDaysSinceDiagnosis", "endNumberOfDaysSinceDiagnosis"}},
 	{"GET", "/api/genes?pageSize=40&pageNumber=2", "", []string{"entrezGeneId", "hugoGeneSymbol", "cytoband", "length"}},
-}
-
-// listOf requests a list and decodes it.
-func listOf(t *testing.T, method, path, body string) []map[string]any {
-	t.Helper()
-	resp, b := rawDo(t, method, path, body)
-	if resp.StatusCode != 200 {
-		t.Fatalf("%s %s -> %d: %s", method, path, resp.StatusCode, b)
-	}
-	var out []map[string]any
-	if err := json.Unmarshal(b, &out); err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	return out
 }
 
 func withQuery(path string, kv ...string) string {
@@ -285,7 +272,7 @@ func TestGenericAssayMetaPaging(t *testing.T) {
 		t.Fatalf("%d entities", len(all))
 	}
 	resp, b := rawDo(t, "POST", "/api/generic-assay-meta/fetch?pageSize=2&pageNumber=1", body)
-	wantEq(t, resp.Header.Get("total-count"), itoa(len(all)))
+	wantEq(t, resp.Header.Get("total-count"), strconv.Itoa(len(all)))
 	var page []map[string]any
 	json.Unmarshal(b, &page)
 	wantEq(t, fieldOf(page, "stableId"), fieldOf(all, "stableId")[2:4])

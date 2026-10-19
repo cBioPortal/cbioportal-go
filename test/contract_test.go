@@ -12,12 +12,8 @@
 package contract
 
 import (
-	"bytes"
-	"compress/gzip"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"os"
@@ -44,46 +40,6 @@ func requireAPI(t *testing.T) {
 	}
 	resp.Body.Close()
 }
-
-// do sends an optional JSON body (gzip-compressed when gz) and decodes the JSON
-// response into out.
-func do(t *testing.T, method, path string, body any, gz bool, out any) {
-	t.Helper()
-	var r io.Reader
-	h := http.Header{"Content-Type": {"application/json"}}
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatalf("marshal body: %v", err)
-		}
-		if gz {
-			var buf bytes.Buffer
-			zw := gzip.NewWriter(&buf)
-			zw.Write(raw)
-			zw.Close()
-			raw = buf.Bytes()
-			h.Set("Content-Encoding", "gzip")
-		}
-		r = bytes.NewReader(raw)
-	}
-	req, _ := http.NewRequest(method, apiBase()+path, r)
-	req.Header = h
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
-	if err != nil {
-		t.Fatalf("%s %s: %v", method, path, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		t.Fatalf("%s %s -> %d: %s", method, path, resp.StatusCode, b)
-	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		t.Fatalf("decode %s %s: %v", method, path, err)
-	}
-}
-
-func post(t *testing.T, path string, body any, out any) { do(t, "POST", path, body, false, out) }
-func get(t *testing.T, path string, out any)            { do(t, "GET", path, nil, false, out) }
 
 type geneCount struct {
 	HugoGeneSymbol       string   `json:"hugoGeneSymbol"`
@@ -156,7 +112,7 @@ func TestContractSamplesFetchBySampleList(t *testing.T) {
 
 func TestContractPatientsFetchByUniqueKeys(t *testing.T) {
 	requireAPI(t)
-	key := base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB:study_es_0"))
+	key := javaKey("TCGA-A1-A0SB", "study_es_0")
 	var d []map[string]any
 	post(t, "/api/patients/fetch", map[string]any{"uniquePatientKeys": []string{key}}, &d)
 	if len(d) != 1 || d[0]["patientId"] != "TCGA-A1-A0SB" {
@@ -229,7 +185,7 @@ func TestContractCnaNamespaceColumns(t *testing.T) {
 
 func TestContractGzipRequestBody(t *testing.T) {
 	requireAPI(t)
-	key := base64.RawStdEncoding.EncodeToString([]byte("TCGA-A1-A0SB:study_es_0"))
+	key := javaKey("TCGA-A1-A0SB", "study_es_0")
 	var d []map[string]any
 	do(t, "POST", "/api/patients/fetch", map[string]any{"uniquePatientKeys": []string{key}}, true, &d)
 	wantEq(t, len(d), 1)

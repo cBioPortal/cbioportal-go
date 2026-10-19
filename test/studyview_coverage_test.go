@@ -2,7 +2,6 @@ package contract
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -14,26 +13,6 @@ import (
 // counts of the study view, the treatment tables and the clinical-data table.
 // Expected values come from the fixture files (study_es_0,
 // lgg_ucsf_2014_test_generic_assay) read through the Java backend's rules.
-
-func javaKey(id, study string) string {
-	return base64.RawStdEncoding.EncodeToString([]byte(id + ":" + study))
-}
-
-// postNumbers posts body and decodes the JSON reply keeping numbers as
-// written (BigDecimal bin bounds keep their scale).
-func postNumbers(t *testing.T, path string, body any, out any) {
-	t.Helper()
-	raw, _ := json.Marshal(body)
-	resp, b := rawDo(t, http.MethodPost, path, string(raw))
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("POST %s -> %d: %s", path, resp.StatusCode, b)
-	}
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.UseNumber()
-	if err := d.Decode(out); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
-}
 
 func esSamples(ids ...string) []map[string]string {
 	out := make([]map[string]string, len(ids))

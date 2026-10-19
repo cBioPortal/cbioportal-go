@@ -1,8 +1,6 @@
 package contract
 
 import (
-	"encoding/base64"
-	"math"
 	"net/http"
 	"slices"
 	"sort"
@@ -12,15 +10,6 @@ import (
 // Contracts for molecular-profile, gene, gene-panel, sample-list and
 // gene-set endpoints the frontend calls. Expected values follow the Java
 // controllers / mappers applied to the e2e fixture studies.
-
-func b64(s string) string { return base64.RawStdEncoding.EncodeToString([]byte(s)) }
-
-func approx(t *testing.T, what string, got, want, rel float64) {
-	t.Helper()
-	if math.Abs(got-want) > rel*math.Abs(want) {
-		t.Errorf("%s = %v, want %v (rel %g)", what, got, want, rel)
-	}
-}
 
 // ---------------------------------------------------------- sample lists ----
 
@@ -217,7 +206,7 @@ func TestContractMutationSpectrums(t *testing.T) {
 	}, &rows)
 	spectrum := func(sample, patient string, ca, cg, ct, ta, tc, tg float64) map[string]any {
 		return map[string]any{
-			"uniqueSampleKey": b64(sample + ":study_es_0"), "uniquePatientKey": b64(patient + ":study_es_0"),
+			"uniqueSampleKey": javaKey(sample, "study_es_0"), "uniquePatientKey": javaKey(patient, "study_es_0"),
 			"molecularProfileId": "study_es_0_mutations", "sampleId": sample, "patientId": patient, "studyId": "study_es_0",
 			"CtoA": ca, "CtoG": cg, "CtoT": ct, "TtoA": ta, "TtoC": tc, "TtoG": tg,
 		}
@@ -276,7 +265,7 @@ func TestContractGenePanelDataInProfile(t *testing.T) {
 			panel, _ := r["genePanelId"].(string)
 			out[key{r["sampleId"].(string), panel}] = r["profiled"].(bool)
 			if r["molecularProfileId"] != profile || r["studyId"] != "study_es_0" ||
-				r["uniqueSampleKey"] != b64(r["sampleId"].(string)+":study_es_0") {
+				r["uniqueSampleKey"] != javaKey(r["sampleId"].(string), "study_es_0") {
 				t.Errorf("%s: row %v", profile, r)
 			}
 		}
@@ -383,7 +372,7 @@ func TestContractGenesetExpressionCorrelation(t *testing.T) {
 	for _, r := range rows {
 		sym := r["hugoGeneSymbol"].(string)
 		c := r["correlationValue"].(float64)
-		approx(t, sym, c, want[sym], 1e-9)
+		wantNear(t, sym, c, want[sym], 1e-9)
 		if c > prev+1e-12 {
 			t.Errorf("not sorted descending at %s", sym)
 		}
@@ -421,8 +410,8 @@ func TestContractCoExpressions(t *testing.T) {
 			continue
 		}
 		seen++
-		approx(t, "r "+r["geneticEntityId"].(string), r["spearmansCorrelation"].(float64), w[0], 1e-12)
-		approx(t, "p "+r["geneticEntityId"].(string), r["pValue"].(float64), w[1], 1e-6)
+		wantNear(t, "r "+r["geneticEntityId"].(string), r["spearmansCorrelation"].(float64), w[0], 1e-12)
+		wantNear(t, "p "+r["geneticEntityId"].(string), r["pValue"].(float64), w[1], 1e-6)
 	}
 	wantEq(t, seen, 3)
 	wantEq(t, len(rows), 5)
