@@ -11,7 +11,7 @@ import (
 // SQLArgs collects request values as ClickHouse query parameters while a
 // statement is assembled: each method returns a {name:Type} placeholder to
 // splice into the SQL in place of the value, and the statement runs with
-// args.params(). Equal values share one placeholder. Safe for concurrent use,
+// args.Params(sql). Equal values share one placeholder. Safe for concurrent use,
 // so fragments can be built from parallel goroutines.
 type SQLArgs struct {
 	mu   sync.Mutex
@@ -68,7 +68,7 @@ func (a *SQLArgs) Triples(v [][3]string) string {
 	return a.bind("Array(Tuple(String, String, String))", v)
 }
 
-// Params returns the bound values sql refers to, so one sqlArgs can serve
+// Params returns the bound values sql refers to, so one SQLArgs can serve
 // several statements without each carrying the others' values.
 func (a *SQLArgs) Params(sql string) ch.Params {
 	a.mu.Lock()

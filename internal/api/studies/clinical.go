@@ -56,7 +56,7 @@ func toClinicalData(r *ClinicalRow, patient bool) ClinicalData {
 // ClinicalDataMapper's order where the database carries internal ids: by the
 // internal id of their sample or patient, then attribute (the storage order
 // of clinical_sample / clinical_patient); a page, sorted by
-// ClinicalDataSortBy or not, is read as sqlListOrder orders it.
+// ClinicalDataSortBy or not, is read as SQLListOrder orders it.
 func clinicalSQL(r *http.Request, b core.Binder, patient, importOrder bool, where string, studies []string) string {
 	def := "studyId, id, clinicalAttributeId"
 	if importOrder {

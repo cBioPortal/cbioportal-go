@@ -45,16 +45,16 @@ var (
 type Filter struct {
 	Users string // data.users holds this user
 	Owner string // data.owner is this user
-	// origin, when hasOrigin, must equal data.origin as a set ($all + $size).
+	// Origin, when HasOrigin, must equal data.origin as a set ($all + $size).
 	Origin    []string
 	HasOrigin bool
 	Page      string // data.page
 }
 
-// Store keeps sessions by (type, id): the built-in memoryStore or
-// the external cBioPortal session service (remoteStore). Lookups of a
-// missing session fail with errSessionNotFound; insert of a taken id or of
-// data identical to another session's fails with errSessionConflict.
+// Store keeps sessions by (type, id): the built-in MemoryStore or
+// the external cBioPortal session service (RemoteStore). Lookups of a
+// missing session fail with ErrNotFound; insert of a taken id or of
+// data identical to another session's fails with ErrConflict.
 type Store interface {
 	Get(typ, id string) (*Session, error)
 	// create stores data under a new id, or answers the id of a session of

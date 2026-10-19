@@ -52,7 +52,7 @@ func TestArraySplitter(t *testing.T) {
 	}
 }
 
-// TestSortedPageStreams checks pageList's sorted pages, kept as the best
+// TestSortedPageStreams checks PageList's sorted pages, kept as the best
 // items while the handler writes them, against sorting the whole list.
 func TestSortedPageStreams(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
@@ -118,7 +118,7 @@ func TestSortNullsLast(t *testing.T) {
 }
 
 // TestSQLPageOrder checks the clause a handler claiming its sorted page
-// reads with, and that pageList passes its response on as it is.
+// reads with, and that PageList passes its response on as it is.
 func TestSQLPageOrder(t *testing.T) {
 	sortable := map[string]string{"value": "v", "none": ""}
 	r := httptest.NewRequest("GET", "/", nil)
@@ -155,7 +155,7 @@ func TestSQLPageOrder(t *testing.T) {
 	}
 }
 
-// TestSortIgnored pins that pageList asks handlers for a sorted page also
+// TestSortIgnored pins that PageList asks handlers for a sorted page also
 // for keyword searches and projection=ID, and drops sortBy only where Java
 // declares none.
 func TestSortIgnored(t *testing.T) {
@@ -184,7 +184,7 @@ func TestSortIgnored(t *testing.T) {
 }
 
 // TestKeyedPage pins the page a handler sorts itself for ID rows: sorted by
-// the key objects' field as pageList sorts (nulls last either way, ties in
+// the key objects' field as PageList sorts (nulls last either way, ties in
 // list order), then cut.
 func TestKeyedPage(t *testing.T) {
 	type key struct {
@@ -268,7 +268,7 @@ func TestPageListCounted(t *testing.T) {
 	}
 }
 
-// TestStreamedReshape checks javaContract's element-by-element reshaping
+// TestStreamedReshape checks JavaContract's element-by-element reshaping
 // against reshaping the whole body.
 func TestStreamedReshape(t *testing.T) {
 	var items []string

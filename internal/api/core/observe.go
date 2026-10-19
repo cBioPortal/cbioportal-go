@@ -61,7 +61,7 @@ func (s *State) Observe(next http.Handler) http.Handler {
 	return s.observeWith(next, newAccessLog(s.Opts.AccessLog))
 }
 
-// observeWith is observe with the given access log (nil: none).
+// observeWith is Observe with the given access log (nil: none).
 func (s *State) observeWith(next http.Handler, accessLog *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

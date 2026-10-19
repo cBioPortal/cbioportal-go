@@ -13,7 +13,7 @@ import (
 )
 
 // GeneRow is the legacy Gene model as GeneMapper selects it: the genetic
-// entity id is never written. The ID projection drops type (javaContract).
+// entity id is never written. The ID projection drops type (JavaContract).
 type GeneRow struct {
 	EntrezGeneID   int64  `json:"entrezGeneId"`
 	HugoGeneSymbol string `json:"hugoGeneSymbol"`

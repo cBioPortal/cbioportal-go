@@ -38,7 +38,7 @@ var scopeAllowlist = map[string]string{
 }
 
 // TestKeyedTablesReadThroughScope fails when SQL in internal/api (any of its
-// packages) names a keyedTable (FROM or JOIN it) outside core/scope.go, so
+// packages) names a KeyedTable (FROM or JOIN it) outside core/scope.go, so
 // every read of the big study-partitioned tables gets its key predicate from
 // a scope. Justified exceptions go in scopeAllowlist, keyed by the file's
 // path below internal/api.

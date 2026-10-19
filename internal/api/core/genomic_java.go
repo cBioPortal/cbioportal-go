@@ -188,7 +188,7 @@ func JavaTruncatedValueSQL(x string) string {
 
 var javaDecimalRE = regexp.MustCompile(`^([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]+))?$`)
 
-// JavaNumericSQL is the SQL condition javaDecimal accepts x on: a decimal
+// JavaNumericSQL is the SQL condition JavaDecimal accepts x on: a decimal
 // with at least one mantissa digit and an exponent in the int range.
 func JavaNumericSQL(x string) string {
 	digits := fmt.Sprintf("extract(%s, '[eE][+-]?0*([0-9]+)$')", x)

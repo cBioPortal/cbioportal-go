@@ -430,14 +430,14 @@ func (s Server) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // clinicalEventSortable are the ClinicalEventSortBy columns (eventType,
-// startDate, stopDate) as timelineSelect names them.
+// startDate, stopDate) as TimelineSelect names them.
 var clinicalEventSortable = map[string]string{
 	"eventType": "eventType", "startNumberOfDaysSinceDiagnosis": "startDate", "endNumberOfDaysSinceDiagnosis": "stopDate",
 }
 
 // writeClinicalEvents streams the timeline events matching where, whose
 // placeholders take their values from p; a sorted page is read as
-// sqlPageOrder orders it.
+// SQLPageOrder orders it.
 func (s Server) writeClinicalEvents(w http.ResponseWriter, r *http.Request, where string, p ch.Params) {
 	sel, def := s.TimelineSelect()
 	if def == "" {

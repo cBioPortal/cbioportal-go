@@ -209,7 +209,7 @@ func (s Server) structuralVariantFetch(w http.ResponseWriter, r *http.Request) {
 }
 
 // structuralVariantSortable are the sortBy fields of structural variants
-// over svSelectColumns' aliases, as the records carry them: counts and
+// over SVSelectColumns' aliases, as the records carry them: counts and
 // positions as numbers (-1 when empty), empty text as "NA".
 var structuralVariantSortable = map[string]string{
 	"sampleId": "sampleId", "patientId": "patientId", "studyId": "studyId", "molecularProfileId": "molecularProfileId",
@@ -221,14 +221,14 @@ var structuralVariantSortable = map[string]string{
 	"tumorVariantCount": svNum("tumorVariantCount"), "tumorReadCount": svNum("tumorReadCount"),
 }
 
-// svNA is a text column as naString reads it.
+// svNA is a text column as core.NAString reads it.
 func svNA(col string) string { return fmt.Sprintf("if(%[1]s = '', 'NA', %[1]s)", col) }
 
 // svNum is a numeric column as javaPartInt reads it, for sorting.
 func svNum(col string) string { return fmt.Sprintf("ifNull(toFloat64OrNull(trimBoth(%s)), -1)", col) }
 
 // svTextColumns are the structural_variant view columns (left) a fetched SV
-// record carries, under the field names toStructuralVariant reads (right).
+// record carries, under the field names ToStructuralVariant reads (right).
 var svTextColumns = [][2]string{
 	{"site1_ensembl_transcript_id", "site1EnsemblTranscriptId"}, {"site1_chromosome", "site1Chromosome"},
 	{"site1_position", "site1Position"}, {"site1_contig", "site1Contig"}, {"site1_region", "site1Region"},
@@ -249,8 +249,8 @@ var svTextColumns = [][2]string{
 	{"sv_status", "svStatus"}, {"namespace_columns", "namespaceColumns"},
 }
 
-// SVSelectColumns selects a structural variant record over svSiteEntrezSQL
-// (alias sv, sample alias sm, gene aliases g1 and g2) as toStructuralVariant
+// SVSelectColumns selects a structural variant record over SVSiteEntrezSQL
+// (alias sv, sample alias sm, gene aliases g1 and g2) as ToStructuralVariant
 // reads it; view columns missing from have read as empty.
 func SVSelectColumns(have map[string]bool) []string {
 	cols := []string{

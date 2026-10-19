@@ -12,7 +12,7 @@ import (
 // answers a request target it cannot parse or normalize with its own HTML
 // 400 page, and Spring Security's default StrictHttpFirewall rejects
 // methods, path parameters and encodings with a 400 that Spring Boot's error
-// controller renders (springError).
+// controller renders (SpringError).
 
 // firewallMethods are the methods StrictHttpFirewall allows.
 var firewallMethods = map[string]bool{

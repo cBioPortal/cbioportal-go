@@ -9,12 +9,12 @@ import (
 // without them the response is the whole list in the endpoint's own order.
 // They are validated as the Java list endpoints validate theirs (pageSize
 // 1..10,000,000, pageNumber from 0, sortBy and direction enums) and
-// documented in the served API descriptions (apiDocsOverlay).
+// documented in the served API descriptions (apidocs/overlay.go).
 type AddedPaging struct {
 	Method string
-	// path is the endpoint's path as the API descriptions name it.
+	// Path is the endpoint's path as the API descriptions name it.
 	Path string
-	// sort is the sortBy parameter: an enum of the response model's fields.
+	// Sort is the sortBy parameter: an enum of the response model's fields.
 	// Without values the endpoint pages only (no sortBy or direction).
 	Sort Param
 	// defaultSort is the field a page without sortBy is sorted by, for an
@@ -32,7 +32,7 @@ func addedSortBy(model string, fields ...string) Param {
 	return sortBy(model+"SortBy", fields...)
 }
 
-// The sortBy enums go adds to the endpoints it pages (addedPagedEndpoints).
+// The sortBy enums go adds to the endpoints it pages (AddedPagedEndpoints).
 var (
 	MolecularDataSortParam     = addedSortBy("MolecularData", "entrezGeneId", "sampleId", "patientId", "studyId", "molecularProfileId", "value")
 	DiscreteCopyNumberSort     = addedSortBy("DiscreteCopyNumberData", "entrezGeneId", "sampleId", "patientId", "alteration")
@@ -58,8 +58,8 @@ var (
 )
 
 // AddedPagedEndpoints are the endpoints with added paging. Lists that
-// stream from ClickHouse read the page in SQL (claimListPage); the others
-// are built in memory and paged by pageList.
+// stream from ClickHouse read the page in SQL (ClaimListPage); the others
+// are built in memory and paged by PageList.
 var AddedPagedEndpoints = []AddedPaging{
 	// Clinical data, samples, patients.
 	{Method: "POST", Path: "/api/clinical-data/fetch", Sort: ClinicalDataSort},
@@ -136,7 +136,7 @@ func templatePath(path string) string {
 // does not declare it, so Java ignores it. It is optional: without it the
 // endpoint answers as Java's. It is validated as Java validates an Integer
 // (or, with Param.Class, an enum) parameter and documented in the served API
-// descriptions (apiDocsOverlay).
+// descriptions (apidocs/overlay.go).
 type AddedParam struct {
 	Method string
 	// Path is the endpoint's path as the API descriptions name it.

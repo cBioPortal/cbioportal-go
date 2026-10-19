@@ -130,13 +130,13 @@ func (a *arraySplitter) complete() bool { return a.state == splitDone }
 // elementWriter receives a handler's response. A successful response whose
 // body is a JSON array is handed to its consumer element by element as the
 // handler writes it, so the array is never held; any other response is kept
-// whole for whole.
+// whole in Raw.
 type elementWriter struct {
 	header    http.Header
 	Status    int
 	Raw       bytes.Buffer
 	streaming bool
-	whole     bool // decided: the response is kept in raw
+	whole     bool // decided: the response is kept in Raw
 	split     arraySplitter
 	// start is called once the response is known to be a successful array;
 	// returning false keeps the response whole instead.
@@ -146,7 +146,7 @@ type elementWriter struct {
 	err  error
 }
 
-// NewElementWriter returns an ElementWriter calling start with the response
+// NewElementWriter returns an elementWriter calling start with the response
 // header and elem with each array element.
 func NewElementWriter(start func(http.Header) bool, elem func([]byte) error) *elementWriter {
 	return &elementWriter{header: http.Header{}, Status: http.StatusOK, start: start, elem: elem}

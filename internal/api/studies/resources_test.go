@@ -12,7 +12,7 @@ import (
 
 // TestResourceDefinitionPriorityNumeric pins that a priority-sorted page of
 // resource definitions keeps SQL's numeric order: the handler claims it, so
-// pageList does not re-sort the JSON strings ("10" < "2").
+// PageList does not re-sort the JSON strings ("10" < "2").
 func TestResourceDefinitionPriorityNumeric(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if clause := core.SQLPageOrder(r, resourceDefinitionSort, "resource_id ASC"); !strings.Contains(clause, "priority ASC") {

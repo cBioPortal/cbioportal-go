@@ -5,7 +5,8 @@ import (
 	"net/http"
 )
 
-// User is the authenticated principal extracted from a bearer token.
+// User is the authenticated principal, from a bearer token, an OAuth2
+// session, a basic login or a data access token.
 type User struct {
 	Name  string
 	Roles []string

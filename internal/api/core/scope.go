@@ -19,12 +19,12 @@ import (
 // table's key columns, the study first. Handlers name these tables only
 // through a scope (scope_test.go enforces it):
 //
-//	sc := s.bySampleList(id)
-//	"SELECT sample_id FROM " + sc.from(args, tSampleList) + " ORDER BY sample_id"
-//	"... JOIN " + sc.samples(args) + " s ON s.study_id = m.study_id AND ..."
+//	sc := s.BySampleList(id)
+//	"SELECT sample_id FROM " + sc.From(args, TSampleList) + " ORDER BY sample_id"
+//	"... JOIN " + sc.Samples(args) + " s ON s.study_id = m.study_id AND ..."
 //
-// Values are bound as query parameters through a binder: a *sqlArgs, or a
-// ch.Params map wrapped as paramsBinder.
+// Values are bound as query parameters through a Binder: a *SQLArgs, or a
+// ch.Params map wrapped as ParamsBinder.
 
 // KeyedTable is a table partitioned by study, with the columns a scope can
 // restrict. key lists the columns leading its sort key: the go transform's
@@ -255,7 +255,7 @@ func (sc Scope) Cond(b Binder, t KeyedTable, alias string) string {
 	return strings.Join(preds, " AND ")
 }
 
-// Key is cond followed by " AND ", to lead a WHERE clause; empty when the
+// Key is Cond followed by " AND ", to lead a WHERE clause; empty when the
 // scope restricts none of t's key columns.
 func (sc Scope) Key(b Binder, t KeyedTable, alias string) string {
 	if c := sc.Cond(b, t, alias); c != "" {

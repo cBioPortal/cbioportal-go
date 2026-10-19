@@ -12,7 +12,7 @@ import (
 )
 
 // routeBulkList registers the bulk GET list endpoints and single-resource
-// GETs. Paging query params are applied by pageList.
+// GETs. Paging query params are applied by PageList.
 // All filtering is pushed into ClickHouse.
 func (s Server) routeBulkList(mux *http.ServeMux) {
 	// Bulk GET list endpoints (no study scope).
@@ -232,7 +232,7 @@ func (s Server) allGenes(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, rows)
 		return
 	}
-	// A keyword search is paged here (pageList leaves it alone), as
+	// A keyword search is paged here (PageList leaves it alone), as
 	// GeneServiceImpl post-processes the mapper's page; META counts every
 	// match.
 	pageSize, limit := core.MaxPageSize, ""
@@ -266,7 +266,7 @@ func (s Server) allGenes(w http.ResponseWriter, r *http.Request) {
 }
 
 // geneSortOrder orders by a geneSortable expression, NULLS LAST in either
-// direction as pageList sorts.
+// direction as PageList sorts.
 func geneSortOrder(expr string, desc bool) string {
 	if desc {
 		return expr + " DESC NULLS LAST"
@@ -367,7 +367,7 @@ func (s Server) allClinicalAttributes(w http.ResponseWriter, r *http.Request) {
 
 // writeSamples writes the samples of the scope matching a predicate over the
 // `sample` view (aliased s), with type, sequenced and segment flags. where
-// may hold placeholders bound in args. A page is read as sqlListOrder
+// may hold placeholders bound in args. A page is read as SQLListOrder
 // orders it.
 func (s Server) writeSamples(w http.ResponseWriter, r *http.Request, sc core.Scope, where string, args *core.SQLArgs) {
 	s.writeSampleRows(w, r, sampleFullSelectFrom(args, sc, where)+core.SQLListOrder(r, sampleSortable, sampleDefaultOrder), args)

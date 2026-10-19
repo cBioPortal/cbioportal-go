@@ -10,7 +10,7 @@ import (
 )
 
 // TestAddedPagingWired pins that every endpoint with added paging is paged
-// by pageList and validates its parameters as the Java list endpoints do.
+// by PageList and validates its parameters as the Java list endpoints do.
 func TestAddedPagingWired(t *testing.T) {
 	for _, a := range AddedPagedEndpoints {
 		if !slices.Contains(pagedEndpoints, a.Endpoint()) {
@@ -105,7 +105,7 @@ func TestClaimListPage(t *testing.T) {
 	}
 }
 
-// TestAddedPagingInMemory pins pageList over an in-memory list with added
+// TestAddedPagingInMemory pins PageList over an in-memory list with added
 // paging: no parameters leave the response as the handler wrote it, a page
 // is cut, numeric strings sort as numbers (non-numbers last), and a list
 // with a default sort is sorted by it when paged.

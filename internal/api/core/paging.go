@@ -34,8 +34,8 @@ var oneBasedPaths = map[string]bool{
 // pagedEndpoints are the Java endpoints that take pageSize / pageNumber /
 // sortBy / direction (their controller methods declare them); every other
 // endpoint ignores those params, as Java does. The /api/legacy/ and
-// /api/not-ready-yet/ aliases reach pageList as the /api/ path that serves
-// them (extraEndpoints).
+// /api/not-ready-yet/ aliases reach PageList as the /api/ path that serves
+// them (ExtraEndpoints).
 var pagedEndpoints = []string{
 	"GET /api/cancer-types",
 	"GET /api/clinical-attributes",
@@ -127,7 +127,7 @@ func pagedEndpointOf(method, path string) string {
 // removed from the request before the handler runs so handlers return the
 // full list, which is never held: an unsorted page is cut from the array as
 // it is written, and a sorted one is read by the handler in SQL
-// (sqlPageOrder) or kept as the best items seen (topPage). META requests
+// (SQLPageOrder) or kept as the best items seen (topPage). META requests
 // pass through: their total-count covers all items.
 func PageList(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,24 +193,24 @@ func PageList(next http.Handler) http.Handler {
 	})
 }
 
-// SQLPage is the sorted page pageList asks a handler for; claimed when the
+// SQLPage is the sorted page PageList asks a handler for; claimed when the
 // handler reads it in SQL.
 type SQLPage struct {
 	page
 	claimed bool
 }
 
-// sqlPageKey is the request context key of the *SQLPage pageList asks a
+// sqlPageKey is the request context key of the *SQLPage PageList asks a
 // handler for.
 type sqlPageKey struct{}
 
-// SQLPageOrder is the ORDER BY clause of a list query. When pageList asks
+// SQLPageOrder is the ORDER BY clause of a list query. When PageList asks
 // for a sorted page by one of the sortable fields (sortBy value -> SQL
 // expression; an empty expression leaves the order as it is), the handler
 // claims it: rows are sorted by that expression, NULLs last in either
 // direction as ClickHouse orders Java's ORDER BY "<sortBy>", ties in the
 // handler's own order def, and only the page is read (LIMIT / OFFSET).
-// Otherwise the clause orders by def, and pageList sorts what the handler
+// Otherwise the clause orders by def, and PageList sorts what the handler
 // writes.
 func SQLPageOrder(r *http.Request, sortable map[string]string, def string) string {
 	sp, expr := claimSortedPage(r, sortable)
@@ -221,7 +221,7 @@ func SQLPageOrder(r *http.Request, sortable map[string]string, def string) strin
 }
 
 // SQLStablePageQuery is the query base (a SELECT without ORDER BY) ordered
-// as sqlPageOrder orders it, for an order def that leaves ties: a sorted
+// as SQLPageOrder orders it, for an order def that leaves ties: a sorted
 // page is cut from base ordered by def and numbered as read, so ties keep
 // the order the unsorted list gives them. sortable's expressions refer to
 // base's columns.
@@ -240,7 +240,7 @@ func SQLStablePageQuery(r *http.Request, sortable map[string]string, base, def s
 		" SETTINGS query_plan_remove_redundant_sorting = 0"
 }
 
-// claimSortedPage returns the sorted page pageList asks the request for and
+// claimSortedPage returns the sorted page PageList asks the request for and
 // the SQL expression of its sortBy, claiming it, or nil when there is none
 // or sortBy is not among sortable.
 func claimSortedPage(r *http.Request, sortable map[string]string) (*SQLPage, string) {
@@ -256,11 +256,11 @@ func claimSortedPage(r *http.Request, sortable map[string]string) (*SQLPage, str
 	return sp, expr
 }
 
-// ClaimListPage claims the page pageList asks the request for, sorted or
+// ClaimListPage claims the page PageList asks the request for, sorted or
 // not, and returns it with the SQL expression of its sortBy ("" for an
 // unsorted page), for a handler that reads it in SQL: ordered by the
 // expression (NULLS LAST), then by the handler's own stable order, and cut
-// with LIMIT / OFFSET (orderLimit). It returns nil when the request asks
+// with LIMIT / OFFSET (OrderLimit). It returns nil when the request asks
 // for no page or its sortBy is not among sortable.
 func ClaimListPage(r *http.Request, sortable map[string]string) (*SQLPage, string) {
 	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
@@ -278,7 +278,7 @@ func ClaimListPage(r *http.Request, sortable map[string]string) (*SQLPage, strin
 	return sp, expr
 }
 
-// SQLListOrder is sqlPageOrder for a handler whose rows are the list's
+// SQLListOrder is SQLPageOrder for a handler whose rows are the list's
 // items, one for one, in the order def: an unsorted page is read in SQL
 // too, in that order. def must be a stable order.
 func SQLListOrder(r *http.Request, sortable map[string]string, def string) string {
@@ -289,7 +289,7 @@ func SQLListOrder(r *http.Request, sortable map[string]string, def string) strin
 	return sp.OrderLimit(expr, def)
 }
 
-// PageAsked reports whether pageList asks the request for a page, sorted
+// PageAsked reports whether PageList asks the request for a page, sorted
 // or not, for handlers that make their order stable only then.
 func PageAsked(r *http.Request) bool {
 	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
@@ -298,14 +298,14 @@ func PageAsked(r *http.Request) bool {
 
 // KeyedPage is a sorted page a handler cuts itself, for rows it writes
 // without the sortBy field (the ID projection drops it): each row is added
-// with an object that has the field, and the rows are sorted as pageList
+// with an object that has the field, and the rows are sorted as PageList
 // sorts them.
 type KeyedPage struct {
 	pg    page
 	items []sortItem
 }
 
-// ClaimKeyedPage claims the sorted page pageList asks the request for, when
+// ClaimKeyedPage claims the sorted page PageList asks the request for, when
 // the handler has not read it in SQL, or returns nil.
 func ClaimKeyedPage(r *http.Request) *KeyedPage {
 	sp, _ := r.Context().Value(sqlPageKey{}).(*SQLPage)
@@ -362,7 +362,7 @@ func (sp *SQLPage) OrderLimit(expr, tie string) string {
 }
 
 // claimWriter passes a handler's response on as it is when the handler
-// claimed its page (sqlPageOrder, claimListPage), else to a topPage that
+// claimed its page (SQLPageOrder, ClaimListPage), else to a topPage that
 // sorts it or, for an unsorted page, a pageWindow that cuts it. The choice
 // is made at the first write.
 type claimWriter struct {
@@ -592,7 +592,7 @@ func writePage(w http.ResponseWriter, header http.Header, status int, body []byt
 	w.Write(buf.Bytes())
 }
 
-// pageWindow receives an unsorted paged handler's response for pageList. A
+// pageWindow receives an unsorted paged handler's response for PageList. A
 // successful JSON array is decoded element by element as the handler writes
 // it, and only the page's elements are written on: the list is never held.
 // Any other response is kept whole for writePage.

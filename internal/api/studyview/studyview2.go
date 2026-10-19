@@ -9,7 +9,7 @@ import (
 )
 
 // routeStudyView2 registers the remaining study-view aggregation endpoints:
-// numeric clinical bins, mutation/genomic data counts, treatments, and
+// clinical and genomic data bins, mutation and genomic data counts, and
 // case-list (sample-list) counts.
 func (s Server) routeStudyView2(mux router) {
 	mux.HandleFunc("POST /api/clinical-data-bin-counts/fetch", s.clinicalDataBinCountsFetch)
@@ -18,8 +18,6 @@ func (s Server) routeStudyView2(mux router) {
 	mux.HandleFunc("POST /api/genomic-data-bin-counts/fetch", s.genomicDataBinCountsFetch)
 	mux.HandleFunc("POST /api/sample-lists-counts/fetch", s.sampleListsCountsFetch)
 }
-
-// ---------- Clinical data bin counts ----------
 
 // ---------- Mutation data counts ----------
 
@@ -269,8 +267,6 @@ func (s Server) genomicDataCountsFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	core.WriteJSON(w, out)
 }
-
-// ---------- Treatments (no treatment data loaded) ----------
 
 // ---------- Sample list (case list) counts ----------
 

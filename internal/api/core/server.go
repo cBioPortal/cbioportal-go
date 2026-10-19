@@ -173,8 +173,8 @@ func WriteJSON(w http.ResponseWriter, v any) {
 }
 
 // jsonArray writes a JSON array element by element, byte for byte as
-// writeJSON writes the whole slice. Nothing is sent before the first element,
-// so an error until then still answers as fail does.
+// WriteJSON writes the whole slice. Nothing is sent before the first element,
+// so an error until then still answers as Fail does.
 type jsonArray struct {
 	w   http.ResponseWriter
 	r   *http.Request
@@ -183,7 +183,7 @@ type jsonArray struct {
 	enc *json.Encoder
 }
 
-// NewJSONArray returns a JSONArray answering r through w.
+// NewJSONArray returns a jsonArray answering r through w.
 func NewJSONArray(w http.ResponseWriter, r *http.Request) *jsonArray {
 	a := &jsonArray{w: w, r: r}
 	a.enc = json.NewEncoder(&a.buf)
@@ -207,7 +207,7 @@ func (a *jsonArray) Add(v any) error {
 	return err
 }
 
-// Finish ends the array, or reports err: as fail before the first element,
+// Finish ends the array, or reports err: as Fail before the first element,
 // by aborting the response after it.
 func (a *jsonArray) Finish(err error) {
 	switch {
@@ -228,7 +228,7 @@ func (a *jsonArray) Finish(err error) {
 // Boot's generic 500: the error itself (SQL, database names, driver text)
 // goes to the server log only.
 //
-// A query stopped at its memory or time limit (BulkSettings) is answered
+// A query stopped at its memory or time limit (BulkLimits) is answered
 // 400 with a message that says how to ask for less.
 func Fail(w http.ResponseWriter, r *http.Request, err error) {
 	if limit := ch.LimitExceeded(err); limit != "" {
@@ -248,7 +248,7 @@ func LogServerError(r *http.Request, msg string, err error) {
 // SQLLit and InList write values into SQL text as escaped string literals,
 // for values chosen by code (database and table names, constant lists, column
 // headers of loaded files). Request values go to ClickHouse as query
-// parameters (sqlArgs, ch.QueryP, cachedQueryP).
+// parameters (SQLArgs, ch.QueryP, CachedQueryP).
 func SQLLit(s string) string { return ch.SQLLit(s) }
 
 // InList writes values as a comma-separated list of SQL string literals.
@@ -296,7 +296,7 @@ func MetaProjection(next http.Handler) http.Handler {
 }
 
 // WriteMetaCount answers projection=META with the record count sql reads (a
-// row with n) as the total-count header, as metaProjection would count the
+// row with n) as the total-count header, as MetaProjection would count the
 // records. p holds sql's placeholder values.
 func WriteMetaCount(w http.ResponseWriter, r *http.Request, c *ch.Client, sql string, p ch.Params) {
 	rows, err := ch.QueryP[struct {
@@ -314,7 +314,7 @@ func WriteMetaCount(w http.ResponseWriter, r *http.Request, c *ch.Client, sql st
 	w.WriteHeader(http.StatusOK)
 }
 
-// metaCounter receives a handler's response for metaProjection. A successful
+// metaCounter receives a handler's response for MetaProjection. A successful
 // JSON array of objects without a total-count header is counted as it is
 // written (its elements and their distinct uniqueSampleKeys) and not kept, so
 // counting a large list costs no more memory than one element; any other

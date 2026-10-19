@@ -323,10 +323,9 @@ func genericAssayMetaSearch(term string, idOnly bool) func(GenericAssayMeta) boo
 	}
 }
 
-// genericAssayMetaEach calls fn with each record of
-// genericAssayMetaList(genericAssayMetaProperties(where, args)), in that
-// order, building one record at a time: the requested profiles can have
-// hundreds of thousands of entities.
+// genericAssayMetaEach calls fn with the metadata record of each entity
+// where selects, in genericAssayMetaList's order, building one record at a
+// time: the requested profiles can have hundreds of thousands of entities.
 func (s Server) genericAssayMetaEach(where string, args *core.SQLArgs, fn func(GenericAssayMeta) error) error {
 	type entity struct {
 		id         string
@@ -362,8 +361,8 @@ func (s Server) genericAssayMetaEach(where string, args *core.SQLArgs, fn func(G
 			return err
 		}
 	}
-	// Of an entity's rows the last one counts, as in
-	// genericAssayMetaProperties' map.
+	// Of an entity's rows the last one counts, as when Java collects them
+	// into a map.
 	sort.SliceStable(all, func(i, j int) bool { return EntityLess(all[i].id, all[j].id) })
 	for i, e := range all {
 		if i+1 < len(all) && all[i+1].id == e.id {

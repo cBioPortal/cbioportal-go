@@ -169,7 +169,7 @@ var segmentSortable = map[string]string{
 }
 
 // writeSegments encodes RowBinary segment rows (study, sample, patient,
-// chromosome, start, end, probes, mean) as the JSON array writeJSON would
+// chromosome, start, end, probes, mean) as the JSON array WriteJSON would
 // produce for []CopyNumberSeg, as the rows arrive.
 func writeSegments(w io.Writer, rb *ch.RowBinaryReader) error {
 	bw := bufio.NewWriterSize(w, 1<<16)

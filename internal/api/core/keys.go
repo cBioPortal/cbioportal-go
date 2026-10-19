@@ -11,7 +11,7 @@ func UniqueKey(studyID, id string) string {
 	return base64.RawStdEncoding.EncodeToString([]byte(id + ":" + studyID))
 }
 
-// DecodeUniqueKey reverses uniqueKey, returning (studyId, id). ok is false if
+// DecodeUniqueKey reverses UniqueKey, returning (studyId, id). ok is false if
 // the key is not valid base64 or lacks the ':' separator. The study id is the
 // part after the last ':' (study ids never contain one; entity ids may).
 func DecodeUniqueKey(key string) (studyID, id string, ok bool) {

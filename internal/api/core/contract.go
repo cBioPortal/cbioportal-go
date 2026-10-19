@@ -209,7 +209,7 @@ func CheckParams(params []Param, q map[string][]string) string {
 	return checkParamsAround(params, q, len(params), nil)
 }
 
-// checkParamsAround is checkParams with the request body read after the
+// checkParamsAround is CheckParams with the request body read after the
 // first at parameters, where the controller declares it: body (when
 // non-nil) returns its 400 message or "".
 func checkParamsAround(params []Param, q map[string][]string, at int, body func() string) string {
@@ -279,7 +279,7 @@ func checkParamsAround(params []Param, q map[string][]string, at int, body func(
 
 // listBody validates a JSON-array request body annotated @Size(min = 1):
 // an empty array is a violation named after the controller parameter.
-// Bodies that are not arrays are left to the handler (readBody).
+// Bodies that are not arrays are left to the handler (ReadBody).
 func listBody(name string) func([]byte) string {
 	return func(raw []byte) string {
 		if EmptyJSONArray(raw) && json.Valid(raw) {
@@ -713,7 +713,7 @@ func (s *State) missing(kind string, v map[string]string) string {
 	return ""
 }
 
-// cachedRowExists is rowExists through the metadata cache.
+// cachedRowExists is RowExists through the metadata cache.
 func (s *State) cachedRowExists(sql string, p ch.Params) bool {
 	type row struct {
 		One int `json:"one"`

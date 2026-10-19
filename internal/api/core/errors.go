@@ -73,7 +73,7 @@ func WriteError(w http.ResponseWriter, status int, msg string) {
 	w.Write(body)
 }
 
-// badBody is raised (as a panic, recovered by bodyErrors) by readBody when the
+// badBody is raised (as a panic, recovered by BodyErrors) by ReadBody when the
 // request body is not JSON of the shape the handler decodes into, so every
 // handler answers like Spring's HttpMessageNotReadableException without
 // checking the decode itself.
@@ -166,7 +166,7 @@ func notWholeNumber(err error) bool {
 	return false
 }
 
-// BodyErrors answers requests aborted by readBody: legacy endpoints whose
+// BodyErrors answers requests aborted by ReadBody: legacy endpoints whose
 // filter the InvolvedCancerStudyExtractorInterceptor parses reply 200 with an
 // empty body (the interceptor vetoes the request), every other endpoint 400
 // with the malformed-payload message.

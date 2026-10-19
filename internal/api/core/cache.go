@@ -57,12 +57,12 @@ func CachedQuery[T any](s *State, sql string) ([]T, error) {
 	return CachedQueryP[T](s, sql, nil)
 }
 
-// CachedQueryA is cachedQuery for a statement whose values are bound in a.
+// CachedQueryA is CachedQuery for a statement whose values are bound in a.
 func CachedQueryA[T any](s *State, sql string, a *SQLArgs) ([]T, error) {
 	return CachedQueryP[T](s, sql, a.Params(sql))
 }
 
-// CachedQueryP is cachedQuery with query parameters; entries are keyed on the
+// CachedQueryP is CachedQuery with query parameters; entries are keyed on the
 // statement and its parameter values.
 func CachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
 	key, err := cacheKey(sql, p)

@@ -11,8 +11,8 @@ import (
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
-// routeMolecular2 registers discrete copy-number, mutation-spectrum,
-// variant-count, mutation-count-by-position and structural-variant-count
+// routeMolecular2 registers the discrete copy-number, copy-number count,
+// mutation-spectrum, variant-count and mutation-count-by-position
 // endpoints. All filtering/aggregation is pushed into ClickHouse; Go only maps
 // the final rows into the cBioPortal client JSON shapes.
 func (s Server) routeMolecular2(mux *http.ServeMux) {

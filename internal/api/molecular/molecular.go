@@ -61,7 +61,7 @@ func (s Server) mpSelect() string {
 func toMP(r mpRow) MolecularProfile {
 	// DISCRETE_LONG is our internal file-layout marker (routes to cna_discrete_long);
 	// the frontend only recognizes DISCRETE as a discrete CNA profile, so present
-	// it as DISCRETE in the API. profileMeta reads the view directly and keeps the
+	// it as DISCRETE in the API. ProfileMeta reads the view directly and keeps the
 	// long form for data-table routing.
 	datatype := r.Datatype
 	if datatype == "DISCRETE_LONG" {
@@ -165,9 +165,9 @@ const mutationOrder = "molecular_profile_id, sample_id, toInt64OrNull(entrez_gen
 
 // mutationSortable are the MutationSortBy columns as SQL over
 // mutationSelect's columns computing the record's field (toMutation): MAF
-// strings read empty as NA, counts as javaCount. aminoAcidChange, which
+// strings read empty as NA, counts as JavaCount. aminoAcidChange, which
 // Java's records leave null, orders nothing. keyword and the protein
-// positions are derived in Go, so their pages are sorted by pageList.
+// positions are derived in Go, so their pages are sorted by PageList.
 var mutationSortable = map[string]string{
 	"entrezGeneId":     "entrezGeneId",
 	"center":           naSQL("center"),
@@ -189,10 +189,10 @@ var mutationSortable = map[string]string{
 	"refseqMrnaId":     naSQL("refseqMrnaId"),
 }
 
-// naSQL is naString in SQL.
+// naSQL is core.NAString in SQL.
 func naSQL(col string) string { return fmt.Sprintf("if(%s = '', 'NA', %s)", col, col) }
 
-// javaCountSQL is javaCount in SQL: the cell as a number, NaN as 0, clamped
+// javaCountSQL is JavaCount in SQL: the cell as a number, NaN as 0, clamped
 // to the Java int range and truncated; null when it is no number or -1.
 func javaCountSQL(col string) string {
 	f := fmt.Sprintf("toFloat64OrNull(trimBoth(%s))", col)

@@ -558,7 +558,7 @@ var fileNameUnsafe = regexp.MustCompile(`[ \\/:*?"<>|]`)
 // (ClinicalTimelineDataTypeExporter): events in import order of the
 // study's known patients; the extra columns are the event type's data keys
 // in sorted order, each event's own values. The keys and values are the
-// clinical-events attributes (timelineSelect), so a staged file's headers
+// clinical-events attributes (TimelineSelect), so a staged file's headers
 // come back as written.
 func (e *studyExport) clinicalTimeline() error {
 	cols := e.s.RawColumns("timeline")

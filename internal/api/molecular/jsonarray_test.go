@@ -37,7 +37,7 @@ func TestJSONArrayMatchesWriteJSON(t *testing.T) {
 
 func TestJSONArrayErrors(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/molecular-data", nil)
-	// Before the first element: the error response fail writes.
+	// Before the first element: the error response Fail writes.
 	got, want := httptest.NewRecorder(), httptest.NewRecorder()
 	core.NewJSONArray(got, req).Finish(errors.New("boom"))
 	core.Fail(want, req, errors.New("boom"))

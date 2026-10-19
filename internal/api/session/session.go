@@ -21,10 +21,10 @@ import (
 )
 
 // The Java SessionServiceController and PublicVirtualStudiesController, over
-// a sessionStore: cBioPortal's external session service when
-// session.service.url is set (remoteStore), else the built-in store, which
+// a sessionstore.Store: cBioPortal's external session service when
+// session.service.url is set (RemoteStore), else the built-in store, which
 // keeps sessions in memory and, when SESSION_STORE_FILE is set, in a JSON
-// file (memoryStore).
+// file (MemoryStore).
 
 // allUsers is the users-entry marking a virtual study as public.
 const allUsers = "*"

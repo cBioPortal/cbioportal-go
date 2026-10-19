@@ -283,7 +283,7 @@ func cancerTypeName(name, id string) string {
 // studies serves GET /api/studies (ColumnStoreStudyController.getAllStudies):
 // keyword search over name / id / cancer type and sorting. The ID projection
 // yields an empty list and META an empty list with the total-count header;
-// pages are numbered from 1 (see pageList). Studies come in import order, a
+// pages are numbered from 1 (see PageList). Studies come in import order, a
 // keyword search ordered by name, unless sortBy is given.
 func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 	if core.IsLegacyAlias(r) {
@@ -619,7 +619,7 @@ func (s Server) samplesFetch(w http.ResponseWriter, r *http.Request) {
 // ---------- Patients ----------
 
 // Patient is the legacy Patient model; the DETAILED projection adds the
-// patient's study (see javaContract).
+// patient's study (see JavaContract).
 type Patient struct {
 	PatientID        string `json:"patientId"`
 	StudyID          string `json:"studyId"`

@@ -75,7 +75,7 @@ func rawBinMethods(filters []json.RawMessage) []binMethodField {
 	return out
 }
 
-// partialFilter keeps only the study / sample-identifier scope.
+// partial keeps only the study / sample-identifier scope.
 func (f studyViewFilter) partial() studyViewFilter {
 	return studyViewFilter{StudyIDs: f.StudyIDs, SampleIdentifiers: f.SampleIdentifiers}
 }

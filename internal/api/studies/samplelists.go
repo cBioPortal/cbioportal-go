@@ -17,7 +17,7 @@ type sampleListRow struct {
 }
 
 // SampleList is the legacy SampleList model; sampleCount and sampleIds belong
-// to the DETAILED projection (the others are cut by javaContract).
+// to the DETAILED projection (the others are cut by JavaContract).
 type SampleList struct {
 	SampleListID string   `json:"sampleListId"`
 	StudyID      string   `json:"studyId"`
@@ -52,7 +52,7 @@ func toSampleList(r sampleListRow) SampleList {
 // with byInternalID, in the order of their internal ids
 // (SampleListMapper.getSampleLists has no ORDER BY) where the database
 // carries them.
-// The lists stream as they are read; a sorted page is read as sqlPageOrder
+// The lists stream as they are read; a sorted page is read as SQLPageOrder
 // orders it.
 func (s Server) sampleListsQuery(w http.ResponseWriter, r *http.Request, sc core.Scope, byInternalID bool) {
 	p := ch.Params{}
