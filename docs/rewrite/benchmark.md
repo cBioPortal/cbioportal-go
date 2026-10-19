@@ -30,7 +30,8 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
 - **Database load:** over three days, go used 1.47 times Java's ClickHouse
   CPU per request on www's traffic and 0.92 times on api's. Java answers many
   repeat requests from its Redis cache, and go has no response cache yet.
-  Most of go's extra cost came from one slow query, which is now fixed
+  Most of go's extra cost in that window came from one slow query. That
+  query now reads 127 MiB instead of 9.8 GiB
   ([details](#clickhouse-load-per-request)).
 - **Errors:** go returns "bad request" (HTTP 400) as often as Java on each
   route. go had no server errors (5xx); Java had 60. Two cases still differ:
@@ -290,8 +291,8 @@ on-demand list prices in us-east-1.
 
 | Account | Portals (pods) | Memory request / limit | Node pools | ≈ $/month |
 |---|---|---|---|---|
-| 203403084713 | www (2), api (2), GENIE public (3) and private (3), containerized, master, public beta (1 each) | 78 / 142 GiB | 3 × r7g.xlarge, 3 × r7g.large, 2 × t4g.xlarge | 900 |
-| 666628074417 | MSK (2), MSK beta, private, SCLC, triage, staging (1 each) | 32 / 48 GiB | 3 × r7g.large; 3 × t4g.large (SCLC, triage, dev) | 380 |
+| Public portals' account | www (2), api (2), GENIE public (3) and private (3), containerized, master, public beta (1 each) | 78 / 142 GiB | 3 × r7g.xlarge, 3 × r7g.large, 2 × t4g.xlarge | 900 |
+| MSK's account | MSK (2), MSK beta, private, SCLC, triage, staging (1 each) | 32 / 48 GiB | 3 × r7g.large; 3 × t4g.large (SCLC, triage, dev) | 380 |
 | **Total** | 20 pods | 110 / 190 GiB | | **≈ 1,280** |
 
 The Redis response caches add 2 × r7g.large (about $155) and 2 × t3.medium
@@ -360,18 +361,23 @@ differences remain:
 
 ## Code size
 
-Lines of code, not counting blank lines and comments, on 2026-10-03. The
-frontend, which both use, is not counted.
+Lines of code, not counting blank lines and comments. The go numbers were
+counted on 2026-10-19, and the Java numbers on 2026-10-03. The frontend,
+which both use, is not counted.
 
 | | Main code | Tests |
 |---|---|---|
-| **cbioportal-go** (API + importer) | **≈ 26,500** | ≈ 9,200 |
+| **cbioportal-go** (API + importer) | **≈ 38,100** | ≈ 20,200 |
 | cbioportal (Java backend) | ≈ 80,000 | ≈ 60,500 |
 | cbioportal-core (Java importer + Python validator) | ≈ 33,300 | ≈ 22,700 |
 
-go is about a quarter of the size and uses one language. It has three direct
-dependencies: ClickHouse's official Go driver, a YAML parser and
-`golang.org/x/sync`. go does not yet have the study validator, SAML login and
+The go row counts the API and the importer, with the contract tests. It
+leaves out the cbioportal.org tools and the Java-migration tools, which add
+about 5,800 lines of code and 2,000 lines of tests.
+
+go is about a third of the size and uses one language. It has seven direct
+dependencies, listed in [Architecture](../architecture.md#dependencies).
+go does not yet have the study validator, SAML login and
 a few MSK-only endpoints, which would add roughly 5,000–10,000 lines. The
 container image, frontend included, is about 100 MB. The Java image
 `cbioportal/cbioportal:master` is 1.33 GB.
