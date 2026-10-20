@@ -333,11 +333,11 @@ var expectations = []expectation{
 			return isListMutations(p) && paged(q) && q.Get("sortBy") == ""
 		},
 		options: `known="Java orders a profile's mutations by profile, sample and gene only (MutationMapper); which of a sample's mutations in one gene fall on a page at its boundary follows ClickHouse's unstable sort"`,
-	},	{
+	}, {
 		match: func(m, p string, q url.Values, b string) bool {
-			return isListMutations(p) && paged(q) && q.Get("sortBy") != ""
+			return isListMutations(p) && paged(q) && q.Get("sortBy") == "entrezGeneId"
 		},
-		options: `known="Java orders a profile's mutations by the sort value only; which of the mutations that tie at a page boundary fall on the page is unspecified"`,
+		options: `known="Java orders a profile's mutations by the gene only; which of a gene's mutations at a page boundary fall on the page is unspecified"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
