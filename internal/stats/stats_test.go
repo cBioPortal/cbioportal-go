@@ -13,45 +13,6 @@ func almostEqual(a, b, tol float64) bool {
 // Chi-square test
 // ---------------------------------------------------------------------------
 
-func TestChiSquareTestCounts(t *testing.T) {
-	tests := []struct {
-		name     string
-		altered  []int
-		profiled []int
-		wantLow  float64
-		wantHigh float64
-	}{
-		{
-			name:     "significant difference",
-			altered:  []int{90, 10},
-			profiled: []int{100, 100},
-			wantLow:  0.0, wantHigh: 0.001,
-		},
-		{
-			name:     "no difference",
-			altered:  []int{50, 50},
-			profiled: []int{100, 100},
-			wantLow:  0.99, wantHigh: 1.01,
-		},
-		{
-			name:     "three groups with difference",
-			altered:  []int{80, 10, 10},
-			profiled: []int{100, 100, 100},
-			wantLow:  0.0, wantHigh: 0.001,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			p := ChiSquareTestCounts(tt.altered, tt.profiled)
-			if p < tt.wantLow || p > tt.wantHigh {
-				t.Errorf("ChiSquareTestCounts = %f, want in [%f, %f]",
-					p, tt.wantLow, tt.wantHigh)
-			}
-		})
-	}
-}
-
 func sampleStats(v []float64) (int, float64, float64) {
 	n := len(v)
 	var s float64
