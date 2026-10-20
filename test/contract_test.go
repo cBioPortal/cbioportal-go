@@ -549,6 +549,11 @@ func TestContractLegacyClinicalDataCounts(t *testing.T) {
 	wantEq(t, counts("OS_STATUS"), map[string]string{"OS_STATUS": `[{"value":"NA","count":2}]`})
 	wantEq(t, counts("NO_SUCH", "OS_STATUS")["NO_SUCH"], `[{"value":"NA","count":2}]`)
 	wantEq(t, counts("NO_SUCH", "MUTATION_COUNT")["NO_SUCH"], `[]`)
+	// No item when no sample matches the filter.
+	saved := filter["sampleIdentifiers"]
+	filter["sampleIdentifiers"] = []map[string]string{{"studyId": "study_es_0", "sampleId": "NO_SUCH_SAMPLE"}}
+	wantEq(t, counts("OS_STATUS"), map[string]string{})
+	filter["sampleIdentifiers"] = saved
 	// NA comes after the values, as Java adds it last.
 	filter["sampleIdentifiers"] = append(filter["sampleIdentifiers"].([]map[string]string),
 		map[string]string{"studyId": "study_es_0", "sampleId": "TCGA-A1-A0SB-01"})
