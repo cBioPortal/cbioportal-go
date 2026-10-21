@@ -42,8 +42,16 @@ done
 sleep 1
 rm -rf test-results/* 2>/dev/null
 
-# E2E_SKIP: a test-title regex to leave out (e.g. a known environment gap).
-EXTRA=(); [ -n "${E2E_SKIP:-}" ] && EXTRA=(--grep-invert "$E2E_SKIP")
+# STALE: upstream tests that fail against Java too, left out on every run.
+# hide-download-controls' patient and study view groups wait for the
+# "Files & Links" tab, which frontend v7.2.0 replaces with one tab per
+# resource when the resource table has data (cbioportal-frontend's
+# e2e_localdb fails them since v7.2.0).
+STALE='hide download controls feature (patient view|study view) '
+# E2E_SKIP: a further test-title regex to leave out (e.g. a known
+# environment gap).
+SKIP="$STALE"; [ -n "${E2E_SKIP:-}" ] && SKIP="$STALE|$E2E_SKIP"
+EXTRA=(--grep-invert "$SKIP")
 CI=1 CBIOPORTAL_URL="$URL" LOCALDEV=1 PW_LOCAL=1 HEADLESS_CHROME=true \
   corepack pnpm exec playwright test "${SPECS[@]}" --update-snapshots --workers="$WORKERS" "${EXTRA[@]}"
 rc=$?
