@@ -333,7 +333,19 @@ var expectations = []expectation{
 			return isListMutations(p) && paged(q) && q.Get("sortBy") == ""
 		},
 		options: `known="Java orders a profile's mutations by profile, sample and gene only (MutationMapper); which of a sample's mutations in one gene fall on a page at its boundary follows ClickHouse's unstable sort"`,
+	}, {
+		match: func(m, p string, q url.Values, b string) bool {
+			return isListMutations(p) && paged(q) && q.Get("sortBy") == "entrezGeneId"
+		},
+		options: `known="Java orders a profile's mutations by the gene only; which of a gene's mutations at a page boundary fall on the page is unspecified"`,
 	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isListMutations(p) && strings.Contains(b, `"sampleIds"`)
+		},
+		options: `known-if-a-subset="for a profile's samples Java's MutationMapper selects the samples, not the profile, so it adds the samples' records of the study's other mutation profiles (such as _uncalled); go answers the profile's records (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+
 	{
 		match: func(m, p string, q url.Values, b string) bool {
 			return m == "GET" && isEntityList(p) && paged(q) && q.Get("sortBy") == "" && !q.Has("keyword") &&
