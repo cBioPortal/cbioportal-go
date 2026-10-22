@@ -38,6 +38,13 @@ func ApplyFromProd(base *ch.Client, prodDB, rawDB, targetDB string) ([]ViewCount
 		return nil, err
 	}
 	b.unifiedResource = strings.TrimSpace(text) != "0"
+	text, err = base.Execute(fmt.Sprintf(
+		"SELECT count() FROM system.columns WHERE database = '%s' AND table = 'cancer_study' AND name = 'license' FORMAT TabSeparated",
+		prodDB))
+	if err != nil {
+		return nil, err
+	}
+	b.studyLicense = strings.TrimSpace(text) != "0"
 	for _, step := range b.steps() {
 		if err := b.build(step); err != nil {
 			return nil, err
@@ -79,6 +86,18 @@ type prodBuilder struct {
 	// unifiedResource: production has the one resource table of schema
 	// 3.1.0 rather than resource_study, resource_patient and resource_sample.
 	unifiedResource bool
+	// studyLicense: production's cancer_study has the optional license
+	// column (an SPDX id).
+	studyLicense bool
+}
+
+// studyLicenseSQL is the cancer_study license, empty when unset or when the
+// production schema has no such column.
+func (b *prodBuilder) studyLicenseSQL() string {
+	if b.studyLicense {
+		return "ifNull(c.license, '') AS license"
+	}
+	return "'' AS license"
 }
 
 func (o prodObject) full() string { return o.db + ".`" + o.name + "`" }
@@ -212,7 +231,7 @@ func (b *prodBuilder) steps() []prodObject {
 		b.table("cancer_study", "study_id",
 			"SELECT cs.study_id AS study_id, c.name AS name, '' AS short_name, c.description AS description, "+
 				"c.type_of_cancer_id AS cancer_type_id, ifNull(c.groups, '') AS groups, ifNull(c.pmid, '') AS pmid, "+
-				"ifNull(c.citation, '') AS citation, ifNull(rg.name, '') AS reference_genome, toUInt8(0) AS add_global_case_list, "+
+				"ifNull(c.citation, '') AS citation, "+b.studyLicenseSQL()+", ifNull(rg.name, '') AS reference_genome, toUInt8(0) AS add_global_case_list, "+
 				"c.import_date AS import_date, toUInt8(c.public = 1) AS public_study, toInt64(ifNull(c.status, 1)) AS status, "+
 				"toUInt64(c.cancer_study_id) AS internal_id FROM {p}.cancer_study c INNER JOIN {t}.prod_study cs ON cs.cancer_study_id = c.cancer_study_id "+
 				"LEFT JOIN {p}.reference_genome rg ON rg.reference_genome_id = c.reference_genome_id"),
