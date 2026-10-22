@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Rerun on main by hand, e.g. when GitHub missed a push event.
+  workflow_dispatch:
 
 env:
   # cBioPortal seed dump (genes, aliases, cancer types, reference genomes).
