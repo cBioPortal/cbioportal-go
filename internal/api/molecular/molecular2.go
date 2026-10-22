@@ -328,7 +328,7 @@ func DerefInt(p *int64) int64 {
 type CopyNumberCount struct {
 	MolecularProfileID                  string `json:"molecularProfileId"`
 	EntrezGeneID                        int64  `json:"entrezGeneId"`
-	Alteration                          int64  `json:"alteration"`
+	Alteration                          *int64 `json:"alteration,omitempty"`
 	NumberOfSamples                     int64  `json:"numberOfSamples"`
 	NumberOfSamplesWithAlterationInGene *int64 `json:"numberOfSamplesWithAlterationInGene,omitempty"`
 }
@@ -341,9 +341,11 @@ type cnCountRow struct {
 
 func (s Server) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 	mpid := r.PathValue("id")
+	// A missing alteration is null, as in Java: it matches no event and is
+	// left out of the answer.
 	var ids []struct {
-		EntrezGeneID int64 `json:"entrezGeneId"`
-		Alteration   int64 `json:"alteration"`
+		EntrezGeneID int64  `json:"entrezGeneId"`
+		Alteration   *int64 `json:"alteration"`
 	}
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 || len(ids) > 50000 {
@@ -364,9 +366,12 @@ func (s Server) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pairs := make([]string, len(ids))
-	for i, id := range ids {
-		pairs[i] = fmt.Sprintf("(%d, %d)", id.EntrezGeneID, id.Alteration)
+	// (0, 0) keeps the list non-empty; it matches nothing, as only -2 and 2 are read.
+	pairs := []string{"(0, 0)"}
+	for _, id := range ids {
+		if id.Alteration != nil {
+			pairs = append(pairs, fmt.Sprintf("(%d, %d)", id.EntrezGeneID, *id.Alteration))
+		}
 	}
 	rows, err := ch.QueryP[cnCountRow](s.CH, fmt.Sprintf(
 		"SELECT entrezGeneId, alteration, uniqExact(sampleId) AS n FROM ("+
@@ -390,7 +395,11 @@ func (s Server) copyNumberCountsFetch(w http.ResponseWriter, r *http.Request) {
 			MolecularProfileID: mpid,
 			NumberOfSamples:    total,
 		}
-		if n, ok := found[[2]int64{id.EntrezGeneID, id.Alteration}]; ok {
+		if id.Alteration == nil {
+			out = append(out, c)
+			continue
+		}
+		if n, ok := found[[2]int64{id.EntrezGeneID, *id.Alteration}]; ok {
 			c.NumberOfSamplesWithAlterationInGene = &n
 		}
 		out = append(out, c)
@@ -639,10 +648,12 @@ type MutationCountByPosition struct {
 }
 
 func (s Server) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Request) {
+	// A missing position is null, as in Java: the mapper's comparisons with
+	// it match no mutation, so its count is null.
 	var ids []struct {
-		EntrezGeneID    int64 `json:"entrezGeneId"`
-		ProteinPosStart int64 `json:"proteinPosStart"`
-		ProteinPosEnd   int64 `json:"proteinPosEnd"`
+		EntrezGeneID    int64  `json:"entrezGeneId"`
+		ProteinPosStart *int64 `json:"proteinPosStart"`
+		ProteinPosEnd   *int64 `json:"proteinPosEnd"`
 	}
 	core.ReadBody(r, &ids)
 	if len(ids) == 0 {
@@ -683,9 +694,13 @@ func (s Server) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 	// returns no row for it.
 	out := make([]*MutationCountByPosition, 0, len(ids))
 	for _, id := range ids {
+		if id.ProteinPosStart == nil || id.ProteinPosEnd == nil {
+			out = append(out, nil)
+			continue
+		}
 		var n int64
 		for _, m := range muts {
-			if m.gene == id.EntrezGeneID && m.start >= id.ProteinPosStart && m.end <= id.ProteinPosEnd {
+			if m.gene == id.EntrezGeneID && m.start >= *id.ProteinPosStart && m.end <= *id.ProteinPosEnd {
 				n += m.n
 			}
 		}
@@ -694,7 +709,7 @@ func (s Server) mutationCountsByPositionFetch(w http.ResponseWriter, r *http.Req
 			continue
 		}
 		out = append(out, &MutationCountByPosition{Count: n, EntrezGeneID: id.EntrezGeneID,
-			ProteinPosStart: id.ProteinPosStart, ProteinPosEnd: id.ProteinPosEnd})
+			ProteinPosStart: *id.ProteinPosStart, ProteinPosEnd: *id.ProteinPosEnd})
 	}
 	core.WriteJSON(w, out)
 }

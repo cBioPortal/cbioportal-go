@@ -40,7 +40,7 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/treatments/patient", `{"studyIds":["a"]}`, "known-if-empty="},
 		{"POST", "/api/treatments/sample", `{"studyIds":["a","b"]}`, "known-if-empty="},
 		{"POST", "/api/legacy/alteration-enrichments/fetch", `{"molecularProfileCasesGroupFilter":[{"molecularProfileCaseIdentifiers":[{"molecularProfileId":"a_mutations","caseId":"s1"},{"molecularProfileId":"b_mutations","caseId":"s2"}]}]}`, "known="},
-		{"POST", "/api/alteration-enrichments/fetch", `{"molecularProfileCasesGroupFilter":[{"molecularProfileCaseIdentifiers":[{"molecularProfileId":"a_mutations","caseId":"s1"}]},{"molecularProfileCaseIdentifiers":[{"molecularProfileId":"a_mutations","caseId":"s2"}]}]}`, ""},
+		{"POST", "/api/alteration-enrichments/fetch", `{"molecularProfileCasesGroupFilter":[{"molecularProfileCaseIdentifiers":[{"molecularProfileId":"a_mutations","caseId":"s1"}]},{"molecularProfileCaseIdentifiers":[{"molecularProfileId":"a_mutations","caseId":"s2"}]}]}`, "known="},
 		{"POST", "/api/structural-variant/fetch?projection=META", `{"molecularProfileIds":["p"]}`, `known="Java's controller has no projection`},
 		{"POST", "/api/gene-panels/fetch?projection=META", `["WES"]`, `known="Java's controller has no projection`},
 		{"POST", "/api/gene-panels/fetch", `["WES"]`, ""},

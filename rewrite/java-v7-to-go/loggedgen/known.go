@@ -143,28 +143,6 @@ func studyCount(body string) int {
 	return len(seen)
 }
 
-// groupProfileCount is the number of distinct molecular profiles in an
-// enrichment body's groups.
-func groupProfileCount(body string) int {
-	var f struct {
-		Groups []struct {
-			Cases []struct {
-				ProfileID string `json:"molecularProfileId"`
-			} `json:"molecularProfileCaseIdentifiers"`
-		} `json:"molecularProfileCasesGroupFilter"`
-	}
-	if json.Unmarshal([]byte(body), &f) != nil {
-		return 0
-	}
-	seen := map[string]bool{}
-	for _, g := range f.Groups {
-		for _, c := range g.Cases {
-			seen[c.ProfileID] = true
-		}
-	}
-	return len(seen)
-}
-
 // filtersMissingAttribute reports a study view filter, at the top of the
 // body or under studyViewFilter, with a clinical data filter on a name that
 // is no clinical attribute: CANCER_STUDY, which API clients send for the
@@ -383,9 +361,9 @@ var expectations = []expectation{
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
-			return m == "POST" && isAltEnrichments(p) && groupProfileCount(b) > 1
+			return m == "POST" && isAltEnrichments(p)
 		},
-		options: `known="Java's AlterationEnrichmentUtil gives a group with no altered sample the whole group's profiled count, also for samples whose gene panel lacks the gene; go counts the samples profiled for the gene (Fixed in go; docs/rewrite/java-quirks.md)"`,
+		options: `known="Java's AlterationEnrichmentUtil gives a group with no altered sample the whole group's profiled count, also for samples whose gene panel lacks the gene (as with MSK-IMPACT's several panels in one profile); go counts the samples profiled for the gene (Fixed in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {

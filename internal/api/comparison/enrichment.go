@@ -144,13 +144,20 @@ func (s Server) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
+	// Java keys the groups by name in a HashMap, so the counts, and the
+	// group Fisher's test reads first, come in its iteration order.
+	names := map[string]bool{}
+	for _, g := range body.Groups {
+		names[g.Name] = true
+	}
+	groupOrder := core.JavaHashMapOrder(core.SortedKeys(names))
 	out := []AlterationEnrichment{}
 	for _, gene := range core.SortedKeys(genes) {
 		c := genes[gene]
 		any := false
-		counts := make([]CountSummary, len(body.Groups))
-		for i, g := range body.Groups {
-			counts[i] = CountSummary{Name: g.Name, AlteredCount: c.altered[g.Name], ProfiledCount: c.profiled[g.Name]}
+		counts := make([]CountSummary, len(groupOrder))
+		for i, name := range groupOrder {
+			counts[i] = CountSummary{Name: name, AlteredCount: c.altered[name], ProfiledCount: c.profiled[name]}
 			if counts[i].AlteredCount > 0 {
 				any = true
 			}

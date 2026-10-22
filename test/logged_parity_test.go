@@ -145,3 +145,27 @@ func TestClinicalDataFetchWithoutIdentifiers(t *testing.T) {
 		wantEq(t, strings.TrimSpace(string(b)), "[]")
 	}
 }
+
+// An identifier without an alteration, or without a protein position, is
+// null in Java: the copy-number count leaves the alteration out and counts
+// no altered samples, and the count by position is null.
+func TestContractMissingIdentifierFields(t *testing.T) {
+	requireAPI(t)
+	var cna []map[string]any
+	post(t, "/api/molecular-profiles/study_es_0_gistic/discrete-copy-number-counts/fetch",
+		[]map[string]any{{"entrezGeneId": 7157}}, &cna)
+	if len(cna) != 1 {
+		t.Fatalf("copy-number counts: %v", cna)
+	}
+	_, hasAlteration := cna[0]["alteration"]
+	_, hasAltered := cna[0]["numberOfSamplesWithAlterationInGene"]
+	wantEq(t, []any{hasAlteration, hasAltered, cna[0]["numberOfSamples"]}, []any{false, false, float64(788)})
+
+	var pos []map[string]any
+	post(t, "/api/mutation-counts-by-position/fetch", []map[string]any{
+		{"entrezGeneId": 7157}, {"entrezGeneId": 7157, "proteinPosStart": 1}, {"entrezGeneId": 7157, "proteinPosStart": 1, "proteinPosEnd": 400},
+	}, &pos)
+	if len(pos) != 3 || pos[0] != nil || pos[1] != nil || pos[2] == nil {
+		t.Errorf("counts by position: %v", pos)
+	}
+}
