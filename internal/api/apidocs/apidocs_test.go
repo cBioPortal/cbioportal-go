@@ -61,6 +61,12 @@ func TestOpenAPIDocs(t *testing.T) {
 		w := get(p)
 		var doc struct {
 			OpenAPI string `json:"openapi"`
+			Info    struct {
+				License struct {
+					Name string `json:"name"`
+					URL  string `json:"url"`
+				} `json:"license"`
+			} `json:"info"`
 			Servers []struct {
 				URL string `json:"url"`
 			} `json:"servers"`
@@ -70,6 +76,15 @@ func TestOpenAPIDocs(t *testing.T) {
 		}
 		if doc.OpenAPI == "" || len(doc.Servers) != 1 || doc.Servers[0].URL != "http://go.example.org" {
 			t.Errorf("%s: openapi %q servers %+v", p, doc.OpenAPI, doc.Servers)
+		}
+		// Java's SwaggerConfig declares the backend's Apache-2.0 license.
+		if l := doc.Info.License; l.Name != "Apache-2.0" || l.URL != "https://www.apache.org/licenses/LICENSE-2.0" {
+			t.Errorf("%s: license %+v", p, l)
+		}
+	}
+	for _, p := range []string{"/api/v3/api-docs.yaml", "/api/v3/api-docs.yaml/public", "/api/v3/api-docs.yaml/internal"} {
+		if w := get(p); !strings.Contains(w.Body.String(), "  license:\n    name: Apache-2.0\n    url: https://www.apache.org/licenses/LICENSE-2.0\n") {
+			t.Errorf("%s: license missing", p)
 		}
 	}
 	if w := get("/api/v3/api-docs.yaml"); !strings.Contains(w.Body.String(), "- url: http://go.example.org\n") ||
