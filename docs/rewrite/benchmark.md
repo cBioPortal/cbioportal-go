@@ -1,8 +1,9 @@
 # Benchmark: cbioportal-go vs the Java backend
 
 This page compares cbioportal-go with cBioPortal's Java backend and Java
-importer. It answers four questions: is go as fast, does it give the same
-answers, what does it cost to run, and how fast does it load a study. How the
+importer. It answers five questions: is go as fast, does it give the same
+answers, what does it cost to run, how fast does it load a study, and how
+quickly can a developer build and start it. How the
 rewrite and the comparison were done is in [Rewrite method](method.md).
 
 Both backends read their data from ClickHouse, a database built for fast
@@ -50,6 +51,10 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
 - **Import:** go loads a study 2.6 to 3.6 times faster than Java's importer.
   The 50,000-sample MSK-IMPACT study takes 80 s instead of 289 s, with 0.2 GB
   of memory instead of 3.9 GB ([Import](#import)).
+- **Build and start-up:** after a one-file change, go's API rebuilds in
+  1.5 s and Java's in 47 s. go answers its first request 0.14 s after it
+  starts, Java after 16 to 19 s. go's image is 80 MB to download, Java's
+  492 MB ([details](#build-and-start-up-time)).
 - **Same answers:** 613 of 618 logged production requests gave identical
   responses, and the other 5 differ for known reasons. The nightly check's
   first run found 65 unexplained differences out of 5,009 requests. These are
@@ -68,6 +73,7 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
 - [Frontend e2e run](#frontend-e2e-run)
 - [Cost estimate](#cost-estimate)
 - [Import](#import)
+- [Build and start-up time](#build-and-start-up-time)
 - [Code size](#code-size)
 
 ## Mirrored production traffic
@@ -359,6 +365,54 @@ differences remain:
 - Java skips copy-number segments whose start is not before their end (4 on
   chord, 10 on 50k). go keeps them.
 
+## Build and start-up time
+
+How long a developer waits between changing the code and trying the change
+decides how quickly the backend can be worked on. This section measures that
+wait for both backends.
+
+Both were measured on 2026-10-22 on the same machine, with 4 CPU cores and
+16 GB of memory. Java is version 7.2.0, built with Maven 3.9 and Java 21 in
+the official Maven image. go is the main branch, built with Go 1.27.3. Each
+number is the range of two or three runs.
+
+| Step | Java | go |
+|---|---:|---:|
+| Rebuild after changing one file | 47 s | 1.5 s (API), 2.5 s (all four programs) |
+| Start until the first request is answered | 16–19 s | 0.14 s |
+| First build on a new machine, downloading dependencies | 174 s | 67–72 s |
+| Full rebuild, dependencies already downloaded | 47–57 s | 67–72 s |
+| Container image, download size | 492 MB | 80 MB |
+| Container image, unpacked | 1.33 GB | about 120 MB |
+| Checks on a pull request (GitHub Actions) | about 7 min | about 2 min |
+
+What each row measures:
+
+- **Rebuild after changing one file.** One line is added to one source file,
+  then the program is built again. For Java this is `mvn package`, which
+  compiles the project again and packs the 130 MB Spring Boot jar. For go it
+  is `go build`, which compiles only the changed package and what depends on
+  it.
+- **Start until the first request is answered.** The time from starting the
+  program until `/api/info` answers, against the same ClickHouse database
+  with the test studies. Java's own log reports 13 to 15 s of this as
+  Spring Boot starting up. Java was measured with version 7.1.3, because
+  7.2.0 needs a newer database schema than the local test database has. Both
+  versions start the same Spring Boot application.
+- **First build and full rebuild.** For go, a full rebuild compiles the
+  standard library and every dependency from source, because its build
+  cache is empty. That only happens on a new machine or a CI runner without
+  a cache. Java's full rebuild reuses its downloaded libraries, which come
+  already compiled, so it is faster than go's here.
+- **Scope.** Java's numbers are for the web API only. Its importer is a
+  separate project (cbioportal-core) with its own build. go's numbers cover
+  all four programs, the importer included.
+- **Checks on a pull request.** The average of recent pull request runs in
+  each repository on GitHub. Java's are its core and integration tests, which
+  run side by side. Java's frontend tests run separately on CircleCI and are
+  not included. go's are lint, unit tests, contract tests and the image
+  build.
+
 ## Code size
 
 Lines of code, not counting blank lines and comments. The go numbers were
@@ -379,5 +433,5 @@ go is about a third of the size and uses one language. It has seven direct
 dependencies, listed in [Architecture](../architecture.md#dependencies).
 go does not yet have the study validator, SAML login and
 a few MSK-only endpoints, which would add roughly 5,000–10,000 lines. The
-container image, frontend included, is about 100 MB. The Java image
-`cbioportal/cbioportal:master` is 1.33 GB.
+container image, frontend included, is about 120 MB unpacked. The Java image
+is 1.33 GB ([Build and start-up time](#build-and-start-up-time)).
