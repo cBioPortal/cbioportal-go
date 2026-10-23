@@ -289,3 +289,22 @@ func TestJavaPortalPage(t *testing.T) {
 		t.Errorf("posted page:\n%s", w.Body.String())
 	}
 }
+
+// The build's scripts and stylesheet load from the netlify deploy preview
+// that localStorage.netlify names, else from this origin.
+func TestWithNetlifyBundle(t *testing.T) {
+	page := string(withNetlifyBundle([]byte(`<head><script defer src="/reactapp/main.app.js"></script>` +
+		`<link href="/reactapp/styles.css" rel="stylesheet"></head>`)))
+	for _, want := range []string{
+		`localStorage.netlify ? "//" + localStorage.netlify + ".netlify.app/" : "/"`,
+		`'reactapp/main.app.js"></scr' + 'ipt>'`,
+		`'reactapp/styles.css" rel="stylesheet">'`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %q in %s", want, page)
+		}
+	}
+	if strings.Contains(page, `src="/reactapp/`) || strings.Contains(page, `href="/reactapp/`) {
+		t.Errorf("a bundle file still loads from this origin only: %s", page)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -505,7 +506,24 @@ func withFrontendConfig(page []byte, host string, rawConfig []byte) []byte {
 	if i := bytes.Index(page, []byte("</body>")); i >= 0 {
 		page = append(append(append([]byte{}, page[:i]...), "<script></script>"...), page[i:]...)
 	}
-	return page
+	return withNetlifyBundle(page)
+}
+
+var (
+	bundleScript = regexp.MustCompile(`<script defer src="/reactapp/([^"<>]+)"></script>`)
+	bundleStyles = regexp.MustCompile(`<link href="/reactapp/([^"<>]+\.css)" rel="stylesheet">`)
+)
+
+// netlifyBase is the script expression for where the frontend bundle is
+// loaded from: a cbioportal-frontend deploy preview when localStorage.netlify
+// names one (as on the Java portal page), else this origin. localdev and
+// localdist keep this origin's bundle, which the e2e runs serve.
+const netlifyBase = `(localStorage.netlify ? "//" + localStorage.netlify + ".netlify.app/" : "/")`
+
+// withNetlifyBundle loads the build's scripts and stylesheet from netlifyBase.
+func withNetlifyBundle(page []byte) []byte {
+	page = bundleScript.ReplaceAll(page, []byte(`<script>document.write('<script defer src="' + `+netlifyBase+` + 'reactapp/$1"></scr' + 'ipt>');</script>`))
+	return bundleStyles.ReplaceAll(page, []byte(`<script>document.write('<link href="' + `+netlifyBase+` + 'reactapp/$1" rel="stylesheet">');</script>`))
 }
 
 // fontAwesome4 is the Font Awesome 4.7 stylesheet the Java portal's index
@@ -544,13 +562,17 @@ func withSiteBanner(page []byte, text, link string) []byte {
 // devModeScript mirrors the Java portal page (index.html + load-frontend.js):
 // ?localdev=true / ?localdist=true are remembered in localStorage and, as in
 // dev mode there, a dismissible "dev mode" banner is added to the body. The
-// bundle is always served from this origin.
+// bundle comes from this origin, or from the netlify deploy preview that
+// localStorage.netlify names (withNetlifyBundle).
 const devModeScript = `<script>
 if (/localdev=true/.test(window.location.href)) { localStorage.setItem("localdev", "true"); }
 if (/localdist=true/.test(window.location.href)) { localStorage.setItem("localdist", "true"); }
 window.localdev = localStorage.localdev === "true";
 window.localdist = localStorage.localdist === "true";
 window.netlify = localStorage.netlify;
+if (window.netlify) {
+  window.frontendConfig.frontendUrl = "//" + window.netlify + ".netlify.app/";
+}
 if (window.localdev || window.localdist || window.netlify) {
   localStorage.setItem("e2etest", "true");
   window.clearDevState = function () {
