@@ -22,12 +22,12 @@ them, go answers as Java does.
 Every fix and every added parameter is listed here, most with a test that
 keeps it working.
 
-**Summary.** The page has 100 entries:
+**Summary.** The page has 101 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 57 | go does the same thing as Java, on purpose. |
-| Fixed in go | 32 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
+| Fixed in go | 33 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Added in go | 1 | go accepts a parameter that Java's endpoint does not have, so Java ignores it. Without the parameter, go answers as Java does. |
 | Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
@@ -85,7 +85,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 32 fixes in one place. It shows what a client gets
+This table collects all 33 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -111,6 +111,7 @@ stores less where Java stores empty rows.
 | `treatments/patient` for studies that share patient ids | Java lists the other study's samples under a treated patient, and counts the patient once. | go keeps each study's patients and samples apart. |
 | Alteration enrichments across gene panels | When no sample of a group has a gene altered, Java counts every sample of the group as profiled for it, even samples whose panel lacks the gene. This changes the p-value. | go counts only the samples profiled for the gene. |
 | Clinical table without `pageSize` | Java returns no samples, but the full total count. | go returns every sample. |
+| Alteration enrichments, a gene profiled in fewer than two groups | Java gives the gene p = 0, the most significant value, although nothing was compared. | go gives p = 1. |
 | A clinical data filter on an attribute none of the studies has, on the `/api/legacy/` study view endpoints | Java drops the filter and answers for every sample. | go applies it, so no sample matches, as Java's newer endpoints do. |
 | Generic assay data, `projection=ID` | Java fails with a 500. | go answers with the data. |
 | META on six fetch endpoints | Java ignores META and returns the records without a total count. | go returns an empty body with the total count. |
@@ -221,6 +222,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `treatments/patient` groups the samples of the treated patients by patient id alone. When two of the asked studies share a patient id, such as lung_msk_pdx and lung_pdx_msk_2021, a treatment of the patient in one study also lists the patient's samples in the other, and the patient is counted once. | TreatmentServiceImpl.getAllPatientTreatmentRows (`samplesByPatient`) | Fixed in go. go matches patients and samples by study and patient id. | TestLiveTreatmentsPatientSharedPatientID, known.go |
 | Alteration enrichments give a group in which no sample has a gene altered the profiled count of the whole group. Samples whose gene panel lacks the gene count as profiled, so the p-value compares against samples that were never tested for it. For example, MSK-IMPACT samples count as profiled for genes off the panel when compared with whole-exome samples. | AlterationEnrichmentUtil.createAlterationEnrichments | Fixed in go. go counts, for every group and gene, the samples profiled for the gene. | TestContractAlterationEnrichmentsProfiledPerGene, TestEnrichmentPValueChiSquare, known.go |
 | The clinical table without `pageSize` returns no samples, though the `total-count` header has the full count. The default page size 0 is meant to mean no paging, but the list is cut at offset plus page size, which is 0. | ClinicalDataServiceImpl, PaginationCalculator.lastIndex | Fixed in go. go returns every sample. | TestContractClinicalTableWithoutPageSize, known.go |
+| An alteration enrichment gives a gene p = 0 when fewer than two groups have a sample profiled for it, for example a gene on only one of the compared groups' gene panels. p = 0 is the most significant value, so such genes sort to the top, although no test was run. | AlterationEnrichmentScoreUtil.calculateEnrichmentScore (`pValue` starts at 0) | Fixed in go. go gives p = 1. | TestEnrichmentPValueChiSquare, known.go |
 | The `/api/legacy/` study view endpoints drop a clinical data filter on an attribute that none of the asked studies has, and answer for every sample. For example, a filter `CANCER_STUDY = glioma_mskcc_2019` on glioma_mskcc_2019 and lgg_tcga_pan_can_atlas_2018 counts the samples of both studies. The newer endpoints apply the filter, so no sample matches. | legacy StudyViewFilterApplier (filters split by the attributes found) | Fixed in go. go applies the filter on both, so no sample matches. An error would break saved study view links when a study loses an attribute. | TestContractClinicalFilterOnMissingAttribute, known.go |
 
 ## Molecular data and projections

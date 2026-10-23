@@ -174,8 +174,10 @@ func (s Server) alterationEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 	core.WriteJSON(w, out)
 }
 
-// enrichmentPValue follows AlterationEnrichmentScoreUtil: 0 unless at least two
-// groups are profiled and no group has more altered than profiled cases.
+// enrichmentPValue follows AlterationEnrichmentScoreUtil: 0 when a group has
+// more altered than profiled cases, and 1 when fewer than two groups are
+// profiled for the gene, as nothing is compared (Java answers 0, the most
+// significant value).
 func enrichmentPValue(counts []CountSummary) float64 {
 	profiledGroups := 0
 	for _, c := range counts {
@@ -187,7 +189,7 @@ func enrichmentPValue(counts []CountSummary) float64 {
 		}
 	}
 	if profiledGroups < 2 {
-		return 0
+		return 1
 	}
 	if len(counts) == 2 {
 		return stats.JavaFisherTwoTailed(counts[1].ProfiledCount-counts[1].AlteredCount, counts[1].AlteredCount,

@@ -363,7 +363,7 @@ var expectations = []expectation{
 		match: func(m, p string, q url.Values, b string) bool {
 			return m == "POST" && isAltEnrichments(p)
 		},
-		options: `known="Java's AlterationEnrichmentUtil gives a group with no altered sample the whole group's profiled count, also for samples whose gene panel lacks the gene (as with MSK-IMPACT's several panels in one profile); go counts the samples profiled for the gene (Fixed in go; docs/rewrite/java-quirks.md)"`,
+		options: `known="Java's AlterationEnrichmentUtil gives a group with no altered sample the whole group's profiled count, also for samples whose gene panel lacks the gene (as with MSK-IMPACT's several panels in one profile); go counts the samples profiled for the gene, and gives p = 1 where fewer than two groups are profiled for it, where Java gives 0 (Fixed in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {

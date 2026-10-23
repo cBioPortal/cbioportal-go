@@ -24,6 +24,17 @@ func TestEnrichmentPValueChiSquare(t *testing.T) {
 		t.Errorf("one group unprofiled: %v, want 1", got)
 	}
 
+	// Fewer than two groups profiled for the gene: nothing is compared, so
+	// p = 1, where Java answers 0.
+	for _, c := range [][]CountSummary{
+		{{AlteredCount: 0, ProfiledCount: 0}, {AlteredCount: 76, ProfiledCount: 8136}},
+		{{AlteredCount: 3, ProfiledCount: 30}, {AlteredCount: 0, ProfiledCount: 0}, {AlteredCount: 0, ProfiledCount: 0}},
+	} {
+		if got := enrichmentPValue(c); got != 1 {
+			t.Errorf("%+v: %v, want 1", c, got)
+		}
+	}
+
 	// Every profiled case altered: an empty column, NaN in commons-math, 1 as in Java.
 	full := []CountSummary{{AlteredCount: 4, ProfiledCount: 4}, {AlteredCount: 3, ProfiledCount: 3}, {AlteredCount: 9, ProfiledCount: 9}}
 	if got := enrichmentPValue(full); got != 1 {
