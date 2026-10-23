@@ -193,14 +193,12 @@ func enrichmentPValue(counts []CountSummary) float64 {
 		return stats.JavaFisherTwoTailed(counts[1].ProfiledCount-counts[1].AlteredCount, counts[1].AlteredCount,
 			counts[0].ProfiledCount-counts[0].AlteredCount, counts[0].AlteredCount)
 	}
-	// Java's table has a row per group; a group no sample of which is
-	// profiled for the gene adds an empty row, which makes the test NaN.
-	// Profiled counts are per gene here, so such groups are left out.
-	var table [][]int64
-	for _, c := range counts {
-		if c.ProfiledCount > 0 {
-			table = append(table, []int64{int64(c.AlteredCount), int64(c.ProfiledCount - c.AlteredCount)})
-		}
+	// A row per group, as in Java. A group with no sample profiled for the
+	// gene is an empty row, which makes the test NaN and the p-value 1: the
+	// groups cannot all be compared.
+	table := make([][]int64, len(counts))
+	for i, c := range counts {
+		table[i] = []int64{int64(c.AlteredCount), int64(c.ProfiledCount - c.AlteredCount)}
 	}
 	p := stats.CommonsChiSquareTest(table)
 	if math.IsNaN(p) {

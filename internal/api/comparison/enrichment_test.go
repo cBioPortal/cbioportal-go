@@ -8,8 +8,8 @@ import (
 )
 
 // TestEnrichmentPValueChiSquare pins the p-value of three or more groups:
-// commons-math's chi-square test over the groups profiled for the gene, as
-// Java's AlterationEnrichmentUtil computes it when every group is profiled.
+// commons-math's chi-square test over every group, as Java's
+// AlterationEnrichmentUtil computes it.
 func TestEnrichmentPValueChiSquare(t *testing.T) {
 	all := []CountSummary{{AlteredCount: 5, ProfiledCount: 40}, {AlteredCount: 12, ProfiledCount: 35}, {AlteredCount: 2, ProfiledCount: 50}}
 	want := stats.CommonsChiSquareTest([][]int64{{5, 35}, {12, 23}, {2, 48}})
@@ -17,12 +17,11 @@ func TestEnrichmentPValueChiSquare(t *testing.T) {
 		t.Errorf("all profiled: %v, want %v", got, want)
 	}
 
-	// A group with no sample profiled for the gene is left out, not an
-	// empty row that would make the test NaN (p = 1).
+	// A group with no sample profiled for the gene is an empty row: the
+	// test is NaN and the p-value 1, as in Java.
 	partial := []CountSummary{{AlteredCount: 5, ProfiledCount: 40}, {AlteredCount: 0, ProfiledCount: 0}, {AlteredCount: 12, ProfiledCount: 35}}
-	want = stats.CommonsChiSquareTest([][]int64{{5, 35}, {12, 23}})
-	if got := enrichmentPValue(partial); got != want || got == 1 {
-		t.Errorf("one group unprofiled: %v, want %v", got, want)
+	if got := enrichmentPValue(partial); got != 1 {
+		t.Errorf("one group unprofiled: %v, want 1", got)
 	}
 
 	// Every profiled case altered: an empty column, NaN in commons-math, 1 as in Java.
