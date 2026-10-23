@@ -4,8 +4,8 @@ This page lists every endpoint of cBioPortal's Java backend and says whether
 go (this project) serves it. Use it to check whether a request you need
 works on go, and which ones are left out on purpose.
 
-**Summary.** The Java backend has 193 endpoints. go serves 179 of them and
-leaves out 14. Tests cover 163. An endpoint here is one method and path,
+**Summary.** The Java backend has 192 endpoints. go serves 179 of them and
+leaves out 13. Tests cover 163. An endpoint here is one method and path,
 such as `GET /api/studies`. The list comes from the request mappings of the
 Java controllers on the `master` branch of
 [cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) (the
@@ -46,8 +46,8 @@ take paging or sorting parameters.
 | [Resources, MutSig / GISTIC](#resources-mutsig--gistic) | 12 | 12 | — | 12 | 8 | 7 |
 | [Sessions, virtual studies](#sessions-virtual-studies) | 14 | 14 | — | 14 | — | — |
 | [Authentication, data-access tokens](#authentication-data-access-tokens) | 10 | 9 | 1 | 7 | — | — |
-| [Portal, proxies, operations](#portal-proxies-operations) | 35 | 22 | 13 | 15 | — | — |
-| **Total** | **193** | **179** | **14** | **163** | **58** | **36** |
+| [Portal, proxies, operations](#portal-proxies-operations) | 34 | 22 | 12 | 15 | — | — |
+| **Total** | **192** | **179** | **13** | **163** | **58** | **36** |
 
 ## How to read the tables
 
@@ -370,7 +370,6 @@ These long lists get no paging, on purpose:
 | GET | `/api/{cache}/keyCountsPerClass` |  |  | implemented |  | Answers 404, as Java does when no cache is set up. |
 | GET | `/api/cacheStatistics` |  |  | implemented | yes | Answers 404, as Java does when no cache is set up. |
 | GET | `/export/study/{studyId}.zip` |  |  | implemented | yes | Needs `feature.study.export`. Protein-level and generic assay profiles and virtual studies are not exported. |
-| GET | `/api/getexternalpage.json` |  | sourceURL | missing |  | Lets anyone make the server fetch any URL, which is a security hole. Left out on purpose. |
 | ANY | `/` |  |  | implemented | yes | The portal page, on the paths Java serves it on, and Java's redirects and static files. See [Website paths](../configuration.md#website-paths). |
 | ANY | `/index` |  |  | implemented |  | Serves the frontend. |
 | ANY | `/index.html` |  |  | implemented |  | Serves the frontend. |
@@ -408,7 +407,6 @@ These parts of the Java backend are left out of go:
 |---|---|
 | Data access tokens other than `dat.method=oauth2` (the `uuid` and `jwt` methods) | They need a place to store tokens. Without `dat.method=oauth2`, the token endpoints return placeholders. |
 | SAML login pages, MSK sample id translation, MatchMiner | They depend on Spring Security or on services that only some deployments have. |
-| `/api/getexternalpage.json` | It fetches any URL for anyone who asks, which is a security hole. It is left out on purpose. |
 | The URL shortener and the old `/api/proxy/*` endpoints | They pass requests on to Bitly and 3D Hotspots. The frontend no longer calls them. |
 
 Java has one more controller, `DocRedirectController` (`/api-docs`,

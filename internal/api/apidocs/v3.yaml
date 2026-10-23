@@ -5100,26 +5100,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ServerStatusMessage"
-  /api/getexternalpage.json:
-    get:
-      tags:
-      - external-page-controller
-      operationId: getExternalPageUsingGET
-      parameters:
-      - name: sourceURL
-        in: query
-        required: true
-        schema:
-          type: string
-      responses:
-        "200":
-          description: OK
-          content:
-            '*/*':
-              schema:
-                type: object
-                additionalProperties:
-                  type: string
   /api/genesets:
     get:
       tags:

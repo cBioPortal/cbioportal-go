@@ -87,6 +87,13 @@ func TestOpenAPIDocs(t *testing.T) {
 			t.Errorf("%s: license missing", p)
 		}
 	}
+	// Java has no /api/getexternalpage.json endpoint, so no description lists it.
+	for _, p := range []string{"/api/v3/api-docs", "/api/v3/api-docs/public", "/api/v3/api-docs/internal",
+		"/api/v3/api-docs.yaml", "/api/v3/api-docs.yaml/public", "/api/v3/api-docs.yaml/internal"} {
+		if w := get(p); strings.Contains(w.Body.String(), "getexternalpage") {
+			t.Errorf("%s lists /api/getexternalpage.json", p)
+		}
+	}
 	if w := get("/api/v3/api-docs.yaml"); !strings.Contains(w.Body.String(), "- url: http://go.example.org\n") ||
 		w.Header().Get("Content-Type") != "application/vnd.oai.openapi" {
 		t.Errorf("yaml: server url or content type %q", w.Header().Get("Content-Type"))
