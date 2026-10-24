@@ -434,7 +434,8 @@ func TestContractPublicVirtualStudiesArray(t *testing.T) {
 // profiled count is per gene: the samples whose gene panel has the gene.
 // Java uses the whole group's count when no sample of the group has the
 // gene altered, so a gene off the group's panel counts every sample as
-// profiled.
+// profiled. A gene profiled in only one group gets p = 1, as nothing is
+// compared.
 func TestContractAlterationEnrichmentsProfiledPerGene(t *testing.T) {
 	requireAPI(t)
 	group := func(name string, ids ...string) map[string]any {
@@ -473,7 +474,7 @@ func TestContractAlterationEnrichmentsProfiledPerGene(t *testing.T) {
 			found = true
 			for _, c := range r.Counts {
 				if c.Name == "panel" {
-					wantEq(t, []any{path, c.AlteredCount, c.ProfiledCount, r.PValue}, []any{path, 0, 0, 0.0})
+					wantEq(t, []any{path, c.AlteredCount, c.ProfiledCount, r.PValue}, []any{path, 0, 0, 1.0})
 				}
 			}
 		}
