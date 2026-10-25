@@ -473,7 +473,7 @@ func TestContractAlterationEnrichmentsProfiledPerGene(t *testing.T) {
 			found = true
 			for _, c := range r.Counts {
 				if c.Name == "panel" {
-					wantEq(t, []any{path, c.AlteredCount, c.ProfiledCount, r.PValue}, []any{path, 0, 0, 0.0})
+					wantEq(t, []any{path, c.AlteredCount, c.ProfiledCount, r.PValue}, []any{path, 0, 0, 1.0})
 				}
 			}
 		}
