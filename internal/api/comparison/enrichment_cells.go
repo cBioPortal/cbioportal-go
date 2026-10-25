@@ -215,13 +215,14 @@ func (s Server) profileRowStats(args *core.SQLArgs, groups []casesGroup, cg []co
 			}
 		}
 		// The group's values in aggregation order, parsed as the matrices'
-		// cells are; non-numeric ones are left out.
+		// cells are; non-numeric ones are left out. Their sums are added up
+		// one value after another in that order, as Java adds them.
 		vals = append(vals, fmt.Sprintf(
 			"arrayMap(x -> %s, arrayMap(x -> assumeNotNull(x), arrayFilter(x -> isNotNull(x) AND isFinite(assumeNotNull(x)), "+
 				"arrayMap(x -> toFloat64OrNull(%s), arraySort((x, k) -> k, arrayFilter((x, m) -> m = 1, s, [%s]), [%s]))))) AS v%d",
 			value, core.JavaTruncatedValueSQL("x"), strings.Join(mask, ","), strings.Join(keys, ","), gi))
 		stats = append(stats, fmt.Sprintf("(toUInt32(%[1]d), length(v%[1]d), arrayReduce('avg', v%[1]d), arrayReduce('varSampStable', v%[1]d), "+
-			"arrayReduce('sum', v%[1]d), arrayReduce('sum', arrayMap(x -> x * x, v%[1]d)))", gi))
+			"arrayFold((acc, x) -> acc + x, v%[1]d, toFloat64(0)), arrayFold((acc, x) -> acc + x * x, v%[1]d, toFloat64(0)))", gi))
 	}
 	if len(stats) == 0 {
 		return "", false, nil
