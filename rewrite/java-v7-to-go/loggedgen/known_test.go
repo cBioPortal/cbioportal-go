@@ -44,6 +44,8 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/structural-variant/fetch?projection=META", `{"molecularProfileIds":["p"]}`, `known="Java's controller has no projection`},
 		{"POST", "/api/gene-panels/fetch?projection=META", `["WES"]`, `known="Java's controller has no projection`},
 		{"POST", "/api/gene-panels/fetch", `["WES"]`, ""},
+		{"POST", "/api/generic-assay-enrichments/fetch?enrichmentType=SAMPLE", `[{"name":"g0","molecularProfileCaseIdentifiers":[]}]`, "reltol=pValue:1e-6"},
+		{"POST", "/api/expression-enrichments/fetch", `[]`, "reltol=pValue:1e-6"},
 		{"POST", "/api/genomic-data-counts/fetch", `{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"cna"},{"hugoGeneSymbol":"MYC","profileType":"cna"}],"studyViewFilter":{"studyIds":["s"]}}`, "known="},
 		{"POST", "/api/genomic-data-counts/fetch", `{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"cna"}],"studyViewFilter":{"studyIds":["s"]}}`, ""},
 		{"POST", "/api/molecular-profiles/p/mutations/fetch?projection=SUMMARY&pageSize=20000&pageNumber=18&sortBy=entrezGeneId", `{"sampleListId":"l"}`, `known="Java orders a profile's mutations by the gene only`},

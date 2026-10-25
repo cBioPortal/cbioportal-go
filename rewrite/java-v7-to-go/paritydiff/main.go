@@ -407,6 +407,7 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	opts.Ignore = setOf(rq.Opts.Ignore)
 	opts.UnorderedKeys = setOf(rq.Opts.UnorderedKeys)
 	opts.Ties = rq.Opts.Ties
+	opts.KeyRelTol = rq.Opts.KeyRelTol
 	d, streamed := diffResult{}, false
 	total := ra.Size() + rb.Size()
 	if total > int64(streamAbove) {

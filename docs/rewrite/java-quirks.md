@@ -22,14 +22,14 @@ them, go answers as Java does.
 Every fix and every added parameter is listed here, most with a test that
 keeps it working.
 
-**Summary.** The page has 101 entries:
+**Summary.** The page has 102 entries:
 
 | What go does | Entries | Meaning |
 |---|---|---|
 | Copied | 57 | go does the same thing as Java, on purpose. |
 | Fixed in go | 33 | Java gives an error or wrong data, or ignores a paging or sorting parameter, and go gives the right answer. |
 | Added in go | 1 | go accepts a parameter that Java's endpoint does not have, so Java ignores it. Without the parameter, go answers as Java does. |
-| Can't match | 9 | Java gives a random or changing answer, so go cannot give the same one. |
+| Can't match | 10 | Java gives a random or changing answer, so go cannot give the same one. |
 | Does not apply | 1 | The quirk has no counterpart in go. |
 
 A test checks 55 of the 57 copied entries. The two without a test are the
@@ -315,6 +315,7 @@ twice. When Java's two answers differ, the job reports the request as
 | Profile-type and case-list-type labels use whichever name the database returns first. | mergeCaseListCounts, profile sample counts | Can't match. | known.go (`ignore=label`) |
 | Rows from database grouping or joining come in any order (study-view counts, gene panel data). Rows that tie in a sort can swap. | ClickHouse | Can't match. | corpus `unordered` / `ties=`; fixtures (about 180 requests) |
 | The single NA count or bin of a request for several genes or entities goes to a gene or entity picked at random. | ClickhouseGenomicDataMapper, generic assay counts and bins | Can't match. | corpus `genomic-data-counts-two-genes`, `generic-assay-*-two` |
+| Expression and generic assay enrichments of three or more groups: Java's ANOVA subtracts nearly equal sums, so when the groups barely differ, the order in which it adds the values moves the p-value in about the 9th digit. go uses the same formula, but adds the values in another order, so a few p-values differ there. | commons-math OneWayAnova; ExpressionEnrichmentUtil | Can't match. go's p-values agree to about 6 digits. | known.go (`reltol=pValue`) |
 | The clinical table's `byUniqueSampleKey` map is filled in the order the database returns rows. | StudyViewController | Can't match. | TestOracleFieldOrder (skips this field) |
 | When a request breaks several validation rules at once, Java reports one of them at random. | Hibernate Validator | Can't match. go always reports the same one. | TestContractFilterValidation (one broken rule only) |
 | A study's `groups` come in a `HashSet`'s order, which depends on the import. | cbioportal-core | Can't match on go's own import. A copy of production's database keeps production's order. | fixtures |

@@ -29,6 +29,9 @@ type compareOptions struct {
 	// RelTol is the relative tolerance for numbers; AbsTol the absolute one
 	// (for values that should be zero).
 	RelTol, AbsTol float64
+	// KeyRelTol is the relative tolerance of numbers held by these keys,
+	// in place of RelTol.
+	KeyRelTol map[string]float64
 	// MaxDiffs caps the differences recorded (all are counted).
 	MaxDiffs int
 }
@@ -293,6 +296,16 @@ func walk(a, b any, path string, o *compareOptions, r *diffResult) {
 			case !ina:
 				r.add(o, p, "only in b (%s)", short(vb))
 			default:
+				if tol, ok := o.KeyRelTol[k]; ok {
+					if na, ok := va.(json.Number); ok {
+						loose := *o
+						loose.RelTol = tol
+						if nb, ok := vb.(json.Number); !ok || !numbersEqual(na, nb, &loose) {
+							r.add(o, p, "a=%s b=%s", short(va), short(vb))
+						}
+						continue
+					}
+				}
 				walk(va, vb, p, o, r)
 			}
 		}

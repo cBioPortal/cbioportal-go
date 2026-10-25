@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -22,6 +23,8 @@ type requestOptions struct {
 	Unordered     bool
 	UnorderedKeys []string
 	Ties          []string
+	// KeyRelTol loosens the relative tolerance of numbers held by these keys.
+	KeyRelTol     map[string]float64
 	NullIsMissing bool
 	StatusOnly    bool
 	Ignore        []string
@@ -52,7 +55,8 @@ type requestOptions struct {
 //
 // Options: unordered (sort every array), unordered=key,key (sort the arrays
 // held by these keys), ties=field,field (elements equal in these fields may
-// come in any order), ignore=key,key (drop these keys), nullmissing (null
+// come in any order), reltol=key:tol,key:tol (compare the numbers these keys
+// hold with this relative tolerance), ignore=key,key (drop these keys), nullmissing (null
 // equals absent), status-only (compare the status code only),
 // known="reason" (an accepted difference), known-if-empty="reason" (a
 // difference accepted when A answers an empty array), known-if-b-empty="reason"
@@ -168,6 +172,18 @@ func parseHeader(h string) (request, error) {
 			req.Opts.UnorderedKeys = append(req.Opts.UnorderedKeys, strings.Split(tok[len("unordered="):], ",")...)
 		case strings.HasPrefix(tok, "ties="):
 			req.Opts.Ties = append(req.Opts.Ties, strings.Split(tok[len("ties="):], ",")...)
+		case strings.HasPrefix(tok, "reltol="):
+			for _, kv := range strings.Split(tok[len("reltol="):], ",") {
+				k, v, _ := strings.Cut(kv, ":")
+				tol, err := strconv.ParseFloat(v, 64)
+				if k == "" || err != nil || tol <= 0 {
+					return req, fmt.Errorf("%s: bad option %q", name, tok)
+				}
+				if req.Opts.KeyRelTol == nil {
+					req.Opts.KeyRelTol = map[string]float64{}
+				}
+				req.Opts.KeyRelTol[k] = tol
+			}
 		case strings.HasPrefix(tok, "ignore="):
 			req.Opts.Ignore = append(req.Opts.Ignore, strings.Split(tok[len("ignore="):], ",")...)
 		default:

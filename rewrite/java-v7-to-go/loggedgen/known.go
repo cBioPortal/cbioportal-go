@@ -61,6 +61,7 @@ var (
 	isLegacyPost      = pathIs(`^/api/legacy/`)
 	isGenomicCounts   = pathIs(`^/api/(legacy/)?genomic-data-counts/fetch$`)
 	isGenericAssayAll = pathIs(`^/api/generic_assay_data/fetch$`)
+	isContEnrichments = pathIs(`^/api/(legacy/)?(expression|generic-assay)-enrichments/fetch$`)
 	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
 
@@ -360,6 +361,11 @@ var expectations = []expectation{
 		options: `known-if-a-subset="Java's copy-number GET has no gene parameter and answers every gene's calls; go reads entrezGeneId and answers that gene's (Added in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
+		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isContEnrichments(p) },
+		options: "reltol=pValue:1e-6",
+		comment: "Java's t-test and ANOVA subtract nearly equal sums, so the order its values are added in moves the 9th digit of a p-value; go adds them in another order",
+	},
+	{
 		match: func(m, p string, q url.Values, b string) bool {
 			return m == "POST" && isLegacyPost(p) && filtersMissingAttribute(b)
 		},
@@ -472,7 +478,7 @@ func expect(method, target, body string) (options, comment string) {
 
 // expectationOptions are the header options expect sets; annotate replaces
 // them.
-var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset)="[^"]*"| ignore=\S+`)
+var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset)="[^"]*"| ignore=\S+| reltol=\S+`)
 
 // annotate copies a corpus written by this command with the expectations
 // marked as they stand now: the options and comments of earlier

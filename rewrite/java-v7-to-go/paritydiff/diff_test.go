@@ -355,3 +355,29 @@ func TestTransientGatewayStatuses(t *testing.T) {
 		}
 	}
 }
+
+// reltol=key:tol compares the numbers a key holds with its own relative
+// tolerance; other numbers keep the default one.
+func TestKeyRelTol(t *testing.T) {
+	rq, err := parseHeader("r reltol=pValue:1e-6")
+	if err != nil || rq.Opts.KeyRelTol["pValue"] != 1e-6 {
+		t.Fatalf("parse: %+v %v", rq.Opts, err)
+	}
+	a, _ := decodeJSON([]byte(`[{"pValue": 0.44998266567683287, "mean": 0.1}]`))
+	b, _ := decodeJSON([]byte(`[{"pValue": 0.44998266397531006, "mean": 0.1}]`))
+	o := defaultOptions()
+	if d := compareJSON(a, b, o); d.Count == 0 {
+		t.Errorf("default tolerance accepts a 4e-9 difference")
+	}
+	o.KeyRelTol = rq.Opts.KeyRelTol
+	if d := compareJSON(a, b, o); d.Count != 0 {
+		t.Errorf("reltol: %v", d.Diffs)
+	}
+	c, _ := decodeJSON([]byte(`[{"pValue": 0.44998266567683287, "mean": 0.1000001}]`))
+	if d := compareJSON(a, c, o); d.Count == 0 {
+		t.Errorf("reltol loosened another key")
+	}
+	if _, err := parseHeader("r reltol=pValue:x"); err == nil {
+		t.Errorf("bad reltol accepted")
+	}
+}
