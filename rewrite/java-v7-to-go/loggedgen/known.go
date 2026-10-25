@@ -59,6 +59,8 @@ var (
 	isEntityClinical  = pathIs(`^/api/studies/[^/]+/(patients|samples)/[^/]+/clinical-data$`)
 	isClinicalEvents  = pathIs(`^/api/studies/[^/]+/(patients/[^/]+/)?clinical-events$`)
 	isLegacyPost      = pathIs(`^/api/legacy/`)
+	isGenomicCounts   = pathIs(`^/api/(legacy/)?genomic-data-counts/fetch$`)
+	isGenericAssayAll = pathIs(`^/api/generic_assay_data/fetch$`)
 	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
 
@@ -202,7 +204,17 @@ func skip(method, target, body string) bool {
 		// ignored, and only the POST body's entrezGeneIds narrow the list.
 		return strings.EqualFold(q.Get("discreteCopyNumberEventType"), "ALL") && !bodyHasGenes(body)
 	case isMolecularData(path):
-		return (paged(q) || method == "POST") && !hasGenes(q, body)
+		// Java's POST reads its genes from the body only.
+		if method == "POST" {
+			return !bodyHasGenes(body)
+		}
+		return paged(q) && !hasGenes(q, body)
+	case method == "POST" && isGenericAssayAll(path):
+		// Without genericAssayStableIds at the top of the body, the request
+		// asks for whole profiles (a filter nested under an unknown key is
+		// ignored by go and makes Java answer an empty 200).
+		ids, ok := bodyObject(body)["genericAssayStableIds"]
+		return !ok || string(ids) == "null"
 	}
 	return false
 }
@@ -402,6 +414,12 @@ var expectations = []expectation{
 			return m == "POST" && isMutationsFetch(p) && strings.Contains(b, `"sampleMolecularIdentifiers"`)
 		},
 		options: `known-if-a-subset="for (profile, sample) pairs Java's MutationMapper selects the samples, not the profiles, so it adds the samples' records of the study's other mutation profiles (such as _uncalled); go answers the named profiles' records (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool {
+			return m == "POST" && isGenomicCounts(p) && strings.Count(b, `"hugoGeneSymbol"`) > 1
+		},
+		options: `known="Java's ClickhouseGenomicDataMapper attaches the request's single NA count to a gene ClickHouse picks; go attaches it to the first gene (docs/rewrite/java-quirks.md, can't match)"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isDataBinCounts(p) },

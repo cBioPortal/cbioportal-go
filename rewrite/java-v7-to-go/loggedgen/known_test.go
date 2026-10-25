@@ -44,6 +44,8 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/structural-variant/fetch?projection=META", `{"molecularProfileIds":["p"]}`, `known="Java's controller has no projection`},
 		{"POST", "/api/gene-panels/fetch?projection=META", `["WES"]`, `known="Java's controller has no projection`},
 		{"POST", "/api/gene-panels/fetch", `["WES"]`, ""},
+		{"POST", "/api/genomic-data-counts/fetch", `{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"cna"},{"hugoGeneSymbol":"MYC","profileType":"cna"}],"studyViewFilter":{"studyIds":["s"]}}`, "known="},
+		{"POST", "/api/genomic-data-counts/fetch", `{"genomicDataFilters":[{"hugoGeneSymbol":"CDKN2A","profileType":"cna"}],"studyViewFilter":{"studyIds":["s"]}}`, ""},
 		{"POST", "/api/molecular-profiles/p/mutations/fetch?projection=SUMMARY&pageSize=20000&pageNumber=18&sortBy=entrezGeneId", `{"sampleListId":"l"}`, `known="Java orders a profile's mutations by the gene only`},
 		{"POST", "/api/molecular-profiles/p/mutations/fetch?projection=DETAILED", `{"sampleIds":["a","b"]}`, "known-if-a-subset="},
 		{"POST", "/api/molecular-profiles/p/mutations/fetch?projection=DETAILED", `{"sampleListId":"l"}`, ""},
@@ -143,6 +145,9 @@ func TestSkip(t *testing.T) {
 		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "entrezGeneIds": [983]}`, false},
 		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "entrezGeneIds": []}`, false},
 		{"GET", "/api/molecular-profiles/p_mrna/molecular-data?sampleListId=l", "", false},
+		{"POST", "/api/molecular-profiles/p_mrna/molecular-data/fetch?entrezGeneId=6124", `{"sampleIds": ["s1"]}`, true},
+		{"POST", "/api/generic_assay_data/fetch", `{"genericAssayDataFilter": {"genericAssayStableIds": ["cg1"]}, "molecularProfileIds": ["p_methylation"]}`, true},
+		{"POST", "/api/generic_assay_data/fetch", `{"genericAssayStableIds": ["cg1"], "molecularProfileIds": ["p_methylation"]}`, false},
 	} {
 		if got := skip(c.method, c.target, c.body); got != c.want {
 			t.Errorf("%s %s %s: %v, want %v", c.method, c.target, c.body, got, c.want)
