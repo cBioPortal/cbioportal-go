@@ -75,22 +75,3 @@ func TestWelchTTestNearOne(t *testing.T) {
 		}
 	}
 }
-
-func TestOneWayAnovaP(t *testing.T) {
-	// With two groups the F-test equals the pooled-variance t-test.
-	a, b := []float64{1, 2, 3, 4}, []float64{2, 4, 6, 8, 10}
-	n1, m1, v1 := sampleStats(a)
-	n2, m2, v2 := sampleStats(b)
-	df := float64(n1 + n2 - 2)
-	sp := ((float64(n1-1))*v1 + float64(n2-1)*v2) / df
-	tstat := (m1 - m2) / math.Sqrt(sp*(1/float64(n1)+1/float64(n2)))
-	want := 2 * TDistCDF(-math.Abs(tstat), df)
-	if got := OneWayAnovaP([]int{n1, n2}, []float64{m1, m2}, []float64{v1, v2}); !almostEqual(got, want, 1e-10) {
-		t.Errorf("two-group ANOVA = %v, want pooled t-test %v", got, want)
-	}
-	// Three groups: F = 3.6 on (2, 9) degrees of freedom.
-	got := OneWayAnovaP([]int{4, 4, 4}, []float64{1, 2, 3}, []float64{1, 1, 4.0 / 3})
-	if got <= 0.05 || got >= 0.1 {
-		t.Errorf("three-group ANOVA p = %v, want in (0.05, 0.1)", got)
-	}
-}

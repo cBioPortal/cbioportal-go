@@ -123,6 +123,9 @@ type contStatRow struct {
 	N      uint64   `json:"n"`
 	Mean   *float64 `json:"mean"`
 	Var    *float64 `json:"var"`
+	// Sum and SumSq feed the ANOVA, which Java computes from them.
+	Sum   *float64 `json:"sum"`
+	SumSq *float64 `json:"sumsq"`
 }
 
 // contGroup is one group's (study_id, profile_stable_id, sample_id)
@@ -187,7 +190,7 @@ func (s Server) computeContinuous(groups []casesGroup, keyCol string, withGene b
 	}
 	query := agg + " ORDER BY pos, symbol, grp"
 	if withGene {
-		query = "SELECT a.symbol AS symbol, a.entrez AS entrez, a.grp AS grp, a.n AS n, a.mean AS mean, a.var AS var FROM (" + agg + ") a " +
+		query = "SELECT a.symbol AS symbol, a.entrez AS entrez, a.grp AS grp, a.n AS n, a.mean AS mean, a.var AS var, a.sum AS sum, a.sumsq AS sumsq FROM (" + agg + ") a " +
 			"LEFT JOIN (SELECT entrez_gene_id, genetic_entity_id FROM cbioportal_ref.gene) g ON g.entrez_gene_id = a.entrez " +
 			"ORDER BY g.genetic_entity_id, a.symbol, a.grp"
 	}
@@ -241,17 +244,22 @@ func (s Server) computeContinuous(groups []casesGroup, keyCol string, withGene b
 		ns := make([]int, len(idx))
 		means := make([]float64, len(idx))
 		vars := make([]float64, len(idx))
+		sums := make([]float64, len(idx))
+		sumsqs := make([]float64, len(idx))
 		gs := make([]GroupStatistics, len(idx))
 		for k, gi := range idx {
 			st := a.stats[gi]
 			ns[k], means[k], vars[k] = int(st.N), *st.Mean, *st.Var
+			if st.Sum != nil && st.SumSq != nil {
+				sums[k], sumsqs[k] = *st.Sum, *st.SumSq
+			}
 			gs[k] = GroupStatistics{MeanExpression: means[k], Name: groups[gi].Name, StandardDeviation: math.Sqrt(vars[k])}
 		}
 		var p float64
 		if len(idx) == 2 {
 			p = stats.WelchTTest(ns[0], means[0], vars[0], ns[1], means[1], vars[1])
 		} else {
-			p = stats.OneWayAnovaP(ns, means, vars)
+			p = stats.CommonsAnovaPValueFromSums(ns, sums, sumsqs)
 		}
 		if math.IsNaN(p) {
 			continue

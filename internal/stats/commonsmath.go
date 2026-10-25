@@ -620,22 +620,35 @@ func cmTCdf(x, df float64) float64 {
 // ANOVA F-test over the groups. NaN with fewer than two groups or a group
 // with fewer than two values.
 func CommonsAnovaPValue(groups [][]float64) float64 {
-	if len(groups) < 2 {
+	ns := make([]int, len(groups))
+	sums := make([]float64, len(groups))
+	sumsqs := make([]float64, len(groups))
+	for i, g := range groups {
+		ns[i] = len(g)
+		for _, v := range g {
+			sums[i] += v
+			sumsqs[i] += v * v
+		}
+	}
+	return CommonsAnovaPValueFromSums(ns, sums, sumsqs)
+}
+
+// CommonsAnovaPValueFromSums is CommonsAnovaPValue from each group's size,
+// sum and sum of squares, with commons-math's arithmetic: the between-group
+// sum of squares as the total minus the within-group one, and the p-value as
+// 1 minus the F distribution's CDF.
+func CommonsAnovaPValueFromSums(ns []int, sums, sumsqs []float64) float64 {
+	if len(ns) < 2 {
 		return math.NaN()
 	}
 	dfwg := 0
 	var sswg, totsum, totsumsq float64
 	totnum := 0
-	for _, g := range groups {
-		if len(g) <= 1 {
+	for i, num := range ns {
+		if num <= 1 {
 			return math.NaN()
 		}
-		sum, sumsq := 0.0, 0.0
-		for _, v := range g {
-			sum += v
-			sumsq += v * v
-		}
-		num := len(g)
+		sum, sumsq := sums[i], sumsqs[i]
 		totnum += num
 		totsum += sum
 		totsumsq += sumsq
@@ -644,14 +657,13 @@ func CommonsAnovaPValue(groups [][]float64) float64 {
 	}
 	sst := totsumsq - ((totsum * totsum) / float64(totnum))
 	ssbg := sst - sswg
-	dfbg := len(groups) - 1
+	dfbg := len(ns) - 1
 	msbg := ssbg / float64(dfbg)
 	mswg := sswg / float64(dfwg)
 	f := msbg / mswg
 	return 1.0 - cmFCdf(f, float64(dfbg), float64(dfwg))
 }
 
-// cmFCdf is FDistribution(n, m).cumulativeProbability.
 func cmFCdf(x, n, m float64) float64 {
 	if x <= 0 {
 		return 0

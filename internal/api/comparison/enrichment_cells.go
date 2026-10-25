@@ -101,7 +101,7 @@ func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, w
 				"FROM (SELECT *, %s AS pos_, %s, %s FROM cbioportal_raw.%s WHERE %s) WHERE isFinite(x)",
 			key, s.RawFileOrder(table, ""), x, grp, table, where))
 	}
-	return "SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSampStable(v) AS var, min(pos_) AS pos FROM (" +
+	return "SELECT symbol, entrez, grp, count() AS n, avg(v) AS mean, varSampStable(v) AS var, sum(v) AS sum, sum(v * v) AS sumsq, min(pos_) AS pos FROM (" +
 		strings.Join(parts, " UNION ALL ") + ") GROUP BY symbol, entrez, grp", nil
 }
 
@@ -220,7 +220,8 @@ func (s Server) profileRowStats(args *core.SQLArgs, groups []casesGroup, cg []co
 			"arrayMap(x -> %s, arrayMap(x -> assumeNotNull(x), arrayFilter(x -> isNotNull(x) AND isFinite(assumeNotNull(x)), "+
 				"arrayMap(x -> toFloat64OrNull(%s), arraySort((x, k) -> k, arrayFilter((x, m) -> m = 1, s, [%s]), [%s]))))) AS v%d",
 			value, core.JavaTruncatedValueSQL("x"), strings.Join(mask, ","), strings.Join(keys, ","), gi))
-		stats = append(stats, fmt.Sprintf("(toUInt32(%[1]d), length(v%[1]d), arrayReduce('avg', v%[1]d), arrayReduce('varSampStable', v%[1]d))", gi))
+		stats = append(stats, fmt.Sprintf("(toUInt32(%[1]d), length(v%[1]d), arrayReduce('avg', v%[1]d), arrayReduce('varSampStable', v%[1]d), "+
+			"arrayReduce('sum', v%[1]d), arrayReduce('sum', arrayMap(x -> x * x, v%[1]d)))", gi))
 	}
 	if len(stats) == 0 {
 		return "", false, nil
@@ -237,9 +238,9 @@ func (s Server) profileRowStats(args *core.SQLArgs, groups []casesGroup, cg []co
 			"ON e.id = t.genetic_entity_id"
 	}
 	return fmt.Sprintf(
-		"SELECT %s, t.grp AS grp, t.n AS n, t.mean AS mean, t.var AS var, (toUInt32(0), toUInt64(0), toUInt64(0), toUInt64(0)) AS pos "+
+		"SELECT %s, t.grp AS grp, t.n AS n, t.mean AS mean, t.var AS var, t.sum AS sum, t.sumsq AS sumsq, (toUInt32(0), toUInt64(0), toUInt64(0), toUInt64(0)) AS pos "+
 			"FROM (SELECT genetic_entity_id, tupleElement(st, 1) AS grp, tupleElement(st, 2) AS n, tupleElement(st, 3) AS mean, "+
-			"tupleElement(st, 4) AS var FROM (SELECT genetic_entity_id, %s "+
+			"tupleElement(st, 4) AS var, tupleElement(st, 5) AS sum, tupleElement(st, 6) AS sumsq FROM (SELECT genetic_entity_id, %s "+
 			"FROM (SELECT genetic_entity_id, arrayResize(splitByChar(',', substring(values, 1, -1)), %d) AS s "+
 			"FROM cbioportal_ref.genetic_alteration FINAL WHERE genetic_profile_id = %s)) "+
 			"ARRAY JOIN [%s] AS st) t %s WHERE t.n > 0",
