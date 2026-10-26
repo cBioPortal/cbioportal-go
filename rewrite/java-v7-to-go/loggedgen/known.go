@@ -34,6 +34,7 @@ var (
 	isCustomCounts    = pathIs(`^/api/custom-data-counts/fetch$`)
 	isInfo            = pathIs(`^/api/info$`)
 	isAPIDocs         = pathIs(`^/api/(v2|v3)/api-docs(/|$)`)
+	isMissingProxy    = pathIs(`^/api/(matchminer|proxy)(/|$)`)
 	isStudyList       = pathIs(`^/api/studies$`)
 	isStudy           = pathIs(`^/api/studies/[^/]+$`)
 	isLegacyStudies   = pathIs(`^/api/legacy/studies(/[^/]+)?$`)
@@ -235,6 +236,11 @@ var expectations = []expectation{
 			return isCustomCounts(p) || strings.Contains(b, `"customDataFilters"`)
 		},
 		options: `known="custom data ids are sessions in www's session store"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool { return isMissingProxy(p) },
+		options: `known="go does not serve the proxies to MatchMiner and the old /api/proxy services ` +
+			`(docs/rewrite/api-coverage.md); www passes them on to services outside cBioPortal"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return isInfo(p) },
