@@ -468,7 +468,11 @@ How login works:
   posted again.
 - An `/api/**` request without a login session gets `401`. `/api/health`
   and `/api/public_virtual_studies` stay open to everyone.
-- `/logout` ends the session at the portal and at the provider.
+- `/logout` ends the session at the portal and at the provider. Some
+  providers, such as Google, have no way to end their session. Then
+  `/logout` shows the "You are now signed out" page at
+  `/login?logout_success`. That page does not send the user back to the
+  provider, so they are not signed in again at once.
 - The portal offers every provider that has a client id. If there is only
   one, `/login` goes straight to it, unless `--login-auto-redirect=false`.
   If there are several, `/login` lists them.
