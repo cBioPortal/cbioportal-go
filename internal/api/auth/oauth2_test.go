@@ -33,6 +33,8 @@ type fakeProvider struct {
 	codes    map[string]string // code -> nonce
 	tamper   func(claims map[string]any)
 	tokenReq url.Values
+	// noEndSession leaves end_session_endpoint out of discovery, as Google does.
+	noEndSession bool
 
 	mu           sync.Mutex
 	offline      map[string]bool // issued offline tokens
@@ -50,10 +52,14 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/realms/cbio/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		base := p.URL + "/realms/cbio"
-		core.WriteJSON(w, map[string]string{
+		meta := map[string]string{
 			"issuer": base, "authorization_endpoint": base + "/auth", "token_endpoint": base + "/token",
 			"userinfo_endpoint": base + "/userinfo", "jwks_uri": base + "/certs", "end_session_endpoint": base + "/logout",
-		})
+		}
+		if p.noEndSession {
+			delete(meta, "end_session_endpoint")
+		}
+		core.WriteJSON(w, meta)
 	})
 	mux.HandleFunc("/realms/cbio/certs", func(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, map[string]any{"keys": []map[string]string{{
@@ -228,6 +234,33 @@ func TestOAuth2LoginFlow(t *testing.T) {
 	resp, _ = c.Get(portal.URL + "/api/studies")
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("after logout: %d, want 401", resp.StatusCode)
+	}
+}
+
+// A provider without an end_session_endpoint (Google), or a logout without a
+// session, lands on /login?logout_success, which shows the signed-out page
+// instead of sending the browser back to the only provider to sign in again.
+func TestOAuth2LogoutWithoutEndSession(t *testing.T) {
+	p := newFakeProvider(t)
+	p.noEndSession = true
+	portal := loginPortal(t, p)
+	c := browser(t)
+	mustBody(t)(c.Get(portal.URL + "/"))
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	for _, name := range []string{"with session", "without session"} {
+		resp, err := c.Get(portal.URL + "/logout")
+		if err != nil || resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/login?logout_success" {
+			t.Fatalf("%s: logout %v %d to %q, want 302 to /login?logout_success", name, err, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+	resp, err := c.Get(portal.URL + "/login?logout_success")
+	page := mustBody(t)(resp, err)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(page, "You are now signed out.") {
+		t.Fatalf("signed-out page %d %q:\n%s", resp.StatusCode, resp.Header.Get("Location"), page)
+	}
+	resp, _ = c.Get(portal.URL + "/login")
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/oauth2/authorization/keycloak" {
+		t.Fatalf("login: %d to %q, want the only provider", resp.StatusCode, resp.Header.Get("Location"))
 	}
 }
 
