@@ -357,7 +357,7 @@ These long lists get no paging, on purpose:
 | DELETE | `/api/data-access-tokens` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it does nothing. |
 | DELETE | `/api/data-access-tokens/{token}` |  |  | implemented | yes | With `dat.method=oauth2`, it answers 501, as Java does. Otherwise it does nothing. |
 | POST | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider (see [Login](../configuration.md#login-and-study-authorization)). |
-| GET | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider. With `?logout_failure`, it explains why a login was refused. |
+| GET | `/login` |  |  | implemented |  | With `authenticate=oauth2`, it sends the user to the login provider. With `?logout_failure`, it explains why a login was refused. With `?logout_success`, it shows the signed-out page instead. |
 | GET | `/restful_login` |  |  | missing |  | The SAML and password login page. go does not support SAML. |
 
 ## Portal, proxies, operations
