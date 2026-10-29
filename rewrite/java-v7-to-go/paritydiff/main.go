@@ -29,8 +29,9 @@
 // top-level arrays larger than -stream-above are compared element by element
 // with an external sort of their element records (compareStream, within
 // -sort-budget), and other bodies larger than -decode-above are compared
-// byte for byte. A body over -max-body (2 GiB) fails its request, which
-// bounds the disk and time one request takes. Without GOMEMLIMIT the
+// byte for byte. A body over -max-body (2 GiB) is not read, which bounds
+// the disk and time one request takes: the request is a known difference
+// when B's body is the one over it, and an error otherwise. Without GOMEMLIMIT the
 // collector's soft limit is 1 GiB.
 package main
 
@@ -40,6 +41,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -146,7 +148,7 @@ func readBody(status int, src io.Reader) (response, error) {
 	r := response{Status: status, spool: f, temp: true}
 	k, err := io.Copy(f, io.LimitReader(io.MultiReader(&buf, src), maxBody+1))
 	if err == nil && k > maxBody {
-		err = fmt.Errorf("body larger than %d bytes (-max-body)", maxBody)
+		err = fmt.Errorf("%w: larger than %d bytes (-max-body)", errTooLarge, maxBody)
 	}
 	if err != nil {
 		r.release()
@@ -155,6 +157,9 @@ func readBody(status int, src io.Reader) (response, error) {
 	r.size = k
 	return r, nil
 }
+
+// errTooLarge fails a request whose body is over -max-body.
+var errTooLarge = errors.New("body too large")
 
 // maxBody is the largest body read, in bytes; a larger one fails the
 // request, bounding the disk and time one request takes.
@@ -377,6 +382,17 @@ func settleJavaFailed(r result) result {
 	return r
 }
 
+// fetchFailed is the result of a request A or B did not answer. An answer
+// from B over -max-body is a known difference rather than an error, when A
+// answered or was over -max-body too: it is a request too large to replay.
+func fetchFailed(name string, statusA int, errA, errB error) result {
+	res := result{Name: name, Outcome: failed, Diffs: []string{fmt.Sprintf("a: %v", errA), fmt.Sprintf("b: %v", errB)}}
+	if errors.Is(errB, errTooLarge) && (errA == nil || errors.Is(errA, errTooLarge)) {
+		res.Outcome, res.Known, res.StatusA = known, "B's answer is larger than -max-body, so it is not compared", statusA
+	}
+	return res
+}
+
 // gateway reports whether a status is a proxy's while the origin is down,
 // rolling out or too slow: 502 to 504, and Cloudflare's 520 to 524.
 func gateway(code int) bool {
@@ -590,7 +606,7 @@ func main() {
 		rb, errB := fb.get(rq)
 		var res result
 		if errA != nil || errB != nil {
-			res = result{Name: rq.Name, Outcome: failed, Diffs: []string{fmt.Sprintf("a: %v", errA), fmt.Sprintf("b: %v", errB)}}
+			res = fetchFailed(rq.Name, ra.Status, errA, errB)
 		} else {
 			res = compareResponses(rq, ra, rb, opts)
 		}
@@ -600,7 +616,7 @@ func main() {
 		var pathA, pathB string
 		if *dump != "" {
 			pathA, pathB = filepath.Join(*dump, rq.Name+".a.json"), filepath.Join(*dump, rq.Name+".b.json")
-			if res.Outcome != identical && res.Outcome != failed {
+			if res.Outcome != identical && errA == nil && errB == nil {
 				if err := os.MkdirAll(*dump, 0o755); err != nil {
 					fatal(err)
 				}
@@ -609,7 +625,7 @@ func main() {
 			}
 		}
 		ra.release()
-		if res.Outcome != failed && *selfCheckB {
+		if errA == nil && errB == nil && *selfCheckB {
 			rb2, errB2 := fb.get(rq)
 			res = selfCheck(res, rq, rb, rb2, errB2, opts)
 			rb2.release()

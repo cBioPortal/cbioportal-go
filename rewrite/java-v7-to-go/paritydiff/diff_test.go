@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -379,5 +380,24 @@ func TestKeyRelTol(t *testing.T) {
 	}
 	if _, err := parseHeader("r reltol=pValue:x"); err == nil {
 		t.Errorf("bad reltol accepted")
+	}
+}
+
+func TestFetchFailed(t *testing.T) {
+	tooLarge := fmt.Errorf("%w: larger than 10 bytes (-max-body)", errTooLarge)
+	other := errors.New("connection reset")
+	for _, c := range []struct {
+		errA, errB error
+		want       string
+	}{
+		{nil, tooLarge, known},
+		{tooLarge, tooLarge, known},
+		{tooLarge, nil, failed},
+		{other, tooLarge, failed},
+		{nil, other, failed},
+	} {
+		if got := fetchFailed("r", 200, c.errA, c.errB).Outcome; got != c.want {
+			t.Errorf("a %v, b %v: %s, want %s", c.errA, c.errB, got, c.want)
+		}
 	}
 }
