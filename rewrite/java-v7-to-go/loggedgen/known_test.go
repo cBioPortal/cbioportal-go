@@ -149,6 +149,8 @@ func TestSkip(t *testing.T) {
 		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "sampleIds": ["s1"], "genes": ["CDK1"]}`, true},
 		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "entrezGeneIds": [983]}`, false},
 		{"POST", "/api/molecular-data/fetch", `{"molecularProfileIds": ["p_mrna"], "entrezGeneIds": []}`, false},
+		{"POST", "/api/molecular-profiles/p_cna/molecular-data/fetch", `{"entrezGeneIds": [` + strings.Repeat("1, ", maxGenes) + `2], "sampleListId": "l"}`, true},
+		{"POST", "/api/molecular-profiles/p_cna/molecular-data/fetch", `{"entrezGeneIds": [` + strings.Repeat("1, ", maxGenes-1) + `2], "sampleListId": "l"}`, false},
 		{"GET", "/api/molecular-profiles/p_mrna/molecular-data?sampleListId=l", "", false},
 		{"POST", "/api/molecular-profiles/p_mrna/molecular-data/fetch?entrezGeneId=6124", `{"sampleIds": ["s1"]}`, true},
 		{"POST", "/api/generic_assay_data/fetch", `{"genericAssayDataFilter": {"genericAssayStableIds": ["cg1"]}, "molecularProfileIds": ["p_methylation"]}`, true},

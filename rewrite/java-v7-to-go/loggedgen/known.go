@@ -185,6 +185,18 @@ func bodyHasGenes(body string) bool {
 	return ok && string(ids) != "null"
 }
 
+// maxGenes is the most genes a replayed molecular-data POST may name. A
+// request for more asks for nearly whole matrices: every gene of a
+// profile, for one, is gigabytes from both servers.
+const maxGenes = 1000
+
+// bodyGeneCount counts the entrezGeneIds a request body names.
+func bodyGeneCount(body string) int {
+	var ids []json.RawMessage
+	json.Unmarshal(bodyObject(body)["entrezGeneIds"], &ids)
+	return len(ids)
+}
+
 // skip reports a request too costly to replay against production every
 // night, gigabytes from Java even when go is asked for one page of it:
 //   - the whole copy-number matrix of a profile (event type ALL keeps the
@@ -192,8 +204,8 @@ func bodyHasGenes(body string) bool {
 //   - one page of a profile's values for every gene. Java's molecular-data
 //     controllers have no paging parameters and answer the whole matrix,
 //     so the answers differ anyway (go pages them, a known difference);
-//   - a molecular-data fetch that names no genes, which asks for whole
-//     matrices. Java's filters do not require entrezGeneIds. Where the body
+//   - a molecular-data fetch that names no genes, or more than maxGenes,
+//     which asks for whole matrices. Java's filters do not require entrezGeneIds. Where the body
 //     also has a field the filter lacks (such as sampleIds or genes on
 //     molecular-data/fetch), Java answers an empty 200 and go the matrices.
 func skip(method, target, body string) bool {
@@ -208,7 +220,7 @@ func skip(method, target, body string) bool {
 	case isMolecularData(path):
 		// Java's POST reads its genes from the body only.
 		if method == "POST" {
-			return !bodyHasGenes(body)
+			return !bodyHasGenes(body) || bodyGeneCount(body) > maxGenes
 		}
 		return paged(q) && !hasGenes(q, body)
 	case method == "POST" && isGenericAssayAll(path):
