@@ -20,6 +20,7 @@ type studyRow struct {
 	Description      string `json:"description"`
 	Pmid             string `json:"pmid"`
 	Citation         string `json:"citation"`
+	License          string `json:"license"`
 	Groups           string `json:"groups"`
 	ReferenceGenome  string `json:"referenceGenome"`
 	AllSampleCount   int64  `json:"allSampleCount"`
@@ -81,6 +82,7 @@ func (c CancerStudy) MarshalJSON() ([]byte, error) {
 		o.Add("publicStudy", sum.PublicStudy)
 		o.AddIf(sum.Pmid != "", "pmid", sum.Pmid)
 		o.AddIf(sum.Citation != "", "citation", sum.Citation)
+		o.AddIf(sum.License != "", "license", sum.License)
 		o.Add("groups", sum.Groups)
 		o.Add("status", sum.Status)
 		o.AddIf(sum.ImportDate != "", "importDate", sum.ImportDate)
@@ -129,6 +131,7 @@ type studySummary struct {
 	PublicStudy     bool   `json:"publicStudy"`
 	Pmid            string `json:"pmid,omitempty"`
 	Citation        string `json:"citation,omitempty"`
+	License         string `json:"license,omitempty"`
 	Groups          string `json:"groups"`
 	Status          int    `json:"status"`
 	ImportDate      string `json:"importDate,omitempty"`
@@ -207,7 +210,7 @@ const studyCountJoins = "LEFT JOIN (SELECT study_id, countIf(list_id = concat(st
 	"WHERE variant_type = 'structural_variant' GROUP BY cancer_study_identifier) sv ON c.study_id = sv.study_id "
 
 const studySelectTmpl = "SELECT c.study_id AS studyId, c.cancer_type_id AS cancerTypeId, " +
-	"c.name AS name, c.description AS description, c.pmid AS pmid, c.citation AS citation, " +
+	"c.name AS name, c.description AS description, c.pmid AS pmid, c.citation AS citation, {license} AS license, " +
 	"c.groups AS groups, c.reference_genome AS referenceGenome, " +
 	"toInt64(ifNull(lc.all_samples, 0)) AS allSampleCount, " +
 	"{public} AS publicFlag, {status} AS status, " +
@@ -221,7 +224,8 @@ const studySelectTmpl = "SELECT c.study_id AS studyId, c.cancer_type_id AS cance
 // public when the portal cancer_study says so (public_study, built from a
 // production clone), else when its groups include PUBLIC.
 func (s Server) studySelect() string {
-	return strings.NewReplacer("{public}", s.StudyPublicSQL("c."), "{status}", s.studyStatusSQL("c.")).Replace(studySelectTmpl)
+	return strings.NewReplacer("{public}", s.StudyPublicSQL("c."), "{status}", s.studyStatusSQL("c."),
+		"{license}", s.StudyLicenseSQL("c.")).Replace(studySelectTmpl)
 }
 
 // studyStatusSQL is the status of a cancer_study row: 1 (AVAILABLE) unless
@@ -248,7 +252,7 @@ func toCancerStudy(r studyRow, shape studyShape, importDates map[string]string) 
 	}
 	out.studySummary = &studySummary{
 		CancerTypeID: r.CancerTypeID, Name: r.Name, Description: r.Description, PublicStudy: r.PublicFlag != 0,
-		Pmid: r.Pmid, Citation: r.Citation, Groups: r.Groups, Status: r.Status, ImportDate: importDates[r.StudyID],
+		Pmid: r.Pmid, Citation: r.Citation, License: r.License, Groups: r.Groups, Status: r.Status, ImportDate: importDates[r.StudyID],
 		AllSampleCount: r.AllSampleCount, ReferenceGenome: core.ReferenceGenome(r.ReferenceGenome),
 	}
 	if shape.detailed {

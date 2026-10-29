@@ -47,3 +47,25 @@ func TestFromProdSteps(t *testing.T) {
 		}
 	}
 }
+
+// The study license passes through from production's cancer_study when the
+// clone has the column, and is empty when its schema has none.
+func TestFromProdStudyLicense(t *testing.T) {
+	studySQL := func(b *prodBuilder) string {
+		for _, o := range b.steps() {
+			if o.db == "`T`" && o.name == "cancer_study" {
+				return o.sql
+			}
+		}
+		t.Fatal("cancer_study is not built")
+		return ""
+	}
+	without := studySQL(&prodBuilder{p: "`P`", t: "`T`", r: "`R`"})
+	if !strings.Contains(without, "'' AS license") || strings.Contains(without, "c.license") {
+		t.Errorf("without the column: %s", without)
+	}
+	with := studySQL(&prodBuilder{p: "`P`", t: "`T`", r: "`R`", studyLicense: true})
+	if !strings.Contains(with, "ifNull(c.license, '') AS license") {
+		t.Errorf("with the column: %s", with)
+	}
+}

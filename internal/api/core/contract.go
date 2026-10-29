@@ -1042,6 +1042,16 @@ func skipValue(b []byte, i int) int {
 	}
 }
 
+// StudyLicenseSQL is the license (an SPDX id) of a cancer_study row (alias
+// is the table alias with its dot, or empty), empty for databases built
+// without the column.
+func (s *State) StudyLicenseSQL(alias string) string {
+	if s.ModelHasColumn("cancer_study", "license") {
+		return alias + "license"
+	}
+	return "''"
+}
+
 // StudyPublicSQL is the UInt8 public flag of a cancer_study row (alias is
 // the table alias with its dot, or empty).
 func (s *State) StudyPublicSQL(alias string) string {
