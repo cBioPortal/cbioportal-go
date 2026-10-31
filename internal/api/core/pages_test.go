@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -306,5 +307,43 @@ func TestWithNetlifyBundle(t *testing.T) {
 	}
 	if strings.Contains(page, `src="/reactapp/`) || strings.Contains(page, `href="/reactapp/`) {
 		t.Errorf("a bundle file still loads from this origin only: %s", page)
+	}
+}
+
+// TestPortalLocaldev runs the portal page's configuration script in node:
+// localdev is "true" (port 3000) or a 4-digit port, from the URL or
+// localStorage, and other values are neither stored nor dev mode.
+func TestPortalLocaldev(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	page := string(javaPortalPage("h", nil))
+	start := strings.Index(page, "<script>\nvar host")
+	end := strings.Index(page[start:], "</script>")
+	if start < 0 || end < 0 {
+		t.Fatalf("no configuration script:\n%s", page)
+	}
+	script := page[start+len("<script>") : start+end]
+	for _, c := range []struct{ href, stored, want string }{
+		{"https://h/?localdev=true", "", `"true" true https://localhost:3000/`},
+		{"https://h/?localdev=3001", "", `"3001" true https://localhost:3001/`},
+		{"https://h/", "4000", `"4000" true https://localhost:4000/`},
+		{"https://h/?localdev=30011", "", `undefined false //h/`},
+		{"https://h/?localdev=yes", "", `undefined false //h/`},
+		{"https://h/", "", `undefined false //h/`},
+	} {
+		stored := "{}"
+		if c.stored != "" {
+			stored = `{localdev: "` + c.stored + `"}`
+		}
+		prog := `var localStorage = ` + stored + `; localStorage.setItem = function (k, v) { this[k] = String(v); };
+var window = {location: {href: "` + c.href + `"}};
+` + script + `
+console.log(JSON.stringify(localStorage.localdev), window.localdev, window.frontendConfig.frontendUrl);`
+		out, err := exec.Command(node, "-e", prog).CombinedOutput()
+		if got := strings.TrimSpace(string(out)); err != nil || got != c.want {
+			t.Errorf("%s (stored %q): got %q (%v), want %q", c.href, c.stored, got, err, c.want)
+		}
 	}
 }
