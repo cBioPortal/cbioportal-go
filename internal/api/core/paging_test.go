@@ -1,9 +1,11 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -84,6 +86,51 @@ func TestPagedEndpoint(t *testing.T) {
 	} {
 		if got := pagedEndpointOf(c.method, c.path) != ""; got != c.want {
 			t.Errorf("%s %s: %v, want %v", c.method, c.path, got, c.want)
+		}
+	}
+}
+
+// TestStudyClinicalEventsPageSize checks the study's clinical-events bounds
+// (ClinicalEventController): pageSize defaults to 10000 and may not exceed it.
+func TestStudyClinicalEventsPageSize(t *testing.T) {
+	var items []string
+	for i := range 10001 {
+		items = append(items, fmt.Sprintf(`{"i":%d}`, i))
+	}
+	array := "[" + strings.Join(items, ",") + "]"
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(array))
+	})
+	study, patient := "/api/studies/s/clinical-events", "/api/studies/s/patients/p/clinical-events"
+	for _, c := range []struct {
+		url  string
+		want int
+	}{
+		{study, 10000},
+		{study + "?pageSize=", 10000},
+		{study + "?pageNumber=1", 1},
+		{study + "?pageSize=5000&pageNumber=2", 1},
+		{study + "?pageSize=3", 3},
+		{patient, 10001},
+		{patient + "?pageNumber=1", 10001},
+		{patient + "?pageSize=3", 3},
+	} {
+		got := httptest.NewRecorder()
+		PageList(handler).ServeHTTP(got, httptest.NewRequest("GET", c.url, nil))
+		var page []json.RawMessage
+		if err := json.Unmarshal(got.Body.Bytes(), &page); err != nil || len(page) != c.want {
+			t.Errorf("%s: got %d items (%v), want %d", c.url, len(page), err, c.want)
+		}
+	}
+	rt, _ := matchContract("GET", "/api/studies/s/clinical-events")
+	for query, want := range map[string]string{
+		"pageSize=10000": "",
+		"pageSize=10001": "pageSize must be less than or equal to 10000",
+	} {
+		q, _ := url.ParseQuery(query)
+		if got := CheckParams(rt.params, q); got != want {
+			t.Errorf("%q: got %q, want %q", query, got, want)
 		}
 	}
 }

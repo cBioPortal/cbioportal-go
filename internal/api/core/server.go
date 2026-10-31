@@ -560,14 +560,16 @@ func withSiteBanner(page []byte, text, link string) []byte {
 }
 
 // devModeScript mirrors the Java portal page (index.html + load-frontend.js):
-// ?localdev=true / ?localdist=true are remembered in localStorage and, as in
-// dev mode there, a dismissible "dev mode" banner is added to the body. The
-// bundle comes from this origin, or from the netlify deploy preview that
-// localStorage.netlify names (withNetlifyBundle).
+// ?localdev=true (or a 4-digit port, e.g. ?localdev=3001) and ?localdist=true
+// are remembered in localStorage and, as in dev mode there, a dismissible
+// "dev mode" banner is added to the body. The bundle comes from this origin,
+// or from the netlify deploy preview that localStorage.netlify names
+// (withNetlifyBundle).
 const devModeScript = `<script>
-if (/localdev=true/.test(window.location.href)) { localStorage.setItem("localdev", "true"); }
+var localdevParam = window.location.href.match(/localdev=(true|\d{4})\b/);
+if (localdevParam) { localStorage.setItem("localdev", localdevParam[1]); }
 if (/localdist=true/.test(window.location.href)) { localStorage.setItem("localdist", "true"); }
-window.localdev = localStorage.localdev === "true";
+window.localdev = localStorage.localdev === "true" || /^\d{4}$/.test(localStorage.localdev);
 window.localdist = localStorage.localdist === "true";
 window.netlify = localStorage.netlify;
 if (window.netlify) {

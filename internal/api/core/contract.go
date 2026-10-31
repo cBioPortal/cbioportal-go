@@ -510,7 +510,7 @@ var contractRoutes = []contractRoute{
 
 	// Clinical events (the study's list has its own page size bound).
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", params: paged(legacyProjection, clinicalEventSort)},
-	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
+	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 10000)},
 	{method: "POST", pattern: "/api/clinical-events-meta/fetch", filter: clinicalEventAttributeRequestSchema,
 		intercepted: "interceptedClinicalEventAttributeRequest", unvalidated: true},
 	{method: "POST", pattern: "/api/survival-data/fetch", filter: survivalRequestSchema,
