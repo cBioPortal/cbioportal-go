@@ -86,6 +86,13 @@ func sortIgnored(endpoint string) bool {
 	return unsortedEndpoints[endpoint]
 }
 
+// defaultPageSizes are the paged endpoints whose controllers declare a
+// pageSize default below MaxPageSize: a request without pageSize gets a page
+// of that size (ClinicalEventController.CLINICAL_EVENT_DEFAULT_PAGE_SIZE).
+var defaultPageSizes = map[string]string{
+	"GET /api/studies/{}/clinical-events": "10000",
+}
+
 // countedEndpoints take pageSize and pageNumber only together, else 400, and
 // send the number of all items in the total-count header of a page
 // (ColumnStoreGenericAssayController). Their /api/legacy/ aliases are served
@@ -139,6 +146,9 @@ func PageList(next http.Handler) http.Handler {
 			q.Del("sortBy")
 		}
 		sizeParam, numberParam := q.Get("pageSize"), q.Get("pageNumber")
+		if def, ok := defaultPageSizes[endpoint]; ok && strings.TrimSpace(sizeParam) == "" {
+			sizeParam = def
+		}
 		counted := countedEndpoints[endpoint]
 		if counted && aliasOf(r) != "" {
 			next.ServeHTTP(w, r)
