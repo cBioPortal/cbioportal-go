@@ -58,6 +58,20 @@ func TestCheckParams(t *testing.T) {
 	}
 }
 
+func TestCheckParamsClinicalEventsPageSize(t *testing.T) {
+	params := pagedMax(legacyProjection, clinicalEventSort, clinicalEventMaxPageSize)
+	for query, want := range map[string]string{
+		"pageSize=10000":  "",
+		"pageSize=10001":  "pageSize must be less than or equal to 10000",
+		"pageSize=100000": "pageSize must be less than or equal to 10000",
+	} {
+		q, _ := url.ParseQuery(query)
+		if got := CheckParams(params, q); got != want {
+			t.Errorf("%q: got %q, want %q", query, got, want)
+		}
+	}
+}
+
 func TestBodyValidators(t *testing.T) {
 	genes := listBody("geneIds")
 	if got := genes([]byte(`[]`)); got != "geneIds size must be between 1 and 10000000" {
