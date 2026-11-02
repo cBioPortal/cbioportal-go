@@ -40,7 +40,7 @@ var (
 	isLegacyStudies   = pathIs(`^/api/legacy/studies(/[^/]+)?$`)
 	isStudyClinical   = pathIs(`^/api/studies/[^/]+/clinical-data$`)
 	isStudiesFetch    = pathIs(`^/api/studies/fetch$`)
-	isSampleList      = pathIs(`^/api/samples$`)
+	isKeywordList     = pathIs(`^/api/(samples|patients)$`)
 	isClinicalTable   = pathIs(`^/api/clinical-data-table/fetch$`)
 	isProfileSamples  = pathIs(`^/api/molecular-profile-sample-counts/fetch$`)
 	isCaseListCounts  = pathIs(`^/api/sample-lists-counts/fetch$`)
@@ -297,9 +297,9 @@ var expectations = []expectation{
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
-			return m == "GET" && isSampleList(p) && q.Has("keyword") && q.Has("pageSize")
+			return m == "GET" && isKeywordList(p) && q.Has("keyword") && q.Has("pageSize")
 		},
-		options: `known="a sample id in several studies ties in the keyword order, which Java leaves unspecified, so the page boundary picks either"`,
+		options: `known="a sample or patient id in several studies ties in the keyword order, which Java leaves unspecified, so the page boundary picks either"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {

@@ -35,6 +35,7 @@ func TestExpect(t *testing.T) {
 		{"GET", "/api/studies/s/clinical-data?pageNumber=6&pageSize=200", "", "known="},
 		{"GET", "/api/studies/s/clinical-data?attributeId=AGE", "", ""},
 		{"GET", "/api/samples?keyword=ar&pageSize=3", "", "known="},
+		{"GET", "/api/patients?pageSize=5&pageNumber=0&keyword=TCGA-OR-A5J", "", "known="},
 		{"POST", "/api/clinical-data-table/fetch?pageSize=500&sortBy=X", "{}", "known="},
 		{"POST", "/api/clinical-data-table/fetch?pageSize=500", "{}", "known="},
 		{"POST", "/api/clinical-data-table/fetch", "{}", `known="Java's default pageSize 0`},
