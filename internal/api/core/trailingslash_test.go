@@ -8,7 +8,7 @@ import (
 
 // TestTrailingSlashMatch checks that /api/ paths with a trailing slash are
 // served by the route without it, path parameters included, as Java's
-// setUseTrailingSlashMatch does.
+// setUseTrailingSlashMatch did up to v7.2.3.
 func TestTrailingSlashMatch(t *testing.T) {
 	mux := http.NewServeMux()
 	echo := func(s string) http.HandlerFunc {

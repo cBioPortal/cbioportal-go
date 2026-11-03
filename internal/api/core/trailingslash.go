@@ -7,9 +7,10 @@ import (
 )
 
 // TrailingSlash serves an /api/ path ending in one slash as the path without
-// it, as Java's request mappings match it (WebAppConfig
-// setUseTrailingSlashMatch), for every method: GET /api/studies/x/ is GET
-// /api/studies/x, POST /api/studies/x/ the 405 of that route. It applies
+// it, for every method: GET /api/studies/x/ is GET /api/studies/x, POST
+// /api/studies/x/ the 405 of that route. Java up to v7.2.3 matched such
+// paths the same way (WebAppConfig setUseTrailingSlashMatch); from v7.2.4
+// (Spring Framework 7) it answers 404 (docs/rewrite/java-quirks.md). It applies
 // only when the path as given has no route and the trimmed one has, so
 // routes of their own such as /api/ keep their answer and a path parameter
 // never matches an empty segment. Error bodies keep the requested path, as
@@ -17,8 +18,8 @@ import (
 //
 // A POST to a legacy endpoint whose filter Java's
 // InvolvedCancerStudyExtractorInterceptor parses answers as without the
-// slash too: that interceptor matches the exact path, so Java's controller
-// fails on such a request (docs/rewrite/java-quirks.md).
+// slash too: that interceptor matches the exact path, so up to v7.2.3
+// Java's controller failed on such a request.
 func (s *State) TrailingSlash(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path

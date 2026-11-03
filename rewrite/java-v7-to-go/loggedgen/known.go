@@ -462,6 +462,11 @@ var expectations = []expectation{
 // fails on the request, while go answers it as without the slash.
 const slashedIntercepted = `known-if-b-fails="with a trailing slash Java's InvolvedCancerStudyExtractorInterceptor, which matches exact paths, leaves the filter unparsed and the controller fails; go answers as without the slash (Fixed in go; docs/rewrite/java-quirks.md)"`
 
+// slashedPath is the expectation of any other /api/ request with a trailing
+// slash: Java from v7.2.4 (Spring Framework 7, which has no trailing-slash
+// matching) answers 404, while go answers it as without the slash.
+const slashedPath = `known-if-b-fails="Java from v7.2.4 (Spring Framework 7) matches no path with a trailing slash and answers 404; go answers as without the slash (Fixed in go; docs/rewrite/java-quirks.md)"`
+
 // unknownIntercepted is the expectation of every POST to a legacy endpoint
 // whose filter Java's InvolvedCancerStudyExtractorInterceptor parses: it
 // fails on a property the filter does not declare and Java answers an
@@ -469,12 +474,22 @@ const slashedIntercepted = `known-if-b-fails="with a trailing slash Java's Invol
 const unknownIntercepted = `known-if-b-empty="Java's InvolvedCancerStudyExtractorInterceptor fails on a filter property it does not declare and answers an empty 200; go answers as without the property (Fixed in go; docs/rewrite/java-quirks.md)"`
 
 // expect returns the extra header options and comment for a request. Java
-// matches a path with a trailing slash as the path without it, except for
-// the filter of a legacy multi-study POST (slashedIntercepted).
+// up to v7.2.3 matches a path with a trailing slash as the path without it,
+// except for the filter of a legacy multi-study POST (slashedIntercepted);
+// from v7.2.4 it answers 404 (slashedPath), so a slashed request gets the
+// expectations of the path without the slash and slashedPath.
 func expect(method, target, body string) (options, comment string) {
 	path, rawQuery, _ := strings.Cut(target, "?")
-	slashed := strings.HasSuffix(path, "/")
-	path = strings.TrimSuffix(path, "/")
+	slashed := strings.HasPrefix(path, "/api/") && strings.HasSuffix(path, "/")
+	options, comment = expectUnslashed(method, strings.TrimSuffix(path, "/"), rawQuery, body, slashed)
+	if slashed && options != slashedIntercepted {
+		options = strings.TrimSpace(options + " " + slashedPath)
+	}
+	return options, comment
+}
+
+// expectUnslashed is expect for the path without its trailing slash.
+func expectUnslashed(method, path, rawQuery, body string, slashed bool) (options, comment string) {
 	intercepted := method == "POST" && core.InterceptedBodyPath(path)
 	if intercepted && slashed {
 		return slashedIntercepted, ""

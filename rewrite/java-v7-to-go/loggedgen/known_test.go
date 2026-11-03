@@ -109,9 +109,12 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/mutations/fetch", `{"molecularProfileIds":["p"]}`, "known-if-b-empty="},
 		{"POST", "/api/survival-data/fetch", `{"attributeIdPrefix":"OS"}`, "known-if-b-empty="},
 		{"POST", "/api/treatments/patient?tier=Agent", `{"studyIds":["s"]}`, "known-if-empty="},
-		{"GET", "/api/clinical-data/fetch/", "", ""},
-		{"POST", "/api/clinical-data-counts/fetch/", `{"studyViewFilter":{"studyIds":["s"]}}`, ""},
-		{"POST", "/api/studies/fetch/", `["s"]`, "ignore=allSampleCount,resourceCounts,treatmentCount"},
+		// Any other slashed /api/ path, which Java from v7.2.4 answers 404.
+		{"GET", "/api/clinical-data/fetch/", "", slashedPath},
+		{"GET", "/api/studies/s/?projection=SUMMARY", "", slashedPath},
+		{"POST", "/api/clinical-data-counts/fetch/", `{"studyViewFilter":{"studyIds":["s"]}}`, slashedPath},
+		{"POST", "/api/studies/fetch/", `["s"]`, "ignore=allSampleCount,resourceCounts,treatmentCount " + slashedPath},
+		{"GET", "/results/", "", ""},
 		// Java bugs in the data.
 		{"POST", "/api/structuralvariant-counts/fetch", `{"studyIds":["s"]}`, "ignore=matchingGenePanelIds,numberOfProfiledCases"},
 		{"GET", "/api/studies/s/significant-copy-number-regions?pageSize=10&projection=SUMMARY", "", "known="},
