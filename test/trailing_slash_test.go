@@ -5,8 +5,10 @@ import (
 	"testing"
 )
 
-// Java matches a path with one trailing slash to the request mapping without
-// it (WebAppConfig setUseTrailingSlashMatch), for every method.
+// go matches a path with one trailing slash to the route without it, for
+// every method, as Java did up to v7.2.3 (WebAppConfig
+// setUseTrailingSlashMatch); Java from v7.2.4 answers 404
+// (docs/rewrite/java-quirks.md).
 
 func TestContractTrailingSlashGet(t *testing.T) {
 	requireAPI(t)
