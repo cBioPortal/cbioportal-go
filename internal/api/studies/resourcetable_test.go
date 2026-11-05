@@ -27,6 +27,8 @@ func TestResourceMetadataJSON(t *testing.T) {
 			`{"stain":"HE","n":1,"x":1.5,"e":100.0,"big":123456789012345678901234567890,"neg":0}`},
 		{ptr(`{"a": 1, "b": 2, "a": 3}`), `{"a":3,"b":2}`},
 		{ptr(`{"nested": {"z": 1, "y": [1.0, true, null, "s"]}} trailing`), `{"nested":{"z":1,"y":[1.0,true,null,"s"]}}`},
+		{ptr(`{"slide_key": "2351e12d4955", "serving": {"key": "2351e12d4955", "tile_metadata_json": {"levels": 1, "level_downsamples": [1.0]}, "thumbnail_width": 128}}`),
+			`{"slide_key":"2351e12d4955","serving":{"key":"2351e12d4955","tile_metadata_json":{"levels":1,"level_downsamples":[1.0]},"thumbnail_width":128}}`},
 		{ptr(`{"huge": 1e400}`), `{"huge":"Infinity"}`},
 		{ptr(`{"broken": `), `{}`},
 	} {

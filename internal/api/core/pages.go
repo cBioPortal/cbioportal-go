@@ -50,7 +50,7 @@ var (
 		"case.do": true, "loading": true, "comparison": true,
 	}
 	// "/x/y/*".
-	viewTwoLevel = map[[2]string]bool{{"results", "comparison"}: true, {"results", "pathways"}: true}
+	viewTwoLevel = map[[2]string]bool{{"results", "comparison"}: true, {"results", "pathways"}: true, {"wsi", "patient"}: true}
 )
 
 // isViewRoute reports whether p matches one of WebAppConfig's view-controller
