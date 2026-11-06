@@ -56,8 +56,7 @@ import (
 )
 
 // userAgent is sent with every request: a browser's by default, as www
-// routes non-browser clients elsewhere; api.cbioportal.org refuses browsers
-// (-ua).
+// sends only browsers to Java (-ua).
 var userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 // response is a status and body. Bodies up to spoolAbove bytes are held in
@@ -560,7 +559,7 @@ func main() {
 	timeout := flag.Duration("timeout", 5*time.Minute, "per-request timeout")
 	selfCheckB := flag.Bool("self-check", false, "send every request to B twice and compare the two answers; A/B differences where they differ are \"nondeterministic\"")
 	retry := flag.Duration("retry", -1, "send requests that failed in transport, with 502/503/504/520-524, or with 500 from B only once more after this pause (negative: no retry)")
-	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (api.cbioportal.org refuses browser user agents)")
+	flag.StringVar(&userAgent, "ua", userAgent, "User-Agent header (www sends only browser user agents to Java)")
 	flag.IntVar(&streamAbove, "stream-above", streamAbove, "compare top-level arrays element by element when the two bodies together exceed this many bytes, to bound memory")
 	flag.IntVar(&decodeAbove, "decode-above", decodeAbove, "compare bodies that are not arrays only byte for byte when the two together exceed this many bytes")
 	flag.IntVar(&spoolAbove, "spool-above", spoolAbove, "keep response bodies larger than this many bytes in temporary files instead of memory")

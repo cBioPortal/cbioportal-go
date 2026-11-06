@@ -1,6 +1,6 @@
 // Package parity is the nightly API parity check of go.cbioportal.org (A,
-// the go API on the production mirror) against api.cbioportal.org (B, Java
-// production): it replays a corpus of logged production requests to both,
+// the go API on the production mirror) against www.cbioportal.org (B, Java
+// production, which answers browser user agents): it replays a corpus of logged production requests to both,
 // writes a short report, and keeps one GitHub issue open while unexplained
 // differences, status mismatches or errors remain. Every request goes to B
 // twice (paritydiff -self-check): where B's two answers differ, the request
@@ -133,9 +133,9 @@ itself could not run.`,
 	fs.StringVar(&day, "day", "", "record the run as this night, `YYYY-MM-DD`, and sample the day before it (default: today, UTC)")
 	fs.BoolVar(&dry, "dry-run", false, "print the GitHub issue actions instead of running gh, and record nothing in --state")
 	fs.StringVar(&a, "origin-a", "https://go.cbioportal.org", "origin A, the go API")
-	fs.StringVar(&b, "origin-b", "https://api.cbioportal.org", "origin B, Java production")
+	fs.StringVar(&b, "origin-b", "https://www.cbioportal.org", "origin B, Java production")
 	fs.Float64Var(&rate, "rate", 4, "requests per second to B, both of its runs together")
-	fs.StringVar(&ua, "ua", "cbioportal-go-parity", "User-Agent (api.cbioportal.org refuses browsers)")
+	fs.StringVar(&ua, "ua", "Mozilla/5.0 (compatible; cbioportal-go-parity)", "User-Agent: www sends browsers (Mozilla) to Java and other clients to go")
 	is.register(fs)
 	fs.StringVar(&memoryMax, "memory-max", "2G", "hard memory cap of paritydiff")
 	fs.StringVar(&memoryAS, "memory-as", "", "address-space cap of paritydiff where no systemd scope can be had (default: twice --memory-max)")

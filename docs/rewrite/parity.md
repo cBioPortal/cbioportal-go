@@ -105,13 +105,13 @@ too costly to replay every night:
 
 `-annotate` marks an existing list again with the current expectations,
 replacing earlier marks, and leaves out the requests now skipped. Compare against
-api.cbioportal.org, with go serving a copy of production built by
+Java on www.cbioportal.org, with go serving a copy of production built by
 `transform --from-prod`:
 
 ```bash
 go run ./rewrite/java-v7-to-go/loggedgen -n 500 > .parity/logged.txt      # needs CLICKHOUSE_URL/USER/PASSWORD
-go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
-  -ua cbioportal-go-parity -a http://localhost:18091 -cache .parity/cache-api -q
+go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://www.cbioportal.org \
+  -ua 'Mozilla/5.0 (compatible; cbioportal-go-parity)' -a http://localhost:18091 -cache .parity/cache-api -q
 ```
 
 On 2026-10-03, 620 of 636 requests were identical and 16 were known
@@ -122,7 +122,7 @@ reads the whole `clinical_event_data` table.
 ### Nightly parity job
 
 `cbioportal-rewrite-test java-v7-to-go parity run` compares go.cbioportal.org
-with api.cbioportal.org on real production traffic every day. For each request it reports whether the
+with Java on www.cbioportal.org on real production traffic every day. For each request it reports whether the
 answers are identical, a known difference, or unexplained.
 
 ```bash
@@ -154,7 +154,9 @@ first, so each night tests different requests:
 - Each run marks the list again with `loggedgen -annotate`, so new and
   changed entries in `known.go` apply right away.
 
-**How requests are sent.** Every request goes to api.cbioportal.org twice
+**How requests are sent.** Java is reached through www.cbioportal.org with a
+user agent that contains `Mozilla`, because www sends browsers to Java and
+every other client, like api.cbioportal.org, to go. Every request goes to Java twice
 (`-self-check`), at most 4 requests a second, with no cache. If Java's two
 answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent
@@ -184,8 +186,8 @@ than run uncapped.
 - counts of identical, known, Java nondeterministic, unexplained, status
   mismatch and error, overall and per host;
 - the number of clean nights in a row (stored in `nights.txt` in
-  `PARITY_STATE`). Seven clean nights are the bar for go to take over
-  api.cbioportal.org;
+  `PARITY_STATE`). Seven clean nights were the bar for go to take over
+  api.cbioportal.org and www's API traffic from scripts and agents;
 - each unexplained request with its body (first 200 bytes) and the first
   lines of the difference, marking those that are new since the last run.
 
