@@ -72,12 +72,15 @@ func (s Server) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 	core.WriteJSON(w, report)
 }
 
-// Info is InfoController's response. Versions name what this backend serves:
-// the cBioPortal schema version its views reproduce (Java's db.version) and
+// Info is InfoController's response, plus goRewriteVersion. Versions name
+// what this backend serves: the cBioPortal release whose API it matches
+// (portalVersion), go's own release (goRewriteVersion), the cBioPortal
+// schema version its views reproduce (Java's db.version) and
 // the gene / gene-set tables of the seed database the reference is loaded
 // from. Git properties the build does not record are "not set", as in Java.
 type Info struct {
 	PortalVersion             string `json:"portalVersion"`
+	GoRewriteVersion          string `json:"goRewriteVersion"`
 	DbVersion                 string `json:"dbVersion"`
 	GenesetVersion            string `json:"genesetVersion"`
 	GeneTableVersion          string `json:"geneTableVersion"`
@@ -93,26 +96,29 @@ type Info struct {
 }
 
 const (
-	dbSchemaVersion = "3.1.0"
-	seedGeneTable   = "hgnc_v7_2025.10.7"
-	gitNotSet       = "not set"
+	// javaPortalVersion is the cBioPortal release whose API go matches,
+	// reported as portalVersion. The daily upstream sync raises it when it
+	// ports a new cBioPortal release.
+	javaPortalVersion = "v7.2.3"
+	dbSchemaVersion   = "3.1.0"
+	seedGeneTable     = "hgnc_v7_2025.10.7"
+	gitNotSet         = "not set"
 )
 
-// portalVersion is the release /api/info reports: go- and the release tag
-// without its v (go-0.1.0, or go-0.1.0-12-g6b38ed6 after it), go-dev for a
-// build without one.
-func portalVersion() string { return portalVersionOf(buildinfo.Release()) }
+// goRewriteVersion is go's release as /api/info reports it: the release tag
+// (v0.1.0, or v0.1.0-12-g6b38ed6 after it), dev for a build without one.
+func goRewriteVersion() string { return goRewriteVersionOf(buildinfo.Release()) }
 
-func portalVersionOf(release string) string {
+func goRewriteVersionOf(release string) string {
 	if release == "" {
-		return "go-dev"
+		return "dev"
 	}
-	return "go-" + strings.TrimPrefix(release, "v")
+	return release
 }
 
 func (s Server) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
-		PortalVersion: portalVersion(), DbVersion: dbSchemaVersion,
+		PortalVersion: javaPortalVersion, GoRewriteVersion: goRewriteVersion(), DbVersion: dbSchemaVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,
 		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,

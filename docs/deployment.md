@@ -27,9 +27,12 @@ The image `docker.io/cbioportal/cbioportal-go` is built and published by
 | `pr-<N>`, `sha-<commit>` | pull requests labelled `preview` (see [PR previews](#pr-previews)) |
 | `<X.Y.Z>`, `<X.Y>`, `sha-<commit>` | a release tag `vX.Y.Z` (see [Releases](#releases)) |
 
-`/api/info` gives the release as `portalVersion`. It is `go-0.1.0` for the
-release `v0.1.0`, and `go-0.1.0-12-g6b38ed6` for a commit 12 commits after
-it.
+`/api/info` gives go's release as `goRewriteVersion`. It is `v0.1.0` for the
+release `v0.1.0`, and `v0.1.0-12-g6b38ed6` for a commit 12 commits after it.
+`portalVersion` is the cBioPortal release whose API go matches, such as
+`v7.2.3`, as Java reports its own release there. The image build also
+records the git branch, commit message and author, which `/api/info` gives
+as `gitBranch` and the `gitCommitMessage` fields.
 
 The [Dockerfile](../Dockerfile) builds the frontend once and compiles the Go
 programs for each platform, so the ARM image does not need slow emulation.
