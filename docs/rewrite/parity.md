@@ -3,7 +3,7 @@
 "Parity" means go gives the same answer as the Java backend for the same
 request. This page explains the tools that check it: comparing go with
 production (www.cbioportal.org) on real requests, the nightly job that does
-this every day, and the "Java oracle", a local Java server run on the same
+this on a day's traffic, and the "Java oracle", a local Java server run on the same
 test data as go.
 
 ## Contents
@@ -122,8 +122,13 @@ reads the whole `clinical_event_data` table.
 ### Nightly parity job
 
 `cbioportal-rewrite-test java-v7-to-go parity run` compares go.cbioportal.org
-with Java on www.cbioportal.org on real production traffic every day. For each request it reports whether the
-answers are identical, a known difference, or unexplained.
+with Java on www.cbioportal.org on a day of real production traffic. For each
+request it reports whether the answers are identical, a known difference, or
+unexplained.
+
+It ran every night until go passed the bar of seven clean nights in a row and
+took over api.cbioportal.org. It is no longer scheduled. Run it by hand, or
+schedule it again as below, to check go before moving more traffic to it.
 
 ```bash
 go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--day YYYY-MM-DD] [--dry-run]
@@ -212,7 +217,7 @@ right away. With `--dry-run` it prints the description instead.
 | `--dry-run` | print the GitHub actions instead of doing them, and do not count the night |
 | `--day` | record the run as that night instead of today, to redo a past night; the list then comes from the day before it |
 
-**Where it runs.** On the parity host, cron starts it every day at 15:17
+**Where it runs.** On the parity host, cron can start it every day at 15:17
 UTC. The mirror is rebuilt within an hour after each import on production
 (see [Deployment](../deployment.md#mirroring-production)). Before it sends
 any requests, the job compares each study's import date on go and on Java.
