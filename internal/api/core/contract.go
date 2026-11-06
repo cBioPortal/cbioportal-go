@@ -551,9 +551,9 @@ var contractRoutes = []contractRoute{
 		params: paged(legacyProjection, mutationSort), filter: mutationFilterSchema},
 	{method: "POST", pattern: "/api/mutations/fetch", params: paged(legacyProjection, mutationSort),
 		filter: mutationMultipleStudyFilterSchema, intercepted: "interceptedMutationMultipleStudyFilter"},
-	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"},
+	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"valueProfile"},
 		params: []Param{sampleListIDParam, {Name: "entrezGeneId", required: true}, projectionParamOf(legacyProjection)}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"valueProfile"},
 		params: []Param{projectionParamOf(legacyProjection)}, filter: molecularDataFilterSchema},
 	{method: "POST", pattern: "/api/molecular-data/fetch", params: []Param{projectionParamOf(legacyProjection)},
 		filter: molecularDataMultipleStudyFilterSchema, intercepted: "interceptedMolecularDataMultipleStudyFilter"},
@@ -714,6 +714,15 @@ func (s *State) missing(kind string, v map[string]string) string {
 		}
 	case "profile":
 		if !s.cachedRowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1",
+			ch.Params{"profile": v["molecularProfileId"]}) {
+			return MsgMolecularProfileNotFound(v["molecularProfileId"])
+		}
+	case "valueProfile":
+		// MolecularDataServiceImpl.validateMolecularProfile: mutation and
+		// structural variant profiles have no molecular data, so they are
+		// not found.
+		if !s.cachedRowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} "+
+			"AND molecular_alteration_type NOT IN ('MUTATION_EXTENDED', 'MUTATION_UNCALLED', 'STRUCTURAL_VARIANT') LIMIT 1",
 			ch.Params{"profile": v["molecularProfileId"]}) {
 			return MsgMolecularProfileNotFound(v["molecularProfileId"])
 		}
