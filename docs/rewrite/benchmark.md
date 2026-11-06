@@ -153,6 +153,41 @@ Java's restarts happened because its pods stopped answering Kubernetes'
 health checks, not because they ran out of memory. go's CPU includes four
 deployments of new versions during the window.
 
+### 30 days in production
+
+The figures below cover 2026-10-07 to 2026-11-05. They compare the Java pods
+that answer api.cbioportal.org with go's API pods. In this period go answered
+a copy of a quarter of the same requests. Each figure adds up CPU and memory
+over the pods every 5 minutes, and counts each pod once.
+
+Most of these requests don't go to api.cbioportal.org itself (about 10,000
+to 15,000 a day). They are requests to www.cbioportal.org/api from scripts
+and agents, which the same Java pods answer. In early November these grew
+from about 300,000 to about 1 million a day.
+
+![CPU, memory and requests per day of the Java and go API pods over 30 days](images/production-pods-30-days.png)
+
+Java's CPU was high and uneven in early October, when its pods often ran out
+of memory and restarted. It settled from about October 31, after the cap on
+the clinical-events page size and other fixes in Java. go stayed low the
+whole time.
+
+![Each week's spread of 5-minute CPU and memory for Java and go](images/production-pods-by-week.png)
+
+The boxes show the middle half of the 5-minute samples for each week, and
+the line inside each box is the median. Java's median CPU fell from about 0.8
+to about 0.45 cores over the five weeks. Its median memory stayed at about
+3.5 to 3.8 GB. go's boxes stay close to zero.
+
+![CPU by hour of day, and CPU time per request each day](images/production-cpu-per-request.png)
+
+On the left is CPU by hour of the day for October 31 to November 5. On the
+right is CPU time per request for each day. go's requests are counted as a
+quarter of Java's, because that is the share it receives. From October 31 to
+November 5, Java used about 75 ms of CPU per request and go about 20 ms.
+Java answers repeated requests from its Redis cache, which go doesn't have
+yet, so this comparison favors Java slightly.
+
 ## Why go uses less memory
 
 A Java API pod used about 1.8 GB of memory on average and a go pod about
