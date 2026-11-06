@@ -50,6 +50,7 @@ jobs:
         id: meta
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
@@ -66,6 +67,10 @@ jobs:
           { echo "tags<<EOF"; echo "$tags"; echo "$IMAGE:sha-$(git rev-parse --short=7 HEAD)"; echo EOF; } >> "$GITHUB_OUTPUT"
           echo "release=$(git describe --tags --match 'v*' 2>/dev/null)" >> "$GITHUB_OUTPUT"
           echo "version=$(git rev-parse --short=7 HEAD) ($(git log -1 --format=%cI))" >> "$GITHUB_OUTPUT"
+          # /api/info's gitBranch and gitCommitMessage* (Dockerfile GIT_COMMIT).
+          echo "git_commit=$(jq -cn --arg branch "$BRANCH" --arg message "$(git log -1 --format=%B)" \
+            --arg userName "$(git log -1 --format=%an)" --arg userEmail "$(git log -1 --format=%ae)" \
+            '{$branch, $message, $userName, $userEmail}' | base64 -w0)" >> "$GITHUB_OUTPUT"
           echo "frontend_commit=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "frontend_version=$(git -C frontend describe --always --tags)" >> "$GITHUB_OUTPUT"
       # The built frontend is cached by submodule commit (shared with the e2e
@@ -101,6 +106,7 @@ jobs:
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ steps.meta.outputs.commit }}
             RELEASE=${{ steps.meta.outputs.release }}
+            GIT_COMMIT=${{ steps.meta.outputs.git_commit }}
             FRONTEND_COMMIT=${{ steps.meta.outputs.frontend_commit }}
             FRONTEND_VERSION=${{ steps.meta.outputs.frontend_version }}
           labels: |

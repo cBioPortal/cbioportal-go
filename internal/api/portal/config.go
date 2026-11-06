@@ -73,13 +73,12 @@ func (s Server) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 }
 
 // Info is InfoController's response. Versions name what this backend serves:
-// the cBioPortal schema / derived-table versions its views reproduce and the
-// gene / gene-set tables of the seed database the reference is loaded from.
-// Git properties the build does not record are "not set", as in Java.
+// the cBioPortal schema version its views reproduce (Java's db.version) and
+// the gene / gene-set tables of the seed database the reference is loaded
+// from. Git properties the build does not record are "not set", as in Java.
 type Info struct {
 	PortalVersion             string `json:"portalVersion"`
 	DbVersion                 string `json:"dbVersion"`
-	DerivedTableVersion       string `json:"derivedTableVersion"`
 	GenesetVersion            string `json:"genesetVersion"`
 	GeneTableVersion          string `json:"geneTableVersion"`
 	GitBranch                 string `json:"gitBranch"`
@@ -94,10 +93,9 @@ type Info struct {
 }
 
 const (
-	dbSchemaVersion     = "2.14.5"
-	derivedTableVersion = "1.0.11"
-	seedGeneTable       = "hgnc_v7_2025.10.7"
-	gitNotSet           = "not set"
+	dbSchemaVersion = "3.1.0"
+	seedGeneTable   = "hgnc_v7_2025.10.7"
+	gitNotSet       = "not set"
 )
 
 // portalVersion is the release /api/info reports: go- and the release tag
@@ -114,7 +112,7 @@ func portalVersionOf(release string) string {
 
 func (s Server) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
-		PortalVersion: portalVersion(), DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
+		PortalVersion: portalVersion(), DbVersion: dbSchemaVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,
 		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,
@@ -129,5 +127,22 @@ func (s Server) info(w http.ResponseWriter, r *http.Request) {
 		}
 		info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
 	}
+	setGitCommit(&info, buildinfo.Git())
 	core.WriteJSON(w, info)
+}
+
+// setGitCommit fills the branch and commit message properties the build was
+// stamped with; the short message is the message's first line.
+func setGitCommit(info *Info, c buildinfo.GitCommit) {
+	set := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	set(&info.GitBranch, c.Branch)
+	set(&info.GitCommitMessageFull, c.Message)
+	short, _, _ := strings.Cut(c.Message, "\n")
+	set(&info.GitCommitMessageShort, short)
+	set(&info.GitCommitMessageUserName, c.UserName)
+	set(&info.GitCommitMessageUserEmail, c.UserEmail)
 }

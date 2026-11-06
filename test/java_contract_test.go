@@ -404,4 +404,11 @@ func TestContractInfo(t *testing.T) {
 			t.Errorf("info lacks %s", k)
 		}
 	}
+	// Java v7's fields only, and its schema version (pom.xml db.version).
+	if len(info) != 13 {
+		t.Errorf("info has %d fields, want Java's 13: %v", len(info), info)
+	}
+	if info["dbVersion"] != "3.1.0" {
+		t.Errorf("dbVersion %v, want 3.1.0", info["dbVersion"])
+	}
 }

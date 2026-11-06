@@ -60,3 +60,17 @@ func TestStampOverrides(t *testing.T) {
 		t.Fatalf("Version() = %q, want %q", got, stamp)
 	}
 }
+
+func TestDecodeGitCommit(t *testing.T) {
+	// base64 of {"branch":"main","message":"Fix it\n\nBody","userName":"A","userEmail":"a@b"}
+	const stamped = "eyJicmFuY2giOiJtYWluIiwibWVzc2FnZSI6IkZpeCBpdFxuXG5Cb2R5IiwidXNlck5hbWUiOiJBIiwidXNlckVtYWlsIjoiYUBiIn0="
+	want := GitCommit{Branch: "main", Message: "Fix it\n\nBody", UserName: "A", UserEmail: "a@b"}
+	if got := decodeGitCommit(stamped); got != want {
+		t.Errorf("decodeGitCommit: %+v, want %+v", got, want)
+	}
+	for _, bad := range []string{"", "not base64!", "bm90IGpzb24="} {
+		if got := decodeGitCommit(bad); got != (GitCommit{}) {
+			t.Errorf("decodeGitCommit(%q): %+v, want zero", bad, got)
+		}
+	}
+}
