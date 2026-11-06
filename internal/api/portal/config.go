@@ -3,6 +3,7 @@ package portal
 import (
 	_ "embed"
 	"net/http"
+	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
@@ -93,16 +94,27 @@ type Info struct {
 }
 
 const (
-	portalVersion       = "go-0.1.0"
 	dbSchemaVersion     = "2.14.5"
 	derivedTableVersion = "1.0.11"
 	seedGeneTable       = "hgnc_v7_2025.10.7"
 	gitNotSet           = "not set"
 )
 
+// portalVersion is the release /api/info reports: go- and the release tag
+// without its v (go-0.1.0, or go-0.1.0-12-g6b38ed6 after it), go-dev for a
+// build without one.
+func portalVersion() string { return portalVersionOf(buildinfo.Release()) }
+
+func portalVersionOf(release string) string {
+	if release == "" {
+		return "go-dev"
+	}
+	return "go-" + strings.TrimPrefix(release, "v")
+}
+
 func (s Server) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
-		PortalVersion: portalVersion, DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
+		PortalVersion: portalVersion(), DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,
 		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,

@@ -7,6 +7,7 @@ previews new datahub studies, and the per-pull-request previews.
 ## Contents
 
 - [Container image](#container-image)
+  - [Releases](#releases)
 - [go.cbioportal.org](#gocbioportalorg)
   - [Sign-in](#sign-in)
   - [Loading studies](#loading-studies)
@@ -24,6 +25,11 @@ The image `docker.io/cbioportal/cbioportal-go` is built and published by
 |---|---|
 | `latest`, `sha-<7-char commit>` | every push to `main` |
 | `pr-<N>`, `sha-<commit>` | pull requests labelled `preview` (see [PR previews](#pr-previews)) |
+| `<X.Y.Z>`, `<X.Y>`, `sha-<commit>` | a release tag `vX.Y.Z` (see [Releases](#releases)) |
+
+`/api/info` gives the release as `portalVersion`. It is `go-0.1.0` for the
+release `v0.1.0`, and `go-0.1.0-12-g6b38ed6` for a commit 12 commits after
+it.
 
 The [Dockerfile](../Dockerfile) builds the frontend once and compiles the Go
 programs for each platform, so the ARM image does not need slow emulation.
@@ -79,6 +85,27 @@ The API container uses the settings described in
   [Login sessions in Redis](configuration.md#login-sessions-in-redis)).
 
 The health check is `GET /health`.
+
+### Releases
+
+A release is a git tag `vX.Y.Z` on `main`. Tagging builds an image with the
+tags `X.Y.Z` and `X.Y`. A deployment that should change only when we choose,
+such as api.cbioportal.org, uses a release tag instead of `latest`.
+
+To make a release:
+
+1. Check that the tests pass on `main` and that the latest nightly parity run
+   was clean.
+2. Tag the commit and push the tag. Raise the last number for fixes and the
+   middle number for new features.
+
+   ```bash
+   git tag -a v0.1.1 -m "v0.1.1" && git push origin v0.1.1
+   ```
+
+3. Write the release notes on GitHub:
+   `gh release create v0.1.1 --generate-notes`.
+4. When the image is built, change the deployment's image to the new tag.
 
 ## go.cbioportal.org
 

@@ -18,6 +18,14 @@ var stamp string
 // -ldflags "-X github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=6b38ed6…".
 var commit string
 
+// release, when set at link time, is the build's place among the release
+// tags as git describe --tags gives it: v0.1.0 for a tagged release,
+// v0.1.0-12-g6b38ed6 for a later commit.
+var release string
+
+// Release is the build's release, "" when it was built without one.
+func Release() string { return release }
+
 // Commit is the git revision the binary was built from and whether the
 // working tree had changes: the stamped commit, else the toolchain's VCS
 // information, else "".

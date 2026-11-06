@@ -3,6 +3,8 @@ name: Docker image
 on:
   push:
     branches: [main]
+    # A release tag (v0.1.0) gets the image tags 0.1.0 and 0.1.
+    tags: ['v*']
     # Docs-only and CI-only pushes don't change the image; skipping them
     # avoids restarting the deployments for nothing.
     paths-ignore:
@@ -42,6 +44,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           submodules: true
+          # The release tags, for git describe.
+          fetch-depth: 0
       - name: Image tags and frontend version
         id: meta
         env:
@@ -49,9 +53,18 @@ jobs:
         run: |
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short_sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
-          # main: latest; a pull request: pr-<N>. Both also get sha-<commit>.
-          if [ -n "$PR_NUMBER" ]; then tag=pr-$PR_NUMBER; else tag=latest; fi
-          echo "branch_tag=$tag" >> "$GITHUB_OUTPUT"
+          # main: latest; a pull request: pr-<N>; a release tag vX.Y.Z: X.Y.Z
+          # and X.Y. Each also gets sha-<commit>.
+          if [ -n "$PR_NUMBER" ]; then
+            tags="$IMAGE:pr-$PR_NUMBER"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v=${GITHUB_REF#refs/tags/v}
+            tags="$IMAGE:$v"$'\n'"$IMAGE:${v%.*}"
+          else
+            tags="$IMAGE:latest"
+          fi
+          { echo "tags<<EOF"; echo "$tags"; echo "$IMAGE:sha-$(git rev-parse --short=7 HEAD)"; echo EOF; } >> "$GITHUB_OUTPUT"
+          echo "release=$(git describe --tags --match 'v*' 2>/dev/null)" >> "$GITHUB_OUTPUT"
           echo "version=$(git rev-parse --short=7 HEAD) ($(git log -1 --format=%cI))" >> "$GITHUB_OUTPUT"
           echo "frontend_commit=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "frontend_version=$(git -C frontend describe --always --tags)" >> "$GITHUB_OUTPUT"
@@ -83,12 +96,11 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.meta.outputs.branch_tag }}
-            ${{ env.IMAGE }}:sha-${{ steps.meta.outputs.short_sha }}
+          tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             COMMIT=${{ steps.meta.outputs.commit }}
+            RELEASE=${{ steps.meta.outputs.release }}
             FRONTEND_COMMIT=${{ steps.meta.outputs.frontend_commit }}
             FRONTEND_VERSION=${{ steps.meta.outputs.frontend_version }}
           labels: |
