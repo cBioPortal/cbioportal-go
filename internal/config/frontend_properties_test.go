@@ -40,3 +40,17 @@ func TestSkinHideDownloadControls(t *testing.T) {
 		t.Errorf("default skin_hide_download_controls = %v", cfg["skin_hide_download_controls"])
 	}
 }
+
+// The MSK whole-slide viewer properties are not frontend properties, even
+// when set in application.properties.
+func TestNoMskWholeSlideViewerProperties(t *testing.T) {
+	cfg := FrontendConfig("/", map[string]string{
+		"msk.whole.slide.viewer.secret.key":        "secret",
+		"skin.patientview.show_mskcc_slide_viewer": "true",
+	}, true)
+	for _, key := range []string{"mskWholeSlideViewerToken", "skin_patientview_show_mskcc_slide_viewer"} {
+		if v, ok := cfg[key]; ok {
+			t.Errorf("%s = %v, want absent", key, v)
+		}
+	}
+}
