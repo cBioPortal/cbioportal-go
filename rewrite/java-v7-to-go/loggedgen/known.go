@@ -236,7 +236,7 @@ func skip(method, target, body string) bool {
 // versionFields are /api/info's fields that describe the deployment.
 const versionFields = "gitBranch,gitCommitId,gitCommitIdAbbrev,gitCommitIdDescribe,gitCommitIdDescribeShort," +
 	"gitCommitMessageFull,gitCommitMessageShort,gitCommitMessageUserEmail,gitCommitMessageUserName," +
-	"portalVersion,goRewriteVersion,gitDirty,dbVersion,derivedTableVersion"
+	"portalVersion,goRewriteVersion,goRewriteJavaParityCommit,gitDirty,dbVersion,derivedTableVersion"
 
 var expectations = []expectation{
 	{

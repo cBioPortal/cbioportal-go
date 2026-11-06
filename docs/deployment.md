@@ -30,7 +30,9 @@ The image `docker.io/cbioportal/cbioportal-go` is built and published by
 `/api/info` gives go's release as `goRewriteVersion`. It is `v0.1.0` for the
 release `v0.1.0`, and `v0.1.0-12-g6b38ed6` for a commit 12 commits after it.
 `portalVersion` is the cBioPortal release whose API go matches, such as
-`v7.2.3`, as Java reports its own release there. The image build also
+`v7.2.3`, as Java reports its own release there. `goRewriteJavaParityCommit` is the
+latest commit of cBioPortal's Java backend whose changes go has taken in. The
+daily upstream sync updates it. The image build also
 records the git branch, commit message and author, which `/api/info` gives
 as `gitBranch` and the `gitCommitMessage` fields.
 

@@ -74,13 +74,16 @@ func (s Server) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 
 // Info is InfoController's response, plus goRewriteVersion. Versions name
 // what this backend serves: the cBioPortal release whose API it matches
-// (portalVersion), go's own release (goRewriteVersion), the cBioPortal
+// (portalVersion), go's own release (goRewriteVersion), the latest
+// cBioPortal/cbioportal commit whose changes go has taken in
+// (goRewriteJavaParityCommit), the cBioPortal
 // schema version its views reproduce (Java's db.version) and
 // the gene / gene-set tables of the seed database the reference is loaded
 // from. Git properties the build does not record are "not set", as in Java.
 type Info struct {
 	PortalVersion             string `json:"portalVersion"`
 	GoRewriteVersion          string `json:"goRewriteVersion"`
+	GoRewriteJavaParityCommit string `json:"goRewriteJavaParityCommit"`
 	DbVersion                 string `json:"dbVersion"`
 	GenesetVersion            string `json:"genesetVersion"`
 	GeneTableVersion          string `json:"geneTableVersion"`
@@ -100,9 +103,13 @@ const (
 	// reported as portalVersion. The daily upstream sync raises it when it
 	// ports a new cBioPortal release.
 	javaPortalVersion = "v7.2.3"
-	dbSchemaVersion   = "3.1.0"
-	seedGeneTable     = "hgnc_v7_2025.10.7"
-	gitNotSet         = "not set"
+	// javaParityCommit is the latest cBioPortal/cbioportal commit on master
+	// whose changes go has taken in, reported as goRewriteJavaParityCommit.
+	// The daily upstream sync sets it to the commit it went through.
+	javaParityCommit = "54727b16c192a55adf487d860c65ffd6fa600988"
+	dbSchemaVersion  = "3.1.0"
+	seedGeneTable    = "hgnc_v7_2025.10.7"
+	gitNotSet        = "not set"
 )
 
 // goRewriteVersion is go's release as /api/info reports it: the release tag
@@ -118,7 +125,8 @@ func goRewriteVersionOf(release string) string {
 
 func (s Server) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
-		PortalVersion: javaPortalVersion, GoRewriteVersion: goRewriteVersion(), DbVersion: dbSchemaVersion,
+		PortalVersion: javaPortalVersion, GoRewriteVersion: goRewriteVersion(),
+		GoRewriteJavaParityCommit: javaParityCommit, DbVersion: dbSchemaVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,
 		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,
