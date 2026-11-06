@@ -392,6 +392,40 @@ Java also runs a validator, which go does not have. It is not counted above.
 It adds 56–71 s and 0.6 GB on msk_chord_2024, and 132–141 s and 1.2 GB on
 msk_impact_50k_2026.
 
+### Load on ClickHouse
+
+The table above counts only the importers' own work. ClickHouse does work
+too: it stores the rows, and for go it also builds the tables the API reads.
+The table below shows ClickHouse's side of the same runs, taken from its
+query log and its once-a-second metric log.
+
+| Study | Importer | ClickHouse CPU | Time spent on ClickHouse | Average cores | Largest query's memory | ClickHouse memory above idle | Written | Read |
+|---|---|---|---|---|---|---|---|---|
+| msk_chord_2024 | Java | 56 / 55 s | 4–5½ min | 0.6–0.9 | 0.5 GB | 0.5 / 1.2 GB | 3.1 GB | 3.4 GB |
+| | go | 72 / 80 s | about 1 min | about 1.7 | 1.0 GB | 1.0 / 1.2 GB | 7.8 GB | 8 GB |
+| msk_impact_50k_2026 | Java | 86 / 91 s | 8–10 min | 0.5–0.8 | 1.1 GB | 1.2 GB | 6.8 GB | 3.0 GB |
+| | go | 151 / 147 s | about 1½ min | 2.3–2.4 | 1.2 GB | 1.2 GB | 21.5 GB | 22 GB |
+
+"ClickHouse memory above idle" is the server's peak memory during the run
+minus what it used when idle (about 2.2 GB).
+
+go moves the work into ClickHouse:
+
+- ClickHouse does more work for go: 1.3 to 1.7 times the CPU, and about
+  three times the data written. go first copies the files into ClickHouse
+  as they are, then builds the final tables from them with SQL.
+- go's load is short and heavy: about 2.4 cores for a minute and a half
+  on the large study. Java's is light and long: less than one core for 8
+  to 10 minutes.
+- Both need about the same peak memory on ClickHouse.
+
+Counting both sides, go still needs far less memory and time: Java's
+importer itself needs 3 to 4 GB for several minutes, while go's needs at
+most 213 MB for about a minute and a half.
+
+These numbers come from one local ClickHouse server, not production. They
+count only queries on the benchmark's own databases.
+
 Both importers produced the same samples, patients, clinical data, mutations,
 structural variants, alterations and generic-assay rows. Two small
 differences remain:
