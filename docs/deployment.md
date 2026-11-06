@@ -231,14 +231,12 @@ the LibreChat copy job:
    `-raw-db`, `-ref-db`).
 
 A build takes about 5 minutes. The CronJob `cbioportal-go-mirror` runs every
-hour, but it can only see a new import once production's color swap marks it
-complete. So the swap also runs it as a post-swap hook (`post_swap_hooks` in
-cmo-pipelines' color-swap config), which starts one job from the CronJob's
-template right after the switch:
-
-```bash
-kubectl create job --from=cronjob/cbioportal-go-mirror cbioportal-go-mirror-swap-$(date +%s)
-```
+hour, and also right after each production switch. The public color swap sets
+`public_db.active_color` in the `cbioportal-db-status` ConfigMap when it marks
+an import complete. [Reloader](https://github.com/stakater/Reloader) watches
+that ConfigMap and starts a Job from the CronJob's template when it changes. So
+go follows each import within minutes. The hourly run retries a failed
+rebuild.
 
 #### What `transform --from-prod` builds
 
