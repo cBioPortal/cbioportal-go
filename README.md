@@ -45,7 +45,7 @@ flowchart LR
     clients["Scripts and agents"]
 
     files --> importer -->|loads| db
-    db -->|queries| api
+    db -->|serves| api
     api -->|website and /api| browser
     api -->|/api| clients
 ```
