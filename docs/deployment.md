@@ -208,21 +208,35 @@ the LibreChat copy job:
    It stops without changes while an import is running, or when the live go
    copy was already built from that import. The import it was built from is
    recorded in `<prefix>_<color>_ref._go_mirror_source`.
-2. It empties go's inactive copy. Then it clones every table of
+2. Only one run builds at a time. The hourly run and a run started by
+   production's color swap can overlap. Each run adds itself to
+   `<prefix>_<color>_ref._go_mirror_lock` in the copy it would build, and the
+   earliest run of the last 2 hours goes ahead. A later run leaves go as it
+   is. A run that finds that copy already built from the same import switches
+   to it without building again.
+3. It empties go's inactive copy. Then it clones every table of
    `cbioportal_public_<color>` into `<prefix>_<color>_ref`, except the login
    and password tables. ClickHouse's `CREATE TABLE … CLONE AS` makes this
    copy without duplicating the data on disk, in about 20 s.
-3. It builds the portal database from the clone, as this command does:
+4. It builds the portal database from the clone, as this command does:
 
    ```bash
    cbioportal-import transform --from-prod \
      --ref-db <prefix>_<color>_ref --raw-db <prefix>_<color>_raw --db <prefix>_<color>
    ```
 
-4. It passes the three database names (`CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB`,
+5. It passes the three database names (`CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB`,
    `CBIOPORTAL_REF_DB`) to the step that switches `cbioportal-go-active` to
    the new copy. The API reads the three databases as they are (`-db`,
    `-raw-db`, `-ref-db`).
+
+A build takes about 5 minutes. The job runs every hour, but it can only see a
+new import once production's color swap marks it complete. To follow an
+import within minutes, the swap can start the job right away:
+
+```bash
+kubectl create job --from=cronjob/cbioportal-go-mirror-daily cbioportal-go-mirror-swap-$(date +%s)
+```
 
 #### What `transform --from-prod` builds
 

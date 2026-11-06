@@ -224,6 +224,31 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 		return plan, r.writeState(plan)
 	}
 
+	// 2) One run builds at a time: the hourly run and one started by
+	//    production's color swap may overlap.
+	if r.Cfg.TargetDB == "" {
+		won, err := r.lock(q, plan.RefDB)
+		if err != nil {
+			return plan, err
+		}
+		if !won {
+			keep := Plan{DB: r.Cfg.ActiveDB, RawDB: r.Cfg.ActiveDB + "_raw", RefDB: r.Cfg.ActiveDB + "_ref",
+				Reason: "another run is building " + plan.DB}
+			r.Logf("%s", keep.Reason)
+			return keep, r.writeState(keep)
+		}
+		defer q.query(fmt.Sprintf("DROP TABLE IF EXISTS `%s`.%s SYNC", plan.RefDB, lockTable))
+		// A run that finished just before this one may have built the
+		// target from this import already: switch to it.
+		if built, err := r.builtFrom(q, plan.RefDB); err != nil {
+			return plan, err
+		} else if built == src.Snapshot {
+			plan.Build, plan.Reason = false, fmt.Sprintf("%s already built from %s; switching to it", plan.DB, src.Snapshot)
+			r.Logf("%s", plan.Reason)
+			return plan, r.writeState(plan)
+		}
+	}
+
 	// 3) Empty the target databases (tables and views; the databases stay,
 	//    since the job's user may not create or drop databases), then clone.
 	for _, d := range []string{plan.DB, plan.RawDB, plan.RefDB} {
@@ -237,6 +262,9 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 				return plan, err
 			}
 			for _, name := range lines(names) {
+				if name == lockTable {
+					continue
+				}
 				stmt := fmt.Sprintf("DROP %s IF EXISTS `%s`.`%s`", kind, d, name)
 				if kind == "TABLE" {
 					stmt += " SYNC"
@@ -302,6 +330,41 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 	}
 	r.Logf("done: CBIOPORTAL_DB=%s", plan.DB)
 	return plan, nil
+}
+
+// lockTable, in the target color's _ref database, holds one row per run
+// that wants to build that color. The earliest row of the last 2 hours (a
+// run's deadline) holds the lock; older rows are runs that died.
+const lockTable = "_go_mirror_lock"
+
+// lock records this run in refDB's lock table and reports whether it holds
+// the lock.
+func (r *Runner) lock(q retrying, refDB string) (bool, error) {
+	id := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	if _, err := q.query(fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.%s (id String, started DateTime64(3) DEFAULT now64(3)) ENGINE = MergeTree ORDER BY tuple()", refDB, lockTable)); err != nil {
+		return false, err
+	}
+	if _, err := q.query(fmt.Sprintf("INSERT INTO `%s`.%s (id) VALUES ('%s')", refDB, lockTable, id)); err != nil {
+		return false, err
+	}
+	holder, err := q.query(fmt.Sprintf("SELECT id FROM `%s`.%s WHERE started > now64(3) - INTERVAL 2 HOUR ORDER BY started, id LIMIT 1 FORMAT TSV", refDB, lockTable))
+	if err != nil || holder == id {
+		return holder == id, err
+	}
+	// Not the holder: take the row out again, so it does not hold the lock
+	// for the runs after the holder.
+	_, err = q.query(fmt.Sprintf("ALTER TABLE `%s`.%s DELETE WHERE id = '%s' SETTINGS mutations_sync = 2", refDB, lockTable, id))
+	return false, err
+}
+
+// builtFrom is the production snapshot refDB's color was last built from,
+// "" when none was recorded.
+func (r *Runner) builtFrom(q retrying, refDB string) (string, error) {
+	n, err := q.query(fmt.Sprintf("SELECT count() FROM system.tables WHERE database = '%s' AND name = '_go_mirror_source' FORMAT TSV", ch.SQLLit(refDB)))
+	if err != nil || n != "1" {
+		return "", err
+	}
+	return q.query(fmt.Sprintf("SELECT argMax(snapshot, built_at) FROM `%s`._go_mirror_source FORMAT TSV", refDB))
 }
 
 // clone makes dst.table a zero-copy clone of src.table. CLONE AS creates
