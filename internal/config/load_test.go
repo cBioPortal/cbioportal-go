@@ -152,6 +152,18 @@ func TestStudyAvailabilityEnabled(t *testing.T) {
 	}
 }
 
+// The slide viewer's tile server is unset by default, which hides the viewer.
+func TestWsiTileServerURL(t *testing.T) {
+	cfg := FrontendConfig("/", nil, false)
+	if v, ok := cfg["wsi_tile_server_url"]; !ok || v != nil {
+		t.Errorf("default wsi_tile_server_url = %#v (present %v), want null", v, ok)
+	}
+	cfg = FrontendConfig("/", map[string]string{"wsi.tile_server.url": "/wsi"}, true)
+	if v := cfg["wsi_tile_server_url"]; v != "/wsi" {
+		t.Errorf("wsi_tile_server_url = %#v, want /wsi", v)
+	}
+}
+
 func TestFilePathsRelativeToPropertiesFile(t *testing.T) {
 	dir := t.TempDir()
 	for _, f := range []string{"frontend.json", "llms.txt"} {

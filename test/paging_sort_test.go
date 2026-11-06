@@ -348,3 +348,16 @@ func TestContractStudiesMetaParams(t *testing.T) {
 			"Request parameter type mismatch: java.lang.IllegalArgumentException: No enum constant org.cbioportal.legacy.web.parameter."+enum)
 	}
 }
+
+// The study's clinical events take a pageSize of at most 10000, which is
+// also the default (ClinicalEventController).
+func TestContractStudyClinicalEventsPageSize(t *testing.T) {
+	requireAPI(t)
+	path := "/api/studies/lgg_ucsf_2014_test_generic_assay/clinical-events"
+	wantError(t, "GET", path+"?pageSize=10001", "", 400, "pageSize must be less than or equal to 10000")
+	all := listOf(t, "GET", path, "")
+	wantEq(t, len(listOf(t, "GET", path+"?pageSize=10000", "")), len(all))
+	if len(all) == 0 {
+		t.Fatal("no clinical events")
+	}
+}

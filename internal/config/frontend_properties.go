@@ -181,6 +181,7 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"clickhouse_mode", "clickhouse_mode", strPtr("false")},
 	{"feature.study.export", "feature_study_export", strPtr("false")},
 	{"study_availability.enabled", "study_availability_enabled", strPtr("false")},
+	{"wsi.tile_server.url", "wsi_tile_server_url", nil},
 }
 
 // ParseApplicationProperties reads a Java-style application.properties file.
