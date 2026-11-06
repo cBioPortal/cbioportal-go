@@ -212,8 +212,13 @@ right away. With `--dry-run` it prints the description instead.
 
 **Where it runs.** On the parity host, cron starts it every day at 15:17
 UTC. The mirror is rebuilt within an hour after each import on production
-(see [Deployment](../deployment.md#mirroring-production)), so the job
-compares go and Java on the same data unless an import is still running.
+(see [Deployment](../deployment.md#mirroring-production)). Before it sends
+any requests, the job compares each study's import date on go and on Java.
+If production imported a study that the mirror doesn't have yet, the job
+checks again every 5 minutes, for up to 2 hours. If the mirror still hasn't
+caught up after that, the log names the studies that differ and the job runs
+anyway. A study that production imports while the job is running can still
+show up as a difference.
 
 ```bash
 go build -o ~/.local/bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrite-test

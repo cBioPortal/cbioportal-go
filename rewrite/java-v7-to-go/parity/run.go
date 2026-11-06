@@ -89,6 +89,10 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 		return false, die("refusing to run paritydiff without a hard memory cap: %v", err)
 	}
 	fmt.Fprintf(o.stderr, "paritydiff memory cap: %s\n", capHow)
+	if stale := waitForMirror(o.a, o.b, o.ua, o.stderr); len(stale) > 0 {
+		fmt.Fprintf(o.stderr, "the mirror is still behind after %v: %d studies differ in import date (%s)\n",
+			mirrorWait, len(stale), cutList(stale, 5))
+	}
 	versionA, versionB := version(o.a, o.ua), version(o.b, o.ua)
 	start := time.Now()
 	runParitydiff(o, capPrefix, filepath.Join(bin, "paritydiff"), corpusPath, run)
