@@ -35,8 +35,19 @@ which is rebuilt within an hour after each new import on production.
 
 ## How it fits together
 
-```
-study files ──cbioportal-import──▶ ClickHouse ◀──cbioportal-api──▶ browser (API + website)
+```mermaid
+flowchart LR
+    files["Study files<br/>and reference data<br/>(datahub)"]
+    importer["cbioportal-import"]
+    db[("ClickHouse")]
+    api["cbioportal-api"]
+    browser["Browser<br/>(cbioportal-frontend)"]
+    clients["Scripts and agents"]
+
+    files --> importer -->|loads| db
+    db -->|queries| api
+    api -->|website and /api| browser
+    api -->|/api| clients
 ```
 
 | Part | What it does |
