@@ -272,6 +272,26 @@ func TestSegmentFileIsNoMolecularProfile(t *testing.T) {
 	}
 }
 
+// meta_study.txt's optional license (an SPDX id) is a study meta field, as
+// cbioportal-core's CancerStudyReader reads it; a study without one has none.
+func TestScanStudyLicense(t *testing.T) {
+	dir := t.TempDir()
+	meta := "cancer_study_identifier: lic_study\ntype_of_cancer: brca\nname: L\ndescription: d\n"
+	if err := os.WriteFile(filepath.Join(dir, "meta_study.txt"), []byte(meta+"license:  CC-BY-NC-ND-4.0 \r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Meta["license"] != "CC-BY-NC-ND-4.0" {
+		t.Errorf("license = %q", s.Meta["license"])
+	}
+	if got, ok := ParseMeta(meta).Fields["license"]; ok {
+		t.Errorf("license without the key = %q", got)
+	}
+}
+
 func TestSampleID(t *testing.T) {
 	for in, want := range map[string]string{
 		"TCGA-RZ-AB0B-01A":             "TCGA-RZ-AB0B-01",

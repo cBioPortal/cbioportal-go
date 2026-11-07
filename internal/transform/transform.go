@@ -138,7 +138,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	// numbers the studies in import order.
 	if err := createView("cancer_study", fmt.Sprintf(
 		"SELECT c.study_id AS study_id, c.name AS name, c.short_name AS short_name, c.description AS description, "+
-			"c.type_of_cancer AS cancer_type_id, c.groups AS groups, c.pmid AS pmid, c.citation AS citation, "+
+			"c.type_of_cancer AS cancer_type_id, c.groups AS groups, c.pmid AS pmid, c.citation AS citation, c.license AS license, "+
 			"c.reference_genome AS reference_genome, c.add_global_case_list = 'true' AS add_global_case_list, "+
 			"toInt64OrDefault(c.status, toInt64(1)) AS status, r.study_rank AS internal_id "+
 			"FROM `%s`.cancer_study c LEFT JOIN (%s) r ON r.study_id = c.study_id", rawDB, studyRankSQL(rawDB))); err != nil {
