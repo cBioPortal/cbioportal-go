@@ -106,7 +106,7 @@ const (
 	// javaParityCommit is the latest cBioPortal/cbioportal commit on master
 	// whose changes go has taken in, reported as goRewriteJavaParityCommit.
 	// The daily upstream sync sets it to the commit it went through.
-	javaParityCommit = "54727b16c192a55adf487d860c65ffd6fa600988"
+	javaParityCommit = "bb5db0098ef4e12808552fa43dfa96d1a021bac8"
 	dbSchemaVersion  = "3.1.0"
 	seedGeneTable    = "hgnc_v7_2025.10.7"
 	gitNotSet        = "not set"
