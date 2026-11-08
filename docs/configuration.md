@@ -851,6 +851,8 @@ different labels small.
 | `cbioportal_clickhouse_query_duration_seconds` | How long ClickHouse takes until the whole result is read. |
 | `cbioportal_clickhouse_read_rows_total`, `…_read_bytes_total` | How many rows and bytes ClickHouse reports reading. |
 | `cbioportal_metadata_cache_lookups_total{result}` | How often the metadata cache had the answer (hit) or not (miss). |
+| `cbioportal_metadata_cache_entries`, `…_bytes` | How many answers the metadata cache holds, and about how much memory they take. The cache keeps at most about 64 MB. |
+| `cbioportal_metadata_cache_evictions_total` | How many answers the metadata cache dropped to stay under its size limit. It drops the ones used least recently. |
 | `cbioportal_logins_total{outcome}` | The number of OAuth2 logins, by outcome. |
 | `cbioportal_data_access_token_checks_total{result}` | Data access token checks: answered from memory, traded at the provider, or rejected. |
 | `go_*`, `process_*` | The Go runtime and the process: memory, garbage collection, goroutines, CPU and open files. |

@@ -1,6 +1,8 @@
 package core
 
 import (
+	"container/list"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -17,16 +19,33 @@ import (
 // ids) that the frontend repeats many times per page. Entries are dropped
 // whenever the databases' tables change — checked at most once per
 // metaCacheRecheck — so a re-import or transform is picked up promptly.
+//
+// Some keys come from requests (a study search keyword, a list of study
+// ids), so the cache is bounded: past metaCacheBudget bytes, the least
+// recently used entries go first. Entries every page asks for stay.
 type metaCache struct {
 	mu      sync.Mutex
-	entries map[string]any
+	entries map[string]*list.Element // of *metaEntry, in lru
+	lru     list.List                // most recently used first
+	bytes   int
 	version string
 	checked time.Time
 	// inflight collapses concurrent identical queries on a miss.
 	inflight singleflight.Group
 }
 
-const metaCacheRecheck = time.Second
+type metaEntry struct {
+	key   string
+	rows  any
+	bytes int
+}
+
+const (
+	metaCacheRecheck = time.Second
+	// metaCacheBudget bounds the cache's estimated size (keys plus the rows
+	// as JSON). One result larger than an eighth of it is not kept.
+	metaCacheBudget = 64 << 20
+)
 
 func (c *metaCache) validate(client *ch.Client) {
 	c.mu.Lock()
@@ -39,15 +58,66 @@ func (c *metaCache) validate(client *ch.Client) {
 		"SELECT max(metadata_modification_time), sum(ifNull(total_rows, 0)), count() FROM system.tables "+
 			"WHERE database IN ('%s', 'cbioportal_raw', 'cbioportal_ref') FORMAT TabSeparated", SQLLit(client.Database())))
 	if err != nil || v != c.version {
-		c.entries = nil
+		c.clear()
 		c.version = v
 	}
+}
+
+// get returns the rows cached under key and marks them recently used. The
+// caller holds mu.
+func (c *metaCache) get(key string) (any, bool) {
+	e, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	c.lru.MoveToFront(e)
+	return e.Value.(*metaEntry).rows, true
+}
+
+// put caches rows under key, dropping the least recently used entries
+// while the cache is over budget. The caller holds mu.
+func (c *metaCache) put(key string, rows any, size int) {
+	size += len(key)
+	if size > metaCacheBudget/8 {
+		return
+	}
+	if e, ok := c.entries[key]; ok {
+		c.remove(e)
+	}
+	if c.entries == nil {
+		c.entries = map[string]*list.Element{}
+	}
+	c.entries[key] = c.lru.PushFront(&metaEntry{key: key, rows: rows, bytes: size})
+	c.bytes += size
+	metaCacheEntries.Add(1)
+	metaCacheBytes.Add(int64(size))
+	for c.bytes > metaCacheBudget {
+		c.remove(c.lru.Back())
+		metaCacheEvictions.Inc()
+	}
+}
+
+func (c *metaCache) remove(e *list.Element) {
+	m := c.lru.Remove(e).(*metaEntry)
+	delete(c.entries, m.key)
+	c.bytes -= m.bytes
+	metaCacheEntries.Add(-1)
+	metaCacheBytes.Add(-int64(m.bytes))
+}
+
+// clear empties the cache. The caller holds mu.
+func (c *metaCache) clear() {
+	metaCacheEntries.Add(-int64(len(c.entries)))
+	metaCacheBytes.Add(-int64(c.bytes))
+	c.entries = nil
+	c.lru.Init()
+	c.bytes = 0
 }
 
 // ClearMetaCache empties the metadata cache.
 func (s *State) ClearMetaCache() {
 	s.meta.mu.Lock()
-	s.meta.entries = nil
+	s.meta.clear()
 	s.meta.mu.Unlock()
 }
 
@@ -74,7 +144,7 @@ func CachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
 	}
 	s.meta.validate(s.CH)
 	s.meta.mu.Lock()
-	if v, ok := s.meta.entries[key]; ok {
+	if v, ok := s.meta.get(key); ok {
 		s.meta.mu.Unlock()
 		metaCacheLookups.Inc("hit")
 		return slices.Clone(v.([]T)), nil
@@ -90,15 +160,17 @@ func CachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
 		return nil, err
 	}
 	rows := v.([]T)
+	// The rows' JSON length estimates their size in memory.
+	enc, err := json.Marshal(rows)
+	if err != nil {
+		return rows, nil
+	}
 	s.meta.mu.Lock()
 	if s.meta.version != version {
 		s.meta.mu.Unlock()
 		return rows, nil
 	}
-	if s.meta.entries == nil {
-		s.meta.entries = map[string]any{}
-	}
-	s.meta.entries[key] = rows
+	s.meta.put(key, rows, len(enc))
 	s.meta.mu.Unlock()
 	return slices.Clone(rows), nil
 }
