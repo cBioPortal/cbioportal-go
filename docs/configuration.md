@@ -844,7 +844,7 @@ different labels small.
 
 | Metric | Meaning |
 |---|---|
-| `cbioportal_http_requests_total{route,code}` | The number of requests, by route and status code. |
+| `cbioportal_http_requests_total{route,code}` | The number of requests, by route and status code. Code 499 means the client left (closed the page or gave up) before the answer was ready. |
 | `cbioportal_http_request_duration_seconds{route}` | How long requests take, as a histogram. |
 | `cbioportal_http_requests_in_flight` | The number of requests being answered right now. |
 | `cbioportal_clickhouse_queries_total{outcome}` | The number of ClickHouse queries, by outcome: `ok`, `error` (ClickHouse reported an error) or `transport` (the query did not reach ClickHouse or got no answer). |
