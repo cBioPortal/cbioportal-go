@@ -61,7 +61,7 @@ func (s *State) CheckLogin(ctx context.Context) []auth.CheckResult {
 
 // NewRouter builds the API handler with CORS, the OAuth2 login, data access
 // tokens and study authorization (authenticate=oauth2), optional HS256
-// bearer-token auth (disabled by default), Java's trailing-slash matching
+// bearer-token auth (disabled by default), trailing-slash matching
 // (TrailingSlash), Spring's binding of repeated String parameters
 // (SpringStringParams) and a catch-all for the portal's pages and static files,
 // with Spring Security's default response headers, behind the

@@ -231,7 +231,17 @@ func (a *jsonArray) Finish(err error) {
 //
 // A query stopped at its memory or time limit (BulkLimits) is answered
 // 400 with a message that says how to ask for less.
+//
+// When the client has gone away before the answer (it closed the page or
+// gave up), the error is the cancelled request, not a server fault: the
+// request is recorded as 499 Client Closed Request, as nginx does, and
+// logged as a warning.
 func Fail(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() != nil {
+		slog.Warn("client closed request", slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
+		w.WriteHeader(StatusClientClosedRequest)
+		return
+	}
 	if limit := ch.LimitExceeded(err); limit != "" {
 		slog.Warn("query limit", slog.String("method", r.Method), slog.String("path", r.URL.Path), slog.Any("error", err))
 		WriteError(w, http.StatusBadRequest, MsgQueryLimit(limit))
@@ -240,6 +250,10 @@ func Fail(w http.ResponseWriter, r *http.Request, err error) {
 	LogServerError(r, "internal server error", err)
 	SpringError(w, r, http.StatusInternalServerError)
 }
+
+// StatusClientClosedRequest is nginx's status for a request whose client
+// disconnected before the answer.
+const StatusClientClosedRequest = 499
 
 // LogServerError logs an internal error of the request r.
 func LogServerError(r *http.Request, msg string, err error) {
@@ -560,14 +574,16 @@ func withSiteBanner(page []byte, text, link string) []byte {
 }
 
 // devModeScript mirrors the Java portal page (index.html + load-frontend.js):
-// ?localdev=true / ?localdist=true are remembered in localStorage and, as in
-// dev mode there, a dismissible "dev mode" banner is added to the body. The
-// bundle comes from this origin, or from the netlify deploy preview that
-// localStorage.netlify names (withNetlifyBundle).
+// ?localdev=true (or a 4-digit port, e.g. ?localdev=3001) and ?localdist=true
+// are remembered in localStorage and, as in dev mode there, a dismissible
+// "dev mode" banner is added to the body. The bundle comes from this origin,
+// or from the netlify deploy preview that localStorage.netlify names
+// (withNetlifyBundle).
 const devModeScript = `<script>
-if (/localdev=true/.test(window.location.href)) { localStorage.setItem("localdev", "true"); }
+var localdevParam = window.location.href.match(/localdev=(true|\d{4})\b/);
+if (localdevParam) { localStorage.setItem("localdev", localdevParam[1]); }
 if (/localdist=true/.test(window.location.href)) { localStorage.setItem("localdist", "true"); }
-window.localdev = localStorage.localdev === "true";
+window.localdev = localStorage.localdev === "true" || /^\d{4}$/.test(localStorage.localdev);
 window.localdist = localStorage.localdist === "true";
 window.netlify = localStorage.netlify;
 if (window.netlify) {

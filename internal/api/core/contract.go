@@ -195,6 +195,14 @@ func paged(projClass string, sort Param) []Param {
 	return pagedMax(projClass, sort, MaxPageSize)
 }
 
+// clinicalEventMaxPageSize is the study-wide clinical-events endpoint's
+// largest and default pageSize (ClinicalEventController).
+const clinicalEventMaxPageSize = 10000
+
+// copyNumberSegmentMaxPageSize is a sample's copy-number segments' largest
+// and default pageSize (CopyNumberSegmentController).
+const copyNumberSegmentMaxPageSize = 20000
+
 // pagedMax is paged with an endpoint's own @Max page size.
 func pagedMax(projClass string, sort Param, maxSize int) []Param {
 	size := pageSizeParam
@@ -510,7 +518,7 @@ var contractRoutes = []contractRoute{
 
 	// Clinical events (the study's list has its own page size bound).
 	{method: "GET", pattern: "/api/studies/{studyId}/patients/{patientId}/clinical-events", params: paged(legacyProjection, clinicalEventSort)},
-	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, 100000)},
+	{method: "GET", pattern: "/api/studies/{studyId}/clinical-events", params: pagedMax(legacyProjection, clinicalEventSort, clinicalEventMaxPageSize)},
 	{method: "POST", pattern: "/api/clinical-events-meta/fetch", filter: clinicalEventAttributeRequestSchema,
 		intercepted: "interceptedClinicalEventAttributeRequest", unvalidated: true},
 	{method: "POST", pattern: "/api/survival-data/fetch", filter: survivalRequestSchema,
@@ -524,7 +532,7 @@ var contractRoutes = []contractRoute{
 	{method: "GET", pattern: "/api/studies/{studyId}/resource-definitions", params: paged(legacyProjection, resourceDefinitionSortParam), metaUnsupported: true},
 	{method: "POST", pattern: "/api/resource-definitions/fetch", params: []Param{projectionParamOf(legacyProjection)}, body: listBody("studyIds")},
 	{method: "GET", pattern: "/api/studies/{studyId}/samples/{sampleId}/copy-number-segments",
-		params: append([]Param{{Name: "chromosome", text: true}}, pagedMax(legacyProjection, CopyNumberSegmentSort, 20000)...)},
+		params: append([]Param{{Name: "chromosome", text: true}}, pagedMax(legacyProjection, CopyNumberSegmentSort, copyNumberSegmentMaxPageSize)...)},
 	{method: "POST", pattern: "/api/copy-number-segments/fetch", params: []Param{{Name: "chromosome", text: true}, projectionParamOf(legacyProjection)},
 		filter: sampleIdentifierListSchema, intercepted: "interceptedSampleIdentifiers", unvalidated: true},
 	{method: "GET", pattern: "/api/studies/{studyId}/significantly-mutated-genes", params: paged(legacyProjection, smgSort)},
@@ -543,9 +551,9 @@ var contractRoutes = []contractRoute{
 		params: paged(legacyProjection, mutationSort), filter: mutationFilterSchema},
 	{method: "POST", pattern: "/api/mutations/fetch", params: paged(legacyProjection, mutationSort),
 		filter: mutationMultipleStudyFilterSchema, intercepted: "interceptedMutationMultipleStudyFilter"},
-	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"profile"},
+	{method: "GET", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data", exists: []string{"valueProfile"},
 		params: []Param{sampleListIDParam, {Name: "entrezGeneId", required: true}, projectionParamOf(legacyProjection)}},
-	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"profile"},
+	{method: "POST", pattern: "/api/molecular-profiles/{molecularProfileId}/molecular-data/fetch", exists: []string{"valueProfile"},
 		params: []Param{projectionParamOf(legacyProjection)}, filter: molecularDataFilterSchema},
 	{method: "POST", pattern: "/api/molecular-data/fetch", params: []Param{projectionParamOf(legacyProjection)},
 		filter: molecularDataMultipleStudyFilterSchema, intercepted: "interceptedMolecularDataMultipleStudyFilter"},
@@ -706,6 +714,15 @@ func (s *State) missing(kind string, v map[string]string) string {
 		}
 	case "profile":
 		if !s.cachedRowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} LIMIT 1",
+			ch.Params{"profile": v["molecularProfileId"]}) {
+			return MsgMolecularProfileNotFound(v["molecularProfileId"])
+		}
+	case "valueProfile":
+		// MolecularDataServiceImpl.validateMolecularProfile: mutation and
+		// structural variant profiles have no molecular data, so they are
+		// not found.
+		if !s.cachedRowExists("SELECT 1 FROM molecular_profile WHERE molecular_profile_id = {profile:String} "+
+			"AND molecular_alteration_type NOT IN ('MUTATION_EXTENDED', 'MUTATION_UNCALLED', 'STRUCTURAL_VARIANT') LIMIT 1",
 			ch.Params{"profile": v["molecularProfileId"]}) {
 			return MsgMolecularProfileNotFound(v["molecularProfileId"])
 		}

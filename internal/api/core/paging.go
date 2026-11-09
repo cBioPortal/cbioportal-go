@@ -72,6 +72,13 @@ var pagedEndpoints = []string{
 	"GET /api/studies/{}/significantly-mutated-genes",
 }
 
+// defaultPageSizes are the paged endpoints whose controllers default
+// pageSize below MaxPageSize, so a request without pageSize gets one page.
+var defaultPageSizes = map[string]int{
+	"GET /api/studies/{}/clinical-events":                 clinicalEventMaxPageSize,
+	"GET /api/studies/{}/samples/{}/copy-number-segments": copyNumberSegmentMaxPageSize,
+}
+
 // unsortedEndpoints are the paged endpoints whose Java controllers declare
 // no sortBy: it is ignored.
 var unsortedEndpoints = map[string]bool{
@@ -139,6 +146,9 @@ func PageList(next http.Handler) http.Handler {
 			q.Del("sortBy")
 		}
 		sizeParam, numberParam := q.Get("pageSize"), q.Get("pageNumber")
+		if d, ok := defaultPageSizes[endpoint]; ok && strings.TrimSpace(sizeParam) == "" {
+			sizeParam = strconv.Itoa(d)
+		}
 		counted := countedEndpoints[endpoint]
 		if counted && aliasOf(r) != "" {
 			next.ServeHTTP(w, r)

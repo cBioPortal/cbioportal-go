@@ -89,6 +89,10 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 		return false, die("refusing to run paritydiff without a hard memory cap: %v", err)
 	}
 	fmt.Fprintf(o.stderr, "paritydiff memory cap: %s\n", capHow)
+	if stale := waitForMirror(o.a, o.b, o.ua, o.stderr); len(stale) > 0 {
+		fmt.Fprintf(o.stderr, "the mirror is still behind after %v: %d studies differ in import date (%s)\n",
+			mirrorWait, len(stale), cutList(stale, 5))
+	}
 	versionA, versionB := version(o.a, o.ua), version(o.b, o.ua)
 	start := time.Now()
 	runParitydiff(o, capPrefix, filepath.Join(bin, "paritydiff"), corpusPath, run)
@@ -347,12 +351,17 @@ func version(origin, ua string) string {
 	defer resp.Body.Close()
 	var info struct {
 		PortalVersion       *string `json:"portalVersion"`
+		GoRewriteVersion    *string `json:"goRewriteVersion"`
 		GitCommitID         *string `json:"gitCommitId"`
 		DBVersion           *string `json:"dbVersion"`
 		DerivedTableVersion *string `json:"derivedTableVersion"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return "unreachable"
+	}
+	if g := deref(info.GoRewriteVersion); g != "" {
+		portal := "go " + g + " (API of " + deref(info.PortalVersion) + ")"
+		info.PortalVersion = &portal
 	}
 	return describeVersion(info.PortalVersion, info.GitCommitID, info.DBVersion, info.DerivedTableVersion)
 }

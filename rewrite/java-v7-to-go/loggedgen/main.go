@@ -10,8 +10,8 @@
 //
 //	CLICKHOUSE_URL=… CLICKHOUSE_USER=… CLICKHOUSE_PASSWORD=… \
 //	  go run ./rewrite/java-v7-to-go/loggedgen -n 500 > .parity/logged.txt
-//	go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
-//	  -ua cbioportal-go-parity -a http://localhost:18091
+//	go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://www.cbioportal.org \
+//	  -ua 'Mozilla/5.0 (compatible; cbioportal-go-parity)' -a http://localhost:18091
 //
 // The log is a ReplacingMergeTree keyed by a hash of the request, read with
 // FINAL: each distinct request counts once, as last seen. Only successful

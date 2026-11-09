@@ -3,6 +3,7 @@ package portal
 import (
 	_ "embed"
 	"net/http"
+	"strings"
 
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/molecular"
@@ -71,14 +72,19 @@ func (s Server) customDriverAnnotationReport(w http.ResponseWriter, r *http.Requ
 	core.WriteJSON(w, report)
 }
 
-// Info is InfoController's response. Versions name what this backend serves:
-// the cBioPortal schema / derived-table versions its views reproduce and the
-// gene / gene-set tables of the seed database the reference is loaded from.
-// Git properties the build does not record are "not set", as in Java.
+// Info is InfoController's response, plus goRewriteVersion. Versions name
+// what this backend serves: the cBioPortal release whose API it matches
+// (portalVersion), go's own release (goRewriteVersion), the latest
+// cBioPortal/cbioportal commit whose changes go has taken in
+// (goRewriteJavaParityCommit), the cBioPortal
+// schema version its views reproduce (Java's db.version) and
+// the gene / gene-set tables of the seed database the reference is loaded
+// from. Git properties the build does not record are "not set", as in Java.
 type Info struct {
 	PortalVersion             string `json:"portalVersion"`
+	GoRewriteVersion          string `json:"goRewriteVersion"`
+	GoRewriteJavaParityCommit string `json:"goRewriteJavaParityCommit"`
 	DbVersion                 string `json:"dbVersion"`
-	DerivedTableVersion       string `json:"derivedTableVersion"`
 	GenesetVersion            string `json:"genesetVersion"`
 	GeneTableVersion          string `json:"geneTableVersion"`
 	GitBranch                 string `json:"gitBranch"`
@@ -93,16 +99,34 @@ type Info struct {
 }
 
 const (
-	portalVersion       = "go-0.1.0"
-	dbSchemaVersion     = "2.14.5"
-	derivedTableVersion = "1.0.11"
-	seedGeneTable       = "hgnc_v7_2025.10.7"
-	gitNotSet           = "not set"
+	// javaPortalVersion is the cBioPortal release whose API go matches,
+	// reported as portalVersion. The daily upstream sync raises it when it
+	// ports a new cBioPortal release.
+	javaPortalVersion = "v7.2.3"
+	// javaParityCommit is the latest cBioPortal/cbioportal commit on master
+	// whose changes go has taken in, reported as goRewriteJavaParityCommit.
+	// The daily upstream sync sets it to the commit it went through.
+	javaParityCommit = "bb5db0098ef4e12808552fa43dfa96d1a021bac8"
+	dbSchemaVersion  = "3.1.0"
+	seedGeneTable    = "hgnc_v7_2025.10.7"
+	gitNotSet        = "not set"
 )
+
+// goRewriteVersion is go's release as /api/info reports it: the release tag
+// (v0.1.0, or v0.1.0-12-g6b38ed6 after it), dev for a build without one.
+func goRewriteVersion() string { return goRewriteVersionOf(buildinfo.Release()) }
+
+func goRewriteVersionOf(release string) string {
+	if release == "" {
+		return "dev"
+	}
+	return release
+}
 
 func (s Server) info(w http.ResponseWriter, r *http.Request) {
 	info := Info{
-		PortalVersion: portalVersion, DbVersion: dbSchemaVersion, DerivedTableVersion: derivedTableVersion,
+		PortalVersion: javaPortalVersion, GoRewriteVersion: goRewriteVersion(),
+		GoRewriteJavaParityCommit: javaParityCommit, DbVersion: dbSchemaVersion,
 		GenesetVersion: molecular.SeedGenesetVersion, GeneTableVersion: seedGeneTable,
 		GitBranch: gitNotSet, GitCommitID: gitNotSet, GitCommitIDDescribe: gitNotSet, GitCommitIDDescribeShort: gitNotSet,
 		GitCommitMessageFull: gitNotSet, GitCommitMessageShort: gitNotSet,
@@ -117,5 +141,22 @@ func (s Server) info(w http.ResponseWriter, r *http.Request) {
 		}
 		info.GitCommitIDDescribeShort = info.GitCommitIDDescribe
 	}
+	setGitCommit(&info, buildinfo.Git())
 	core.WriteJSON(w, info)
+}
+
+// setGitCommit fills the branch and commit message properties the build was
+// stamped with; the short message is the message's first line.
+func setGitCommit(info *Info, c buildinfo.GitCommit) {
+	set := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	set(&info.GitBranch, c.Branch)
+	set(&info.GitCommitMessageFull, c.Message)
+	short, _, _ := strings.Cut(c.Message, "\n")
+	set(&info.GitCommitMessageShort, short)
+	set(&info.GitCommitMessageUserName, c.UserName)
+	set(&info.GitCommitMessageUserEmail, c.UserEmail)
 }

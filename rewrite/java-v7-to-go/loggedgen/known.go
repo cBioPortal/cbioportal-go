@@ -40,7 +40,7 @@ var (
 	isLegacyStudies   = pathIs(`^/api/legacy/studies(/[^/]+)?$`)
 	isStudyClinical   = pathIs(`^/api/studies/[^/]+/clinical-data$`)
 	isStudiesFetch    = pathIs(`^/api/studies/fetch$`)
-	isSampleList      = pathIs(`^/api/samples$`)
+	isKeywordList     = pathIs(`^/api/(samples|patients)$`)
 	isClinicalTable   = pathIs(`^/api/clinical-data-table/fetch$`)
 	isProfileSamples  = pathIs(`^/api/molecular-profile-sample-counts/fetch$`)
 	isCaseListCounts  = pathIs(`^/api/sample-lists-counts/fetch$`)
@@ -185,6 +185,18 @@ func bodyHasGenes(body string) bool {
 	return ok && string(ids) != "null"
 }
 
+// maxGenes is the most genes a replayed molecular-data POST may name. A
+// request for more asks for nearly whole matrices: every gene of a
+// profile, for one, is gigabytes from both servers.
+const maxGenes = 1000
+
+// bodyGeneCount counts the entrezGeneIds a request body names.
+func bodyGeneCount(body string) int {
+	var ids []json.RawMessage
+	json.Unmarshal(bodyObject(body)["entrezGeneIds"], &ids)
+	return len(ids)
+}
+
 // skip reports a request too costly to replay against production every
 // night, gigabytes from Java even when go is asked for one page of it:
 //   - the whole copy-number matrix of a profile (event type ALL keeps the
@@ -192,8 +204,8 @@ func bodyHasGenes(body string) bool {
 //   - one page of a profile's values for every gene. Java's molecular-data
 //     controllers have no paging parameters and answer the whole matrix,
 //     so the answers differ anyway (go pages them, a known difference);
-//   - a molecular-data fetch that names no genes, which asks for whole
-//     matrices. Java's filters do not require entrezGeneIds. Where the body
+//   - a molecular-data fetch that names no genes, or more than maxGenes,
+//     which asks for whole matrices. Java's filters do not require entrezGeneIds. Where the body
 //     also has a field the filter lacks (such as sampleIds or genes on
 //     molecular-data/fetch), Java answers an empty 200 and go the matrices.
 func skip(method, target, body string) bool {
@@ -208,7 +220,7 @@ func skip(method, target, body string) bool {
 	case isMolecularData(path):
 		// Java's POST reads its genes from the body only.
 		if method == "POST" {
-			return !bodyHasGenes(body)
+			return !bodyHasGenes(body) || bodyGeneCount(body) > maxGenes
 		}
 		return paged(q) && !hasGenes(q, body)
 	case method == "POST" && isGenericAssayAll(path):
@@ -224,7 +236,7 @@ func skip(method, target, body string) bool {
 // versionFields are /api/info's fields that describe the deployment.
 const versionFields = "gitBranch,gitCommitId,gitCommitIdAbbrev,gitCommitIdDescribe,gitCommitIdDescribeShort," +
 	"gitCommitMessageFull,gitCommitMessageShort,gitCommitMessageUserEmail,gitCommitMessageUserName," +
-	"portalVersion,gitDirty,dbVersion,derivedTableVersion"
+	"portalVersion,goRewriteVersion,goRewriteJavaParityCommit,gitDirty,dbVersion,derivedTableVersion"
 
 var expectations = []expectation{
 	{
@@ -285,9 +297,9 @@ var expectations = []expectation{
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
-			return m == "GET" && isSampleList(p) && q.Has("keyword") && q.Has("pageSize")
+			return m == "GET" && isKeywordList(p) && q.Has("keyword") && q.Has("pageSize")
 		},
-		options: `known="a sample id in several studies ties in the keyword order, which Java leaves unspecified, so the page boundary picks either"`,
+		options: `known="a sample or patient id in several studies ties in the keyword order, which Java leaves unspecified, so the page boundary picks either"`,
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool {
@@ -450,6 +462,11 @@ var expectations = []expectation{
 // fails on the request, while go answers it as without the slash.
 const slashedIntercepted = `known-if-b-fails="with a trailing slash Java's InvolvedCancerStudyExtractorInterceptor, which matches exact paths, leaves the filter unparsed and the controller fails; go answers as without the slash (Fixed in go; docs/rewrite/java-quirks.md)"`
 
+// slashedPath is the expectation of any other /api/ request with a trailing
+// slash: Java from v7.2.4 (Spring Framework 7, which has no trailing-slash
+// matching) answers 404, while go answers it as without the slash.
+const slashedPath = `known-if-b-fails="Java from v7.2.4 (Spring Framework 7) matches no path with a trailing slash and answers 404; go answers as without the slash (Fixed in go; docs/rewrite/java-quirks.md)"`
+
 // unknownIntercepted is the expectation of every POST to a legacy endpoint
 // whose filter Java's InvolvedCancerStudyExtractorInterceptor parses: it
 // fails on a property the filter does not declare and Java answers an
@@ -457,12 +474,22 @@ const slashedIntercepted = `known-if-b-fails="with a trailing slash Java's Invol
 const unknownIntercepted = `known-if-b-empty="Java's InvolvedCancerStudyExtractorInterceptor fails on a filter property it does not declare and answers an empty 200; go answers as without the property (Fixed in go; docs/rewrite/java-quirks.md)"`
 
 // expect returns the extra header options and comment for a request. Java
-// matches a path with a trailing slash as the path without it, except for
-// the filter of a legacy multi-study POST (slashedIntercepted).
+// up to v7.2.3 matches a path with a trailing slash as the path without it,
+// except for the filter of a legacy multi-study POST (slashedIntercepted);
+// from v7.2.4 it answers 404 (slashedPath), so a slashed request gets the
+// expectations of the path without the slash and slashedPath.
 func expect(method, target, body string) (options, comment string) {
 	path, rawQuery, _ := strings.Cut(target, "?")
-	slashed := strings.HasSuffix(path, "/")
-	path = strings.TrimSuffix(path, "/")
+	slashed := strings.HasPrefix(path, "/api/") && strings.HasSuffix(path, "/")
+	options, comment = expectUnslashed(method, strings.TrimSuffix(path, "/"), rawQuery, body, slashed)
+	if slashed && options != slashedIntercepted {
+		options = strings.TrimSpace(options + " " + slashedPath)
+	}
+	return options, comment
+}
+
+// expectUnslashed is expect for the path without its trailing slash.
+func expectUnslashed(method, path, rawQuery, body string, slashed bool) (options, comment string) {
 	intercepted := method == "POST" && core.InterceptedBodyPath(path)
 	if intercepted && slashed {
 		return slashedIntercepted, ""

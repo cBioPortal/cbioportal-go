@@ -4174,8 +4174,8 @@ paths:
         schema:
           type: integer
           format: int32
-          default: 100000
-          maximum: 100000
+          default: 10000
+          maximum: 10000
           minimum: 1
       - name: pageNumber
         in: query
@@ -4671,14 +4671,14 @@ paths:
           type: integer
           format: int32
       responses:
-        "200":
-          description: OK
+        "404":
+          description: Reference genome or gene not found
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReferenceGenomeGene"
-        "404":
-          description: Reference genome or gene not found
+        "200":
+          description: OK
           content:
             application/json:
               schema:

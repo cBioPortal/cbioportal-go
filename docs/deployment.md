@@ -7,6 +7,7 @@ previews new datahub studies, and the per-pull-request previews.
 ## Contents
 
 - [Container image](#container-image)
+  - [Releases](#releases)
 - [go.cbioportal.org](#gocbioportalorg)
   - [Sign-in](#sign-in)
   - [Loading studies](#loading-studies)
@@ -24,6 +25,16 @@ The image `docker.io/cbioportal/cbioportal-go` is built and published by
 |---|---|
 | `latest`, `sha-<7-char commit>` | every push to `main` |
 | `pr-<N>`, `sha-<commit>` | pull requests labelled `preview` (see [PR previews](#pr-previews)) |
+| `<X.Y.Z>`, `<X.Y>`, `sha-<commit>` | a release tag `vX.Y.Z` (see [Releases](#releases)) |
+
+`/api/info` gives go's release as `goRewriteVersion`. It is `v0.1.0` for the
+release `v0.1.0`, and `v0.1.0-12-g6b38ed6` for a commit 12 commits after it.
+`portalVersion` is the cBioPortal release whose API go matches, such as
+`v7.2.3`, as Java reports its own release there. `goRewriteJavaParityCommit` is the
+latest commit of cBioPortal's Java backend whose changes go has taken in. The
+daily upstream sync updates it. The image build also
+records the git branch, commit message and author, which `/api/info` gives
+as `gitBranch` and the `gitCommitMessage` fields.
 
 The [Dockerfile](../Dockerfile) builds the frontend once and compiles the Go
 programs for each platform, so the ARM image does not need slow emulation.
@@ -79,6 +90,27 @@ The API container uses the settings described in
   [Login sessions in Redis](configuration.md#login-sessions-in-redis)).
 
 The health check is `GET /health`.
+
+### Releases
+
+A release is a git tag `vX.Y.Z` on `main`. Tagging builds an image with the
+tags `X.Y.Z` and `X.Y`. A deployment that should change only when we choose,
+such as api.cbioportal.org, uses a release tag instead of `latest`.
+
+To make a release:
+
+1. Check that the tests pass on `main` and that the latest nightly parity run
+   was clean.
+2. Tag the commit and push the tag. Raise the last number for fixes and the
+   middle number for new features.
+
+   ```bash
+   git tag -a v0.1.1 -m "v0.1.1" && git push origin v0.1.1
+   ```
+
+3. Write the release notes on GitHub:
+   `gh release create v0.1.1 --generate-notes`.
+4. When the image is built, change the deployment's image to the new tag.
 
 ## go.cbioportal.org
 
@@ -181,21 +213,35 @@ the LibreChat copy job:
    It stops without changes while an import is running, or when the live go
    copy was already built from that import. The import it was built from is
    recorded in `<prefix>_<color>_ref._go_mirror_source`.
-2. It empties go's inactive copy. Then it clones every table of
+2. Only one run builds at a time. The hourly run and a run started by
+   production's color swap can overlap. Each run adds itself to
+   `<prefix>_<color>_ref._go_mirror_lock` in the copy it would build, and the
+   earliest run of the last 2 hours goes ahead. A later run leaves go as it
+   is. A run that finds that copy already built from the same import switches
+   to it without building again.
+3. It empties go's inactive copy. Then it clones every table of
    `cbioportal_public_<color>` into `<prefix>_<color>_ref`, except the login
    and password tables. ClickHouse's `CREATE TABLE … CLONE AS` makes this
    copy without duplicating the data on disk, in about 20 s.
-3. It builds the portal database from the clone, as this command does:
+4. It builds the portal database from the clone, as this command does:
 
    ```bash
    cbioportal-import transform --from-prod \
      --ref-db <prefix>_<color>_ref --raw-db <prefix>_<color>_raw --db <prefix>_<color>
    ```
 
-4. It passes the three database names (`CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB`,
+5. It passes the three database names (`CBIOPORTAL_DB`, `CBIOPORTAL_RAW_DB`,
    `CBIOPORTAL_REF_DB`) to the step that switches `cbioportal-go-active` to
    the new copy. The API reads the three databases as they are (`-db`,
    `-raw-db`, `-ref-db`).
+
+A build takes about 5 minutes. The CronJob `cbioportal-go-mirror` runs every
+hour, and also right after each production switch. The public color swap sets
+`public_db.active_color` in the `cbioportal-db-status` ConfigMap when it marks
+an import complete. [Reloader](https://github.com/stakater/Reloader) watches
+that ConfigMap and starts a Job from the CronJob's template when it changes. So
+go follows each import within minutes. The hourly run retries a failed
+rebuild.
 
 #### What `transform --from-prod` builds
 

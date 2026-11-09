@@ -3,6 +3,8 @@
 package buildinfo
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -17,6 +19,40 @@ var stamp string
 // commit, when set at link time, is the full git revision of such a build:
 // -ldflags "-X github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=6b38ed6…".
 var commit string
+
+// release, when set at link time, is the build's place among the release
+// tags as git describe --tags gives it: v0.1.0 for a tagged release,
+// v0.1.0-12-g6b38ed6 for a later commit.
+var release string
+
+// Release is the build's release, "" when it was built without one.
+func Release() string { return release }
+
+// gitCommit, when set at link time, describes the commit the build was made
+// from, as base64 of a JSON GitCommit, so a multi-line message survives the
+// linker flags: -ldflags "-X github.com/cbioportal/cbioportal-go/internal/buildinfo.gitCommit=eyJicmFuY2giOi…".
+var gitCommit string
+
+// GitCommit is the branch and commit details a build was stamped with.
+type GitCommit struct {
+	Branch    string `json:"branch"`
+	Message   string `json:"message"`
+	UserName  string `json:"userName"`
+	UserEmail string `json:"userEmail"`
+}
+
+// Git is the build's stamped commit details; its fields are "" when the
+// build has none.
+func Git() GitCommit { return decodeGitCommit(gitCommit) }
+
+func decodeGitCommit(stamped string) GitCommit {
+	var c GitCommit
+	raw, err := base64.StdEncoding.DecodeString(stamped)
+	if err != nil || json.Unmarshal(raw, &c) != nil {
+		return GitCommit{}
+	}
+	return c
+}
 
 // Commit is the git revision the binary was built from and whether the
 // working tree had changes: the stamped commit, else the toolchain's VCS

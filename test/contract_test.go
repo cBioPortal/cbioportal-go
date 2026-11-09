@@ -19,6 +19,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -434,7 +435,8 @@ func TestContractPublicVirtualStudiesArray(t *testing.T) {
 // profiled count is per gene: the samples whose gene panel has the gene.
 // Java uses the whole group's count when no sample of the group has the
 // gene altered, so a gene off the group's panel counts every sample as
-// profiled.
+// profiled. A gene profiled in only one group gets p = 1, as nothing is
+// compared.
 func TestContractAlterationEnrichmentsProfiledPerGene(t *testing.T) {
 	requireAPI(t)
 	group := func(name string, ids ...string) map[string]any {
@@ -558,4 +560,25 @@ func TestContractLegacyClinicalDataCounts(t *testing.T) {
 	filter["sampleIdentifiers"] = append(filter["sampleIdentifiers"].([]map[string]string),
 		map[string]string{"studyId": "study_es_0", "sampleId": "TCGA-A1-A0SB-01"})
 	wantEq(t, counts("OS_STATUS")["OS_STATUS"], `[{"value":"0:LIVING","count":1},{"value":"NA","count":2}]`)
+}
+
+// Mutation and structural variant profiles have no molecular data:
+// MolecularDataServiceImpl answers them as not found.
+func TestContractMolecularDataOfMutationProfile(t *testing.T) {
+	requireAPI(t)
+	for _, c := range []struct{ method, path, body string }{
+		{"GET", "/api/molecular-profiles/study_es_0_mutations/molecular-data?sampleListId=study_es_0_all&entrezGeneId=7157", ""},
+		{"GET", "/api/molecular-profiles/study_es_0_mutations/molecular-data?sampleListId=&entrezGeneId=7157", ""},
+		{"POST", "/api/molecular-profiles/study_es_0_mutations/molecular-data/fetch", `{"sampleListId":"study_es_0_all","entrezGeneIds":[7157]}`},
+		{"POST", "/api/molecular-profiles/study_es_0_mutations/molecular-data/fetch?projection=META", `{"sampleListId":"study_es_0_all","entrezGeneIds":[7157]}`},
+		{"GET", "/api/molecular-profiles/study_es_0_structural_variants/molecular-data?sampleListId=study_es_0_all&entrezGeneId=7157", ""},
+	} {
+		resp, b := rawDo(t, c.method, c.path, c.body)
+		want := `{"message":"Molecular profile not found: ` + strings.Split(strings.TrimPrefix(c.path, "/api/molecular-profiles/"), "/")[0] + `"}`
+		if resp.StatusCode != http.StatusNotFound || strings.TrimSpace(string(b)) != want {
+			t.Errorf("%s %s: %d %s, want 404 %s", c.method, c.path, resp.StatusCode, b, want)
+		}
+	}
+	resp, _ := rawDo(t, "GET", "/api/molecular-profiles/study_es_0_gistic/molecular-data?sampleListId=study_es_0_all&entrezGeneId=7157", "")
+	wantEq(t, resp.StatusCode, http.StatusOK)
 }

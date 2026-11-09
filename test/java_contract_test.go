@@ -404,4 +404,17 @@ func TestContractInfo(t *testing.T) {
 			t.Errorf("info lacks %s", k)
 		}
 	}
+	// Java v7's fields plus go's two, and Java's schema version (pom.xml
+	// db.version).
+	for _, k := range []string{"goRewriteVersion", "goRewriteJavaParityCommit"} {
+		if _, ok := info[k]; !ok {
+			t.Errorf("info lacks %s", k)
+		}
+	}
+	if len(info) != 15 {
+		t.Errorf("info has %d fields, want Java's 13 and go's 2: %v", len(info), info)
+	}
+	if info["dbVersion"] != "3.1.0" {
+		t.Errorf("dbVersion %v, want 3.1.0", info["dbVersion"])
+	}
 }

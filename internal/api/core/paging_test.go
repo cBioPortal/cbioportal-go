@@ -87,3 +87,36 @@ func TestPagedEndpoint(t *testing.T) {
 		}
 	}
 }
+
+// TestPageListDefaultPageSize checks that an endpoint with its own default
+// pageSize answers one page of that size when the request names none.
+func TestPageListDefaultPageSize(t *testing.T) {
+	const n = clinicalEventMaxPageSize + 5
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("["))
+		for i := range n {
+			if i > 0 {
+				w.Write([]byte(","))
+			}
+			fmt.Fprintf(w, `{"i":%d}`, i)
+		}
+		w.Write([]byte("]"))
+	})
+	for _, c := range []struct {
+		target string
+		want   int
+	}{
+		{"/api/studies/s/clinical-events", clinicalEventMaxPageSize},
+		{"/api/studies/s/clinical-events?pageNumber=1", 5},
+		{"/api/studies/s/clinical-events?pageSize=3", 3},
+		{"/api/studies/s/patients/p/clinical-events", n},
+		{"/api/studies/s/clinical-data", n},
+	} {
+		got := httptest.NewRecorder()
+		PageList(handler).ServeHTTP(got, httptest.NewRequest("GET", c.target, nil))
+		if items := strings.Count(got.Body.String(), `{"i":`); items != c.want {
+			t.Errorf("%s: %d items, want %d", c.target, items, c.want)
+		}
+	}
+}

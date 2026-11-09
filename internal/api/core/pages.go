@@ -25,8 +25,9 @@ var javaRedirects = map[string]string{
 	"/donate":        "https://docs.cbioportal.org/donate/",
 }
 
-// portalPages are IndexPageController's paths, served for every method and,
-// with Spring's trailing-slash matching, with a trailing slash too.
+// portalPages are IndexPageController's paths, served for every method and
+// with a trailing slash too, as Java up to v7.2.3 did with Spring's
+// trailing-slash matching (docs/rewrite/java-quirks.md).
 var portalPages = map[string]bool{
 	"/": true, "/index": true, "/index.html": true, "/study/summary": true, "/results": true,
 	"/index/": true, "/index.html/": true, "/study/summary/": true, "/results/": true,
@@ -49,7 +50,7 @@ var (
 		"case.do": true, "loading": true, "comparison": true,
 	}
 	// "/x/y/*".
-	viewTwoLevel = map[[2]string]bool{{"results", "comparison"}: true, {"results", "pathways"}: true}
+	viewTwoLevel = map[[2]string]bool{{"results", "comparison"}: true, {"results", "pathways"}: true, {"wsi", "patient"}: true}
 )
 
 // isViewRoute reports whether p matches one of WebAppConfig's view-controller

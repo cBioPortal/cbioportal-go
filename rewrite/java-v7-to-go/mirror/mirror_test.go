@@ -158,4 +158,27 @@ func TestLiveMirror(t *testing.T) {
 	if plan = run(p + "_go_green"); !plan.Build || plan.DB != p+"_go_blue" || builds != 2 {
 		t.Errorf("completed import: %+v", plan)
 	}
+	if n := exec("SELECT count() FROM system.tables WHERE database = '" + p + "_go_blue_ref' AND name = '_go_mirror_lock'"); n != "0" {
+		t.Errorf("the lock outlived the run")
+	}
+
+	// A run that starts before the pointer moves to blue finds blue built
+	// from this import: it switches without building.
+	if plan = run(p + "_go_green"); plan.Build || plan.DB != p+"_go_blue" || builds != 2 ||
+		!strings.Contains(state(), "CBIOPORTAL_DB="+p+"_go_blue\n") {
+		t.Errorf("already built: %+v, %d builds, state %s", plan, builds, state())
+	}
+
+	// While another run holds the lock, a run keeps the served databases.
+	exec("ALTER TABLE `" + p + "_mgmt`.update_status UPDATE time_of_last_update_process_completion = '2026-10-10 14:00:00' WHERE 1 SETTINGS mutations_sync = 2")
+	exec("CREATE TABLE `" + p + "_go_green_ref`._go_mirror_lock (id String, started DateTime64(3) DEFAULT now64(3)) ENGINE = MergeTree ORDER BY tuple()")
+	exec("INSERT INTO `" + p + "_go_green_ref`._go_mirror_lock (id) VALUES ('other')")
+	if plan = run(p + "_go_blue"); plan.Build || plan.DB != p+"_go_blue" || builds != 2 {
+		t.Errorf("locked: %+v, %d builds", plan, builds)
+	}
+	// A lock older than a run's deadline belongs to a run that died.
+	exec("ALTER TABLE `" + p + "_go_green_ref`._go_mirror_lock UPDATE started = now64(3) - INTERVAL 3 HOUR WHERE id = 'other' SETTINGS mutations_sync = 2")
+	if plan = run(p + "_go_blue"); !plan.Build || plan.DB != p+"_go_green" || builds != 3 {
+		t.Errorf("stale lock: %+v, %d builds", plan, builds)
+	}
 }

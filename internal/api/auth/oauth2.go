@@ -568,13 +568,14 @@ func (o *oauth2Login) saveRequest(w http.ResponseWriter, r *http.Request) {
 // with (and explains a refused login).
 func (o *oauth2Login) loginPage(w http.ResponseWriter, r *http.Request) {
 	failed := r.URL.Query().Has("logout_failure")
-	if len(o.cfg.Registrations) == 1 && !failed && o.cfg.ForceRedirect {
+	signedOut := r.URL.Query().Has("logout_success")
+	if len(o.cfg.Registrations) == 1 && !failed && !signedOut && o.cfg.ForceRedirect {
 		http.Redirect(w, r, "/oauth2/authorization/"+o.cfg.Registrations[0].ID, http.StatusFound)
 		return
 	}
 	page := o.cfg.Texts
 	page.LoginError = failed
-	page.LogoutSuccess = r.URL.Query().Has("logout_success")
+	page.LogoutSuccess = signedOut
 	for _, reg := range o.cfg.Registrations {
 		page.Providers = append(page.Providers, loginProvider{ID: reg.ID, URL: "/oauth2/authorization/" + reg.ID})
 	}
@@ -861,12 +862,18 @@ func claimRoles(claims map[string]any, path []string) []string {
 }
 
 // logout ends the session and returns to the portal. With oauth2 it ends the
-// provider's session too when the provider supports it; optional_oauth2
-// returns to / directly, as Java's logoutSuccessUrl("/").
+// provider's session too when the provider supports it, and otherwise lands
+// on /login?logout_success (as Java's default target), which does not send
+// the browser straight back to the provider to sign in again;
+// optional_oauth2 returns to / directly, as Java's logoutSuccessUrl("/").
 func (o *oauth2Login) logout(w http.ResponseWriter, r *http.Request) {
 	sess := o.endSession(w, r)
-	target := "/"
-	if reg := o.cfg.registration(sess.Registration); reg != nil && !o.cfg.optional() && sess.IDToken != "" {
+	if o.cfg.optional() {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	target := "/login?logout_success"
+	if reg := o.cfg.registration(sess.Registration); reg != nil && sess.IDToken != "" {
 		if meta, _, err := o.provider(reg); err == nil && meta.EndSessionEndpoint != "" {
 			q := url.Values{"id_token_hint": {sess.IDToken}, "post_logout_redirect_uri": {core.BaseURL(r)}}
 			target = meta.EndSessionEndpoint + "?" + q.Encode()

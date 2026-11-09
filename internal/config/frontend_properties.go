@@ -111,7 +111,6 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"skin.show_tweet_button", "skin_show_tweet_button", nil},
 	{"skin.show_study_help_button", "skin_show_study_help_button", nil},
 	{"skin.patientview.filter_genes_profiled_all_samples", "skin_patientview_filter_genes_profiled_all_samples", nil},
-	{"skin.patientview.show_mskcc_slide_viewer", "skin_patientview_show_mskcc_slide_viewer", nil},
 	{"skin.show_settings_menu", "skin_show_settings_menu", nil},
 	{"skin.hide_logout_button", "skin_hide_logout_button", nil},
 	{"quick_search.enabled", "quick_search_enabled", nil},
@@ -145,7 +144,6 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"frontend.config", "frontendConfigOverride", nil},
 	{"querypage.setsofgenes.location", "query_sets_of_genes", nil},
 	{"authenticate", "authenticationMethod", strPtr("false")},
-	{"msk.whole.slide.viewer.secret.key", "mskWholeSlideViewerToken", nil},
 	{"oncoprint.oncokb_hotspots.default", "oncoprintOncoKbHotspotsDefault", strPtr("true")},
 	{"oncokb.token", "oncoKbTokenDefined", strPtr("")},
 	{"session.service.url", "sessionServiceEnabled", strPtr("")},
@@ -181,6 +179,7 @@ var FrontendProperties = []FrontendPropertyDef{
 	{"clickhouse_mode", "clickhouse_mode", strPtr("false")},
 	{"feature.study.export", "feature_study_export", strPtr("false")},
 	{"study_availability.enabled", "study_availability_enabled", strPtr("false")},
+	{"wsi.tile_server.url", "wsi_tile_server_url", nil},
 }
 
 // ParseApplicationProperties reads a Java-style application.properties file.
@@ -431,11 +430,6 @@ func BuildFrontendConfig(appProps map[string]string, baseURL string) map[string]
 			result[prop.FrontendName] = normalizeFrontendURL(val)
 			continue
 
-		case "mskWholeSlideViewerToken":
-			// This is generated at runtime per-request in the Java backend.
-			// For the Go API we set it to nil.
-			result[prop.FrontendName] = nil
-			continue
 		}
 
 		// Convert "true"/"false" strings to boolean values

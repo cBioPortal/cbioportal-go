@@ -3,7 +3,7 @@
 "Parity" means go gives the same answer as the Java backend for the same
 request. This page explains the tools that check it: comparing go with
 production (www.cbioportal.org) on real requests, the nightly job that does
-this every day, and the "Java oracle", a local Java server run on the same
+this on a day's traffic, and the "Java oracle", a local Java server run on the same
 test data as go.
 
 ## Contents
@@ -105,13 +105,13 @@ too costly to replay every night:
 
 `-annotate` marks an existing list again with the current expectations,
 replacing earlier marks, and leaves out the requests now skipped. Compare against
-api.cbioportal.org, with go serving a copy of production built by
+Java on www.cbioportal.org, with go serving a copy of production built by
 `transform --from-prod`:
 
 ```bash
 go run ./rewrite/java-v7-to-go/loggedgen -n 500 > .parity/logged.txt      # needs CLICKHOUSE_URL/USER/PASSWORD
-go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://api.cbioportal.org \
-  -ua cbioportal-go-parity -a http://localhost:18091 -cache .parity/cache-api -q
+go run ./rewrite/java-v7-to-go/paritydiff -corpus .parity/logged.txt -b https://www.cbioportal.org \
+  -ua 'Mozilla/5.0 (compatible; cbioportal-go-parity)' -a http://localhost:18091 -cache .parity/cache-api -q
 ```
 
 On 2026-10-03, 620 of 636 requests were identical and 16 were known
@@ -122,8 +122,13 @@ reads the whole `clinical_event_data` table.
 ### Nightly parity job
 
 `cbioportal-rewrite-test java-v7-to-go parity run` compares go.cbioportal.org
-with api.cbioportal.org on real production traffic every day. For each request it reports whether the
-answers are identical, a known difference, or unexplained.
+with Java on www.cbioportal.org on a day of real production traffic. For each
+request it reports whether the answers are identical, a known difference, or
+unexplained.
+
+It ran every night until go passed the bar of seven clean nights in a row and
+took over api.cbioportal.org. It is no longer scheduled. Run it by hand, or
+schedule it again as below, to check go before moving more traffic to it.
 
 ```bash
 go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--day YYYY-MM-DD] [--dry-run]
@@ -154,7 +159,9 @@ first, so each night tests different requests:
 - Each run marks the list again with `loggedgen -annotate`, so new and
   changed entries in `known.go` apply right away.
 
-**How requests are sent.** Every request goes to api.cbioportal.org twice
+**How requests are sent.** Java is reached through www.cbioportal.org with a
+user agent that contains `Mozilla`, because www sends browsers to Java and
+every other client, like api.cbioportal.org, to go. Every request goes to Java twice
 (`-self-check`), at most 4 requests a second, with no cache. If Java's two
 answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent
@@ -184,8 +191,8 @@ than run uncapped.
 - counts of identical, known, Java nondeterministic, unexplained, status
   mismatch and error, overall and per host;
 - the number of clean nights in a row (stored in `nights.txt` in
-  `PARITY_STATE`). Seven clean nights are the bar for go to take over
-  api.cbioportal.org;
+  `PARITY_STATE`). Seven clean nights were the bar for go to take over
+  api.cbioportal.org and www's API traffic from scripts and agents;
 - each unexplained request with its body (first 200 bytes) and the first
   lines of the difference, marking those that are new since the last run.
 
@@ -210,10 +217,15 @@ right away. With `--dry-run` it prints the description instead.
 | `--dry-run` | print the GitHub actions instead of doing them, and do not count the night |
 | `--day` | record the run as that night instead of today, to redo a past night; the list then comes from the day before it |
 
-**Where it runs.** On the parity host, cron starts it every day at 15:17
+**Where it runs.** On the parity host, cron can start it every day at 15:17
 UTC. The mirror is rebuilt within an hour after each import on production
-(see [Deployment](../deployment.md#mirroring-production)), so the job
-compares go and Java on the same data unless an import is still running.
+(see [Deployment](../deployment.md#mirroring-production)). Before it sends
+any requests, the job compares each study's import date on go and on Java.
+If production imported a study that the mirror doesn't have yet, the job
+checks again every 5 minutes, for up to 2 hours. If the mirror still hasn't
+caught up after that, the log names the studies that differ and the job runs
+anyway. A study that production imports while the job is running can still
+show up as a difference.
 
 ```bash
 go build -o ~/.local/bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrite-test

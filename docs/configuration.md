@@ -468,7 +468,11 @@ How login works:
   posted again.
 - An `/api/**` request without a login session gets `401`. `/api/health`
   and `/api/public_virtual_studies` stay open to everyone.
-- `/logout` ends the session at the portal and at the provider.
+- `/logout` ends the session at the portal and at the provider. Some
+  providers, such as Google, have no way to end their session. Then
+  `/logout` shows the "You are now signed out" page at
+  `/login?logout_success`. That page does not send the user back to the
+  provider, so they are not signed in again at once.
 - The portal offers every provider that has a client id. If there is only
   one, `/login` goes straight to it, unless `--login-auto-redirect=false`.
   If there are several, `/login` lists them.
@@ -840,13 +844,15 @@ different labels small.
 
 | Metric | Meaning |
 |---|---|
-| `cbioportal_http_requests_total{route,code}` | The number of requests, by route and status code. |
+| `cbioportal_http_requests_total{route,code}` | The number of requests, by route and status code. Code 499 means the client left (closed the page or gave up) before the answer was ready. |
 | `cbioportal_http_request_duration_seconds{route}` | How long requests take, as a histogram. |
 | `cbioportal_http_requests_in_flight` | The number of requests being answered right now. |
 | `cbioportal_clickhouse_queries_total{outcome}` | The number of ClickHouse queries, by outcome: `ok`, `error` (ClickHouse reported an error) or `transport` (the query did not reach ClickHouse or got no answer). |
 | `cbioportal_clickhouse_query_duration_seconds` | How long ClickHouse takes until the whole result is read. |
 | `cbioportal_clickhouse_read_rows_total`, `…_read_bytes_total` | How many rows and bytes ClickHouse reports reading. |
 | `cbioportal_metadata_cache_lookups_total{result}` | How often the metadata cache had the answer (hit) or not (miss). |
+| `cbioportal_metadata_cache_entries`, `…_bytes` | How many answers the metadata cache holds, and about how much memory they take. The cache keeps at most about 64 MB. |
+| `cbioportal_metadata_cache_evictions_total` | How many answers the metadata cache dropped to stay under its size limit. It drops the ones used least recently. |
 | `cbioportal_logins_total{outcome}` | The number of OAuth2 logins, by outcome. |
 | `cbioportal_data_access_token_checks_total{result}` | Data access token checks: answered from memory, traded at the provider, or rejected. |
 | `go_*`, `process_*` | The Go runtime and the process: memory, garbage collection, goroutines, CPU and open files. |

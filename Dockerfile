@@ -34,6 +34,13 @@ ARG TARGETARCH
 ARG VERSION=""
 # Full git commit, served as /api/info's gitCommitId.
 ARG COMMIT=""
+# Release tag as git describe --tags gives it, e.g. "v0.1.0", served as
+# /api/info's portalVersion.
+ARG RELEASE=""
+# Branch, commit message and author as base64 of JSON
+# ({"branch","message","userName","userEmail"}), served as /api/info's
+# gitBranch and gitCommitMessage* properties.
+ARG GIT_COMMIT=""
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/ cmd/
@@ -45,7 +52,7 @@ COPY rewrite/ rewrite/
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}'" -o /out/ \
+    go build -trimpath -ldflags "-s -w -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.stamp=${VERSION}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.commit=${COMMIT}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.release=${RELEASE}' -X 'github.com/cbioportal/cbioportal-go/internal/buildinfo.gitCommit=${GIT_COMMIT}'" -o /out/ \
       ./cmd/cbioportal-api ./cmd/cbioportal-import ./ops/cbioportal.org/cmd/cbioportal-ops ./rewrite/cmd/cbioportal-rewrite-test
 
 # cbioportal-core's study validator (scripts/importer), run by the hub's

@@ -23,6 +23,11 @@ var (
 
 	metaCacheLookups = metrics.NewCounterVec("cbioportal_metadata_cache_lookups_total",
 		"Metadata cache lookups by result (hit, miss).", "result")
+	metaCacheEntries = metrics.NewGauge("cbioportal_metadata_cache_entries", "Entries in the metadata cache.")
+	metaCacheBytes   = metrics.NewGauge("cbioportal_metadata_cache_bytes",
+		"Estimated size of the metadata cache: keys plus the cached rows as JSON.")
+	metaCacheEvictions = metrics.NewCounterVec("cbioportal_metadata_cache_evictions_total",
+		"Metadata cache entries dropped to stay within its size budget.")
 	LoginsTotal = metrics.NewCounterVec("cbioportal_logins_total",
 		"OAuth2 logins by outcome (success, failure).", "outcome")
 	DATChecks = metrics.NewCounterVec("cbioportal_data_access_token_checks_total",
