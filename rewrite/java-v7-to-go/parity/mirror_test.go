@@ -43,18 +43,18 @@ func TestWaitForMirror(t *testing.T) {
 	defer srv.Close()
 
 	mirrorWait = time.Minute
-	if stale := waitForMirror(srv.URL+"/a", srv.URL+"/b", "test", io.Discard); stale != nil || polls.Load() != catchUpAfter {
+	if stale := waitForMirror(srv.URL+"/a", srv.URL+"/b", "test", basicAuth{}, io.Discard); stale != nil || polls.Load() != catchUpAfter {
 		t.Errorf("caught up: stale %v after %d polls, want none after %d", stale, polls.Load(), catchUpAfter)
 	}
 
 	polls.Store(0)
 	catchUpAfter = 1 << 30
 	mirrorWait = 35 * time.Millisecond
-	if stale := waitForMirror(srv.URL+"/a", srv.URL+"/b", "test", io.Discard); !slices.Equal(stale, []string{"s1"}) {
+	if stale := waitForMirror(srv.URL+"/a", srv.URL+"/b", "test", basicAuth{}, io.Discard); !slices.Equal(stale, []string{"s1"}) {
 		t.Errorf("never caught up: stale %v, want [s1]", stale)
 	}
 
-	if stale := waitForMirror(srv.URL+"/missing", srv.URL+"/b", "test", io.Discard); stale != nil {
+	if stale := waitForMirror(srv.URL+"/missing", srv.URL+"/b", "test", basicAuth{}, io.Discard); stale != nil {
 		t.Errorf("unreadable A: stale %v, want none", stale)
 	}
 }

@@ -26,6 +26,8 @@ type runOptions struct {
 	root           string // repository root
 	dir, state     string // PARITY_DIR, PARITY_STATE
 	a, b, rate, ua string
+	bUser          string // basic auth user of B, with the password in bPasswordFile
+	bPasswordFile  string
 	issueRepo      string
 	issue          string // PARITY_ISSUE
 	memoryMax      string
@@ -89,11 +91,15 @@ func nightlyRun(o runOptions) (clean bool, err error) {
 		return false, die("refusing to run paritydiff without a hard memory cap: %v", err)
 	}
 	fmt.Fprintf(o.stderr, "paritydiff memory cap: %s\n", capHow)
-	if stale := waitForMirror(o.a, o.b, o.ua, o.stderr); len(stale) > 0 {
+	authB, err := readBasicAuth(o.bUser, o.bPasswordFile)
+	if err != nil {
+		return false, die("origin B's password: %v", err)
+	}
+	if stale := waitForMirror(o.a, o.b, o.ua, authB, o.stderr); len(stale) > 0 {
 		fmt.Fprintf(o.stderr, "the mirror is still behind after %v: %d studies differ in import date (%s)\n",
 			mirrorWait, len(stale), cutList(stale, 5))
 	}
-	versionA, versionB := version(o.a, o.ua), version(o.b, o.ua)
+	versionA, versionB := version(o.a, o.ua, basicAuth{}), version(o.b, o.ua, authB)
 	start := time.Now()
 	runParitydiff(o, capPrefix, filepath.Join(bin, "paritydiff"), corpusPath, run)
 	minutes := int((time.Since(start) + time.Minute - time.Second) / time.Minute)
@@ -293,6 +299,9 @@ func runParitydiff(o runOptions, capPrefix []string, bin, corpus, run string) {
 		"-cache", "", "-retry", "2m", "-self-check", "-q", "-json", filepath.Join(run, "results.json"),
 		"-dump", filepath.Join(run, "dump"), "-dump-unexplained", "-dump-max", "1000000",
 		"-spool", filepath.Join(run, "spool"))
+	if o.bUser != "" {
+		args = append(args, "-b-user", o.bUser, "-b-password-file", o.bPasswordFile)
+	}
 	if err := os.MkdirAll(filepath.Join(run, "spool"), 0o755); err != nil {
 		return
 	}
@@ -337,12 +346,13 @@ func annotate(loggedgen, corpus string, stderr io.Writer) error {
 }
 
 // version describes a deployment from its /api/info.
-func version(origin, ua string) string {
+func version(origin, ua string, auth basicAuth) string {
 	req, err := http.NewRequest(http.MethodGet, origin+"/api/info", nil)
 	if err != nil {
 		return "unreachable"
 	}
 	req.Header.Set("User-Agent", ua)
+	auth.set(req)
 	req.Header.Set("Accept", "application/json")
 	resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
 	if err != nil {

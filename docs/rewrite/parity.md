@@ -122,9 +122,15 @@ reads the whole `clinical_event_data` table.
 ### Nightly parity job
 
 `cbioportal-rewrite-test java-v7-to-go parity run` compares go.cbioportal.org
-with Java on www.cbioportal.org on a day of real production traffic. For each
-request it reports whether the answers are identical, a known difference, or
-unexplained.
+with Java on a day of real production traffic. For each request it reports
+whether the answers are identical, a known difference, or unexplained.
+
+The Java side is java.cbioportal.org: a private Java cBioPortal of the release
+go matches, which reads the same copy of production's data as go. So both
+always answer from the same import, and Java stays available after www moves
+to go. Every request to it needs a password (HTTP basic auth). The run reads
+it from the first line of `~/.config/cbioportal-go/java-reference-password`
+(`--origin-b-password-file`), with the user `parity` (`--origin-b-user`).
 
 It ran every night until go passed the bar of seven clean nights in a row and
 took over api.cbioportal.org. It is no longer scheduled. Run it by hand, or
@@ -159,9 +165,10 @@ first, so each night tests different requests:
 - Each run marks the list again with `loggedgen -annotate`, so new and
   changed entries in `known.go` apply right away.
 
-**How requests are sent.** Java is reached through www.cbioportal.org with a
-user agent that contains `Mozilla`, because www sends browsers to Java and
-every other client, like api.cbioportal.org, to go. Every request goes to Java twice
+**How requests are sent.** To compare with Java on www.cbioportal.org instead,
+set `--origin-b https://www.cbioportal.org --origin-b-user ''`. The user agent
+contains `Mozilla`, because www sends browsers to Java and every other client
+to go. Every request goes to Java twice
 (`-self-check`), at most 4 requests a second, with no cache. If Java's two
 answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent

@@ -82,9 +82,10 @@ func (i *issueFlags) register(fs *pflag.FlagSet) {
 func runCommand() *cobra.Command {
 	var st stateFlags
 	var is issueFlags
-	var day, a, b, ua, memoryMax, memoryAS, goMemLimit string
+	var day, a, b, bUser, bPasswordFile, ua, memoryMax, memoryAS, goMemLimit string
 	var rate float64
 	var dry bool
+	home, _ := os.UserHomeDir()
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "compare a new sample of the previous day's traffic and report",
@@ -114,7 +115,8 @@ itself could not run.`,
 			}
 			clean, err := nightlyRun(runOptions{
 				root: root, dir: dir, state: state,
-				a: a, b: b, rate: strconv.FormatFloat(rate, 'f', -1, 64), ua: ua,
+				a: a, b: b, bUser: bUser, bPasswordFile: bPasswordFile,
+				rate: strconv.FormatFloat(rate, 'f', -1, 64), ua: ua,
 				issueRepo: is.repo, issue: is.number,
 				memoryMax: memoryMax, memoryAS: memoryAS, goMemLimit: goMemLimit,
 				day: day, dry: dry, stdout: cmd.OutOrStdout(), stderr: cmd.ErrOrStderr(),
@@ -133,7 +135,10 @@ itself could not run.`,
 	fs.StringVar(&day, "day", "", "record the run as this night, `YYYY-MM-DD`, and sample the day before it (default: today, UTC)")
 	fs.BoolVar(&dry, "dry-run", false, "print the GitHub issue actions instead of running gh, and record nothing in --state")
 	fs.StringVar(&a, "origin-a", "https://go.cbioportal.org", "origin A, the go API")
-	fs.StringVar(&b, "origin-b", "https://www.cbioportal.org", "origin B, Java production")
+	fs.StringVar(&b, "origin-b", "https://java.cbioportal.org", "origin B, Java on the same data as A")
+	fs.StringVar(&bUser, "origin-b-user", "parity", "basic auth `user` of origin B (empty: none)")
+	fs.StringVar(&bPasswordFile, "origin-b-password-file", filepath.Join(home, ".config/cbioportal-go/java-reference-password"),
+		"`file` whose first line is origin B's basic auth password")
 	fs.Float64Var(&rate, "rate", 4, "requests per second to B, both of its runs together")
 	fs.StringVar(&ua, "ua", "Mozilla/5.0 (compatible; cbioportal-go-parity)", "User-Agent: www sends browsers (Mozilla) to Java and other clients to go")
 	is.register(fs)
@@ -141,6 +146,7 @@ itself could not run.`,
 	fs.StringVar(&memoryAS, "memory-as", "", "address-space cap of paritydiff where no systemd scope can be had (default: twice --memory-max)")
 	fs.StringVar(&goMemLimit, "gomemlimit", "1500MiB", "paritydiff's GOMEMLIMIT, its collector's soft limit")
 	for name, env := range map[string]string{"origin-a": "A", "origin-b": "B", "rate": "RATE", "ua": "UA",
+		"origin-b-user": "B_USER", "origin-b-password-file": "B_PASSWORD_FILE",
 		"memory-max": "PARITY_MEMORY_MAX", "memory-as": "PARITY_MEMORY_AS", "gomemlimit": "GOMEMLIMIT"} {
 		cli.Env(fs, name, env)
 	}

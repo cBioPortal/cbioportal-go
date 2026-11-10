@@ -17,12 +17,13 @@ var (
 )
 
 // importDates returns each study's importDate as origin lists it.
-func importDates(origin, ua string) (map[string]string, error) {
+func importDates(origin, ua string, auth basicAuth) (map[string]string, error) {
 	req, err := http.NewRequest(http.MethodGet, origin+"/api/studies", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", ua)
+	auth.set(req)
 	req.Header.Set("Accept", "application/json")
 	resp, err := (&http.Client{Timeout: 2 * time.Minute}).Do(req)
 	if err != nil {
@@ -63,11 +64,11 @@ func staleStudies(a, b map[string]string) []string {
 // the import date B serves it with: production imports studies during the
 // day and the mirror copies them within the hour. It returns the studies
 // still stale, nil when A caught up or the dates could not be read.
-func waitForMirror(a, b, ua string, log io.Writer) []string {
+func waitForMirror(a, b, ua string, authB basicAuth, log io.Writer) []string {
 	deadline := time.Now().Add(mirrorWait)
 	for {
-		datesB, errB := importDates(b, ua)
-		datesA, errA := importDates(a, ua)
+		datesB, errB := importDates(b, ua, authB)
+		datesA, errA := importDates(a, ua, basicAuth{})
 		if errA != nil || errB != nil {
 			fmt.Fprintf(log, "mirror check skipped: a: %v, b: %v\n", errA, errB)
 			return nil

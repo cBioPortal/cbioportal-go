@@ -240,6 +240,8 @@ func writeCache(path string, rq request, r response) {
 
 type fetcher struct {
 	origin   string
+	user     string // basic auth, with password, when set
+	password string
 	client   *http.Client
 	cacheDir string // empty: no cache
 	refresh  bool
@@ -280,6 +282,9 @@ func (f *fetcher) get(rq request) (response, error) {
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/json")
+	if f.user != "" {
+		req.SetBasicAuth(f.user, f.password)
+	}
 	if rq.Body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -545,6 +550,8 @@ func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 func main() {
 	a := flag.String("a", "http://localhost:18091", "origin A (the API under test)")
 	b := flag.String("b", "https://www.cbioportal.org", "origin B (the reference)")
+	bUser := flag.String("b-user", "", "basic auth user of origin B (empty: none)")
+	bPasswordFile := flag.String("b-password-file", "", "file whose first line is origin B's basic auth password")
 	corpus := flag.String("corpus", "test/parity/corpus.txt", "corpus file")
 	cache := flag.String("cache", ".parity/cache", "cache directory for origin B responses (empty: no cache)")
 	refresh := flag.Bool("refresh", false, "refetch origin B instead of reading the cache")
@@ -592,6 +599,14 @@ func main() {
 	client := &http.Client{Timeout: *timeout}
 	fa := &fetcher{origin: strings.TrimRight(*a, "/"), client: client}
 	fb := &fetcher{origin: strings.TrimRight(*b, "/"), client: client, cacheDir: *cache, refresh: *refresh}
+	if *bUser != "" {
+		raw, err := os.ReadFile(*bPasswordFile)
+		if err != nil {
+			fatal(err)
+		}
+		password, _, _ := strings.Cut(string(raw), "\n")
+		fb.user, fb.password = *bUser, strings.TrimSuffix(password, "\r")
+	}
 	if *rate > 0 {
 		fb.interval = time.Duration(float64(time.Second) / *rate)
 	}
