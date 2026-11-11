@@ -92,6 +92,7 @@ func TestStatusBody(t *testing.T) {
 		map[string]string{"2026-10-09": "https://x/c/2"}, 1, "2026-10-09")
 	for _, want := range []string{
 		"**7 clean nights in a row**",
+		"one of the gates of #18",
 		"Clean nights in a row: **1 of 7**",
 		"| 2026-10-09 | clean | [report](https://x/c/2) |\n| 2026-10-08 | unexplained differences | — |",
 		"https://github.com/org/repo/blob/main/docs/rewrite/parity.md",
@@ -138,7 +139,7 @@ func TestReport(t *testing.T) {
 	})
 	for _, want := range []string{
 		"# Nightly parity 2026-10-08\n\nResult: **unexplained diff** (2 unexplained of 6 requests, 1 new since the last run)\n",
-		"Clean nights in a row: **0** (go/no-go for api.cbioportal.org: 7)\n",
+		"Clean nights in a row: **0** (go/no-go for www.cbioportal.org: 7)\n",
 		"Java nondeterministic: 1 requests answered differently by B's two runs, 1 of them also differing from A (not counted as unexplained)\n",
 		"- Corpus: 6 requests sampled from production traffic, written 2026-10-08; 3 min at 4/s to B\n",
 		"- Window: 2026-10-07 22:30 to 2026-10-08 10:00 UTC (first and last request seen)\n",

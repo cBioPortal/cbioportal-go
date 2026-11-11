@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	issueTitle = "Parity with Java: 7 clean nights before switching api.cbioportal.org"
+	issueTitle = "Parity with Java: 7 clean nights before moving www.cbioportal.org to go"
 	issueLabel = "parity"
+	// rolloutIssue is the issue the parity goal is a gate of.
+	rolloutIssue = 18
 )
 
 // runOptions configure one nightly comparison (the run subcommand).

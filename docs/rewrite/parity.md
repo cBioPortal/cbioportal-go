@@ -132,9 +132,10 @@ to go. Every request to it needs a password (HTTP basic auth). The run reads
 it from the first line of `~/.config/cbioportal-go/java-reference-password`
 (`--origin-b-password-file`), with the user `parity` (`--origin-b-user`).
 
-It ran every night until go passed the bar of seven clean nights in a row and
-took over api.cbioportal.org. It is no longer scheduled. Run it by hand, or
-schedule it again as below, to check go before moving more traffic to it.
+It runs every night at 15:17 UTC, after the day's mirror update, from the
+crontab of the machine that keeps the password. Seven clean nights in a row
+are the bar for moving www.cbioportal.org's browser traffic to go (issue
+#18). Run it by hand with:
 
 ```bash
 go run ./rewrite/cmd/cbioportal-rewrite-test java-v7-to-go parity run [--day YYYY-MM-DD] [--dry-run]
@@ -156,8 +157,9 @@ first, so each night tests different requests:
   endpoints, only those that returned 200 with a complete body.
 - Busy endpoints get more requests, growing with the square root of their
   volume, with at least 3 each.
-- A quarter (`CORPUS_API_SHARE`) comes from api.cbioportal.org, since that is
-  the site go aims to replace first. Those entries are named `api-…`.
+- A quarter (`CORPUS_API_SHARE`) comes from api.cbioportal.org and the rest
+  from www.cbioportal.org, most of it the website's own requests. Entries
+  from api.cbioportal.org are named `api-…`.
 - The list is saved to `.parity/nightly/corpus.txt`,
   which git ignores and only the owner can read, because it is real user
   traffic. Its header records the window, the requests per host and which
@@ -198,8 +200,8 @@ than run uncapped.
 - counts of identical, known, Java nondeterministic, unexplained, status
   mismatch and error, overall and per host;
 - the number of clean nights in a row (stored in `nights.txt` in
-  `PARITY_STATE`). Seven clean nights were the bar for go to take over
-  api.cbioportal.org and www's API traffic from scripts and agents;
+  `PARITY_STATE`). Seven clean nights in a row are the bar for moving
+  www.cbioportal.org's browser traffic to go;
 - each unexplained request with its body (first 200 bytes) and the first
   lines of the difference, marking those that are new since the last run.
 
@@ -208,7 +210,8 @@ than run uncapped.
 anything is unexplained, 2 when the check itself fails.
 
 **The GitHub issue.** One issue with the label `parity` tracks the goal of 7
-clean nights in a row. Its description says what the goal is and shows where
+clean nights in a row. It is one of the gates of the www rollout issue (#18).
+Its description says what the goal is and shows where
 it stands: the clean nights so far and a table of recent nights, each linked
 to its report. Every night, clean or not, the job posts that night's report as
 a comment and rewrites the description. When the goal is reached, it says so

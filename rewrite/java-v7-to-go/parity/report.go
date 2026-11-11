@@ -8,7 +8,7 @@ import (
 )
 
 // goal is the number of clean nights in a row that is the go/no-go for
-// serving api.cbioportal.org from go.
+// moving www.cbioportal.org's browser traffic to go.
 const goal = 7
 
 // shown is how many requests each report section details.
@@ -198,7 +198,7 @@ func report(in reportInput) string {
 	p("")
 	p("Result: **%s** (%d unexplained of %d requests, %d new since the last run)", c.Result(), bad, c.All, len(in.New))
 	p("")
-	p("Clean nights in a row: **%d** (go/no-go for api.cbioportal.org: %d)", in.Streak, goal)
+	p("Clean nights in a row: **%d** (go/no-go for www.cbioportal.org: %d)", in.Streak, goal)
 	p("")
 	unverified := ""
 	if c.JavaUnverified > 0 {
@@ -373,10 +373,12 @@ func firstDiffs(diffs []string, n int) string {
 // stands, and the most recent nights, each linked to its report comment.
 func statusBody(repo string, nightLines []string, links map[string]string, streak int, day string) string {
 	var b strings.Builder
-	b.WriteString("This issue tracks the go/no-go for serving api.cbioportal.org from go: ")
-	fmt.Fprintf(&b, "**%d clean nights in a row** of the nightly parity check.\n\n", goal)
+	b.WriteString("This issue tracks the go/no-go for moving www.cbioportal.org's browser traffic to go: ")
+	fmt.Fprintf(&b, "**%d clean nights in a row** of the nightly parity check. ", goal)
+	fmt.Fprintf(&b, "It is one of the gates of #%d, the www rollout.\n\n", rolloutIssue)
 	b.WriteString("Each night the check sends a new sample of the previous day's production requests to ")
-	b.WriteString("go.cbioportal.org and to api.cbioportal.org and compares the answers. A night is ")
+	b.WriteString("go.cbioportal.org and to java.cbioportal.org, a private Java cBioPortal on the same ")
+	b.WriteString("copy of the data, and compares the answers. A night is ")
 	b.WriteString("clean when every difference is known and explained (a Java bug go fixes, ")
 	b.WriteString("Java giving changing answers, or a documented choice). Each night's report is ")
 	b.WriteString("a comment below; this description is rewritten after every run.\n\n")
