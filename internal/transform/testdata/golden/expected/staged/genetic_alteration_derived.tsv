@@ -1,5 +1,5 @@
 alteration_value	cancer_study_identifier	hugo_gene_symbol	profile_type	sample_unique_id
-Nullable(String)	String	String	String	String
+Nullable(String)	LowCardinality(String)	LowCardinality(String)	LowCardinality(String)	String
 -0.005	golden_a	ERBB2	log2CNA	golden_a_GA-P2-01
 -0.25	golden_a	TP53	mrna	golden_a_GA-P1-02
 -0.75	golden_a	TP53	log2CNA	golden_a_GA-P1-01

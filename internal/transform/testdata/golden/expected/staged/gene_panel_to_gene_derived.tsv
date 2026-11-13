@@ -1,5 +1,5 @@
 gene	gene_panel_id
-String	String
+LowCardinality(String)	LowCardinality(String)
 ALK	GOLDEN_PANEL2
 ALK	WES
 BRCA1	GOLDEN_PANEL2

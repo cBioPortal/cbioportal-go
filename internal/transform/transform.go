@@ -221,27 +221,39 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 
 	// Prod-aligned column-store `*_derived` tables (built from our staging
 	// with prod's exact column names and sort keys, which the API's reads
-	// lead with), created after the base views they read. Ordered so every
-	// table is built after the tables it reads.
-	for _, d := range []struct{ name, key, sql string }{
-		{"gene_panel_to_gene_derived", "(gene_panel_id)", genePanelToGeneDerivedSQL(targetDB, refDB)},
+	// lead with), created after the base views they read. Their text columns
+	// with few distinct values (studies, genes, profiles, types) are
+	// LowCardinality: stored as numbers into a dictionary, so filters and
+	// groupings on them compare numbers. Ordered so every table is built
+	// after the tables it reads.
+	for _, d := range []struct{ name, key, lowCardinality, sql string }{
+		{"gene_panel_to_gene_derived", "(gene_panel_id)", "gene_panel_id, gene", genePanelToGeneDerivedSQL(targetDB, refDB)},
 		{"sample_to_gene_panel_derived", "(gene_panel_id, alteration_type, genetic_profile_id, sample_unique_id)",
+			"gene_panel_id, alteration_type, genetic_profile_id, cancer_study_identifier",
 			sampleToGenePanelDerivedSQL(targetDB)},
-		{"sample_derived", "(cancer_study_identifier, sample_unique_id)", sampleDerivedSQL(rawDB, refDB, targetDB)},
+		{"sample_derived", "(cancer_study_identifier, sample_unique_id)", "cancer_study_identifier, sample_type",
+			sampleDerivedSQL(rawDB, refDB, targetDB)},
 		{"clinical_data_derived", "(cancer_study_identifier, type, attribute_name, sample_unique_id)",
+			"cancer_study_identifier, type, attribute_name",
 			clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
 		{"genomic_event_derived",
 			"(genetic_profile_stable_id, cancer_study_identifier, variant_type, entrez_gene_id, hugo_gene_symbol, sample_unique_id)",
+			"genetic_profile_stable_id, cancer_study_identifier, variant_type, hugo_gene_symbol, gene_panel_stable_id, " +
+				"mutation_type, mutation_status, driver_filter, driver_tiers_filter, cna_cytoband",
 			genomicEventDerivedSQL(c, rawDB, refDB, targetDB, hasGenomeGenes)},
 		{"genetic_alteration_derived", "(cancer_study_identifier, hugo_gene_symbol, profile_type, sample_unique_id)",
+			"cancer_study_identifier, hugo_gene_symbol, profile_type",
 			geneticAlterationDerivedSQL(rawDB, targetDB)},
 		{"generic_assay_data_derived", "(profile_type, entity_stable_id, patient_unique_id, sample_unique_id)",
+			"profile_type, profile_stable_id, generic_assay_type, datatype",
 			genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
 				hasColumn(c, rawDB, "genetic_profile", "patient_level") && hasColumn(c, rawDB, "genetic_profile", "generic_assay_type"))},
-		{"clinical_event_derived", "(cancer_study_identifier, event_type, clinical_event_id)", clinicalEventDerivedSQL(rawDB, refDB)},
-		{"clinical_event_data_derived", "(cancer_study_identifier, event_type, patient_unique_id)", clinicalEventDataDerivedSQL(c, rawDB)},
+		{"clinical_event_derived", "(cancer_study_identifier, event_type, clinical_event_id)", "cancer_study_identifier, event_type",
+			clinicalEventDerivedSQL(rawDB, refDB)},
+		{"clinical_event_data_derived", "(cancer_study_identifier, event_type, patient_unique_id)", "cancer_study_identifier, event_type, key",
+			clinicalEventDataDerivedSQL(c, rawDB)},
 	} {
-		if err := materialize(d.name, d.key, d.sql); err != nil {
+		if err := materialize(d.name, d.key, withLowCardinality(d.sql, d.lowCardinality)); err != nil {
 			return nil, err
 		}
 	}
@@ -272,6 +284,17 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		counts = append(counts, ViewCount{Name: v, Rows: n})
 	}
 	return counts, nil
+}
+
+// withLowCardinality wraps sel so the named columns (comma-separated) are
+// LowCardinality(String).
+func withLowCardinality(sel, columns string) string {
+	var repl []string
+	for _, c := range strings.Split(columns, ",") {
+		c = strings.TrimSpace(c)
+		repl = append(repl, fmt.Sprintf("toLowCardinality(%[1]s) AS %[1]s", c))
+	}
+	return fmt.Sprintf("SELECT * REPLACE (%s) FROM (%s)", strings.Join(repl, ", "), sel)
 }
 
 // snapshotted lists the views Apply turns into tables, with their sort keys

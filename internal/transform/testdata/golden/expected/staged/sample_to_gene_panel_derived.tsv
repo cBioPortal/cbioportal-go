@@ -1,5 +1,5 @@
 alteration_type	cancer_study_identifier	gene_panel_id	genetic_profile_id	sample_unique_id
-String	String	String	String	String
+LowCardinality(String)	LowCardinality(String)	LowCardinality(String)	LowCardinality(String)	String
 COPY_NUMBER_ALTERATION	golden_a	GOLDEN_PANEL1	golden_a_gistic	golden_a_GA-P1-01
 COPY_NUMBER_ALTERATION	golden_a	GOLDEN_PANEL1	golden_a_gistic	golden_a_GA-P2-01
 COPY_NUMBER_ALTERATION	golden_a	WES	golden_a_gistic	golden_a_GA-P1-02

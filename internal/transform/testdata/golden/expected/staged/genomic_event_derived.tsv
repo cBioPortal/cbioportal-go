@@ -1,5 +1,5 @@
 cancer_study_identifier	cna_alteration	cna_cytoband	driver_filter	driver_filter_annotation	driver_tiers_filter	driver_tiers_filter_annotation	entrez_gene_id	gene_panel_stable_id	genetic_profile_stable_id	hugo_gene_symbol	mutation_status	mutation_type	mutation_variant	off_panel	patient_unique_id	sample_unique_id	sv_event_info	variant_type
-String	Nullable(Int8)	String	String	String	String	String	Int32	String	String	String	String	String	String	UInt8	String	String	String	String
+LowCardinality(String)	Nullable(Int8)	LowCardinality(String)	LowCardinality(String)	String	LowCardinality(String)	String	Int32	LowCardinality(String)	LowCardinality(String)	LowCardinality(String)	LowCardinality(String)	LowCardinality(String)	String	UInt8	String	String	String	LowCardinality(String)
 golden_a	-2	17p13.1					7157	GOLDEN_PANEL1	golden_a_gistic	TP53		NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01		cna
 golden_a	-2	17p13.1					7157	GOLDEN_PANEL1	golden_a_gistic	TP53		NA	NA	0	golden_a_GA-P2	golden_a_GA-P2-01		cna
 golden_a	2	17q12					2064	GOLDEN_PANEL1	golden_a_gistic	ERBB2		NA	NA	0	golden_a_GA-P1	golden_a_GA-P1-01		cna

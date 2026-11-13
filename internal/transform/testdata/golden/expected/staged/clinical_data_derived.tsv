@@ -1,5 +1,5 @@
 attribute_name	attribute_value	cancer_study_identifier	internal_id	patient_unique_id	sample_unique_id	type
-String	String	String	Int32	String	String	String
+LowCardinality(String)	String	LowCardinality(String)	Int32	String	String	LowCardinality(String)
 1P19Q_STATUS	Codeleted	golden_b	5	golden_b_GB-P1	golden_b_GB-P1-01	sample
 AGE	55	golden_a	3	golden_a_GA-P3		patient
 AGE	61	golden_a	1	golden_a_GA-P1		patient
