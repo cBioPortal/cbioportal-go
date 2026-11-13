@@ -79,6 +79,15 @@ It builds two kinds of tables:
   *projection*). ClickHouse reads that copy by itself for requests that
   need one profile across all genes, such as co-expression.
 
+For a portal copied from Java's database, the timeline table is sorted by
+study, then event id. That is the order the API returns a study's clinical
+events in, so ClickHouse can send them as it reads them instead of sorting
+millions of events in memory first. A projection keeps a second copy sorted
+by patient for the patient page's timeline. The patient request turns off
+reading in event order (the ClickHouse setting `optimize_read_in_order`),
+because otherwise ClickHouse would pick the event-id order and read the
+whole study.
+
 A few rules keep the results the same as Java:
 
 - Every table the API reads always exists, even when no study has that kind

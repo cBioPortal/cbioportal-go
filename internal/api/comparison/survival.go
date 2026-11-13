@@ -424,7 +424,12 @@ func (s Server) studyClinicalEvents(w http.ResponseWriter, r *http.Request) {
 
 // patientClinicalEvents serves the patient-view timeline:
 // GET /api/studies/{studyId}/patients/{patientId}/clinical-events.
+//
+// A timeline sorted by event id would otherwise be read in that order across
+// the whole study; without read-in-order ClickHouse reads the patient's rows
+// from the timeline's by_patient projection.
 func (s Server) patientClinicalEvents(w http.ResponseWriter, r *http.Request) {
+	s.CH = s.CH.WithSettings(map[string]string{"optimize_read_in_order": "0"})
 	s.writeClinicalEvents(w, r, "study_id = {study:String} AND patient_id = {patient:String}",
 		ch.Params{"study": r.PathValue("studyId"), "patient": r.PathValue("patientId")})
 }

@@ -65,11 +65,14 @@ func ApplyFromProd(base *ch.Client, prodDB, rawDB, targetDB string) ([]ViewCount
 }
 
 // prodObject is one view or table built from the production clone. A table
-// (orderBy set) is materialized, replacing any earlier object of that name.
+// (orderBy set) is materialized, replacing any earlier object of that name,
+// with its projections (each "name (SELECT ... ORDER BY ...)") filled as the
+// rows are inserted.
 type prodObject struct {
-	db, name string
-	orderBy  string
-	sql      string
+	db, name    string
+	orderBy     string
+	sql         string
+	projections []string
 }
 
 type prodBuilder struct {
@@ -107,6 +110,20 @@ func (b *prodBuilder) build(o prodObject) error {
 			}
 		}
 		stmt = fmt.Sprintf("CREATE OR REPLACE TABLE %s ENGINE = MergeTree ORDER BY %s AS %s", full, o.orderBy, o.sql)
+	}
+	if len(o.projections) > 0 {
+		stmts := []string{fmt.Sprintf("CREATE OR REPLACE TABLE %s ENGINE = MergeTree ORDER BY %s EMPTY AS %s", full, o.orderBy, o.sql)}
+		for _, p := range o.projections {
+			stmts = append(stmts, fmt.Sprintf("ALTER TABLE %s ADD PROJECTION %s", full, p))
+		}
+		stmts = append(stmts, fmt.Sprintf("INSERT INTO %s %s", full, o.sql))
+		for _, st := range stmts {
+			if _, err := b.c.Execute(st); err != nil {
+				return fmt.Errorf("building %s: %w", full, err)
+			}
+		}
+		b.built = append(b.built, o)
+		return nil
 	}
 	if _, err := b.c.Execute(stmt); err != nil {
 		return fmt.Errorf("building %s: %w", full, err)
@@ -503,13 +520,18 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 			"SELECT entity_stable_id, entity_type, properties FROM {p}.generic_assay_meta_derived"),
 	)
 	// Timeline events, one row per event with its attributes in storage order.
-	add(b.rawTable("timeline", "(study_id, patient_id)",
+	// Sorted by event id, the order the API returns them in, so a whole
+	// study's events stream without a sort; the by_patient projection finds
+	// one patient's events.
+	timeline := b.rawTable("timeline", "(study_id, clinical_event_id)",
 		"SELECT p.study_id AS study_id, p.patient_id AS patient_id, e.event_type AS event_type, "+
 			"toString(e.start_date) AS start_date, ifNull(toString(e.stop_date), '') AS stop_date, "+
 			"ifNull(d.attrs, []) AS event_attributes, toUInt64(e.clinical_event_id) AS clinical_event_id "+
 			"FROM {p}.clinical_event e INNER JOIN {t}.prod_patient p ON p.internal_id = e.patient_id "+
 			"LEFT JOIN (SELECT clinical_event_id, groupArray((key, value)) AS attrs FROM "+
 			"(SELECT clinical_event_id, key, value FROM {p}.clinical_event_data WHERE value != '' ORDER BY clinical_event_id, _part, _part_offset) "+
-			"GROUP BY clinical_event_id) d ON d.clinical_event_id = e.clinical_event_id"))
+			"GROUP BY clinical_event_id) d ON d.clinical_event_id = e.clinical_event_id")
+	timeline.projections = []string{"by_patient (SELECT * ORDER BY study_id, patient_id)"}
+	add(timeline)
 	return out
 }
