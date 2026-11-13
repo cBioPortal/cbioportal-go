@@ -13,8 +13,8 @@ import (
 // routeCompat registers endpoints that are thin views over others: the GET
 // molecular-data form and mRNA percentiles.
 func (s Server) routeCompat(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/molecular-profiles/{id}/molecular-data", s.Bulk().molecularDataGet)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/mrna-percentile/fetch", s.mrnaPercentileFetch)
+	core.Handle(mux, "GET /api/molecular-profiles/{id}/molecular-data", s.Bulk(), Server.molecularDataGet)
+	core.Handle(mux, "POST /api/molecular-profiles/{id}/mrna-percentile/fetch", s, Server.mrnaPercentileFetch)
 }
 
 type MrnaPercentile struct {

@@ -14,13 +14,13 @@ import (
 // endpoints (ResourceDefinitionController / ResourceDataController), served
 // from the resource_definition and resource_{study,patient,sample} views.
 func (s Server) routeResources(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/studies/{studyId}/resource-definitions", s.resourceDefinitionsInStudy)
-	mux.HandleFunc("GET /api/studies/{studyId}/resource-definitions/{resourceId}", s.resourceDefinitionInStudy)
-	mux.HandleFunc("POST /api/resource-definitions/fetch", s.resourceDefinitionsFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/resource-data", s.studyResourceData)
-	mux.HandleFunc("GET /api/studies/{studyId}/resource-data-all", s.allResourceDataInStudy)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/resource-data", s.patientResourceData)
-	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}/resource-data", s.sampleResourceData)
+	core.Handle(mux, "GET /api/studies/{studyId}/resource-definitions", s, Server.resourceDefinitionsInStudy)
+	core.Handle(mux, "GET /api/studies/{studyId}/resource-definitions/{resourceId}", s, Server.resourceDefinitionInStudy)
+	core.Handle(mux, "POST /api/resource-definitions/fetch", s, Server.resourceDefinitionsFetch)
+	core.Handle(mux, "GET /api/studies/{studyId}/resource-data", s, Server.studyResourceData)
+	core.Handle(mux, "GET /api/studies/{studyId}/resource-data-all", s, Server.allResourceDataInStudy)
+	core.Handle(mux, "GET /api/studies/{studyId}/patients/{patientId}/resource-data", s, Server.patientResourceData)
+	core.Handle(mux, "GET /api/studies/{studyId}/samples/{sampleId}/resource-data", s, Server.sampleResourceData)
 }
 
 // ResourceDefinition is the ResourceDefinition model as serialized through

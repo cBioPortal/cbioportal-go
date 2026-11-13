@@ -12,8 +12,8 @@ import (
 // routeSignificance registers the per-study GISTIC and MutSig endpoints
 // (SignificantCopyNumberRegionController / SignificantlyMutatedGenesController).
 func (s Server) routeSignificance(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/studies/{studyId}/significant-copy-number-regions", s.significantCopyNumberRegions)
-	mux.HandleFunc("GET /api/studies/{studyId}/significantly-mutated-genes", s.significantlyMutatedGenes)
+	core.Handle(mux, "GET /api/studies/{studyId}/significant-copy-number-regions", s, Server.significantCopyNumberRegions)
+	core.Handle(mux, "GET /api/studies/{studyId}/significantly-mutated-genes", s, Server.significantlyMutatedGenes)
 }
 
 // Gistic is the Gistic model as serialized through GisticMixin (gisticRoiId

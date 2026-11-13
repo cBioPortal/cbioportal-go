@@ -23,9 +23,9 @@ import (
 // a resource's rows, and that resource's columns, filter options and
 // counts. All read the resource view, restricted to the request's studyIds.
 func (s Server) routeResourceTable(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/resource-table/tabs/fetch", s.resourceTableTabs)
-	mux.HandleFunc("POST /api/resource-table/query/fetch", s.resourceTableRows)
-	mux.HandleFunc("POST /api/resource-table/metadata/fetch", s.resourceTableMetadata)
+	core.Handle(mux, "POST /api/resource-table/tabs/fetch", s, Server.resourceTableTabs)
+	core.Handle(mux, "POST /api/resource-table/query/fetch", s, Server.resourceTableRows)
+	core.Handle(mux, "POST /api/resource-table/metadata/fetch", s, Server.resourceTableMetadata)
 }
 
 const (

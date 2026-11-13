@@ -3,6 +3,8 @@
 package session
 
 import (
+	"net/http"
+
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	"github.com/cbioportal/cbioportal-go/internal/api/studyview"
 )
@@ -13,3 +15,6 @@ type Server struct{ studyview.Server }
 
 // New returns the Server over s.
 func New(s *core.State) Server { return Server{studyview.New(s)} }
+
+// ForRequest returns s for one request (studies.Server.ForRequest).
+func (s Server) ForRequest(r *http.Request) Server { return Server{s.Server.ForRequest(r)} }

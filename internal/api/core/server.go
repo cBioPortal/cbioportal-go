@@ -214,6 +214,9 @@ func (a *jsonArray) Finish(err error) {
 	switch {
 	case err != nil && a.bw == nil:
 		Fail(a.w, a.r, err)
+	case err != nil && a.r.Context().Err() != nil:
+		slog.Warn("client closed request", slog.String("method", a.r.Method), slog.String("path", a.r.URL.Path), slog.Any("error", err))
+		panic(http.ErrAbortHandler)
 	case err != nil:
 		LogServerError(a.r, "streamed response aborted", err)
 		panic(http.ErrAbortHandler)

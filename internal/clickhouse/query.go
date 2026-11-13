@@ -28,7 +28,7 @@ func (c *Client) eachJSONLine(sql string, p Params, fn func([]byte) error) error
 		// than ending it with an {"exception": ...} row.
 		"http_write_exception_in_output_format": {"0"},
 	}
-	req, err := c.newRequest(context.Background(), q, c.rewrite(sql)+" FORMAT JSONEachRow", p)
+	req, err := c.newRequest(c.context(), q, c.rewrite(sql)+" FORMAT JSONEachRow", p)
 	if err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func eachNative[T any](c *Client, sql string, p Params, settings clickhouse.Sett
 	if isJSONOnly(key) {
 		return nil, false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	ctx, cancel := context.WithTimeout(c.context(), time.Hour)
 	defer cancel()
 	if _, ok := c.settings["max_execution_time"]; ok {
 		// The driver turns a context's deadline into max_execution_time;

@@ -10,7 +10,7 @@ import (
 // routeCancerTypes registers the single cancer type lookup; the list endpoint
 // is registered in routes.go.
 func (s Server) routeCancerTypes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/cancer-types/{cancerTypeId}", s.cancerType)
+	core.Handle(mux, "GET /api/cancer-types/{cancerTypeId}", s, Server.cancerType)
 }
 
 // refCancerTypesSQL selects the reference cancer types.

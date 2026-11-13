@@ -1,6 +1,10 @@
 package studyview
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
+)
 
 // router is where the study view registers its endpoints.
 type router interface {
@@ -12,18 +16,18 @@ type router interface {
 // (allStudies).
 func (s Server) Routes(mux *http.ServeMux) {
 	r := allStudiesRouter{mux, s}
-	r.HandleFunc("POST /api/clinical-attributes/counts/fetch", s.clinicalAttributeCountsFetch)
-	r.HandleFunc("POST /api/filtered-samples/fetch", s.FilteredSamplesFetch)
-	r.HandleFunc("POST /api/clinical-data-counts/fetch", s.clinicalDataCountsFetch)
-	r.HandleFunc("POST /api/mutated-genes/fetch", s.mutatedGenesFetch)
-	r.HandleFunc("POST /api/cna-genes/fetch", s.cnaGenesFetch)
-	r.HandleFunc("POST /api/structuralvariant-genes/fetch", s.svGenesFetch)
-	r.HandleFunc("POST /api/molecular-profile-sample-counts/fetch", s.molecularProfileSampleCountsFetch)
-	r.HandleFunc("POST /api/clinical-data-density-plot/fetch", s.clinicalDataDensityPlotFetch)
-	r.HandleFunc("POST /api/clinical-data-violin-plots/fetch", s.clinicalDataViolinPlotsFetch)
-	r.HandleFunc("POST /api/generic-assay-data-counts/fetch", s.genericAssayDataCountsFetch)
-	r.HandleFunc("POST /api/generic-assay-data-bin-counts/fetch", s.genericAssayDataBinCountsFetch)
-	r.HandleFunc("POST /api/structuralvariant-counts/fetch", s.svCountsFetch)
+	core.Handle(r, "POST /api/clinical-attributes/counts/fetch", s, Server.clinicalAttributeCountsFetch)
+	core.Handle(r, "POST /api/filtered-samples/fetch", s, Server.FilteredSamplesFetch)
+	core.Handle(r, "POST /api/clinical-data-counts/fetch", s, Server.clinicalDataCountsFetch)
+	core.Handle(r, "POST /api/mutated-genes/fetch", s, Server.mutatedGenesFetch)
+	core.Handle(r, "POST /api/cna-genes/fetch", s, Server.cnaGenesFetch)
+	core.Handle(r, "POST /api/structuralvariant-genes/fetch", s, Server.svGenesFetch)
+	core.Handle(r, "POST /api/molecular-profile-sample-counts/fetch", s, Server.molecularProfileSampleCountsFetch)
+	core.Handle(r, "POST /api/clinical-data-density-plot/fetch", s, Server.clinicalDataDensityPlotFetch)
+	core.Handle(r, "POST /api/clinical-data-violin-plots/fetch", s, Server.clinicalDataViolinPlotsFetch)
+	core.Handle(r, "POST /api/generic-assay-data-counts/fetch", s, Server.genericAssayDataCountsFetch)
+	core.Handle(r, "POST /api/generic-assay-data-bin-counts/fetch", s, Server.genericAssayDataBinCountsFetch)
+	core.Handle(r, "POST /api/structuralvariant-counts/fetch", s, Server.svCountsFetch)
 	s.routeStudyView2(r)
 	s.routeStudyView3(r)
 	s.routeNamespace(r)

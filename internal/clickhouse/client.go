@@ -5,6 +5,7 @@
 package clickhouse
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -31,6 +32,9 @@ type Client struct {
 	// drv is the clickhouse-go connection pool, shared by the clients
 	// WithSettings derives.
 	drv *driverPool
+	// ctx, when set (WithContext), bounds every query of this client:
+	// cancelling it stops the query on the server.
+	ctx context.Context
 }
 
 // driverPool is a clickhouse-go connection pool, opened on first use.
@@ -50,6 +54,27 @@ func (c *Client) WithSettings(settings map[string]string) *Client {
 	}
 	maps.Copy(d.settings, settings)
 	return &d
+}
+
+// WithContext returns a client over the same connections whose queries are
+// bound to ctx, such as an API request's context: when the caller goes
+// away, ClickHouse stops the query instead of running it to its time limit.
+// A nil client (a server built without ClickHouse) stays nil.
+func (c *Client) WithContext(ctx context.Context) *Client {
+	if c == nil {
+		return nil
+	}
+	d := *c
+	d.ctx = ctx
+	return &d
+}
+
+// context is the context the client's queries run under.
+func (c *Client) context() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
 }
 
 // Settings returns the settings WithSettings added to the client's queries.
@@ -182,7 +207,7 @@ func (c *Client) InsertStream(insertSQL string, body io.Reader) error {
 
 func (c *Client) post(query url.Values, body io.Reader) (string, error) {
 	u := c.baseURL + "/?" + withSessionSettings(c.withClientSettings(query)).Encode()
-	req, err := http.NewRequest(http.MethodPost, u, body)
+	req, err := http.NewRequestWithContext(c.context(), http.MethodPost, u, body)
 	if err != nil {
 		return "", err
 	}

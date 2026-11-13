@@ -9,8 +9,8 @@ import (
 
 // routeMisc registers the study clinical-attribute endpoints.
 func (s Server) routeMisc(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/studies/{studyId}/clinical-attributes", s.studyClinicalAttributes)
-	mux.HandleFunc("GET /api/studies/{studyId}/clinical-attributes/{clinicalAttributeId}", s.studyClinicalAttribute)
+	core.Handle(mux, "GET /api/studies/{studyId}/clinical-attributes", s, Server.studyClinicalAttributes)
+	core.Handle(mux, "GET /api/studies/{studyId}/clinical-attributes/{clinicalAttributeId}", s, Server.studyClinicalAttribute)
 }
 
 // ---------- Clinical attributes (per study) ----------

@@ -12,11 +12,11 @@ import (
 // clinical and genomic data bins, mutation and genomic data counts, and
 // case-list (sample-list) counts.
 func (s Server) routeStudyView2(mux router) {
-	mux.HandleFunc("POST /api/clinical-data-bin-counts/fetch", s.clinicalDataBinCountsFetch)
-	mux.HandleFunc("POST /api/mutation-data-counts/fetch", s.mutationDataCountsFetch)
-	mux.HandleFunc("POST /api/genomic-data-counts/fetch", s.genomicDataCountsFetch)
-	mux.HandleFunc("POST /api/genomic-data-bin-counts/fetch", s.genomicDataBinCountsFetch)
-	mux.HandleFunc("POST /api/sample-lists-counts/fetch", s.sampleListsCountsFetch)
+	core.Handle(mux, "POST /api/clinical-data-bin-counts/fetch", s, Server.clinicalDataBinCountsFetch)
+	core.Handle(mux, "POST /api/mutation-data-counts/fetch", s, Server.mutationDataCountsFetch)
+	core.Handle(mux, "POST /api/genomic-data-counts/fetch", s, Server.genomicDataCountsFetch)
+	core.Handle(mux, "POST /api/genomic-data-bin-counts/fetch", s, Server.genomicDataBinCountsFetch)
+	core.Handle(mux, "POST /api/sample-lists-counts/fetch", s, Server.sampleListsCountsFetch)
 }
 
 // ---------- Mutation data counts ----------

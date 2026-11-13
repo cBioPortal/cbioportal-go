@@ -14,13 +14,13 @@ import (
 // charts, all computed from clinical_event_data_derived over the filtered
 // samples/patients.
 func (s Server) routeTreatments(mux router) {
-	mux.HandleFunc("POST /api/treatments/patient-counts/fetch", s.patientTreatmentCountsFetch)
-	mux.HandleFunc("POST /api/treatments/sample-counts/fetch", s.sampleTreatmentCountsFetch)
-	mux.HandleFunc("POST /api/treatments/patient", s.treatmentsPatient)
-	mux.HandleFunc("POST /api/treatments/sample", s.treatmentsSample)
-	mux.HandleFunc("POST /api/clinical-event-type-counts/fetch", s.clinicalEventTypeCountsFetch)
-	mux.HandleFunc("POST /api/treatments/display-patient", s.treatmentsDisplayPatient)
-	mux.HandleFunc("POST /api/treatments/display-sample", s.treatmentsDisplaySample)
+	core.Handle(mux, "POST /api/treatments/patient-counts/fetch", s, Server.patientTreatmentCountsFetch)
+	core.Handle(mux, "POST /api/treatments/sample-counts/fetch", s, Server.sampleTreatmentCountsFetch)
+	core.Handle(mux, "POST /api/treatments/patient", s, Server.treatmentsPatient)
+	core.Handle(mux, "POST /api/treatments/sample", s, Server.treatmentsSample)
+	core.Handle(mux, "POST /api/clinical-event-type-counts/fetch", s, Server.clinicalEventTypeCountsFetch)
+	core.Handle(mux, "POST /api/treatments/display-patient", s, Server.treatmentsDisplayPatient)
+	core.Handle(mux, "POST /api/treatments/display-sample", s, Server.treatmentsDisplaySample)
 }
 
 // treatmentTierKey maps the tier query param (ClinicalEventKeyCode) to the

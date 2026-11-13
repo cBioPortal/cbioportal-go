@@ -18,10 +18,10 @@ import (
 // the amplification and deep-deletion events.
 
 func (s Server) routeNamespace(mux router) {
-	mux.HandleFunc("POST /api/namespace-attributes/fetch", s.namespaceAttributesFetch)
-	mux.HandleFunc("POST /api/namespace-attributes/counts/fetch", s.namespaceAttributeCountsFetch)
-	mux.HandleFunc("POST /api/namespace-data-counts/fetch", s.namespaceDataCountsFetch)
-	mux.HandleFunc("POST /api/namespace-data/fetch", s.namespaceDataFetch)
+	core.Handle(mux, "POST /api/namespace-attributes/fetch", s, Server.namespaceAttributesFetch)
+	core.Handle(mux, "POST /api/namespace-attributes/counts/fetch", s, Server.namespaceAttributeCountsFetch)
+	core.Handle(mux, "POST /api/namespace-data-counts/fetch", s, Server.namespaceDataCountsFetch)
+	core.Handle(mux, "POST /api/namespace-data/fetch", s, Server.namespaceDataFetch)
 }
 
 type NamespaceAttribute struct {

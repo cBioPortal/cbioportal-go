@@ -16,12 +16,12 @@ import (
 // endpoints. All filtering/aggregation is pushed into ClickHouse; Go only maps
 // the final rows into the cBioPortal client JSON shapes.
 func (s Server) routeMolecular2(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number/fetch", s.Bulk().discreteCopyNumberFetch)
-	mux.HandleFunc("GET /api/molecular-profiles/{id}/discrete-copy-number", s.Bulk().discreteCopyNumberGet)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/discrete-copy-number-counts/fetch", s.copyNumberCountsFetch)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/mutation-spectrums/fetch", s.mutationSpectrumsFetch)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/variant-counts/fetch", s.variantCountsFetch)
-	mux.HandleFunc("POST /api/mutation-counts-by-position/fetch", s.mutationCountsByPositionFetch)
+	core.Handle(mux, "POST /api/molecular-profiles/{id}/discrete-copy-number/fetch", s.Bulk(), Server.discreteCopyNumberFetch)
+	core.Handle(mux, "GET /api/molecular-profiles/{id}/discrete-copy-number", s.Bulk(), Server.discreteCopyNumberGet)
+	core.Handle(mux, "POST /api/molecular-profiles/{id}/discrete-copy-number-counts/fetch", s, Server.copyNumberCountsFetch)
+	core.Handle(mux, "POST /api/molecular-profiles/{id}/mutation-spectrums/fetch", s, Server.mutationSpectrumsFetch)
+	core.Handle(mux, "POST /api/molecular-profiles/{id}/variant-counts/fetch", s, Server.variantCountsFetch)
+	core.Handle(mux, "POST /api/mutation-counts-by-position/fetch", s, Server.mutationCountsByPositionFetch)
 }
 
 // cnaEventAlterations maps a discreteCopyNumberEventType enum value to the set of

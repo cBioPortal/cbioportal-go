@@ -40,7 +40,7 @@ import (
 
 // Routes registers the study export endpoint.
 func (s Server) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /export/study/{file}", s.Bulk().exportStudy)
+	core.Handle(mux, "GET /export/study/{file}", s.Bulk(), Server.exportStudy)
 }
 
 // exportStudy serves the zip (ExportController.downloadStudyData): 404 with

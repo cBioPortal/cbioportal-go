@@ -16,15 +16,15 @@ import (
 // All filtering is pushed into ClickHouse.
 func (s Server) routeBulkList(mux *http.ServeMux) {
 	// Bulk GET list endpoints (no study scope).
-	mux.HandleFunc("GET /api/samples", s.allSamples)
-	mux.HandleFunc("GET /api/patients", s.allPatients)
-	mux.HandleFunc("GET /api/genes", s.allGenes)
-	mux.HandleFunc("GET /api/sample-lists", s.allSampleLists)
-	mux.HandleFunc("GET /api/clinical-attributes", s.allClinicalAttributes)
+	core.Handle(mux, "GET /api/samples", s, Server.allSamples)
+	core.Handle(mux, "GET /api/patients", s, Server.allPatients)
+	core.Handle(mux, "GET /api/genes", s, Server.allGenes)
+	core.Handle(mux, "GET /api/sample-lists", s, Server.allSampleLists)
+	core.Handle(mux, "GET /api/clinical-attributes", s, Server.allClinicalAttributes)
 
 	// Single-resource / patient-view GETs.
-	mux.HandleFunc("GET /api/sample-lists/{sampleListId}/sample-ids", s.sampleListSampleIDs)
-	mux.HandleFunc("GET /api/studies/{studyId}/samples/{sampleId}", s.sampleInStudy)
+	core.Handle(mux, "GET /api/sample-lists/{sampleListId}/sample-ids", s, Server.sampleListSampleIDs)
+	core.Handle(mux, "GET /api/studies/{studyId}/samples/{sampleId}", s, Server.sampleInStudy)
 }
 
 // ---------- Bulk samples ----------

@@ -252,6 +252,13 @@ does and why.
   importer sends every request with `alter_sync = 2`, `mutations_sync = 2`,
   `lightweight_deletes_sync = 2`, `select_sequential_consistency = 1` and `insert_deduplicate = 0`. A
   single-server ClickHouse ignores these settings.
+- **A query stops when its visitor leaves.** Each API request queries
+  ClickHouse with the request's own context. When the visitor closes the
+  page or a script gives up, the API closes its connection to ClickHouse.
+  ClickHouse then stops the query instead of running it to its time limit.
+  ClickHouse only does this for a read-only user with the setting
+  `cancel_http_readonly_queries_on_client_close = 1`, so give the API's
+  user both.
 - **Writes are sent in large pieces.** If a reader hands over one line at a
   time, the HTTP client sends many tiny pieces, which is slow. So
   `BodyReader.Read` fills its whole buffer each time. This makes loading a

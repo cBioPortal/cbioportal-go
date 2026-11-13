@@ -465,18 +465,18 @@ func SummaryMetaProperties(props map[string]core.JavaStringMap) map[string]core.
 // routeGenericAssay registers the generic-assay and geneset (GSVA) endpoints.
 func (s Server) routeGenericAssay(mux *http.ServeMux) {
 	// Generic assay data.
-	mux.HandleFunc("POST /api/generic_assay_data/{molecularProfileId}/fetch", s.Bulk().genericAssayDataInProfileFetch)
-	mux.HandleFunc("POST /api/generic_assay_data/fetch", s.Bulk().genericAssayDataMultipleFetch)
+	core.Handle(mux, "POST /api/generic_assay_data/{molecularProfileId}/fetch", s.Bulk(), Server.genericAssayDataInProfileFetch)
+	core.Handle(mux, "POST /api/generic_assay_data/fetch", s.Bulk(), Server.genericAssayDataMultipleFetch)
 
 	// Generic assay meta.
-	mux.HandleFunc("POST /api/generic-assay-meta/fetch", s.genericAssayMetaFetch)
+	core.Handle(mux, "POST /api/generic-assay-meta/fetch", s, Server.genericAssayMetaFetch)
 
 	// Genesets.
-	mux.HandleFunc("POST /api/genesets/fetch", s.genesetsFetch)
-	mux.HandleFunc("GET /api/genesets/{genesetId}", s.genesetGet)
+	core.Handle(mux, "POST /api/genesets/fetch", s, Server.genesetsFetch)
+	core.Handle(mux, "GET /api/genesets/{genesetId}", s, Server.genesetGet)
 
 	// Geneset molecular data (GSVA).
-	mux.HandleFunc("POST /api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch", s.genesetGeneticDataFetch)
+	core.Handle(mux, "POST /api/genetic-profiles/{geneticProfileId}/geneset-genetic-data/fetch", s, Server.genesetGeneticDataFetch)
 }
 
 // genericAssaySource is the staged generic-assay matrix with every column the

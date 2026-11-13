@@ -3,6 +3,8 @@
 package studies
 
 import (
+	"net/http"
+
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
@@ -28,5 +30,12 @@ func (s Server) Bulk() Server {
 	if s.BulkCH != nil {
 		s.CH = s.BulkCH
 	}
+	return s
+}
+
+// ForRequest returns s for one request: its queries are bound to the
+// request's context, so ClickHouse stops them when the client goes away.
+func (s Server) ForRequest(r *http.Request) Server {
+	s.CH = s.CH.WithContext(r.Context())
 	return s
 }

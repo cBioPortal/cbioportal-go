@@ -16,10 +16,10 @@ import (
 
 // RouteSurvival registers survival-data and clinical-event (timeline) endpoints.
 func (s Server) RouteSurvival(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/survival-data/fetch", s.survivalDataFetch)
-	mux.HandleFunc("POST /api/clinical-events-meta/fetch", s.clinicalEventsMetaFetch)
-	mux.HandleFunc("GET /api/studies/{studyId}/clinical-events", s.studyClinicalEvents)
-	mux.HandleFunc("GET /api/studies/{studyId}/patients/{patientId}/clinical-events", s.patientClinicalEvents)
+	core.Handle(mux, "POST /api/survival-data/fetch", s, Server.survivalDataFetch)
+	core.Handle(mux, "POST /api/clinical-events-meta/fetch", s, Server.clinicalEventsMetaFetch)
+	core.Handle(mux, "GET /api/studies/{studyId}/clinical-events", s, Server.studyClinicalEvents)
+	core.Handle(mux, "GET /api/studies/{studyId}/patients/{patientId}/clinical-events", s, Server.patientClinicalEvents)
 }
 
 // ---------- Survival data ----------

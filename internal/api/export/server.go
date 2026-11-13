@@ -3,6 +3,8 @@
 package export
 
 import (
+	"net/http"
+
 	"github.com/cbioportal/cbioportal-go/internal/api/comparison"
 	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
@@ -16,3 +18,6 @@ func New(s *core.State) Server { return Server{comparison.New(s)} }
 
 // Bulk returns the Server for the bulk endpoints (studies.Server.Bulk).
 func (s Server) Bulk() Server { return Server{s.Server.Bulk()} }
+
+// ForRequest returns s for one request (studies.Server.ForRequest).
+func (s Server) ForRequest(r *http.Request) Server { return Server{s.Server.ForRequest(r)} }

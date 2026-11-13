@@ -229,7 +229,7 @@ func (s Server) profileStudies(groups []casesGroup) (map[string]string, error) {
 }
 
 func (s Server) routeEnrichment(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/alteration-enrichments/fetch", s.alterationEnrichmentsFetch)
+	core.Handle(mux, "POST /api/alteration-enrichments/fetch", s, Server.alterationEnrichmentsFetch)
 }
 
 // profiledPerGene counts, per gene of genes, the entities (of studies) with a

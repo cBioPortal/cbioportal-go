@@ -11,8 +11,8 @@ import (
 // routeStudyTags registers the study-tags endpoints (StudyController), served
 // from the cancer_study_tags view (the study's tags_file YAML stored as JSON).
 func (s Server) routeStudyTags(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/studies/{studyId}/tags", s.studyTagsGet)
-	mux.HandleFunc("POST /api/studies/tags/fetch", s.studyTagsFetch)
+	core.Handle(mux, "GET /api/studies/{studyId}/tags", s, Server.studyTagsGet)
+	core.Handle(mux, "POST /api/studies/tags/fetch", s, Server.studyTagsFetch)
 }
 
 // CancerStudyTags is the CancerStudyTags model: tags is the JSON document as a

@@ -17,10 +17,10 @@ import (
 // routeStudyView3 registers study-view endpoints for clinical-data enrichments,
 // the clinical-data table and custom (session) charts.
 func (s Server) routeStudyView3(mux router) {
-	mux.HandleFunc("POST /api/clinical-data-enrichments/fetch", s.clinicalDataEnrichmentsFetch)
-	mux.HandleFunc("POST /api/clinical-data-table/fetch", s.clinicalDataTableFetch)
-	mux.HandleFunc("POST /api/custom-data-counts/fetch", s.customDataCountsFetch)
-	mux.HandleFunc("POST /api/custom-data-bin-counts/fetch", s.customDataBinCountsFetch)
+	core.Handle(mux, "POST /api/clinical-data-enrichments/fetch", s, Server.clinicalDataEnrichmentsFetch)
+	core.Handle(mux, "POST /api/clinical-data-table/fetch", s, Server.clinicalDataTableFetch)
+	core.Handle(mux, "POST /api/custom-data-counts/fetch", s, Server.customDataCountsFetch)
+	core.Handle(mux, "POST /api/custom-data-bin-counts/fetch", s, Server.customDataBinCountsFetch)
 }
 
 // naFilter is the cBioPortal rule for excluding "not available" clinical values,

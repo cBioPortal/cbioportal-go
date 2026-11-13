@@ -16,10 +16,10 @@ import (
 // routeSvData registers the structural-variant detail, gene-panel-data, and
 // multi-study molecular-data endpoints.
 func (s Server) routeSvData(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/structural-variant/fetch", s.structuralVariantFetch)
-	mux.HandleFunc("POST /api/gene-panel-data/fetch", s.Bulk().genePanelDataFetch)
-	mux.HandleFunc("POST /api/molecular-profiles/{id}/gene-panel-data/fetch", s.Bulk().genePanelDataProfileFetch)
-	mux.HandleFunc("POST /api/molecular-data/fetch", s.Bulk().molecularDataMultipleStudyFetch)
+	core.Handle(mux, "POST /api/structural-variant/fetch", s, Server.structuralVariantFetch)
+	core.Handle(mux, "POST /api/gene-panel-data/fetch", s.Bulk(), Server.genePanelDataFetch)
+	core.Handle(mux, "POST /api/molecular-profiles/{id}/gene-panel-data/fetch", s.Bulk(), Server.genePanelDataProfileFetch)
+	core.Handle(mux, "POST /api/molecular-data/fetch", s.Bulk(), Server.molecularDataMultipleStudyFetch)
 }
 
 // ---------- Structural variants (detail rows) ----------

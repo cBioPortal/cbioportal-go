@@ -13,9 +13,9 @@ import (
 // metadata GETs.
 func (s Server) routeGenericAssay2(mux *http.ServeMux) {
 	// Single-entity data + metadata GETs.
-	mux.HandleFunc("GET /api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", s.Bulk().genericAssayDataInProfileGet)
-	mux.HandleFunc("GET /api/generic-assay-meta/generic-assay/{genericAssayStableId}", s.genericAssayMetaByStableIdGet)
-	mux.HandleFunc("GET /api/generic-assay-meta/{molecularProfileId}", s.genericAssayMetaByIDGet)
+	core.Handle(mux, "GET /api/generic-assay-data/{molecularProfileId}/generic-assay/{genericAssayStableId}", s.Bulk(), Server.genericAssayDataInProfileGet)
+	core.Handle(mux, "GET /api/generic-assay-meta/generic-assay/{genericAssayStableId}", s, Server.genericAssayMetaByStableIdGet)
+	core.Handle(mux, "GET /api/generic-assay-meta/{molecularProfileId}", s, Server.genericAssayMetaByIDGet)
 }
 
 // ---------- Generic assay data counts (study view, categorical) ----------

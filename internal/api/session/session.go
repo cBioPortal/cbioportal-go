@@ -99,21 +99,21 @@ func readObject(r *http.Request) (map[string]any, error) {
 
 // Routes registers the session service and virtual study endpoints.
 func (s Server) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/session/{type}", s.sessionAdd)
+	core.Handle(mux, "POST /api/session/{type}", s, Server.sessionAdd)
 	mux.HandleFunc("POST /api/session/virtual_study/save", s.sessionAddWith("virtual_study", true))
 	mux.HandleFunc("POST /api/session/custom_gene_list/save", s.sessionAddWith("custom_gene_list", true))
-	mux.HandleFunc("GET /api/session/{type}/{id}", s.sessionGet)
-	mux.HandleFunc("GET /api/session/virtual_study", s.sessionUserVirtualStudies)
-	mux.HandleFunc("GET /api/session/custom_gene_list", s.sessionUserCustomGeneLists)
-	mux.HandleFunc("GET /api/session/{type}/{operation}/{id}", s.sessionUpdateUsers)
+	core.Handle(mux, "GET /api/session/{type}/{id}", s, Server.sessionGet)
+	core.Handle(mux, "GET /api/session/virtual_study", s, Server.sessionUserVirtualStudies)
+	core.Handle(mux, "GET /api/session/custom_gene_list", s, Server.sessionUserCustomGeneLists)
+	core.Handle(mux, "GET /api/session/{type}/{operation}/{id}", s, Server.sessionUpdateUsers)
 	mux.HandleFunc("POST /api/session/groups/fetch", s.sessionFetchByOrigin("group"))
 	mux.HandleFunc("POST /api/session/custom_data/fetch", s.sessionFetchByOrigin("custom_data"))
-	mux.HandleFunc("POST /api/session/settings", s.sessionUpdateSettings)
-	mux.HandleFunc("POST /api/session/settings/fetch", s.sessionFetchSettings)
+	core.Handle(mux, "POST /api/session/settings", s, Server.sessionUpdateSettings)
+	core.Handle(mux, "POST /api/session/settings/fetch", s, Server.sessionFetchSettings)
 
-	mux.HandleFunc("GET /api/public_virtual_studies", s.publicVirtualStudies)
-	mux.HandleFunc("POST /api/public_virtual_studies/{id}", s.publishVirtualStudy)
-	mux.HandleFunc("DELETE /api/public_virtual_studies/{id}", s.unpublishVirtualStudy)
+	core.Handle(mux, "GET /api/public_virtual_studies", s, Server.publicVirtualStudies)
+	core.Handle(mux, "POST /api/public_virtual_studies/{id}", s, Server.publishVirtualStudy)
+	core.Handle(mux, "DELETE /api/public_virtual_studies/{id}", s, Server.unpublishVirtualStudy)
 }
 
 // ---- create ----

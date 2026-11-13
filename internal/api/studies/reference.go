@@ -15,10 +15,10 @@ import (
 // reference-genome-gene endpoints.
 func (s Server) routeReference(mux *http.ServeMux) {
 	// Gene aliases + reference genome genes.
-	mux.HandleFunc("GET /api/genes/{geneId}/aliases", s.geneAliases)
-	mux.HandleFunc("GET /api/reference-genome-genes/{genomeName}", s.referenceGenomeGenes)
-	mux.HandleFunc("GET /api/reference-genome-genes/{genomeName}/{geneId}", s.referenceGenomeGeneGet)
-	mux.HandleFunc("POST /api/reference-genome-genes/{genomeName}/fetch", s.referenceGenomeGenesFetch)
+	core.Handle(mux, "GET /api/genes/{geneId}/aliases", s, Server.geneAliases)
+	core.Handle(mux, "GET /api/reference-genome-genes/{genomeName}", s, Server.referenceGenomeGenes)
+	core.Handle(mux, "GET /api/reference-genome-genes/{genomeName}/{geneId}", s, Server.referenceGenomeGeneGet)
+	core.Handle(mux, "POST /api/reference-genome-genes/{genomeName}/fetch", s, Server.referenceGenomeGenesFetch)
 }
 
 // ---------- 5. GET /api/genes/{geneId}/aliases ----------
