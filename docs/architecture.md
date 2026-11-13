@@ -211,10 +211,16 @@ The project uses these seven libraries directly:
 These rules come from how ClickHouse works. Each one says what the code
 does and why.
 
-- **Deletes wait until they are done.** In ClickHouse, `ALTER … DELETE`
-  runs in the background. So when a study is ingested again, the importer
-  adds `SETTINGS mutations_sync = 2`. ClickHouse then waits until the old
-  rows are gone before the importer counts the new ones.
+- **Deletes only mark rows.** When a study or a file is ingested again,
+  the importer removes its old rows with a lightweight `DELETE`. This marks
+  the rows as deleted and hides them from every query, and ClickHouse
+  removes them from disk later, during its background merges. The other
+  way, `ALTER … DELETE`, rewrites every part of the table that holds one of
+  the rows. That is many times slower: removing a 1,500-row study from a
+  163-million-row table took 3 seconds instead of 52.
+- **Deletes wait until they are done.** The importer adds
+  `SETTINGS lightweight_deletes_sync = 2`. ClickHouse then waits until every
+  copy hides the old rows before the importer counts the new ones.
 - **Every request asks for consistent copies.** ClickHouse Cloud keeps
   several copies of the database, and two requests in a row can reach
   different copies. An `INSERT` right after `ALTER … ADD COLUMN` could reach
@@ -222,7 +228,7 @@ does and why.
   block of rows that is identical to an earlier one, so a file ingested
   again without changes would stay deleted. To avoid both problems, the
   importer sends every request with `alter_sync = 2`, `mutations_sync = 2`,
-  `select_sequential_consistency = 1` and `insert_deduplicate = 0`. A
+  `lightweight_deletes_sync = 2`, `select_sequential_consistency = 1` and `insert_deduplicate = 0`. A
   single-server ClickHouse ignores these settings.
 - **Writes are sent in large pieces.** If a reader hands over one line at a
   time, the HTTP client sends many tiny pieces, which is slow. So

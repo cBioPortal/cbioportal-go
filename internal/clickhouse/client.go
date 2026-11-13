@@ -221,13 +221,13 @@ func SetProcessSettings(settings map[string]string) {
 
 // ReplicaConsistentSettings make a writer's requests see each other's effects
 // on a replicated service such as ClickHouse Cloud, whose HTTP requests may
-// reach different replicas: ALTERs and mutations return once every replica
-// applied them, and reads see every insert acknowledged before them. Inserts
+// reach different replicas: ALTERs, mutations and lightweight deletes return
+// once every replica applied them, and reads see every insert acknowledged before them. Inserts
 // are not deduplicated: a replicated table drops a block identical to one
 // inserted before, so re-ingesting an unchanged file after deleting its rows
 // would leave them deleted. Single-node servers ignore these settings.
 var ReplicaConsistentSettings = map[string]string{
-	"alter_sync": "2", "mutations_sync": "2", "select_sequential_consistency": "1", "insert_deduplicate": "0",
+	"alter_sync": "2", "mutations_sync": "2", "lightweight_deletes_sync": "2", "select_sequential_consistency": "1", "insert_deduplicate": "0",
 }
 
 // withSessionSettings adds the settings every request runs with. Queries can
@@ -255,12 +255,14 @@ func insertSQLHead(q string) string {
 	return q
 }
 
-// DeleteWhere runs a synchronous ALTER … DELETE (mutations_sync=2: on every
-// replica) so the rows are gone before any subsequent count, making re-ingest
-// idempotent.
+// DeleteWhere deletes rows with a lightweight DELETE, which marks them
+// deleted instead of rewriting the table's data; background merges remove
+// them later. It waits until every replica hides the rows
+// (lightweight_deletes_sync = 2), so they are gone before any later count,
+// making re-ingest idempotent.
 func (c *Client) DeleteWhere(table, where string) {
 	c.Execute(fmt.Sprintf(
-		"ALTER TABLE `%s`.`%s` DELETE WHERE %s SETTINGS mutations_sync = 2",
+		"DELETE FROM `%s`.`%s` WHERE %s SETTINGS lightweight_deletes_sync = 2",
 		c.database, table, where))
 }
 

@@ -54,10 +54,11 @@ func RemoveStudy(c *ch.Client, studyID string) (int, error) {
 		return 0, err
 	}
 	for i, t := range tables {
-		// mutations_sync = 2 waits for every replica, so the next transform
-		// reads none of the rows.
+		// A lightweight DELETE marks the rows deleted without rewriting the
+		// table. lightweight_deletes_sync = 2 waits for every replica, so the
+		// next transform reads none of the rows.
 		if _, err := c.Execute(fmt.Sprintf(
-			"ALTER TABLE `%s`.`%s` DELETE WHERE study_id = '%s' SETTINGS mutations_sync = 2",
+			"DELETE FROM `%s`.`%s` WHERE study_id = '%s' SETTINGS lightweight_deletes_sync = 2",
 			c.Database(), t.Table, ch.SQLLit(studyID))); err != nil {
 			return i, fmt.Errorf("removing study %s from %s: %w", studyID, t.Table, err)
 		}
