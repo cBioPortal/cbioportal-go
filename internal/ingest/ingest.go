@@ -75,6 +75,18 @@ func backtick(cols []string) string {
 	return strings.Join(q, ", ")
 }
 
+// stagingSortKey is a staging table's sort key: the study and file, which
+// deletes name, then the gene or entity column a matrix has, which the API's
+// reads of one profile's genes or entities filter on.
+func stagingSortKey(dataColumns []string) string {
+	for _, col := range []string{"hugo_symbol", "entity_stable_id"} {
+		if slices.Contains(dataColumns, col) {
+			return "(study_id, source_file, `" + col + "`)"
+		}
+	}
+	return "(study_id, source_file)"
+}
+
 // ensureSchema creates the staging table (provenance, file_num, row_num and
 // the data columns as String) or adds any missing columns to an existing one.
 func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
@@ -92,8 +104,8 @@ func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 		for _, col := range dataColumns {
 			defs = append(defs, fmt.Sprintf("`%s` String", col))
 		}
-		ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY (study_id, source_file)",
-			c.Database(), table, strings.Join(defs, ", "))
+		ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY %s",
+			c.Database(), table, strings.Join(defs, ", "), stagingSortKey(dataColumns))
 		_, err := c.Execute(ddl)
 		return err
 	}

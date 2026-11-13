@@ -51,6 +51,13 @@ yet. Because there is little work per row, ClickHouse's own speed sets the
 pace. For example, msk_impact_2017 (about 11,000 samples) loads in seconds.
 Ingesting a study again replaces the old copy.
 
+Each staging table is sorted by study and file. A table with a gene or
+entity column, such as an expression or methylation matrix, is also sorted
+by that column. The API reads a profile's data for a few genes straight
+from these tables, and the extra sort lets it skip the other genes. A
+staging table gets its sort order when it is created, so an older staging
+database keeps the old order until it is rebuilt.
+
 ### Transform: build the API's tables
 
 `cbioportal-import transform` reads the staging tables and builds the tables

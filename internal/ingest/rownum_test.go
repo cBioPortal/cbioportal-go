@@ -182,3 +182,18 @@ func TestLiveSampleIDSQL(t *testing.T) {
 		}
 	}
 }
+
+func TestStagingSortKey(t *testing.T) {
+	for _, c := range []struct {
+		cols []string
+		want string
+	}{
+		{[]string{"entrez_gene_id", "hugo_symbol", "sample_id", "value"}, "(study_id, source_file, `hugo_symbol`)"},
+		{[]string{"entity_stable_id", "name", "sample_id", "value"}, "(study_id, source_file, `entity_stable_id`)"},
+		{[]string{"sample_id", "attr_id", "value"}, "(study_id, source_file)"},
+	} {
+		if got := stagingSortKey(c.cols); got != c.want {
+			t.Errorf("stagingSortKey(%v) = %s, want %s", c.cols, got, c.want)
+		}
+	}
+}
