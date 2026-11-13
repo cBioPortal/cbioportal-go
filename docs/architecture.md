@@ -64,7 +64,10 @@ It builds two kinds of tables:
 - the **normalized model**: one table per kind of thing (studies, samples,
   mutations, and so on), similar to the Java database, and
 - the **`*_derived` tables**: wide tables, shaped for the study view page so
-  its charts can be counted quickly.
+  its charts can be counted quickly. Each is sorted the same way as
+  production's, for example by study, then gene, then profile type. A
+  request for one gene in one study then reads only those rows, not the
+  whole table.
 
 A few rules keep the results the same as Java:
 

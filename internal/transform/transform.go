@@ -219,22 +219,29 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		}
 	}
 
-	// Prod-aligned column-store `*_derived` views (built from our staging with
-	// prod's exact column names), created after the base views they read.
-	// Ordered so every table is built after the tables it reads.
-	for _, d := range []view{
-		{"gene_panel_to_gene_derived", genePanelToGeneDerivedSQL(targetDB, refDB)},
-		{"sample_to_gene_panel_derived", sampleToGenePanelDerivedSQL(targetDB)},
-		{"sample_derived", sampleDerivedSQL(rawDB, refDB, targetDB)},
-		{"clinical_data_derived", clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
-		{"genomic_event_derived", genomicEventDerivedSQL(c, rawDB, refDB, targetDB, hasGenomeGenes)},
-		{"genetic_alteration_derived", geneticAlterationDerivedSQL(rawDB, targetDB)},
-		{"generic_assay_data_derived", genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
-			hasColumn(c, rawDB, "genetic_profile", "patient_level") && hasColumn(c, rawDB, "genetic_profile", "generic_assay_type"))},
-		{"clinical_event_derived", clinicalEventDerivedSQL(rawDB, refDB)},
-		{"clinical_event_data_derived", clinicalEventDataDerivedSQL(c, rawDB)},
+	// Prod-aligned column-store `*_derived` tables (built from our staging
+	// with prod's exact column names and sort keys, which the API's reads
+	// lead with), created after the base views they read. Ordered so every
+	// table is built after the tables it reads.
+	for _, d := range []struct{ name, key, sql string }{
+		{"gene_panel_to_gene_derived", "(gene_panel_id)", genePanelToGeneDerivedSQL(targetDB, refDB)},
+		{"sample_to_gene_panel_derived", "(gene_panel_id, alteration_type, genetic_profile_id, sample_unique_id)",
+			sampleToGenePanelDerivedSQL(targetDB)},
+		{"sample_derived", "(cancer_study_identifier, sample_unique_id)", sampleDerivedSQL(rawDB, refDB, targetDB)},
+		{"clinical_data_derived", "(cancer_study_identifier, type, attribute_name, sample_unique_id)",
+			clinicalDataDerivedSQL(rawDB, refDB, targetDB)},
+		{"genomic_event_derived",
+			"(genetic_profile_stable_id, cancer_study_identifier, variant_type, entrez_gene_id, hugo_gene_symbol, sample_unique_id)",
+			genomicEventDerivedSQL(c, rawDB, refDB, targetDB, hasGenomeGenes)},
+		{"genetic_alteration_derived", "(cancer_study_identifier, hugo_gene_symbol, profile_type, sample_unique_id)",
+			geneticAlterationDerivedSQL(rawDB, targetDB)},
+		{"generic_assay_data_derived", "(profile_type, entity_stable_id, patient_unique_id, sample_unique_id)",
+			genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
+				hasColumn(c, rawDB, "genetic_profile", "patient_level") && hasColumn(c, rawDB, "genetic_profile", "generic_assay_type"))},
+		{"clinical_event_derived", "(cancer_study_identifier, event_type, clinical_event_id)", clinicalEventDerivedSQL(rawDB, refDB)},
+		{"clinical_event_data_derived", "(cancer_study_identifier, event_type, patient_unique_id)", clinicalEventDataDerivedSQL(c, rawDB)},
 	} {
-		if err := materialize(d.name, "tuple()", d.sql); err != nil {
+		if err := materialize(d.name, d.key, d.sql); err != nil {
 			return nil, err
 		}
 	}
