@@ -118,16 +118,31 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
 	// materialize builds a table sorted by orderBy (atomically replaced)
 	// instead of a view, for what the API reads on every request, as prod
-	// does.
-	materialize := func(name, orderBy, sel string) error {
+	// does. Each projection ("name (SELECT … ORDER BY …)") keeps a copy of
+	// the rows in another order, which ClickHouse reads instead when a query
+	// filters on that order's leading columns.
+	materialize := func(name, orderBy, sel string, projections ...string) error {
 		if engineOf(name) == "View" {
 			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, name)); err != nil {
 				return err
 			}
 		}
-		if _, err := c.Execute(fmt.Sprintf(
-			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s AS %s", targetDB, name, orderBy, sel)); err != nil {
-			return fmt.Errorf("creating table %s: %w", name, err)
+		stmts := []string{fmt.Sprintf(
+			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s AS %s", targetDB, name, orderBy, sel)}
+		if len(projections) > 0 {
+			// A projection is added to the empty table so the insert builds
+			// it with the rows.
+			stmts = []string{fmt.Sprintf(
+				"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s EMPTY AS %s", targetDB, name, orderBy, sel)}
+			for _, p := range projections {
+				stmts = append(stmts, fmt.Sprintf("ALTER TABLE `%s`.`%s` ADD PROJECTION %s", targetDB, name, p))
+			}
+			stmts = append(stmts, fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel))
+		}
+		for _, q := range stmts {
+			if _, err := c.Execute(q); err != nil {
+				return fmt.Errorf("creating table %s: %w", name, err)
+			}
 		}
 		created = append(created, name)
 		return nil
@@ -253,7 +268,14 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"clinical_event_data_derived", "(cancer_study_identifier, event_type, patient_unique_id)", "cancer_study_identifier, event_type, key",
 			clinicalEventDataDerivedSQL(c, rawDB)},
 	} {
-		if err := materialize(d.name, d.key, withLowCardinality(d.sql, d.lowCardinality)); err != nil {
+		var projections []string
+		if d.name == "genetic_alteration_derived" {
+			// Co-expression and the study view's per-profile gene counts
+			// read one profile of a study across all its genes.
+			projections = append(projections,
+				"by_profile (SELECT * ORDER BY cancer_study_identifier, profile_type, hugo_gene_symbol, sample_unique_id)")
+		}
+		if err := materialize(d.name, d.key, withLowCardinality(d.sql, d.lowCardinality), projections...); err != nil {
 			return nil, err
 		}
 	}

@@ -74,7 +74,10 @@ It builds two kinds of tables:
   its charts can be counted quickly. Each is sorted the same way as
   production's, for example by study, then gene, then profile type. A
   request for one gene in one study then reads only those rows, not the
-  whole table.
+  whole table. `genetic_alteration_derived` also keeps a second copy of its
+  rows sorted by study, then profile type, then gene (a ClickHouse
+  *projection*). ClickHouse reads that copy by itself for requests that
+  need one profile across all genes, such as co-expression.
 
 A few rules keep the results the same as Java:
 
