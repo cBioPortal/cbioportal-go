@@ -85,7 +85,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 35 fixes in one place. It shows what a client gets
+This table collects all 36 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -124,6 +124,7 @@ stores less where Java stores empty rows.
 | Namespace attributes | Java reads them from one record, picked at random. | go reads them from every record. |
 | `variant-counts` for a mutation profile | Java also lists outdated counts: the importer adds a profile's counts each time it computes them and never removes the earlier ones. | go counts the profile's current mutations, so it gives one row per gene and keyword. |
 | `clinical-data-bin-counts` where the filtered samples have no value for an attribute | Java counts each sample as NA once for every selected study that defines the attribute, so there can be more NA samples than samples. | go counts each sample once. |
+| Clinical data counts and bins for an attribute that some selected studies store per patient and others per sample | Java counts every sample of the selected patients, also samples outside the selection. | go counts only the selected samples. |
 | Import: `clinical_data_derived` | Java stores a row for every attribute and case, even empty ones. | go stores only real values. The API answers the same. |
 | Import: copy-number segments | Java skips segments whose start is not below their end. | go keeps them. There are 4 on msk_chord_2024 and 10 on msk_impact_50k_2026. |
 | Import: timeline rows | Java drops rows for patients not in the study, and rows with more fields than the header. | go keeps them. |
@@ -265,6 +266,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `mutation-data-counts` with sample ids lists "Not Mutated" and "Not Profiled" as their own items, even when they are empty. | StudyViewColumnarServiceUtil | Copied. | TestContractMutationDataCountsWithSampleIDs |
 | `mutation-data-counts` without `genomicDataFilters` counts every mutated gene by mutation type (DETAILED and ID). SUMMARY returns an empty list. | ClickhouseGenomicDataMapper.getMutationCountsByType (an empty gene condition) | Copied. | TestContractMutationDataCountsWithoutFilters |
 | Clinical enrichments decide whether a value is a number with Java's `NumberUtils.isCreatable`. A whole number with a leading zero counts only if it is a valid octal number: `07` counts, `08` does not. | ClinicalDataEnrichmentUtil | Copied. | TestDecimalCreatable |
+| `clinical-data-counts` and `clinical-data-bin-counts` count an attribute that some selected studies store per patient and others per sample (a conflicting attribute) over every sample of the selected patients. Samples outside the selection are counted too, and the NA count shrinks by as many. | ClickhouseClinicalDataMapper (`getClinicalDataCountsQueryByStudyViewFilter`, isConflicting: filtered by patient, joined to all of the patient's samples) | Fixed in go. go counts each selected sample once: its own value, or its patient's. | TestMixedLevelAttributes, known.go |
 | `clinical-data-bin-counts` gives too large an NA count when the filtered samples have no value for an attribute that several selected studies define. Java adds an NA count for each of those studies and then sums them, so the NA count is the number of samples times the number of studies. | GetClinicalDataCountsUseCase (`addClinicalDataCountsForMissingAttributes`) | Fixed in go. go counts each sample once. | known.go |
 | `clinical-data-enrichments` describes an attribute that several studies define with one study's metadata: the study imported last (the highest internal study id). Java keeps the last of `clinical_attribute_meta`'s rows, which are sorted by attribute, then internal study id. | FetchClinicalDataEnrichmentsUseCase | Copied. | TestContractClinicalDataEnrichmentsAttributeStudy |
 | `genomic-data-bin-counts` with two profiles puts every gene in the first filter's profile type and adds one NA bin. | GetGenomicDataBinCountsUseCase; www | Fixed in go. go puts each gene in its own profile. | corpus `genomic-data-bin-counts-two-profiles` |

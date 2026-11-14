@@ -61,7 +61,7 @@ func TestExpect(t *testing.T) {
 		{"GET", "/api/studies/s/clinical-events?pageSize=10000", "", ""},
 		{"POST", "/api/legacy/clinical-data-counts/fetch", `{"attributes":[{"attributeId":"ETHNICITY"}],"studyViewFilter":{"studyIds":["a","b"],"clinicalDataFilters":[{"attributeId":"CANCER_STUDY","values":[{"value":"a"}]}]}}`, `known="Java's legacy StudyViewFilterApplier`},
 		{"POST", "/api/legacy/filtered-samples/fetch", `{"studyIds":["a"],"clinicalDataFilters":[{"attributeId":"CANCER_STUDY","values":[{"value":"a"}]}]}`, `known="Java's legacy StudyViewFilterApplier`},
-		{"POST", "/api/clinical-data-counts/fetch", `{"attributes":[],"studyViewFilter":{"studyIds":["a"],"clinicalDataFilters":[{"attributeId":"CANCER_STUDY","values":[{"value":"a"}]}]}}`, ""},
+		{"POST", "/api/clinical-data-counts/fetch", `{"attributes":[],"studyViewFilter":{"studyIds":["a"],"clinicalDataFilters":[{"attributeId":"CANCER_STUDY","values":[{"value":"a"}]}]}}`, "known-if-mixed-level="},
 		{"POST", "/api/molecular-profile-sample-counts/fetch", "{}", "ignore=label"},
 		{"POST", "/api/sample-lists-counts/fetch", "{}", "ignore=label"},
 		{"POST", "/api/molecular-profiles/p/mutations/fetch?pageSize=1000&pageNumber=452&projection=DETAILED", `{"sampleListId":"l"}`, "known="},
@@ -124,6 +124,8 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/genomic-data-bin-counts/fetch?dataBinMethod=DYNAMIC", `{"genomicDataBinFilters":[]}`, "known-if-b-subset="},
 		{"POST", "/api/generic-assay-data-bin-counts/fetch", `{"genericAssayDataBinFilters":[]}`, "known-if-b-subset="},
 		{"POST", "/api/clinical-data-bin-counts/fetch", `{"attributes":[]}`, "known-if-na-multiple="},
+		{"POST", "/api/clinical-data-bin-counts/fetch?dataBinMethod=STATIC", `{"attributes":[]}`, "known-if-mixed-level="},
+		{"POST", "/api/clinical-data-counts/fetch", `{"attributes":[]}`, "known-if-mixed-level="},
 		{"POST", "/api/molecular-profiles/p_mutations/variant-counts/fetch", `[{"entrezGeneId":1956,"keyword":"EGFR A289 missense"}]`, "known-if-a-subset="},
 	} {
 		got, _ := expect(c.method, c.target, c.body)

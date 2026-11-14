@@ -16,7 +16,8 @@ import (
 // from production is expected: options appended to the corpus header (an
 // ignore list, known="reason", known-if-empty="reason",
 // known-if-b-fails="reason", known-if-a-subset="reason",
-// known-if-b-subset="reason" or known-if-na-multiple="reason") and, for ignored
+// known-if-b-subset="reason", known-if-na-multiple="reason" or
+// known-if-mixed-level="reason") and, for ignored
 // keys, a comment with the reason.
 type expectation struct {
 	match   func(method, path string, query url.Values, body string) bool
@@ -64,6 +65,7 @@ var (
 	isGenericAssayAll = pathIs(`^/api/generic_assay_data/fetch$`)
 	isContEnrichments = pathIs(`^/api/(legacy/)?(expression|generic-assay)-enrichments/fetch$`)
 	isVariantCounts   = pathIs(`^/api/molecular-profiles/[^/]+/variant-counts/fetch$`)
+	isClinicalCounts  = pathIs(`^/api/(legacy/)?clinical-data-counts/fetch$`)
 	isClinicalBins    = pathIs(`^/api/(legacy/)?clinical-data-bin-counts/fetch$`)
 	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
@@ -458,8 +460,12 @@ var expectations = []expectation{
 	},
 	{
 		match: func(m, p string, q url.Values, b string) bool { return m == "POST" && isClinicalBins(p) },
-		options: `known-if-na-multiple="when the filtered samples have no value for an attribute, Java's GetClinicalDataCountsUseCase adds an NA count ` +
+		options: `known-if-mixed-level="for an attribute some selected studies store per patient and others per sample, Java's ClickhouseClinicalDataMapper counts every sample of the selected patients, also samples outside the selection; go counts the selected samples (Fixed in go; docs/rewrite/java-quirks.md)" known-if-na-multiple="when the filtered samples have no value for an attribute, Java's GetClinicalDataCountsUseCase adds an NA count ` +
 			`for each selected study that defines it and sums them, so the NA count is a multiple of the samples; go counts each sample once (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match:   func(m, p string, q url.Values, b string) bool { return m == "POST" && isClinicalCounts(p) },
+		options: `known-if-mixed-level="for an attribute some selected studies store per patient and others per sample, Java's ClickhouseClinicalDataMapper counts every sample of the selected patients, also samples outside the selection; go counts the selected samples (Fixed in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
 		match:   func(m, p string, q url.Values, b string) bool { return isCaseListCounts(p) },
@@ -523,7 +529,7 @@ func expectUnslashed(method, path, rawQuery, body string, slashed bool) (options
 
 // expectationOptions are the header options expect sets; annotate replaces
 // them.
-var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset|known-if-na-multiple)="[^"]*"| ignore=\S+| reltol=\S+`)
+var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset|known-if-na-multiple|known-if-mixed-level)="[^"]*"| ignore=\S+| reltol=\S+`)
 
 // annotate copies a corpus written by this command with the expectations
 // marked as they stand now: the options and comments of earlier

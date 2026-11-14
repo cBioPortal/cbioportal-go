@@ -616,6 +616,7 @@ func main() {
 	opts := defaultOptions()
 	opts.MaxDiffs = *maxDiffs
 
+	mixed := mixedLevels{}
 	compare := func(rq request) result {
 		start := time.Now()
 		ra, errA := fa.get(rq)
@@ -626,6 +627,11 @@ func main() {
 			res = fetchFailed(rq.Name, ra.Status, errA, errB)
 		} else {
 			res = compareResponses(rq, ra, rb, opts)
+			if res.Outcome == differs && rq.Opts.KnownIfMixedLevel != "" {
+				if attrs := mixed.of(fa, rq.Body); len(attrs) > 0 && onlyAttributesDiffer(ra, rb, attrs, rq, opts) {
+					res.Outcome, res.Known = known, rq.Opts.KnownIfMixedLevel
+				}
+			}
 		}
 		// One request's bodies are held at a time, and A's no longer than
 		// needed: they are dumped (and removed again below if the request
