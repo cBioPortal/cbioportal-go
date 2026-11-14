@@ -10,6 +10,7 @@
 #   OPTIONAL=true test/e2e_api.sh   # authenticate=optional_oauth2: open, sign-in optional
 #   BASIC=true test/e2e_api.sh  # also the shared user basicuser / basicpass, role ascn_test_study
 #   REDIS=localhost:16379 REDIS_PASSWORD=pw test/e2e_api.sh   # login sessions in Redis
+#   test/e2e_api.sh --session.service.url=...   # further arguments go to the API, e.g. portal properties
 #
 # Anonymous mode is the contract tests' backend: it serves study_hg38, which
 # the e2e portal properties lock (study_availability.enabled), since the
@@ -77,4 +78,4 @@ fi
 FRONTEND_DIR=${FRONTEND_DIR:-} PUBLISHER_API_KEY=SECRETKEY \
   SESSION_STORE_FILE=${SESSION_STORE_FILE:-.sessions.json} PORT=$PORT \
   CBIOPORTAL_DB=${CBIOPORTAL_DB:-cbioportal_e2e} CBIOPORTAL_RAW_DB=${CBIOPORTAL_RAW_DB:-cbioportal_e2e_raw} \
-  exec bin/cbioportal-api --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties "${auth[@]}"
+  exec bin/cbioportal-api --portal-properties=frontend/end-to-end-test/local/runtime-config/portal.properties "${auth[@]}" "$@"

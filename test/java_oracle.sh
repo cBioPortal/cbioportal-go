@@ -13,7 +13,9 @@
 # (http://localhost:18123; reached from the containers over the host
 # network), CLICKHOUSE_CONTAINER (the ClickHouse server container, for
 # clickhouse-client; found by its image when only one runs), JAVA_PORT (18095), PORTAL_PROPERTIES (the frontend
-# submodule's e2e portal.properties).
+# submodule's e2e portal.properties), SESSION_SERVICE_URL, SESSION_SERVICE_USER,
+# SESSION_SERVICE_PASSWORD and PUBLISHER_API_KEY (a session service for the
+# session endpoints, e.g. test/session_service.sh's; none by default).
 set -euo pipefail
 IMAGE=${IMAGE:-cbioportal/cbioportal:master}
 CH=${CLICKHOUSE_URL:-http://localhost:18123}
@@ -79,9 +81,14 @@ start)
     -e 's#^(spring\.datasource(\.[a-z]+)?\.password)=.*#\1=oracle#' \
     -e 's#^(spring\.datasource\.driver-class-name)=.*#\1=com.clickhouse.jdbc.ClickHouseDriver#' \
     "$props" > "$WORK/application.properties"
+  # Release images ship one Spring Boot jar; master images the classes and libraries.
+  main=(-cp '/cbioportal-webapp:/cbioportal-webapp/lib/*' org.cbioportal.PortalApplication)
+  docker run --rm --entrypoint sh "$IMAGE" -c 'test -f /cbioportal-webapp/app.jar' && main=(-jar /cbioportal-webapp/app.jar)
   docker run -d --name java-oracle --network host -v "$WORK/application.properties:/cbioportal-webapp/application.properties:ro" \
-    --entrypoint java "$IMAGE" -Xms512m -Xmx2g -cp '/cbioportal-webapp:/cbioportal-webapp/lib/*' org.cbioportal.PortalApplication \
-    --spring.config.location=file:/cbioportal-webapp/application.properties --authenticate=false --session.service.url= \
+    --entrypoint java "$IMAGE" -Xms512m -Xmx2g "${main[@]}" \
+    --spring.config.location=file:/cbioportal-webapp/application.properties --authenticate=false --session.service.url="${SESSION_SERVICE_URL:-}" \
+    --session.service.user="${SESSION_SERVICE_USER:-}" --session.service.password="${SESSION_SERVICE_PASSWORD:-}" \
+    --session.endpoint.publisher-api-key="${PUBLISHER_API_KEY:-}" \
     --clickhouse_mode=true --spring.profiles.active=clickhouse --server.port=$PORT
   timeout 300 bash -c "until curl -sf -o /dev/null localhost:$PORT/api/info; do sleep 3; done"
   echo "Java backend on :$PORT"

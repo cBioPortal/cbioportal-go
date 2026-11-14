@@ -11,6 +11,7 @@ that compare go with the Java backend are on a separate page,
 - [Unit tests](#unit-tests)
 - [Transform golden tests](#transform-golden-tests)
 - [API contract tests](#api-contract-tests)
+- [Session service](#session-service)
 - [Frontend e2e tests](#frontend-e2e-tests)
 - [CI](#ci)
 - [Comparing with Java](#comparing-with-java)
@@ -99,6 +100,37 @@ make contract                      # go test ./test/
 
 `setup_test_db.sh` also loads the gene sets from `data/genesets`. On an older
 reference database, `cbioportal-import load-genesets` adds them.
+
+## Session service
+
+Saved sessions, virtual studies, groups, custom data and page settings
+live in cBioPortal's [session service](https://github.com/cBioPortal/session-service).
+On the public portal, go and Java share one session service, so whatever
+one saves, the other must read back the same way. The contract tests
+normally use go's own session file. To test against the real service
+instead, and to check go against Java:
+
+```bash
+test/session_service.sh start      # session service 0.6.5 and MongoDB 8.2, on :15000
+KEYCLOAK=false test/e2e_api.sh --session.service.url=http://localhost:15000/api/sessions/public_portal/ \
+  --session.service.user=cbio --session.service.password=cbio-local-test
+SESSION_SERVICE_URL=http://localhost:15000/api/sessions/public_portal/ SESSION_SERVICE_USER=cbio \
+  SESSION_SERVICE_PASSWORD=cbio-local-test PUBLISHER_API_KEY=SECRETKEY test/java_oracle.sh start
+JAVA_API=http://localhost:18095 go test ./test/ -run 'Session|VirtualStud|Publish|CustomData|PageSettings|Interop'
+test/java_oracle.sh stop; test/session_service.sh stop
+```
+
+The session service runs as on the public portal: version 0.6.5, behind a
+password (these test credentials are only for the local service). The
+`Interop` tests save each kind of session through one server and read it
+through the other. They also count and filter by custom data on both, and
+publish a virtual study through one server and un-publish it through the
+other. Java runs without a login, so the tests that need a signed-in user
+run against go only.
+
+Like Java, go never sends back who saved a session. Virtual studies, custom
+data and page settings come back without their owner, users or timestamps,
+and groups listed by `groups/fetch` are shaped as virtual studies.
 
 ## Frontend e2e tests
 
