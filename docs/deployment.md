@@ -300,6 +300,16 @@ than the derived tables, which are sorted by gene before profile and, for
 generic assays, hold every study of a profile type together. A TCGA
 PanCancer study's comparison reads 0.1–0.5 GiB this way, instead of 4–68 GiB.
 
+Co-expression reads that table too. It lines up the chosen gene's values
+with the profile's samples once, then scores every other gene from its own
+row. Before, it joined every value of every expression profile of the study
+to its sample and regrouped them by gene. For one gene in a large AML study
+(2,613 samples, 40,000 genes) this takes 5 seconds instead of 19, 25
+CPU-seconds instead of 118, and 0.2 GB of memory instead of 5 GB. The
+answers are the same. The query reads the profile's rows in 8 ranges at
+once: a profile has only one row per gene, so otherwise ClickHouse would use
+only one or two cores for it.
+
 ## hub.cbioportal.org
 
 The hub shows a preview of the studies in each cBioPortal/datahub pull
