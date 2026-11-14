@@ -116,7 +116,7 @@ func serve(h http.Handler, r fixtureRequest) *httptest.ResponseRecorder {
 // carries the limits' settings.
 func TestLiveBulkLimits(t *testing.T) {
 	run := fmt.Sprintf("bulk-limits-test-%d-%d", os.Getpid(), time.Now().UnixNano())
-	limits := core.BulkLimits{MaxMemory: 10<<30 + 7, MaxTime: 9 * time.Minute, SortSpill: 1<<30 + 3}
+	limits := core.BulkLimits{MaxMemory: 10<<30 + 7, MaxTime: 9 * time.Minute, MaxRows: 2e9 + 11, SortSpill: 1<<30 + 3}
 	var admin *ch.Client
 	comments := map[string]string{}
 	for i, r := range fixtureRequests(t, bulkRequests) {
@@ -165,27 +165,33 @@ func TestLiveBulkLimits(t *testing.T) {
 	}
 }
 
-// TestLiveBulkLimitTrips checks a request stopped at its memory limit
-// before any data is sent: a 400 with Java's error body, saying how to ask
-// for less.
+// TestLiveBulkLimitTrips checks a request stopped at its memory or row
+// limit before any data is sent: a 400 with Java's error body, saying how
+// to ask for less.
 func TestLiveBulkLimitTrips(t *testing.T) {
-	s, _ := liveFixtureState(t, fmt.Sprintf("bulk-limits-trip-%d", os.Getpid()))
-	s.BulkCH = s.CH.WithSettings(map[string]string{"max_memory_usage": "1", "max_untracked_memory": "0"})
-	h := NewRouter(s)
-	for _, r := range fixtureRequests(t, []string{
-		"GET /api/molecular-profiles/study_es_0_gistic/discrete-copy-number?",
-		"POST /api/molecular-profiles/study_es_0_mrna/molecular-data/fetch",
-		"POST /api/mutations/fetch",
-		"POST /api/copy-number-segments/fetch",
-	}) {
-		w := serve(h, r)
-		var body struct {
-			Message string `json:"message"`
-		}
-		json.Unmarshal(w.Body.Bytes(), &body)
-		if w.Code != http.StatusBadRequest || body.Message != core.MsgQueryLimit("memory") ||
-			!strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
-			t.Errorf("%s %s: %d %q %s", r.method, r.path, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	for limit, settings := range map[string]map[string]string{
+		"memory": {"max_memory_usage": "1", "max_untracked_memory": "0"},
+		"rows":   {"max_rows_to_read": "1"},
+	} {
+		s, _ := liveFixtureState(t, fmt.Sprintf("bulk-limits-trip-%d", os.Getpid()))
+		s.BulkCH = s.CH.WithSettings(settings)
+		h := NewRouter(s)
+		for _, r := range fixtureRequests(t, []string{
+			"GET /api/molecular-profiles/study_es_0_gistic/discrete-copy-number?",
+			"POST /api/molecular-profiles/study_es_0_mrna/molecular-data/fetch",
+			"POST /api/generic_assay_data/study_es_0_mutational_signature/fetch",
+			"POST /api/mutations/fetch",
+			"POST /api/copy-number-segments/fetch",
+		}) {
+			w := serve(h, r)
+			var body struct {
+				Message string `json:"message"`
+			}
+			json.Unmarshal(w.Body.Bytes(), &body)
+			if w.Code != http.StatusBadRequest || body.Message != core.MsgQueryLimit(limit) ||
+				!strings.HasPrefix(w.Header().Get("Content-Type"), "application/json") {
+				t.Errorf("%s: %s %s: %d %q %s", limit, r.method, r.path, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+			}
 		}
 	}
 }

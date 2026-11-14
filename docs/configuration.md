@@ -140,6 +140,7 @@ usually easier.
 | `-ref-db` | `CBIOPORTAL_REF_DB` | `cbioportal_ref` | The reference database, written by `load-reference`. |
 | `-clickhouse-bulk-max-memory` | `CLICKHOUSE_BULK_MAX_MEMORY` | `10GiB` | The memory one ClickHouse query of a bulk endpoint may use. `0` means no limit. See [Limits on bulk requests](#limits-on-bulk-requests). |
 | `-clickhouse-bulk-max-time` | `CLICKHOUSE_BULK_MAX_TIME` | `10m` | How long one query of a bulk endpoint may run, including the time the client takes to read the answer. A number alone means seconds. `0` means no limit. |
+| `-clickhouse-bulk-max-rows` | `CLICKHOUSE_BULK_MAX_ROWS` | `2000000000` | How many table rows one query of a bulk endpoint may read. `0` means no limit. |
 | `-clickhouse-bulk-sort-spill` | `CLICKHOUSE_BULK_SORT_SPILL` | `1GiB` | The memory a sort in a bulk query may use before ClickHouse continues it on disk. `0` keeps ClickHouse's own setting. |
 | `-frontend-dir` | `FRONTEND_DIR` | | A folder with a built frontend, so the website and the API share one address. The server serves its `index.html` as the portal's pages and its files under `/reactapp/` and `/images/`. See [Where the frontend comes from](#where-the-frontend-comes-from). |
 | `-static-dir` | `CBIOPORTAL_STATIC_DIR` | | A folder of the portal's own files, such as its logo or a custom tab's script. Each file is served at its path inside the folder, so `static/images/logo.png` is served at `/images/logo.png`. These files come before the built-in ones, so a portal can also replace a built-in image this way. |
@@ -239,13 +240,15 @@ limits:
 |---|---|---|
 | Memory (`10GiB`) | `max_memory_usage` | ClickHouse stops a query that needs more. Grouping (`GROUP BY`) moves to disk at half of it (`max_bytes_before_external_group_by`). |
 | Time (`10m`) | `max_execution_time` | ClickHouse stops a query that runs longer. |
+| Rows read (2 billion) | `max_rows_to_read` | ClickHouse refuses a query that would read more rows of its tables. It checks this before it starts reading, so the answer comes within a second. |
 | Sort memory (`1GiB`) | `max_bytes_before_external_sort` | A larger sort continues on disk. The answer is the same, only slower. |
 
 If a query stops before any data is sent, the client gets a 400 with a
 message, as Java formats errors: `{"message": "This request needs more
 database memory than one request may use. Ask for less data at a time: name
 the genes (entrezGeneIds) or fewer samples, or page through the result with
-pageSize and pageNumber."}`. If it stops after the answer has started, the
+pageSize and pageNumber. A whole study's data can be downloaded from its
+study page."}`. If it stops after the answer has started, the
 server breaks off the connection, so the client sees a broken transfer, not
 a shorter list.
 
@@ -255,6 +258,13 @@ study) use 7–9 GiB, and none ran longer than 2 minutes. The two that went
 past 10 GiB were whole-profile pulls of 15 GiB. One of them pushed a 30 GiB
 ClickHouse server to its limit. With the sort on disk, the 15 GiB pull
 (124 million values) needs 1.3 GiB.
+
+The row limit is three times the most rows any query of the website reads
+(630 million, for co-expression in a large study). It stops requests for a
+whole methylation profile of a pan-cancer study, which read 7 billion rows.
+Such requests come from scripts, not the website. Without the limit they
+ran for minutes, used up to 10 GiB, and often failed at the time limit
+anyway.
 
 ### Website paths
 

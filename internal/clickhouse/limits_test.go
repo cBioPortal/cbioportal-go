@@ -14,13 +14,14 @@ const memoryLimitError = "Code: 241. DB::Exception: Query memory limit exceeded:
 func TestLimitExceeded(t *testing.T) {
 	for msg, want := range map[string]string{
 		memoryLimitError: "memory",
-		"Code: 241. DB::Exception: Memory limit (for query) exceeded: would use 9.31 GiB. (MEMORY_LIMIT_EXCEEDED)":                       "memory",
-		"Code: 241. DB::Exception: (total) memory limit exceeded: would use 30.20 GiB. (MEMORY_LIMIT_EXCEEDED)":                          "",
-		"Code: 241. DB::Exception: Memory limit (for user) exceeded: would use 9.31 GiB. (MEMORY_LIMIT_EXCEEDED)":                        "",
-		"Code: 159. DB::Exception: Timeout exceeded: elapsed 1006.012926 ms, maximum: 1000 ms. (TIMEOUT_EXCEEDED)":                       "time",
-		"Code: 160. DB::Exception: Estimated query execution time (700 seconds) is too long. Maximum: 600. (TOO_SLOW)":                   "time",
-		"Code: 60. DB::Exception: Unknown table expression identifier 'sample'. (UNKNOWN_TABLE)":                                         "",
-		"clickhouse: query failed mid-stream: Code: 159. DB::Exception: Timeout exceeded: elapsed 1 s, maximum: 1 s. (TIMEOUT_EXCEEDED)": "time",
+		"Code: 241. DB::Exception: Memory limit (for query) exceeded: would use 9.31 GiB. (MEMORY_LIMIT_EXCEEDED)":                                                          "memory",
+		"Code: 241. DB::Exception: (total) memory limit exceeded: would use 30.20 GiB. (MEMORY_LIMIT_EXCEEDED)":                                                             "",
+		"Code: 241. DB::Exception: Memory limit (for user) exceeded: would use 9.31 GiB. (MEMORY_LIMIT_EXCEEDED)":                                                           "",
+		"Code: 159. DB::Exception: Timeout exceeded: elapsed 1006.012926 ms, maximum: 1000 ms. (TIMEOUT_EXCEEDED)":                                                          "time",
+		"Code: 160. DB::Exception: Estimated query execution time (700 seconds) is too long. Maximum: 600. (TOO_SLOW)":                                                      "time",
+		"Code: 158. DB::Exception: Limit for rows (controlled by 'max_rows_to_read' setting) exceeded, max rows: 2.00 billion, current rows: 7.05 billion. (TOO_MANY_ROWS)": "rows",
+		"Code: 60. DB::Exception: Unknown table expression identifier 'sample'. (UNKNOWN_TABLE)":                                                                            "",
+		"clickhouse: query failed mid-stream: Code: 159. DB::Exception: Timeout exceeded: elapsed 1 s, maximum: 1 s. (TIMEOUT_EXCEEDED)":                                    "time",
 	} {
 		if got := LimitExceeded(errors.New(msg)); got != want {
 			t.Errorf("LimitExceeded(%.60q) = %q, want %q", msg, got, want)

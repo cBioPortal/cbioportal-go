@@ -30,6 +30,7 @@ type settings struct {
 	refDB         string
 	bulkMaxMemory byteSize
 	bulkMaxTime   seconds
+	bulkMaxRows   int64
 	bulkSortSpill byteSize
 
 	// api holds the frontend, session and bearer-token settings, which the
@@ -65,6 +66,7 @@ func (s *settings) register(fs *pflag.FlagSet) {
 	s.bulkMaxMemory = byteSize(core.DefaultBulkLimits.MaxMemory)
 	s.bulkMaxTime = seconds(core.DefaultBulkLimits.MaxTime)
 	s.bulkSortSpill = byteSize(core.DefaultBulkLimits.SortSpill)
+	s.bulkMaxRows = core.DefaultBulkLimits.MaxRows
 	str(&s.clickhouseURL, "clickhouse-url", "http://localhost:18123", "CLICKHOUSE_URL", "ClickHouse HTTP `endpoint`, e.g. https://<host>:8443 for ClickHouse Cloud")
 	str(&s.logComment, "clickhouse-log-comment", "", "CLICKHOUSE_LOG_COMMENT", "tag every ClickHouse query with this `text` (log_comment in system.query_log), e.g. the deployment's name")
 	str(&s.db, "db", "cbioportal", "CBIOPORTAL_DB", "`database` built by cbioportal-import transform")
@@ -74,10 +76,12 @@ func (s *settings) register(fs *pflag.FlagSet) {
 	cli.Env(fs, "clickhouse-bulk-max-memory", "CLICKHOUSE_BULK_MAX_MEMORY")
 	fs.Var(&s.bulkMaxTime, "clickhouse-bulk-max-time", "time one query of a bulk endpoint may run, streaming its result included; 0 for no limit")
 	cli.Env(fs, "clickhouse-bulk-max-time", "CLICKHOUSE_BULK_MAX_TIME")
+	fs.Int64Var(&s.bulkMaxRows, "clickhouse-bulk-max-rows", s.bulkMaxRows, "rows one query of a bulk endpoint may read from its tables; 0 for no limit")
+	cli.Env(fs, "clickhouse-bulk-max-rows", "CLICKHOUSE_BULK_MAX_ROWS")
 	fs.Var(&s.bulkSortSpill, "clickhouse-bulk-sort-spill", "memory a sort of a bulk endpoint may use before it sorts on disk; 0 keeps the server's setting")
 	cli.Env(fs, "clickhouse-bulk-sort-spill", "CLICKHOUSE_BULK_SORT_SPILL")
 	cli.Group(fs, "ClickHouse", "clickhouse-url", "clickhouse-log-comment", "db", "raw-db", "ref-db",
-		"clickhouse-bulk-max-memory", "clickhouse-bulk-max-time", "clickhouse-bulk-sort-spill")
+		"clickhouse-bulk-max-memory", "clickhouse-bulk-max-time", "clickhouse-bulk-max-rows", "clickhouse-bulk-sort-spill")
 
 	str(&s.api.FrontendDir, "frontend-dir", "", "FRONTEND_DIR", "serve this frontend build `directory` for every non-/api/ path (single origin)")
 	str(&s.api.StaticDir, "static-dir", "", "CBIOPORTAL_STATIC_DIR", "serve the files in this `directory` at their path, before the built-in ones, e.g. static/images/logo.png at /images/logo.png (a portal's logo or custom tab scripts)")
@@ -118,6 +122,7 @@ func (s *settings) bulkLimits() core.BulkLimits {
 	return core.BulkLimits{
 		MaxMemory: int64(s.bulkMaxMemory),
 		MaxTime:   time.Duration(s.bulkMaxTime),
+		MaxRows:   s.bulkMaxRows,
 		SortSpill: int64(s.bulkSortSpill),
 	}
 }

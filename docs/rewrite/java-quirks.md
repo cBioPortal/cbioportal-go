@@ -147,7 +147,9 @@ With it, go answers with that gene's calls. It is listed under
 "Added in go", and the served API descriptions list it too.
 
 go also limits what one query of a bulk endpoint may cost ClickHouse:
-memory, time, and the memory a sort may use before it moves to disk.
+memory, time, the rows it reads, and the memory a sort may use before it
+moves to disk. So go refuses some requests that Java answers, such as all
+the methylation data of a pan-cancer study in one request.
 Java has no such limits. A request that hits one before any data is sent
 gets a 400 with a `message` that suggests naming genes, fewer samples, or
 paging. One that hits it later is broken off, never cut short silently.

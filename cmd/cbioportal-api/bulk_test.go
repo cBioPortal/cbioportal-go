@@ -14,15 +14,15 @@ func TestBulkLimits(t *testing.T) {
 	if l := s.bulkLimits(); l != core.DefaultBulkLimits {
 		t.Errorf("default limits = %+v, want core.DefaultBulkLimits %+v", l, core.DefaultBulkLimits)
 	}
-	e := env(map[string]string{"CLICKHOUSE_BULK_MAX_MEMORY": "512MiB", "CLICKHOUSE_BULK_MAX_TIME": "90", "CLICKHOUSE_BULK_SORT_SPILL": "0"})
+	e := env(map[string]string{"CLICKHOUSE_BULK_MAX_MEMORY": "512MiB", "CLICKHOUSE_BULK_MAX_TIME": "90", "CLICKHOUSE_BULK_SORT_SPILL": "0", "CLICKHOUSE_BULK_MAX_ROWS": "1000"})
 	values, _, _ := effective(t, []string{"-clickhouse-bulk-max-time=2m"}, e)
-	for k, v := range map[string]string{"clickhouse-bulk-max-memory": "512MiB", "clickhouse-bulk-max-time": "2m", "clickhouse-bulk-sort-spill": "0"} {
+	for k, v := range map[string]string{"clickhouse-bulk-max-memory": "512MiB", "clickhouse-bulk-max-time": "2m", "clickhouse-bulk-sort-spill": "0", "clickhouse-bulk-max-rows": "1000"} {
 		if values[k] != v {
 			t.Errorf("%s = %q, want %q", k, values[k], v)
 		}
 	}
 	for _, bad := range []string{"-clickhouse-bulk-max-memory=1.5GiB", "-clickhouse-bulk-max-memory=10XB",
-		"-clickhouse-bulk-max-time=soon", "-clickhouse-bulk-sort-spill=-1"} {
+		"-clickhouse-bulk-max-time=soon", "-clickhouse-bulk-sort-spill=-1", "-clickhouse-bulk-max-rows=many"} {
 		var out bytes.Buffer
 		if code := run([]string{"config", bad}, &out, &out, env(nil)); code != 2 {
 			t.Errorf("%s: exit %d, want 2; output:\n%s", bad, code, out.String())

@@ -12,14 +12,15 @@ import (
 
 // ClickHouse error codes of the per-query limits.
 const (
+	codeTooManyRows         = 158 // max_rows_to_read
 	codeTimeoutExceeded     = 159 // max_execution_time
 	codeTooSlow             = 160 // estimated to run past max_execution_time
 	codeMemoryLimitExceeded = 241 // max_memory_usage, or a server-wide limit
 )
 
 // LimitExceeded reports which per-query limit stopped the query that failed
-// with err: "memory" (max_memory_usage) or "time" (max_execution_time); ""
-// for any other error. A server-wide memory limit (all queries together) is
+// with err: "memory" (max_memory_usage), "time" (max_execution_time) or
+// "rows" (max_rows_to_read); "" for any other error. A server-wide memory limit (all queries together) is
 // not a limit of the query.
 func LimitExceeded(err error) string {
 	if err == nil {
@@ -31,6 +32,8 @@ func LimitExceeded(err error) string {
 	}
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "(TOO_MANY_ROWS)"):
+		return limitOf(codeTooManyRows, msg)
 	case strings.Contains(msg, "(TIMEOUT_EXCEEDED)"):
 		return limitOf(codeTimeoutExceeded, msg)
 	case strings.Contains(msg, "(TOO_SLOW)"):
@@ -43,6 +46,8 @@ func LimitExceeded(err error) string {
 
 func limitOf(code int, msg string) string {
 	switch code {
+	case codeTooManyRows:
+		return "rows"
 	case codeTimeoutExceeded, codeTooSlow:
 		return "time"
 	case codeMemoryLimitExceeded:

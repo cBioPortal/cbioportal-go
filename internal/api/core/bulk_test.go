@@ -13,7 +13,7 @@ func TestBulkLimitsSettings(t *testing.T) {
 	got := DefaultBulkLimits.Settings()
 	want := map[string]string{
 		"max_memory_usage": "10737418240", "max_bytes_before_external_group_by": "5368709120",
-		"max_bytes_before_external_sort": "1073741824", "max_execution_time": "600",
+		"max_bytes_before_external_sort": "1073741824", "max_execution_time": "600", "max_rows_to_read": "2000000000",
 	}
 	if len(got) != len(want) {
 		t.Errorf("settings %v, want %v", got, want)
@@ -40,6 +40,7 @@ func TestQueryLimitBeforeData(t *testing.T) {
 	for limit, msg := range map[string]string{
 		"memory": limitErr,
 		"time":   "Code: 159. DB::Exception: Timeout exceeded: elapsed 600.1 s, maximum: 600 s. (TIMEOUT_EXCEEDED)",
+		"rows":   "Code: 158. DB::Exception: Limit for rows (controlled by 'max_rows_to_read' setting) exceeded, max rows: 2.00 billion, current rows: 7.05 billion. (TOO_MANY_ROWS)",
 	} {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodPost, "/api/molecular-data/fetch", nil)
