@@ -11,7 +11,7 @@ import (
 
 var studyMetaFields = []string{
 	"type_of_cancer", "name", "short_name", "description", "groups",
-	"pmid", "citation", "reference_genome", "add_global_case_list",
+	"pmid", "citation", "reference_genome", "add_global_case_list", "license",
 }
 
 func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
@@ -32,6 +32,19 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 		if _, err := c.Execute(fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY study_id",
 			c.Database(), table, strings.Join(defs, ", "))); err != nil {
+			return err
+		}
+	}
+	// Staging tables created before a field was read gain it, empty for the
+	// studies already staged.
+	if len(existing) > 0 {
+		var defs []string
+		for _, f := range studyMetaFields {
+			if !existing[f] {
+				defs = append(defs, fmt.Sprintf("`%s` String", f))
+			}
+		}
+		if err := addColumns(c, table, defs); err != nil {
 			return err
 		}
 	}

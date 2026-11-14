@@ -24,8 +24,16 @@ bin/cbioportal-import load-reference "$SEED" --db "$REF_DB" --url "$CH"
 GS="$FIXTURES/data/genesets"
 bin/cbioportal-import load-genesets "$GS/study_es_0_genesets.gmt" --version msigdb_7.5.1 \
   --supp "$GS/study_es_0_supp-genesets.txt" --hierarchy "$GS/study_es_0_tree.yaml" --db "$REF_DB" --url "$CH"
+# ascn_test_study is imported with a license (meta_study `license:`, as the
+# datahub studies of cBioPortal/datahub#2372 carry one).
+LICENSED="$(mktemp -d)"
+trap 'rm -rf "$LICENSED"' EXIT
+cp -r "$FIXTURES/data/studies/ascn-test-study" "$LICENSED/"
+echo "license: CC-BY-NC-ND-4.0" >> "$LICENSED/ascn-test-study/meta_study.txt"
 for s in "${STUDIES[@]}"; do
-  bin/cbioportal-import ingest "$FIXTURES/data/studies/$s" --db "$RAW_DB" --url "$CH"
+  dir="$FIXTURES/data/studies/$s"
+  [ "$s" = ascn-test-study ] && dir="$LICENSED/$s"
+  bin/cbioportal-import ingest "$dir" --db "$RAW_DB" --url "$CH"
 done
 # study_hg38 is mid-(re)import (cancer_study.status 0), as in upstream CI's
 # localdb database: the e2e portal answers 423 for it (study_availability).
