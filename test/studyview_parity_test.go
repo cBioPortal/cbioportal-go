@@ -172,3 +172,44 @@ func TestContractViolinCurveIsDensity(t *testing.T) {
 		}
 	}
 }
+
+// TestContractClinicalDataEnrichmentsAttributeStudy pins the metadata of an
+// attribute several studies define: the study with the highest internal
+// id's, as FetchClinicalDataEnrichmentsUseCase keeps the last of
+// clinical_attribute_meta's rows (sorted by attribute, then internal study
+// id). CANCER_TYPE has priority 1 in lgg_ucsf_2014_test_generic_assay
+// (imported after teststudy_genepanels) and 5 in teststudy_genepanels.
+func TestContractClinicalDataEnrichmentsAttributeStudy(t *testing.T) {
+	requireAPI(t)
+	group := func(name, study string, ids ...string) map[string]any {
+		var s []map[string]string
+		for _, id := range ids {
+			s = append(s, map[string]string{"studyId": study, "sampleId": id})
+		}
+		return map[string]any{"name": name, "sampleIdentifiers": s}
+	}
+	body := map[string]any{"groups": []any{
+		group("a", "lgg_ucsf_2014_test_generic_assay", "P01_Pri", "P01_Rec", "P02_Pri", "P02_Rec"),
+		group("b", "teststudy_genepanels", "sample1", "sample2", "sample3", "sample4"),
+	}}
+	var d []struct {
+		ClinicalAttribute struct {
+			ID       string `json:"clinicalAttributeId"`
+			StudyID  string `json:"studyId"`
+			Priority string `json:"priority"`
+		} `json:"clinicalAttribute"`
+	}
+	post(t, "/api/clinical-data-enrichments/fetch", body, &d)
+	found := false
+	for _, r := range d {
+		if a := r.ClinicalAttribute; a.ID == "CANCER_TYPE" {
+			found = true
+			if a.StudyID != "lgg_ucsf_2014_test_generic_assay" || a.Priority != "1" {
+				t.Errorf("CANCER_TYPE from %s with priority %s, want lgg_ucsf_2014_test_generic_assay's (1)", a.StudyID, a.Priority)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no CANCER_TYPE enrichment among %d", len(d))
+	}
+}

@@ -122,19 +122,27 @@ func (s Server) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		core.Fail(w, r, err)
 		return
 	}
-	// Unique attributes by id + patient flag, and each id's level.
+	// Unique attributes by id + patient flag, and each id's level. Of an
+	// attribute several studies define, the metadata is the study's that
+	// Java reads last: FetchClinicalDataEnrichmentsUseCase keeps the last
+	// of clinical_attribute_meta's rows, which are sorted by attribute,
+	// then internal study id.
+	ranks := s.StudyRanks()
 	attrs := map[string]studies.ClinicalAttribute{}
 	var keys []string
 	flags := map[string]map[bool]bool{}
 	for _, a := range attrRows {
 		patient := a.PatientFlag != 0
 		key := a.ClinicalAttributeID + strconv.FormatBool(patient)
-		if _, ok := attrs[key]; !ok {
+		prev, seen := attrs[key]
+		if !seen {
 			keys = append(keys, key)
 		}
-		attrs[key] = studies.ClinicalAttribute{
-			ClinicalAttributeID: a.ClinicalAttributeID, DisplayName: a.DisplayName, Description: a.Description,
-			Datatype: a.Datatype, PatientAttribute: patient, Priority: a.Priority, StudyID: a.StudyID,
+		if !seen || ranks == nil || ranks[a.StudyID] >= ranks[prev.StudyID] {
+			attrs[key] = studies.ClinicalAttribute{
+				ClinicalAttributeID: a.ClinicalAttributeID, DisplayName: a.DisplayName, Description: a.Description,
+				Datatype: a.Datatype, PatientAttribute: patient, Priority: a.Priority, StudyID: a.StudyID,
+			}
 		}
 		if flags[a.ClinicalAttributeID] == nil {
 			flags[a.ClinicalAttributeID] = map[bool]bool{}
