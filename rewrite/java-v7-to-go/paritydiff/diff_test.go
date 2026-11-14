@@ -428,3 +428,18 @@ func TestKnownIfNAMultiple(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// TestCloudflareScriptIgnored checks that HTML pages differing only by the
+// script Cloudflare adds are identical.
+func TestCloudflareScriptIgnored(t *testing.T) {
+	page := "<html><body>x\n  %s</body></html>"
+	cf := `<script>(function(){function c(){var b=a.contentDocument;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a5a7',t:'MTc5'};var u='/cdn-cgi/challenge-platform/scripts/jsd/main.js';";}}})();</script>`
+	rq := request{Name: "html"}
+	a := response{Status: 200, Body: []byte(fmt.Sprintf(page, cf))}
+	if r := compareResponses(rq, a, response{Status: 200, Body: []byte(fmt.Sprintf(page, ""))}, defaultOptions()); r.Outcome != identical {
+		t.Errorf("with Cloudflare's script: %s %v", r.Outcome, r.Diffs)
+	}
+	if r := compareResponses(rq, a, response{Status: 200, Body: []byte(fmt.Sprintf(page, "<p>y</p>"))}, defaultOptions()); r.Outcome == identical {
+		t.Error("another difference was hidden")
+	}
+}

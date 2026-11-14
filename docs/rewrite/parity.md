@@ -175,6 +175,8 @@ to go. Every request goes to Java twice
 answers differ, the request is reported as *Java nondeterministic*, never as
 unexplained. Requests that fail to connect or get 502, 503 or 504 are sent
 once more after 2 minutes, so a server restart is not reported as a bug.
+HTML pages are compared without the bot-detection script Cloudflare adds to
+some of them, which differs on every request.
 The same goes for a request where go answers and Java returns 500: Java
 sometimes fails once under load and answers fine a minute later. A 500
 from go is never sent again, so a go failure always shows.

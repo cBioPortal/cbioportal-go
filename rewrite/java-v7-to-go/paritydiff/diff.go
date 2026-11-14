@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -479,4 +480,13 @@ func countOf(v any) (int64, error) {
 		return 0, fmt.Errorf("not a number: %v", v)
 	}
 	return n.Int64()
+}
+
+// cloudflareScript is the bot-detection script Cloudflare adds to HTML pages
+// it serves, which differs per request.
+var cloudflareScript = regexp.MustCompile(`<script>\(function\(\)\{function c\(\)\{[^<]*__CF\$cv\$params[^<]*</script>`)
+
+// withoutCloudflareScript is a body without Cloudflare's script, trimmed.
+func withoutCloudflareScript(b []byte) []byte {
+	return bytes.TrimSpace(cloudflareScript.ReplaceAll(b, nil))
 }

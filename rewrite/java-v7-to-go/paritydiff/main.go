@@ -456,7 +456,7 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		switch {
 		case errA == nil && errB == nil:
 			d = compareJSON(ja, jb, opts)
-		case !bytes.Equal(bytes.TrimSpace(ba), bytes.TrimSpace(bb)):
+		case !bytes.Equal(withoutCloudflareScript(ba), withoutCloudflareScript(bb)):
 			d.add(&opts, "", "non-JSON bodies differ: a=%.80q b=%.80q", head(ra), head(rb))
 		}
 	}
