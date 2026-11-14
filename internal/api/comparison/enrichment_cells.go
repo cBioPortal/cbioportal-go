@@ -86,7 +86,7 @@ func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, w
 			}
 			parts = append(parts, fmt.Sprintf(
 				"SELECT gk.resolved_hugo_gene_symbol AS symbol, toNullable(gk.resolved_entrez_gene_id) AS entrez, t.grp AS grp, "+
-					"if(position(concat(t.study_id, '_', t.profile_stable_id), 'rna_seq') > 0, log2(greatest(t.x, 0) + 1), t.x) AS v, t.pos_ AS pos_ "+
+					"if(position(concat(t.study_id, '_', t.profile_stable_id), 'rna_seq') > 0, log1p(greatest(t.x, 0)) / log(2), t.x) AS v, t.pos_ AS pos_ "+
 					"FROM (SELECT study_id, profile_stable_id, %s AS key_sym, %s AS key_ent, %s AS pos_, %s, %s FROM cbioportal_raw.%s "+
 					"WHERE %s) t "+
 					"INNER JOIN (SELECT * FROM gene_key_map WHERE source = '%s' AND (study_id, profile_stable_id) IN %s) gk ON gk.study_id = t.study_id "+
@@ -97,7 +97,7 @@ func (s Server) matrixStats(args *core.SQLArgs, cg []contGroup, keyCol string, w
 		}
 		parts = append(parts, fmt.Sprintf(
 			"SELECT %s, grp, "+
-				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log2(greatest(x, 0) + 1), x) AS v, pos_ "+
+				"if(position(concat(study_id, '_', profile_stable_id), 'rna_seq') > 0, log1p(greatest(x, 0)) / log(2), x) AS v, pos_ "+
 				"FROM (SELECT *, %s AS pos_, %s, %s FROM cbioportal_raw.%s WHERE %s) WHERE isFinite(x)",
 			key, s.RawFileOrder(table, ""), x, grp, table, where))
 	}

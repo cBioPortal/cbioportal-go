@@ -137,10 +137,11 @@ type contGroup struct {
 }
 
 // rnaSeqValueSQL is the value Java compares for a cell x of a profile: for
-// rna_seq profiles log2(x+1) with negatives clamped to 0, otherwise x.
+// rna_seq profiles log2(x+1) with negatives clamped to 0, computed as Java
+// does with log1p, so values far below 1 keep their size; otherwise x.
 func rnaSeqValueSQL(x string, rnaSeq bool) string {
 	if rnaSeq {
-		return "log2(greatest(" + x + ", 0) + 1)"
+		return "log1p(greatest(" + x + ", 0)) / log(2)"
 	}
 	return x
 }
@@ -150,7 +151,7 @@ func rnaSeqValueSQL(x string, rnaSeq bool) string {
 // ExpressionEnrichmentUtil computes them, in the order Java iterates the
 // profile's rows: genes by genetic entity id, generic assay entities in
 // storage (file) order. As in Java: values of rna_seq
-// profiles are log2(x+1) transformed (negatives clamped to 0), groups with
+// profiles are log2(x+1) transformed (log1p, negatives clamped to 0), groups with
 // fewer than two values are left out, and entities need two remaining groups.
 // The p-value is Welch's t-test for two groups and a one-way ANOVA otherwise;
 // entities with an undefined p-value are skipped. Only per-group summary
