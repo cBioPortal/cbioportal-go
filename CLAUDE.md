@@ -125,3 +125,8 @@ are not Go or ClickHouse experts. Write so an 8th grader could follow.
 ## No "prior state" comments in code
 
 Comments describe current intent only, not what was changed from.
+
+<!-- entire-agent:begin -->
+Read .entire/agent-guide.md for this repository's workflow, source inspection, and verification guidance.
+@.entire/agent-guide.md
+<!-- entire-agent:end -->
