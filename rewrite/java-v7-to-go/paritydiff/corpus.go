@@ -44,6 +44,10 @@ type requestOptions struct {
 	// KnownIfBSubset when they differ just by elements A has and B lacks.
 	KnownIfASubset string
 	KnownIfBSubset string
+	// KnownIfNAMultiple is the reason of a difference accepted only when
+	// the arrays differ just in the count of NA bins (specialValue "NA"),
+	// B's being a whole multiple of A's.
+	KnownIfNAMultiple string
 }
 
 // parseCorpus reads the corpus format:
@@ -133,7 +137,8 @@ func parseCorpus(r io.Reader) ([]request, error) {
 
 // parseHeader parses "name opt opt ..." where the quoted options
 // (known="...", known-if-empty="...", known-if-b-fails="...",
-// known-if-b-empty="...", known-if-a-subset="...", known-if-b-subset="...")
+// known-if-b-empty="...", known-if-a-subset="...", known-if-b-subset="...",
+// known-if-na-multiple="...")
 // may contain spaces.
 func parseHeader(h string) (request, error) {
 	name, rest, _ := strings.Cut(h, " ")
@@ -144,7 +149,8 @@ func parseHeader(h string) (request, error) {
 	rest = strings.TrimSpace(rest)
 	quoted := map[string]*string{`known="`: &req.Opts.Known, `known-if-empty="`: &req.Opts.KnownIfEmpty,
 		`known-if-b-fails="`: &req.Opts.KnownIfBFails, `known-if-b-empty="`: &req.Opts.KnownIfBEmpty,
-		`known-if-a-subset="`: &req.Opts.KnownIfASubset, `known-if-b-subset="`: &req.Opts.KnownIfBSubset}
+		`known-if-a-subset="`: &req.Opts.KnownIfASubset, `known-if-b-subset="`: &req.Opts.KnownIfBSubset,
+		`known-if-na-multiple="`: &req.Opts.KnownIfNAMultiple}
 	for rest != "" {
 		var tok string
 		if prefix, _, ok := strings.Cut(rest, `"`); ok {

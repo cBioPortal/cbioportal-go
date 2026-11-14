@@ -85,7 +85,7 @@ A few more terms used below:
 
 ## What go fixes
 
-This table collects all 33 fixes in one place. It shows what a client gets
+This table collects all 35 fixes in one place. It shows what a client gets
 from go that it would not get from Java. Most fixes are in the API. The
 last three are in the importer: go keeps data that Java throws away, or
 stores less where Java stores empty rows.
@@ -122,6 +122,8 @@ stores less where Java stores empty rows.
 | Numeric filter on a patient-level generic assay | Java ignores the filter. | go filters by patient. |
 | Categorical enrichment, patient-level | Java fails with a 500. | go answers with the enrichment. |
 | Namespace attributes | Java reads them from one record, picked at random. | go reads them from every record. |
+| `variant-counts` for a mutation profile | Java also lists outdated counts: the importer adds a profile's counts each time it computes them and never removes the earlier ones. | go counts the profile's current mutations, so it gives one row per gene and keyword. |
+| `clinical-data-bin-counts` where the filtered samples have no value for an attribute | Java counts each sample as NA once for every selected study that defines the attribute, so there can be more NA samples than samples. | go counts each sample once. |
 | Import: `clinical_data_derived` | Java stores a row for every attribute and case, even empty ones. | go stores only real values. The API answers the same. |
 | Import: copy-number segments | Java skips segments whose start is not below their end. | go keeps them. There are 4 on msk_chord_2024 and 10 on msk_impact_50k_2026. |
 | Import: timeline rows | Java drops rows for patients not in the study, and rows with more fields than the header. | go keeps them. |
@@ -232,6 +234,7 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | Behaviour | Java source | go | Pinned |
 |---|---|---|---|
 | `GET /api/molecular-profiles/{id}/discrete-copy-number` has no gene parameter. An `entrezGeneId` in the address is ignored, and Java answers with the calls of every gene, which for `discreteCopyNumberEventType=ALL` can be gigabytes. | DiscreteCopyNumberController | Added in go. go reads `entrezGeneId` (one Entrez Gene ID, checked like Java's Integer parameters) and answers with that gene's calls, the same as the POST `/fetch` naming it. Without it, go answers with every gene's calls. | TestContractDiscreteCopyNumberGetGeneParam, TestAddedParamsWired, known.go |
+| `variant-counts/fetch` can list several rows for one gene and keyword, with different counts. Java reads `mutation_count_by_keyword`, where the importer adds a profile's counts each time it computes them and does not remove the earlier ones. On the public portal this affects `difg_glass_2019` and `pog570_bcgsc_2020`. | VariantCountMapper; cbioportal-core DaoMutation.calculateMutationCountByKeyword | Fixed in go. go counts the profile's mutations and gives one row, the same as Java's newest one. | known.go |
 | Generic assay data fails with a 500 for `projection=ID`. | GenericAssayDataController; fixtures | Fixed in go. go answers with the data. | — |
 | Some endpoints ignore META and return the records without a total count. They are `sample-lists/fetch`, `gene-panels/fetch`, `resource-definitions/fetch`, `structural-variant/fetch`, the generic assay meta endpoints and `mutation-data-counts/fetch`. | their controllers; fixtures | Fixed in go. go returns an empty body with the total count. `treatments/sample-counts/fetch` returns its records, as Java does. | TestContractMetaWhereJavaIgnoresIt, known.go |
 | `mutations/fetch` with `sampleMolecularIdentifiers`, and `molecular-profiles/{id}/mutations/fetch` with `sampleIds`, return each sample's mutations from every mutation profile of its study, not only from the profile named. For example, asking for `glioma_msk_2018_mutations` also returns the samples' records of `glioma_msk_2018_mutations_uncalled`, and the META total count counts them. | MutationMapper (`whereInMultipleMolecularProfiles` selects the samples, not the profiles) | Fixed in go. go returns the mutations of the profiles named. | TestLiveMutationsUncalledProfile, known.go |
@@ -262,6 +265,8 @@ asks every crawler to stay away and the sitemaps answer 404, whatever
 | `mutation-data-counts` with sample ids lists "Not Mutated" and "Not Profiled" as their own items, even when they are empty. | StudyViewColumnarServiceUtil | Copied. | TestContractMutationDataCountsWithSampleIDs |
 | `mutation-data-counts` without `genomicDataFilters` counts every mutated gene by mutation type (DETAILED and ID). SUMMARY returns an empty list. | ClickhouseGenomicDataMapper.getMutationCountsByType (an empty gene condition) | Copied. | TestContractMutationDataCountsWithoutFilters |
 | Clinical enrichments decide whether a value is a number with Java's `NumberUtils.isCreatable`. A whole number with a leading zero counts only if it is a valid octal number: `07` counts, `08` does not. | ClinicalDataEnrichmentUtil | Copied. | TestDecimalCreatable |
+| `clinical-data-bin-counts` gives too large an NA count when the filtered samples have no value for an attribute that several selected studies define. Java adds an NA count for each of those studies and then sums them, so the NA count is the number of samples times the number of studies. | GetClinicalDataCountsUseCase (`addClinicalDataCountsForMissingAttributes`) | Fixed in go. go counts each sample once. | known.go |
+| `clinical-data-enrichments` describes an attribute that several studies define with one study's metadata: the study imported last (the highest internal study id). Java keeps the last of `clinical_attribute_meta`'s rows, which are sorted by attribute, then internal study id. | FetchClinicalDataEnrichmentsUseCase | Copied. | TestContractClinicalDataEnrichmentsAttributeStudy |
 | `genomic-data-bin-counts` with two profiles puts every gene in the first filter's profile type and adds one NA bin. | GetGenomicDataBinCountsUseCase; www | Fixed in go. go puts each gene in its own profile. | corpus `genomic-data-bin-counts-two-profiles` |
 | `genomic-data-bin-counts` and `generic-assay-data-bin-counts` add one NA bin for the whole request. It goes to whichever gene or entity ClickHouse lists first, so the others get no NA bin. | StudyViewMapper (`getGenomicDataBinCounts`, `getGenericAssayDataBinCounts`) | Fixed in go. go gives each gene or entity its own NA bin. | TestBinCountsNAPerGene, known.go |
 | Structural variant pair counts add gene2's panels to gene1's panel list, which later pairs share. So later pairs report extra panels and more profiled cases. | ProfiledCasesCounter.getGenePanelsForAlterationCount | Fixed in go. go reports each pair's own panels. | corpus `sv-counts-msk`, known.go |

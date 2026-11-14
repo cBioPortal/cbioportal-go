@@ -15,8 +15,8 @@ import (
 // expectation is the comparison setting of logged requests whose difference
 // from production is expected: options appended to the corpus header (an
 // ignore list, known="reason", known-if-empty="reason",
-// known-if-b-fails="reason", known-if-a-subset="reason" or
-// known-if-b-subset="reason") and, for ignored
+// known-if-b-fails="reason", known-if-a-subset="reason",
+// known-if-b-subset="reason" or known-if-na-multiple="reason") and, for ignored
 // keys, a comment with the reason.
 type expectation struct {
 	match   func(method, path string, query url.Values, body string) bool
@@ -63,6 +63,8 @@ var (
 	isGenomicCounts   = pathIs(`^/api/(legacy/)?genomic-data-counts/fetch$`)
 	isGenericAssayAll = pathIs(`^/api/generic_assay_data/fetch$`)
 	isContEnrichments = pathIs(`^/api/(legacy/)?(expression|generic-assay)-enrichments/fetch$`)
+	isVariantCounts   = pathIs(`^/api/molecular-profiles/[^/]+/variant-counts/fetch$`)
+	isClinicalBins    = pathIs(`^/api/(legacy/)?clinical-data-bin-counts/fetch$`)
 	isMetaIgnored     = pathIs(`^/api/(sample-lists|gene-panels|resource-definitions|mutation-data-counts|structural-variant)/fetch$`)
 )
 
@@ -450,6 +452,16 @@ var expectations = []expectation{
 		options: `known-if-b-subset="Java's StudyViewMapper adds one NA bin for the whole request, attached to whichever gene or entity ClickHouse lists first, so the others have none; go gives each its own NA bin (Fixed in go; docs/rewrite/java-quirks.md)"`,
 	},
 	{
+		match: func(m, p string, q url.Values, b string) bool { return m == "POST" && isVariantCounts(p) },
+		options: `known-if-a-subset="Java reads mutation_count_by_keyword, where the importer adds a profile's counts each time it computes them ` +
+			`and never removes the earlier ones, so Java also lists outdated counts; go counts the profile's mutations, which is one of Java's rows (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
+		match: func(m, p string, q url.Values, b string) bool { return m == "POST" && isClinicalBins(p) },
+		options: `known-if-na-multiple="when the filtered samples have no value for an attribute, Java's GetClinicalDataCountsUseCase adds an NA count ` +
+			`for each selected study that defines it and sums them, so the NA count is a multiple of the samples; go counts each sample once (Fixed in go; docs/rewrite/java-quirks.md)"`,
+	},
+	{
 		match:   func(m, p string, q url.Values, b string) bool { return isCaseListCounts(p) },
 		options: "ignore=label",
 		comment: "a case list type's label is the name of the list ClickHouse's unordered GROUP BY yields first (mergeCaseListCounts), in hash-table order that shifts with the filtered samples",
@@ -511,7 +523,7 @@ func expectUnslashed(method, path, rawQuery, body string, slashed bool) (options
 
 // expectationOptions are the header options expect sets; annotate replaces
 // them.
-var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset)="[^"]*"| ignore=\S+| reltol=\S+`)
+var expectationOptions = regexp.MustCompile(` (known|known-if-empty|known-if-b-fails|known-if-b-empty|known-if-a-subset|known-if-b-subset|known-if-na-multiple)="[^"]*"| ignore=\S+| reltol=\S+`)
 
 // annotate copies a corpus written by this command with the expectations
 // marked as they stand now: the options and comments of earlier

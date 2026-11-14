@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
 	"sort"
 	"strconv"
@@ -434,4 +435,48 @@ func short(v any) string {
 		s = s[:157] + "..."
 	}
 	return s
+}
+
+// naMultipleOnly reports whether arrays a and b differ only in elements
+// that are NA bins (specialValue "NA") equal but for their count, b's count
+// a whole multiple (2 or more) of a's.
+func naMultipleOnly(a, b any, o compareOptions) bool {
+	xa, okA := a.([]any)
+	xb, okB := b.([]any)
+	if !okA || !okB || len(xa) != len(xb) {
+		return false
+	}
+	o.Unordered = false
+	differs := false
+	for i := range xa {
+		if compareJSON(xa[i], xb[i], o).Count == 0 {
+			continue
+		}
+		ea, okA := xa[i].(map[string]any)
+		eb, okB := xb[i].(map[string]any)
+		if !okA || !okB || ea["specialValue"] != "NA" || eb["specialValue"] != "NA" {
+			return false
+		}
+		ca, errA := countOf(ea["count"])
+		cb, errB := countOf(eb["count"])
+		if errA != nil || errB != nil || ca <= 0 || cb < 2*ca || cb%ca != 0 {
+			return false
+		}
+		ra, rb := maps.Clone(ea), maps.Clone(eb)
+		delete(ra, "count")
+		delete(rb, "count")
+		if compareJSON(ra, rb, o).Count != 0 {
+			return false
+		}
+		differs = true
+	}
+	return differs
+}
+
+func countOf(v any) (int64, error) {
+	n, ok := v.(json.Number)
+	if !ok {
+		return 0, fmt.Errorf("not a number: %v", v)
+	}
+	return n.Int64()
 }

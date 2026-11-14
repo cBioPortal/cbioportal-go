@@ -401,3 +401,30 @@ func TestFetchFailed(t *testing.T) {
 		}
 	}
 }
+
+// TestKnownIfNAMultiple checks the NA-bin option: accepted only when every
+// difference is an NA bin whose count in B is a whole multiple of A's.
+func TestKnownIfNAMultiple(t *testing.T) {
+	const bin = `{"attributeId":"X","start":1,"end":2,"count":3}`
+	na := func(n int) string { return fmt.Sprintf(`{"attributeId":"X","specialValue":"NA","count":%d}`, n) }
+	for _, c := range []struct {
+		name, a, b, want string
+	}{
+		{"doubled", "[" + bin + "," + na(23) + "]", "[" + bin + "," + na(46) + "]", known},
+		{"tripled", "[" + na(5) + "]", "[" + na(15) + "]", known},
+		{"not a multiple", "[" + bin + "," + na(23) + "]", "[" + bin + "," + na(47) + "]", differs},
+		{"smaller", "[" + na(46) + "]", "[" + na(23) + "]", differs},
+		{"another bin too", "[" + bin + "," + na(2) + "]", `[{"attributeId":"X","start":1,"end":2,"count":4},` + na(4) + "]", differs},
+		{"other attribute", "[" + na(2) + "]", `[{"attributeId":"Y","specialValue":"NA","count":4}]`, differs},
+		{"lengths", "[" + na(2) + "]", "[" + na(4) + "," + bin + "]", differs},
+	} {
+		rq := request{Name: c.name, Opts: requestOptions{KnownIfNAMultiple: "x"}}
+		ra, rb := response{Status: 200, Body: []byte(c.a)}, response{Status: 200, Body: []byte(c.b)}
+		if r := compareResponses(rq, ra, rb, defaultOptions()); r.Outcome != c.want {
+			t.Errorf("%s: %s %q, want %s", c.name, r.Outcome, r.Diffs, c.want)
+		}
+	}
+	if _, err := parseHeader(`n known-if-na-multiple="Java adds NA per study"`); err != nil {
+		t.Error(err)
+	}
+}

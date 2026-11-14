@@ -429,6 +429,7 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 	opts.Ties = rq.Opts.Ties
 	opts.KeyRelTol = rq.Opts.KeyRelTol
 	d, streamed := diffResult{}, false
+	var ja, jb any
 	total := ra.Size() + rb.Size()
 	if total > int64(streamAbove) {
 		d, streamed = compareStream(ra.reader(), rb.reader(), opts)
@@ -450,8 +451,8 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 			d.add(&opts, "", "reading the bodies failed: %v %v", errA, errB)
 			break
 		}
-		ja, errA := decodeJSON(ba)
-		jb, errB := decodeJSON(bb)
+		ja, errA = decodeJSON(ba)
+		jb, errB = decodeJSON(bb)
 		switch {
 		case errA == nil && errB == nil:
 			d = compareJSON(ja, jb, opts)
@@ -473,6 +474,8 @@ func compareResponses(rq request, ra, rb response, opts compareOptions) result {
 		res.Outcome, res.Known = known, rq.Opts.KnownIfASubset
 	case rq.Opts.KnownIfBSubset != "" && d.bInA():
 		res.Outcome, res.Known = known, rq.Opts.KnownIfBSubset
+	case rq.Opts.KnownIfNAMultiple != "" && naMultipleOnly(ja, jb, opts):
+		res.Outcome, res.Known = known, rq.Opts.KnownIfNAMultiple
 	default:
 		res.Outcome = differs
 	}

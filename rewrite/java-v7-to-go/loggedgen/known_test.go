@@ -123,7 +123,8 @@ func TestExpect(t *testing.T) {
 		{"POST", "/api/legacy/mutations/fetch", `{"sampleMolecularIdentifiers":[]}`, "known-if-a-subset="},
 		{"POST", "/api/genomic-data-bin-counts/fetch?dataBinMethod=DYNAMIC", `{"genomicDataBinFilters":[]}`, "known-if-b-subset="},
 		{"POST", "/api/generic-assay-data-bin-counts/fetch", `{"genericAssayDataBinFilters":[]}`, "known-if-b-subset="},
-		{"POST", "/api/clinical-data-bin-counts/fetch", `{"attributes":[]}`, ""},
+		{"POST", "/api/clinical-data-bin-counts/fetch", `{"attributes":[]}`, "known-if-na-multiple="},
+		{"POST", "/api/molecular-profiles/p_mutations/variant-counts/fetch", `[{"entrezGeneId":1956,"keyword":"EGFR A289 missense"}]`, "known-if-a-subset="},
 	} {
 		got, _ := expect(c.method, c.target, c.body)
 		if (c.want == "") != (got == "") || !strings.Contains(got, c.want) {
