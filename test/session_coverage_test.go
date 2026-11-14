@@ -49,7 +49,7 @@ func sessionIDs(docs []sessionDoc) []string {
 
 func TestContractSessionGroupsByOrigin(t *testing.T) {
 	requireAPI(t)
-	user := sessionUser(t)
+	sessionUser(t) // the session endpoints need a logged-in user
 	origin := []string{"study_es_0", fmt.Sprintf("contract_origin_%d", time.Now().UnixNano())}
 	var created struct {
 		ID string `json:"id"`
@@ -65,7 +65,9 @@ func TestContractSessionGroupsByOrigin(t *testing.T) {
 	if len(groups) != 1 || groups[0].ID != created.ID {
 		t.Fatalf("groups for %v: %v", origin, sessionIDs(groups))
 	}
-	wantEq(t, []any{groups[0].Data.Owner, groups[0].Data.Users}, []any{user, []string{user}})
+	if d := groups[0].Data; d.Owner != "" || d.Users != nil {
+		t.Errorf("groups/fetch sends its owner %q and users %v (Java's SessionDataMixin hides them)", d.Owner, d.Users)
+	}
 
 	// A subset of the origin does not match.
 	post(t, "/api/session/groups/fetch", []string{origin[1]}, &groups)
@@ -74,7 +76,7 @@ func TestContractSessionGroupsByOrigin(t *testing.T) {
 
 func TestContractSessionCustomDataByOrigin(t *testing.T) {
 	requireAPI(t)
-	user := sessionUser(t)
+	sessionUser(t) // the session endpoints need a logged-in user
 	origin := []string{fmt.Sprintf("contract_origin_%d", time.Now().UnixNano())}
 	var created struct {
 		ID string `json:"id"`
@@ -88,7 +90,9 @@ func TestContractSessionCustomDataByOrigin(t *testing.T) {
 	if len(docs) != 1 || docs[0].ID != created.ID {
 		t.Fatalf("custom data for %v: %v", origin, sessionIDs(docs))
 	}
-	wantEq(t, []any{docs[0].Data.Owner, docs[0].Data.Users}, []any{user, []string{user}})
+	if d := docs[0].Data; d.Owner != "" || d.Users != nil {
+		t.Errorf("custom_data/fetch sends its owner %q and users %v (Java's SessionDataMixin hides them)", d.Owner, d.Users)
+	}
 }
 
 // Saved virtual studies and gene lists are listed for their users; the
@@ -121,9 +125,12 @@ func TestContractSessionSavedListsAndUserOperations(t *testing.T) {
 		if i < 0 {
 			t.Fatalf("%s: saved %s not listed", c.list, created.ID)
 		}
-		wantEq(t, listed[i].Data.Users, []string{user})
+		// A gene list is sent with its users (CustomGeneListData has no
+		// mixin); a virtual study without its owner and users.
 		if c.typ == "virtual_study" {
-			wantEq(t, listed[i].Data.Owner, user)
+			wantEq(t, []any{listed[i].Data.Owner, listed[i].Data.Users}, []any{"", []string(nil)})
+		} else {
+			wantEq(t, listed[i].Data.Users, []string{user})
 		}
 
 		resp, _ := rawDo(t, http.MethodGet, "/api/session/"+c.typ+"/delete/"+created.ID, "")
@@ -145,7 +152,7 @@ func TestContractSessionSavedListsAndUserOperations(t *testing.T) {
 // origin, later ones update them; fetch returns the most recent data.
 func TestContractSessionPageSettings(t *testing.T) {
 	requireAPI(t)
-	user := sessionUser(t)
+	sessionUser(t) // the session endpoints need a logged-in user
 	origin := []string{fmt.Sprintf("contract_origin_%d", time.Now().UnixNano())}
 	for _, chart := range []string{"first", "second"} {
 		resp, _ := rawDo(t, http.MethodPost, "/api/session/settings", fmt.Sprintf(
@@ -153,7 +160,7 @@ func TestContractSessionPageSettings(t *testing.T) {
 		wantEq(t, resp.StatusCode, http.StatusOK)
 		var got map[string]any
 		post(t, "/api/session/settings/fetch", map[string]any{"page": "study_view", "origin": origin}, &got)
-		wantEq(t, []any{got["owner"], got["origin"], got["page"]}, []any{user, []any{origin[0]}, "study_view"})
+		wantEq(t, []any{got["owner"], got["origin"], got["page"]}, []any{nil, []any{origin[0]}, "study_view"})
 		if cs, _ := got["chartSettings"].([]any); len(cs) != 1 || cs[0].(map[string]any)["id"] != chart {
 			t.Errorf("chartSettings %v, want [%s]", got["chartSettings"], chart)
 		}
@@ -198,16 +205,20 @@ func TestContractPublicVirtualStudyPublishing(t *testing.T) {
 		t.Fatalf("published %s not listed", created.ID)
 	}
 	data := public[i]["data"].(map[string]any)
-	wantEq(t, []any{data["users"], data["typeOfCancerId"], data["pmid"]}, []any{[]any{"*"}, "brca", "123"})
+	wantEq(t, []any{data["users"], data["owner"], data["typeOfCancerId"], data["pmid"]}, []any{nil, nil, "brca", "123"})
 
 	wantEq(t, publish(http.MethodDelete, "SECRETKEY", ""), http.StatusOK)
 	get(t, "/api/public_virtual_studies", &public)
 	if slices.ContainsFunc(public, func(v map[string]any) bool { return v["id"] == created.ID }) {
 		t.Errorf("%s still public after un-publishing", created.ID)
 	}
-	var got sessionDoc
-	get(t, "/api/session/virtual_study/"+created.ID, &got)
-	wantEq(t, []any{got.Data.Owner, got.Data.Users}, []any{user, []string{user}})
+	// Un-publishing gives the study back to its owner, so it is listed as
+	// theirs again.
+	var mine []sessionDoc
+	get(t, "/api/session/virtual_study", &mine)
+	if !slices.ContainsFunc(mine, func(d sessionDoc) bool { return d.ID == created.ID }) {
+		t.Errorf("%s not %s's again after un-publishing", created.ID, user)
+	}
 
 	// Only a published study can be un-published.
 	wantEq(t, publish(http.MethodDelete, "SECRETKEY", ""), http.StatusNotFound)

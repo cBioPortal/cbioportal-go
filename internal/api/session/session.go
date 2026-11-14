@@ -239,7 +239,7 @@ func (s Server) sessionGet(w http.ResponseWriter, r *http.Request) {
 	if typ == "virtual_study" {
 		s.populateDynamic(sess)
 	}
-	core.WriteJSON(w, sess)
+	core.WriteJSON(w, sessionView(sess, javaClass(typ)))
 }
 
 func (s Server) sessionUserVirtualStudies(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +254,7 @@ func (s Server) sessionUserVirtualStudies(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	core.WriteJSON(w, list)
+	core.WriteJSON(w, sessionViews(list, "virtual_study"))
 }
 
 // virtualStudiesFor lists virtual studies whose users contain name, with
@@ -276,19 +276,20 @@ func (s Server) sessionUserCustomGeneLists(w http.ResponseWriter, r *http.Reques
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
-	s.writeSessions(w, r, "custom_gene_list", sessionstore.Filter{Users: user})
+	s.writeSessions(w, r, "custom_gene_list", "custom_gene_list", sessionstore.Filter{Users: user})
 }
 
-// writeSessions answers the sessions of typ matching f; a store failure is
-// the unhandled exception's Spring error.
-func (s Server) writeSessions(w http.ResponseWriter, r *http.Request, typ string, f sessionstore.Filter) {
+// writeSessions answers the sessions of typ matching f, each as Java's
+// class (sessionView) writes it; a store failure is the unhandled
+// exception's Spring error.
+func (s Server) writeSessions(w http.ResponseWriter, r *http.Request, typ, class string, f sessionstore.Filter) {
 	list, err := s.SessionStore().Find(typ, f)
 	if err != nil {
 		sessionstore.LogError(err)
 		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	core.WriteJSON(w, list)
+	core.WriteJSON(w, sessionViews(list, class))
 }
 
 // sessionFetchByOrigin lists sessions of typ owned by the user whose origin
@@ -302,7 +303,12 @@ func (s Server) sessionFetchByOrigin(typ string) http.HandlerFunc {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return
 		}
-		s.writeSessions(w, r, typ, sessionstore.Filter{Users: user, Origin: studyIDs, HasOrigin: true})
+		// Java lists groups as virtual studies (VirtualStudy).
+		class := typ
+		if typ == "group" {
+			class = "virtual_study"
+		}
+		s.writeSessions(w, r, typ, class, sessionstore.Filter{Users: user, Origin: studyIDs, HasOrigin: true})
 	}
 }
 
@@ -474,7 +480,7 @@ func (s Server) sessionFetchSettings(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	core.WriteJSON(w, existing.Data)
+	core.WriteJSON(w, pageSettingsData(existing.Data))
 }
 
 // ---- dynamic virtual studies ----
@@ -545,7 +551,7 @@ func (s Server) publicVirtualStudies(w http.ResponseWriter, r *http.Request) {
 		core.SpringError(w, r, http.StatusInternalServerError)
 		return
 	}
-	core.WriteJSON(w, list)
+	core.WriteJSON(w, sessionViews(list, "virtual_study"))
 }
 
 // publisherKey is the key publishing virtual studies requires: the

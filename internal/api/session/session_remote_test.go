@@ -294,7 +294,9 @@ func TestRemoteStoreServesSameBodies(t *testing.T) {
 		idR := rem.create(c.create, "alice", vs)
 		bm := mem.do("GET", c.get+idM, "", nil, nil).Body.String()
 		br := rem.do("GET", c.get+idR, "", nil, nil).Body.String()
-		if !strings.Contains(br, `"source":"`+fakePortal+`"`) || strings.Contains(br, "checksum") {
+		// Java's VirtualStudy hides the envelope's source; Session sends it.
+		wantSource := c.create == "/api/session/main_session"
+		if strings.Contains(br, `"source":"`+fakePortal+`"`) != wantSource || strings.Contains(br, "checksum") {
 			t.Errorf("remote envelope: %s", br)
 		}
 		if a, b := norm.ReplaceAllString(bm, ""), norm.ReplaceAllString(br, ""); a != b {

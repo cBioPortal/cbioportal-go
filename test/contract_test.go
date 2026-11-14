@@ -400,8 +400,9 @@ func TestContractVirtualStudyRoundTrip(t *testing.T) {
 	get(t, "/api/session/virtual_study/"+created.ID, &got)
 	wantEq(t, []any{got.ID, got.Data.Name, len(got.Data.Users), got.Data.Origin},
 		[]any{created.ID, vs["name"], 0, []string{"study_es_0"}})
-	if got.Data.Owner == "" {
-		t.Errorf("virtual study has no owner")
+	// Java's SessionDataMixin hides who saved the study.
+	if got.Data.Owner != "" {
+		t.Errorf("virtual study sends its owner %q", got.Data.Owner)
 	}
 	if len(got.Data.Studies) != 1 || got.Data.Studies[0].ID != "study_es_0" {
 		t.Errorf("studies not round-tripped: %+v", got.Data.Studies)

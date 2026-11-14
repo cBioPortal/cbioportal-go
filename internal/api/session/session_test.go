@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -63,6 +64,17 @@ func (e *sessionTestEnv) create(path, user string, body any) string {
 		e.t.Errorf("POST %s: want only id, got %v", path, out)
 	}
 	return id
+}
+
+// stored is the session of typ as the store holds it, with the fields the
+// API does not send back (owner, users, timestamps).
+func (e *sessionTestEnv) stored(typ, id string) *sessionstore.Session {
+	e.t.Helper()
+	s, err := e.s.SessionStore().Get(typ, id)
+	if err != nil {
+		e.t.Fatalf("stored %s %s: %v", typ, id, err)
+	}
+	return s
 }
 
 func (e *sessionTestEnv) session(path, user string) sessionstore.Session {
@@ -130,15 +142,24 @@ func TestVirtualStudyAnonymous(t *testing.T) {
 			"name": "vs", "studies": []any{map[string]any{"id": "study_es_0", "samples": []string{"s1"}}},
 			"origin": []string{"study_es_0"}, "owner": "mallory", "users": []string{"*"}, "junk": 1,
 		})
-		s := e.session("/api/session/virtual_study/"+id, "")
-		d := s.Data
+		// As Java's VirtualStudy, the answer hides who saved the study.
+		served := e.session("/api/session/virtual_study/"+id, "").Data
+		for _, k := range []string{"owner", "users", "created", "lastUpdated", "version"} {
+			if _, ok := served[k]; ok {
+				t.Errorf("GET sends %s: %v", k, served)
+			}
+		}
+		if served["name"] != "vs" || served["origin"] == nil {
+			t.Errorf("GET: %v", served)
+		}
+		d := e.stored("virtual_study", id).Data
 		if d["owner"] != "anonymous" || len(d["users"].([]any)) != 0 {
 			t.Errorf("anonymous owner/users not enforced: %v", d)
 		}
 		if _, ok := d["junk"]; ok {
 			t.Errorf("unknown field kept: %v", d)
 		}
-		if d["created"] == nil || d["lastUpdated"] == nil || d["version"] != float64(1) {
+		if d["created"] == nil || d["lastUpdated"] == nil || (fmt.Sprint(d["version"]) != "1" && fmt.Sprint(d["version"]) != "1.0") {
 			t.Errorf("defaults missing: %v", d)
 		}
 		if got := e.list("/api/session/virtual_study", "", nil); len(got) != 0 {
@@ -159,7 +180,7 @@ func TestVirtualStudyAuthorized(t *testing.T) {
 		saved := e.create("/api/session/virtual_study/save", "alice", vs)
 		shared := e.create("/api/session/virtual_study", "alice", map[string]any{"name": "shared", "origin": []string{"a"}})
 
-		s := e.session("/api/session/virtual_study/"+saved, "")
+		s := e.stored("virtual_study", saved)
 		if s.Data["owner"] != "alice" || len(s.Data["users"].([]any)) != 1 || s.Data["users"].([]any)[0] != "alice" {
 			t.Errorf("save should set owner+users to alice: %v", s.Data)
 		}
@@ -208,9 +229,20 @@ func TestGroupsAndCustomDataFetch(t *testing.T) {
 		if got := e.list("/api/session/custom_data/fetch", "alice", []string{"a", "b"}); len(got) != 1 || got[0].ID != cd {
 			t.Errorf("custom data: %v", got)
 		}
-		s := e.session("/api/session/custom_data/"+cd, "")
-		if s.Data["owner"] != "alice" || s.Data["displayName"] != "x" {
-			t.Errorf("custom data payload: %v", s.Data)
+		if s := e.stored("custom_data", cd); s.Data["owner"] != "alice" || s.Data["displayName"] != "x" {
+			t.Errorf("custom data stored: %v", s.Data)
+		}
+		// As Java's CustomDataSession, the answers hide who saved the data.
+		served := e.session("/api/session/custom_data/"+cd, "").Data
+		listed := e.list("/api/session/custom_data/fetch", "alice", []string{"a", "b"})[0].Data
+		for _, d := range []map[string]any{served, listed} {
+			if d["displayName"] != "x" || d["owner"] != nil || d["users"] != nil || d["created"] != nil {
+				t.Errorf("custom data served: %v", d)
+			}
+		}
+		// groups/fetch lists groups as Java's VirtualStudy.
+		if g := e.list("/api/session/groups/fetch", "alice", []string{"b", "a"})[0].Data; g["name"] != "g" || g["owner"] != nil || g["users"] != nil {
+			t.Errorf("group listed: %v", g)
 		}
 		if raw, ok := e.s.SessionData("custom_data", cd); !ok || !bytes.Contains(raw, []byte(`"displayName":"x"`)) {
 			t.Errorf("sessionData: %s %v", raw, ok)
@@ -245,7 +277,7 @@ func TestPageSettings(t *testing.T) {
 		rec := e.do("POST", "/api/session/settings/fetch", "alice", ident, nil)
 		var got map[string]any
 		json.Unmarshal(rec.Body.Bytes(), &got)
-		if got["chartSettings"] != "v2" || got["owner"] != "alice" {
+		if got["chartSettings"] != "v2" || got["owner"] != nil || got["created"] != nil {
 			t.Errorf("fetched settings: %v", got)
 		}
 	})
@@ -292,7 +324,7 @@ func TestPublicVirtualStudies(t *testing.T) {
 		if rec := e.do("DELETE", "/api/public_virtual_studies/"+id, "", nil, key); rec.Code != 200 {
 			t.Fatalf("soft unpublish: %d", rec.Code)
 		}
-		s := e.session("/api/session/virtual_study/"+id, "")
+		s := e.stored("virtual_study", id)
 		if u := s.Data["users"].([]any); len(u) != 1 || u[0] != "alice" {
 			t.Errorf("soft unpublish should restore owner: %v", s.Data)
 		}
