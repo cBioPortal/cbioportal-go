@@ -213,3 +213,36 @@ func TestContractClinicalDataEnrichmentsAttributeStudy(t *testing.T) {
 		t.Errorf("no CANCER_TYPE enrichment among %d", len(d))
 	}
 }
+
+// TestContractClinicalDataEnrichmentsTestPerAttribute: a number attribute's
+// test is named by the groups with values for that attribute, as Java's
+// ClinicalDataEnrichmentUtil does: two groups make a Wilcoxon test, more a
+// Kruskal-Wallis test.
+func TestContractClinicalDataEnrichmentsTestPerAttribute(t *testing.T) {
+	requireAPI(t)
+	group := func(name, study string, ids ...string) map[string]any {
+		var s []map[string]string
+		for _, id := range ids {
+			s = append(s, map[string]string{"studyId": study, "sampleId": id})
+		}
+		return map[string]any{"name": name, "sampleIdentifiers": s}
+	}
+	// TUMOR_PURITY is only in teststudy_genepanels, so group c has no values.
+	body := map[string]any{"groups": []any{
+		group("a", "teststudy_genepanels", "sample1", "sample2", "sample3"),
+		group("b", "teststudy_genepanels", "sample4", "sample5"),
+		group("c", "study_es_0", "TCGA-A1-A0SB-01", "TCGA-A1-A0SD-01", "TCGA-A1-A0SE-01", "TCGA-A1-A0SF-01"),
+	}}
+	var d []struct {
+		ClinicalAttribute struct {
+			ID string `json:"clinicalAttributeId"`
+		} `json:"clinicalAttribute"`
+		Method string `json:"method"`
+	}
+	post(t, "/api/clinical-data-enrichments/fetch", body, &d)
+	got := map[string]string{}
+	for _, r := range d {
+		got[r.ClinicalAttribute.ID] = r.Method
+	}
+	wantEq(t, []string{got["TUMOR_PURITY"], got["OS_MONTHS"]}, []string{"Wilcoxon Test", "Kruskal Wallis Test"})
+}

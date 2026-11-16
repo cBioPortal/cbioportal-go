@@ -108,11 +108,6 @@ func (s Server) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		core.WriteJSON(w, out)
 		return
 	}
-	testName := "Kruskal Wallis Test"
-	if numGroups == 2 {
-		testName = "Wilcoxon Test"
-	}
-
 	attrRows, err := core.QueryA[studies.ClinAttrRow](s.CH, fmt.Sprintf(
 		"%sSELECT study_id AS studyId, clinical_attribute_id AS clinicalAttributeId, display_name AS displayName, "+
 			"description, datatype, priority, patient_attribute AS patientFlag FROM clinical_attribute_meta "+
@@ -326,10 +321,15 @@ func (s Server) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if math.IsNaN(p) {
 			continue
 		}
+		// Java names the test by the groups with values for this attribute.
+		method := "Kruskal Wallis Test"
+		if len(groupRanks) == 2 {
+			method = "Wilcoxon Test"
+		}
 		out = append(out, ClinicalDataEnrichment{
 			ClinicalAttribute: a,
 			Score:             stats.DatumboxChisquareInverseCdf(p, len(groupRanks)-1),
-			Method:            testName,
+			Method:            method,
 			PValue:            p,
 		})
 	}
