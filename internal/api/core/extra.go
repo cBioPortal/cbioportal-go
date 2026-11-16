@@ -64,6 +64,13 @@ func IsLegacyAlias(r *http.Request) bool {
 	return strings.HasPrefix(aliasOf(r), "/api/legacy/")
 }
 
+// IsNotReadyYetAlias reports whether the request came in on its
+// /api/not-ready-yet/ alias, which Java serves with a column-store
+// controller.
+func IsNotReadyYetAlias(r *http.Request) bool {
+	return strings.HasPrefix(aliasOf(r), "/api/not-ready-yet/")
+}
+
 // APIAliasPath maps an alias path (/api/legacy/X, /api/not-ready-yet/X) to the
 // /api/X path that serves it.
 func APIAliasPath(path string) (string, bool) {

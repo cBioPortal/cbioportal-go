@@ -80,6 +80,10 @@ func (s Server) gaEnrichmentParse(w http.ResponseWriter, r *http.Request, dataty
 		core.WriteError(w, http.StatusBadRequest, core.MsgEnumMismatch("org.cbioportal.legacy.model.EnrichmentType", et))
 		return nil
 	}
+	if emptyCasesGroup(groups) {
+		core.WriteError(w, http.StatusBadRequest, msgEmptyCasesGroup)
+		return nil
+	}
 
 	profileIDs := map[string]bool{}
 	profileID := ""

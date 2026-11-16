@@ -283,6 +283,10 @@ func (s Server) computeContinuous(groups []casesGroup, keyCol string, withGene b
 func (s Server) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	core.ReadBody(r, &groups)
+	if emptyCasesGroup(groups) {
+		core.WriteError(w, http.StatusBadRequest, msgEmptyCasesGroup)
+		return
+	}
 	if id, ok := s.enrichmentProfileValid(groups, expressionAlterationTypes); !ok {
 		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(id))
 		return
@@ -320,6 +324,10 @@ func (s Server) expressionEnrichmentsFetch(w http.ResponseWriter, r *http.Reques
 func (s Server) genericAssayEnrichmentsFetch(w http.ResponseWriter, r *http.Request) {
 	var groups []casesGroup
 	core.ReadBody(r, &groups)
+	if emptyCasesGroup(groups) {
+		core.WriteError(w, http.StatusBadRequest, msgEmptyCasesGroup)
+		return
+	}
 	if id, ok := s.enrichmentProfileValid(groups, map[string]bool{"GENERIC_ASSAY": true}); !ok {
 		core.WriteError(w, http.StatusNotFound, core.MsgMolecularProfileNotFound(id))
 		return

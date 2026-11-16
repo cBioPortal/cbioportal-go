@@ -70,6 +70,20 @@ func (s Server) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		} `json:"groups"`
 	}
 	core.ReadBody(r, &f)
+	// The column-store controller (/api/not-ready-yet/) names a number
+	// attribute's test by the groups with values for it; the legacy one by
+	// the groups with samples.
+	columnStore := core.IsNotReadyYetAlias(r)
+	for i, g := range f.Groups {
+		if g.SampleIdentifiers != nil && len(g.SampleIdentifiers) == 0 {
+			msg := core.MsgListSize("interceptedGroupFilter")
+			if columnStore {
+				msg = core.MsgListSize(fmt.Sprintf("groups[%d].sampleIdentifiers", i))
+			}
+			core.WriteError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
 
 	out := []ClinicalDataEnrichment{}
 	if len(f.Groups) < 2 {
@@ -321,9 +335,12 @@ func (s Server) clinicalDataEnrichmentsFetch(w http.ResponseWriter, r *http.Requ
 		if math.IsNaN(p) {
 			continue
 		}
-		// Java names the test by the groups with values for this attribute.
+		testGroups := numGroups
+		if columnStore {
+			testGroups = len(groupRanks)
+		}
 		method := "Kruskal Wallis Test"
-		if len(groupRanks) == 2 {
+		if testGroups == 2 {
 			method = "Wilcoxon Test"
 		}
 		out = append(out, ClinicalDataEnrichment{

@@ -21,6 +21,21 @@ type casesGroup struct {
 	MolecularProfileCaseIdentifiers []caseIdentifier `json:"molecularProfileCaseIdentifiers"`
 }
 
+// emptyCasesGroup reports whether a group lists no cases, which Java's
+// @Size(min = 1) on MolecularProfileCasesGroupFilter rejects.
+func emptyCasesGroup(groups []casesGroup) bool {
+	for _, g := range groups {
+		if g.MolecularProfileCaseIdentifiers != nil && len(g.MolecularProfileCaseIdentifiers) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// msgEmptyCasesGroup is Java's message for an empty group of an endpoint
+// whose groups InvolvedCancerStudyExtractorInterceptor passes on.
+var msgEmptyCasesGroup = core.MsgListSize("interceptedMolecularProfileCasesGroupFilters")
+
 type CountSummary struct {
 	AlteredCount  int    `json:"alteredCount"`
 	Name          string `json:"name"`

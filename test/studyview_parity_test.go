@@ -214,10 +214,10 @@ func TestContractClinicalDataEnrichmentsAttributeStudy(t *testing.T) {
 	}
 }
 
-// TestContractClinicalDataEnrichmentsTestPerAttribute: a number attribute's
-// test is named by the groups with values for that attribute, as Java's
-// ClinicalDataEnrichmentUtil does: two groups make a Wilcoxon test, more a
-// Kruskal-Wallis test.
+// TestContractClinicalDataEnrichmentsTestPerAttribute: two groups make a
+// Wilcoxon test, more a Kruskal-Wallis test. The column-store controller
+// (/api/not-ready-yet/) counts the groups with values for the attribute, the
+// legacy one the groups with samples.
 func TestContractClinicalDataEnrichmentsTestPerAttribute(t *testing.T) {
 	requireAPI(t)
 	group := func(name, study string, ids ...string) map[string]any {
@@ -239,10 +239,31 @@ func TestContractClinicalDataEnrichmentsTestPerAttribute(t *testing.T) {
 		} `json:"clinicalAttribute"`
 		Method string `json:"method"`
 	}
-	post(t, "/api/clinical-data-enrichments/fetch", body, &d)
-	got := map[string]string{}
-	for _, r := range d {
-		got[r.ClinicalAttribute.ID] = r.Method
+	methods := func(path string) []string {
+		d = nil
+		post(t, path, body, &d)
+		got := map[string]string{}
+		for _, r := range d {
+			got[r.ClinicalAttribute.ID] = r.Method
+		}
+		return []string{got["TUMOR_PURITY"], got["OS_MONTHS"]}
 	}
-	wantEq(t, []string{got["TUMOR_PURITY"], got["OS_MONTHS"]}, []string{"Wilcoxon Test", "Kruskal Wallis Test"})
+	wantEq(t, methods("/api/not-ready-yet/clinical-data-enrichments/fetch"), []string{"Wilcoxon Test", "Kruskal Wallis Test"})
+	wantEq(t, methods("/api/clinical-data-enrichments/fetch"), []string{"Kruskal Wallis Test", "Kruskal Wallis Test"})
+}
+
+// TestContractEnrichmentsEmptyGroup: a group without cases is rejected with
+// Java's bean-validation message, which names the controller's parameter.
+func TestContractEnrichmentsEmptyGroup(t *testing.T) {
+	requireAPI(t)
+	clinical := `{"groups":[{"name":"a","sampleIdentifiers":[{"studyId":"study_es_0","sampleId":"TCGA-A1-A0SB-01"}]},{"name":"b","sampleIdentifiers":[]}]}`
+	wantError(t, "POST", "/api/clinical-data-enrichments/fetch", clinical, 400,
+		"interceptedGroupFilter size must be between 1 and 10000000")
+	wantError(t, "POST", "/api/not-ready-yet/clinical-data-enrichments/fetch", clinical, 400,
+		"groups[1].sampleIdentifiers size must be between 1 and 10000000")
+	cases := `[{"name":"a","molecularProfileCaseIdentifiers":[]},{"name":"b","molecularProfileCaseIdentifiers":[{"caseId":"TCGA-A1-A0SB-01","molecularProfileId":"study_es_0_mrna"}]}]`
+	for _, p := range []string{"expression-enrichments", "generic-assay-enrichments", "generic-assay-categorical-enrichments", "generic-assay-binary-enrichments"} {
+		wantError(t, "POST", "/api/"+p+"/fetch?enrichmentType=SAMPLE", cases, 400,
+			"interceptedMolecularProfileCasesGroupFilters size must be between 1 and 10000000")
+	}
 }
