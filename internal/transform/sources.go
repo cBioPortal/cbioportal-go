@@ -29,7 +29,7 @@ func strCols(names ...string) []sourceColumn {
 // names and types as when the data is present.
 var stagingSources = map[string][]sourceColumn{
 	"cancer_study": append(strCols("study_id", "type_of_cancer", "name", "short_name", "description", "groups",
-		"pmid", "citation", "reference_genome", "add_global_case_list", "status"),
+		"pmid", "citation", "license", "reference_genome", "add_global_case_list", "status"),
 		sourceColumn{"import_time", "DateTime64(6)"}),
 	"clinical_attribute_meta": append(strCols("study_id", "attr_id", "display_name", "description", "datatype", "priority"),
 		sourceColumn{"patient_attribute", "UInt8"}),

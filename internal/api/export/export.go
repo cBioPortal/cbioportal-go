@@ -216,13 +216,14 @@ type exportStudyMeta struct {
 	Description     string `json:"description"`
 	Citation        string `json:"citation"`
 	Pmid            string `json:"pmid"`
+	License         string `json:"license"`
 	Groups          string `json:"groups"`
 	ReferenceGenome string `json:"reference_genome"`
 }
 
 func (s Server) exportStudyMetadata(studyID string) (*exportStudyMeta, error) {
 	rows, err := ch.QueryP[exportStudyMeta](s.CH,
-		"SELECT study_id, cancer_type_id, name, description, citation, pmid, groups, reference_genome "+
+		"SELECT study_id, cancer_type_id, name, description, citation, pmid, "+s.StudyLicenseSQL("")+" AS license, groups, reference_genome "+
 			"FROM cancer_study WHERE study_id = {study:String} LIMIT 1", ch.Params{"study": studyID})
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -295,8 +296,8 @@ func (e *studyExport) loadCases() error {
 // ---------- study metadata, cancer type, README ----------
 
 // cancerStudyMetadata writes meta_study.txt (CancerStudyMetadataExporter).
-// Absent citation / pmid are not written; groups are stored upper-cased as a
-// HashSet joined by ';'; the reference genome defaults to hg19.
+// Absent citation / pmid / license are not written; groups are stored
+// upper-cased as a HashSet joined by ';'; the reference genome defaults to hg19.
 func (e *studyExport) cancerStudyMetadata() error {
 	m := e.study
 	opt := func(v string) *string {
@@ -316,6 +317,7 @@ func (e *studyExport) cancerStudyMetadata() error {
 		{"description", strp(m.Description)},
 		{"citation", opt(m.Citation)},
 		{"pmid", opt(m.Pmid)},
+		{"license", opt(m.License)},
 		{"groups", strp(javaGroups(m.Groups))},
 		{"reference_genome", strp(genome)},
 	})
