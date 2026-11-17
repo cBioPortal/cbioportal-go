@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,4 +70,74 @@ func TestMetaProjectionAborted(t *testing.T) {
 		}
 	}()
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/api/x?projection=META", nil))
+}
+
+// TestMetaProjectionStudyFilter checks that a projection=META count leaves
+// out the records of studies the caller may not read, so the count says the
+// same as the list the same request without META would answer.
+func TestMetaProjectionStudyFilter(t *testing.T) {
+	records := func(n int, study string) string {
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, `{"studyId":%q,"uniqueSampleKey":"k%d"},`, study, i)
+		}
+		return b.String()
+	}
+	for _, c := range []struct {
+		name, body string
+		readable   []string
+		want       string
+	}{
+		{name: "one study left out", body: `[{"studyId":"a"},{"studyId":"b"},{"studyId":"a"}]`,
+			readable: []string{"a"}, want: "2"},
+		{name: "no readable study", body: `[{"studyId":"a"},{"studyId":"b"}]`,
+			readable: []string{}, want: "0"},
+		{name: "record without a study counts", body: `[{"studyId":"b"},{"name":"no study"}]`,
+			readable: []string{"a"}, want: "1"},
+		{name: "streamed in pieces", body: "[" + records(4000, "a") + records(4000, "b") + `{"studyId":"a"}]`,
+			readable: []string{"a"}, want: "4001"},
+	} {
+		h := MetaProjection(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			for b := c.body; b != ""; {
+				n := min(len(b), 97)
+				w.Write([]byte(b[:n]))
+				b = b[n:]
+			}
+		}))
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/api/samples?projection=META", nil)
+		h.ServeHTTP(rec, WithMetaStudyFilter(r, NewMetaStudyFilter(c.readable)))
+		if got := rec.Header().Get("total-count"); got != c.want {
+			t.Errorf("%s: total-count %q, want %q", c.name, got, c.want)
+		}
+	}
+	// Without a filter every record counts.
+	h := MetaProjection(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"studyId":"a"},{"studyId":"b"}]`))
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/samples?projection=META", nil))
+	if got := rec.Header().Get("total-count"); got != "2" {
+		t.Errorf("no filter: total-count %q, want 2", got)
+	}
+}
+
+// TestMetaCountSQL checks the count query a filtered META answer runs.
+func TestMetaCountSQL(t *testing.T) {
+	sel := "SELECT study_id AS studyId FROM sample"
+	plain := MetaCountSQL(httptest.NewRequest("GET", "/api/samples?projection=META", nil), NewArgs(), sel)
+	if plain != "SELECT count() AS n FROM ("+sel+")" {
+		t.Errorf("without a filter: %s", plain)
+	}
+	args := NewArgs()
+	r := WithMetaStudyFilter(httptest.NewRequest("GET", "/api/samples?projection=META", nil),
+		NewMetaStudyFilter([]string{"a", "b"}))
+	sql := MetaCountSQL(r, args, sel)
+	if !strings.Contains(sql, ") WHERE studyId IN {a0:Array(String)}") {
+		t.Errorf("with a filter: %s", sql)
+	}
+	if p := args.Params(sql); len(p) != 1 {
+		t.Errorf("params %v", p)
+	}
 }

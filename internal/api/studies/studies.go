@@ -327,7 +327,7 @@ func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if projection == "META" {
-		w.Header().Set("total-count", fmt.Sprint(len(rows)))
+		w.Header().Set("total-count", fmt.Sprint(metaStudyCount(r, rows)))
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("[]"))
 		return
@@ -346,6 +346,22 @@ func (s Server) studies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	core.WriteJSON(w, out)
+}
+
+// metaStudyCount is the number of studies a projection=META answer reports:
+// the studies its list would return, so under study authorization the ones
+// the caller may not see are left out.
+func metaStudyCount(r *http.Request, groups ...[]studyRow) int {
+	f := core.MetaStudyFilterOf(r)
+	n := 0
+	for _, g := range groups {
+		for _, row := range g {
+			if f.Keep(row.StudyID) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // studySortCols maps the studies' sortBy values (StudySortBy) to columns.
@@ -405,7 +421,7 @@ func (s Server) legacyStudies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if projection == "META" {
-		w.Header().Set("total-count", fmt.Sprint(len(rows)+len(extra)))
+		w.Header().Set("total-count", fmt.Sprint(metaStudyCount(r, rows, extra)))
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -662,10 +678,15 @@ func (s Server) patients(w http.ResponseWriter, r *http.Request) {
 }
 
 // writePatientRows streams the patients sql selects, or counts them for
-// projection=META.
+// projection=META. Under study authorization GET /api/patients counts only
+// the patients of the studies the caller may read, as PatientServiceImpl
+// .getMetaPatients does.
 func (s Server) writePatientRows(w http.ResponseWriter, r *http.Request, sql string, p ch.Params) {
 	if core.ProjectionOf(r) == "META" {
-		core.WriteMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", p)
+		if p == nil {
+			p = ch.Params{}
+		}
+		core.WriteMetaCount(w, r, s.CH, core.MetaCountSQL(r, core.ParamsBinder(p), sql), p)
 		return
 	}
 	out := core.NewJSONArray(w, r)

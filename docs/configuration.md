@@ -500,7 +500,12 @@ Which studies a user can read:
   attributes leave out studies the user cannot read. With
   `skin.home_page.show_unauthorized_studies=true`, the home page lists them
   anyway, marked as not readable.
-- A request that names a study the user cannot read gets `403`.
+- Asking one of those lists for a count only (`projection=META`, and
+  `/api/studies/meta`) gives the number of records the list itself would
+  return, so the count never says more than the user may see.
+- A request that names a study the user cannot read gets `403`. The same
+  endpoints under `/api/legacy/` and `/api/not-ready-yet/` serve the same
+  data, so they are checked in the same way.
 - A study's `readPermission` in `/api/studies` also depends on its import
   status, but only when `study_availability.enabled=true`. Then a study
   that is still being imported (status not 1) is not readable. Java's

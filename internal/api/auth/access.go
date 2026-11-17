@@ -167,6 +167,41 @@ var filteredLists = map[string]bool{
 	"/api/patients": true, "/api/samples": true, "/api/clinical-attributes": true,
 }
 
+// studyLists are the endpoints that list or count the studies themselves.
+// With skin.home_page.show_unauthorized_studies they keep the studies the
+// caller may not read, marked readPermission false where they have records.
+var studyLists = map[string]bool{"/api/studies": true, "/api/studies/meta": true}
+
+// readableStudies are the studies the authorities grant, for a count that
+// filters on them.
+func (idx studyIndex) readableStudies(auth map[string]bool) []string {
+	out := make([]string, 0, len(idx.groups))
+	for id, groups := range idx.groups {
+		if canRead(auth, id, groups) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// metaCounted reports whether a GET on the path answers with a count and no
+// records: the studies endpoint that only counts, or a filtered list under
+// projection=META. The count is then made over the studies the caller may
+// read, since there are no records to filter.
+func metaCounted(path, projection string) bool {
+	return path == "/api/studies/meta" || (filteredLists[path] && strings.EqualFold(projection, "META"))
+}
+
+// apiPath is the /api/ path that serves the request: its own, or for a
+// request on an /api/legacy/ or /api/not-ready-yet/ alias the path the alias
+// is served by, so the alias is checked like the endpoint it reaches.
+func apiPath(r *http.Request) string {
+	if to, ok := core.APIAliasPath(r.URL.Path); ok {
+		return to
+	}
+	return r.URL.Path
+}
+
 // studyAccess enforces the policy on API requests of logged-in users.
 func (s Server) studyAccess(policy accessPolicy, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -181,9 +216,10 @@ func (s Server) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			return
 		}
 		auth := policy.authorities(user)
-		studies, profiles, lists := pathTargets(r)
+		path := apiPath(r)
+		studies, profiles, lists := pathTargets(r.Method, path)
 		if r.Method == http.MethodPost {
-			bs, bp, bl := bodyTargets(r.URL.Path, core.BufferedBody(r))
+			bs, bp, bl := bodyTargets(path, core.BufferedBody(r))
 			studies, profiles, lists = append(studies, bs...), append(profiles, bp...), append(lists, bl...)
 		}
 		if !idx.readable(auth, studies, profiles, lists) {
@@ -196,12 +232,23 @@ func (s Server) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 			return !ok || canRead(auth, study, groups)
 		}
 		r = core.WithStudyReadable(r, readable)
-		if r.Method != http.MethodGet || !filteredLists[r.URL.Path] {
+		counting := metaCounted(path, r.URL.Query().Get("projection"))
+		keepAll := studyLists[path] && policy.showUnauthorized
+		if r.Method != http.MethodGet || !(filteredLists[path] || counting) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		keepAll := r.URL.Path == "/api/studies" && policy.showUnauthorized
-		f := studyFilter{readable: readable, keepAll: keepAll, studies: r.URL.Path == "/api/studies"}
+		if counting {
+			// A META answer has no records to filter, so the count is made
+			// over the readable studies where it is made: the number must
+			// be the one the list endpoint's records add up to.
+			if !keepAll {
+				r = core.WithMetaStudyFilter(r, core.NewMetaStudyFilter(idx.readableStudies(auth)))
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		f := studyFilter{readable: readable, keepAll: keepAll, studies: studyLists[path]}
 		// A successful array is filtered element by element as it is
 		// written, unless its total-count header must count the kept records.
 		var bw *bufio.Writer
@@ -241,15 +288,18 @@ func (s Server) studyAccess(policy accessPolicy, next http.Handler) http.Handler
 }
 
 // pathTargets are the study, profile and sample list ids in an API path.
-func pathTargets(r *http.Request) (studies, profiles, lists []string) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/"), "/")
+func pathTargets(method, path string) (studies, profiles, lists []string) {
+	parts := strings.Split(strings.TrimPrefix(path, "/api/"), "/")
 	if len(parts) < 2 || parts[1] == "" {
 		return
 	}
 	id := parts[1]
 	switch parts[0] {
 	case "studies":
-		if r.Method == http.MethodPost && (id == "fetch" || id == "tags") {
+		if id == "meta" {
+			return
+		}
+		if method == http.MethodPost && (id == "fetch" || id == "tags") {
 			return
 		}
 		studies = append(studies, id)

@@ -287,7 +287,7 @@ func MetaProjection(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		rec := &metaCounter{header: http.Header{}, status: http.StatusOK}
+		rec := &metaCounter{header: http.Header{}, status: http.StatusOK, studies: MetaStudyFilterOf(r)}
 		defer rec.close()
 		next.ServeHTTP(rec, r)
 		n, samples, ok := rec.count()
@@ -336,13 +336,15 @@ func WriteMetaCount(w http.ResponseWriter, r *http.Request, c *ch.Client, sql st
 // JSON array of objects without a total-count header is counted as it is
 // written (its elements and their distinct uniqueSampleKeys) and not kept, so
 // counting a large list costs no more memory than one element; any other
-// response is kept in raw to be passed on as it is.
+// response is kept in raw to be passed on as it is. With a study filter only
+// the elements of its studies count.
 type metaCounter struct {
 	header   http.Header
 	status   int
 	raw      bytes.Buffer
 	counting bool
 	err      error // counting failed
+	studies  *MetaStudyFilter
 	pw       *io.PipeWriter
 	done     chan metaCount
 }
@@ -369,7 +371,7 @@ func (m *metaCounter) Write(p []byte) (int, error) {
 		m.counting = true
 		pr, pw := io.Pipe()
 		m.pw, m.done = pw, make(chan metaCount, 1)
-		go countArray(pr, m.done)
+		go countArray(pr, m.studies, m.done)
 		_, err := pw.Write(m.raw.Bytes())
 		m.raw.Reset()
 		if err != nil {
@@ -388,19 +390,21 @@ func (m *metaCounter) count() (n, samples int, ok bool) {
 		if m.status != http.StatusOK || m.header.Get("total-count") != "" {
 			return 0, 0, false
 		}
-		var items []struct {
-			UniqueSampleKey string `json:"uniqueSampleKey"`
-		}
+		var items []metaItem
 		if json.Unmarshal(m.raw.Bytes(), &items) != nil {
 			return 0, 0, false
 		}
 		samples := map[string]bool{}
 		for _, it := range items {
+			if !m.studies.Keep(it.StudyID) {
+				continue
+			}
+			n++
 			if it.UniqueSampleKey != "" {
 				samples[it.UniqueSampleKey] = true
 			}
 		}
-		return len(items), len(samples), true
+		return n, len(samples), true
 	}
 	m.pw.Close()
 	c := <-m.done
@@ -430,9 +434,16 @@ func objectArrayStart(b []byte) bool {
 	return len(b) > 0 && (b[0] == '{' || b[0] == ']')
 }
 
+// metaItem is what a counted element is read for: its study, so a study
+// filter can leave it out, and its sample, for the distinct sample count.
+type metaItem struct {
+	StudyID         string `json:"studyId"`
+	UniqueSampleKey string `json:"uniqueSampleKey"`
+}
+
 // countArray decodes a JSON array of objects from r element by element,
-// then drains r.
-func countArray(r *io.PipeReader, done chan<- metaCount) {
+// counting the ones studies keeps, then drains r.
+func countArray(r *io.PipeReader, studies *MetaStudyFilter, done chan<- metaCount) {
 	var c metaCount
 	defer func() {
 		io.Copy(io.Discard, r)
@@ -444,11 +455,12 @@ func countArray(r *io.PipeReader, done chan<- metaCount) {
 	}
 	samples := map[string]bool{}
 	for dec.More() {
-		var it struct {
-			UniqueSampleKey string `json:"uniqueSampleKey"`
-		}
+		var it metaItem
 		if c.err = dec.Decode(&it); c.err != nil {
 			return
+		}
+		if !studies.Keep(it.StudyID) {
+			continue
 		}
 		c.n++
 		if it.UniqueSampleKey != "" {

@@ -1,8 +1,11 @@
 package studies
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/cbioportal/cbioportal-go/internal/api/core"
 )
 
 func TestStudyReadable(t *testing.T) {
@@ -47,5 +50,25 @@ func TestPrimarySite(t *testing.T) {
 		if ok != (want != "") || site.CancerTypeID != want {
 			t.Errorf("%s: %q %v, want %q", id, site.CancerTypeID, ok, want)
 		}
+	}
+}
+
+// TestMetaStudyCount checks that the studies endpoints' projection=META
+// count reports the studies their list would return: under study
+// authorization only the ones the caller may see.
+func TestMetaStudyCount(t *testing.T) {
+	rows := []studyRow{{StudyID: "a"}, {StudyID: "b"}}
+	extra := []studyRow{{StudyID: "c"}}
+	plain := httptest.NewRequest("GET", "/api/studies?projection=META", nil)
+	if got := metaStudyCount(plain, rows, extra); got != 3 {
+		t.Errorf("without a filter: %d, want 3", got)
+	}
+	filtered := core.WithMetaStudyFilter(plain, core.NewMetaStudyFilter([]string{"a", "c"}))
+	if got := metaStudyCount(filtered, rows, extra); got != 2 {
+		t.Errorf("with a filter: %d, want 2", got)
+	}
+	none := core.WithMetaStudyFilter(plain, core.NewMetaStudyFilter(nil))
+	if got := metaStudyCount(none, rows); got != 0 {
+		t.Errorf("no readable study: %d, want 0", got)
 	}
 }

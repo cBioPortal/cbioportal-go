@@ -72,10 +72,12 @@ func sampleFullSelectFrom(b core.Binder, sc core.Scope, where string) string {
 var sampleSortable = map[string]string{"sampleId": "sampleId", "sampleType": "sampleType"}
 
 // writeSampleRows streams the samples sql selects, or counts them for
-// projection=META.
+// projection=META. Under study authorization GET /api/samples counts only
+// the samples of the studies the caller may read, as SampleController does.
 func (s Server) writeSampleRows(w http.ResponseWriter, r *http.Request, sql string, args *core.SQLArgs) {
 	if core.ProjectionOf(r) == "META" {
-		core.WriteMetaCount(w, r, s.CH, "SELECT count() AS n FROM ("+sql+")", args.Params(sql))
+		count := core.MetaCountSQL(r, args, sql)
+		core.WriteMetaCount(w, r, s.CH, count, args.Params(count))
 		return
 	}
 	out := core.NewJSONArray(w, r)

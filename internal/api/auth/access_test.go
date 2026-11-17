@@ -88,12 +88,77 @@ func TestPathTargets(t *testing.T) {
 		"GET /api/sample-lists/l1/sample-ids":      "||l1",
 		"GET /api/export/study/s9.zip":             "s9||",
 		"GET /api/genes/TP53":                      "||",
+		"GET /api/studies/meta":                    "||",
 	} {
 		method, p, _ := strings.Cut(path, " ")
-		s, pr, l := pathTargets(httptest.NewRequest(method, p, nil))
+		s, pr, l := pathTargets(method, apiPath(httptest.NewRequest(method, p, nil)))
 		if got := strings.Join(s, ",") + "|" + strings.Join(pr, ",") + "|" + strings.Join(l, ","); got != want {
 			t.Errorf("%s: %q, want %q", path, got, want)
 		}
+	}
+}
+
+// TestAPIPath checks that the /api/legacy/ and /api/not-ready-yet/ aliases
+// are checked as the endpoints they reach: they serve the same data, so
+// naming a study through an alias must be refused just the same.
+func TestAPIPath(t *testing.T) {
+	for alias, want := range map[string]string{
+		"/api/legacy/studies/brca_tcga":   "/api/studies/brca_tcga",
+		"/api/legacy/studies/fetch":       "/api/studies/fetch",
+		"/api/not-ready-yet/sample-lists": "/api/sample-lists",
+		"/api/studies":                    "/api/studies",
+	} {
+		if got := apiPath(httptest.NewRequest("GET", alias, nil)); got != want {
+			t.Errorf("apiPath(%q) = %q, want %q", alias, got, want)
+		}
+	}
+	if s, _, _ := pathTargets("GET", apiPath(httptest.NewRequest("GET", "/api/legacy/studies/brca_tcga", nil))); strings.Join(s, ",") != "brca_tcga" {
+		t.Errorf("study of a legacy alias path: %v", s)
+	}
+	if s, _, _ := bodyTargets(apiPath(httptest.NewRequest("POST", "/api/legacy/studies/fetch", nil)), []byte(`["s1"]`)); strings.Join(s, ",") != "s1" {
+		t.Errorf("studies of a legacy fetch body: %v", s)
+	}
+}
+
+// TestMetaCounted checks which requests answer with a count the caller's
+// readable studies decide, rather than with records that are filtered.
+func TestMetaCounted(t *testing.T) {
+	for _, c := range []struct {
+		path, projection string
+		want             bool
+	}{
+		{"/api/studies/meta", "", true},
+		{"/api/studies", "META", true},
+		{"/api/studies", "meta", true},
+		{"/api/samples", "META", true},
+		{"/api/clinical-attributes", "META", true},
+		{"/api/studies", "SUMMARY", false},
+		{"/api/studies", "", false},
+		{"/api/genes", "META", false},
+	} {
+		if got := metaCounted(c.path, c.projection); got != c.want {
+			t.Errorf("metaCounted(%q, %q) = %v, want %v", c.path, c.projection, got, c.want)
+		}
+	}
+}
+
+// TestGroupFilterStudies checks that the studies of a group comparison body
+// and of a multi-study clinical data body are found, so a group naming a
+// study the caller may not read is refused (Java's
+// CancerStudyPermissionEvaluator denies these filter types outright when it
+// cannot tell their studies).
+func TestGroupFilterStudies(t *testing.T) {
+	s, _, _ := bodyTargets("/api/clinical-data-enrichments/fetch", []byte(
+		`{"groups":[{"name":"a","sampleIdentifiers":[{"studyId":"s1","sampleId":"x"}]},
+		{"name":"b","sampleIdentifiers":[{"studyId":"s2","sampleId":"y"}]}]}`))
+	slices.Sort(s)
+	if strings.Join(s, ",") != "s1,s2" {
+		t.Errorf("group filter studies: %v", s)
+	}
+	s, _, _ = bodyTargets("/api/clinical-data/fetch", []byte(
+		`{"attributeIds":["AGE"],"identifiers":[{"studyId":"s1","entityId":"p1"}]}`))
+	if strings.Join(s, ",") != "s1" {
+		t.Errorf("multi-study clinical data filter studies: %v", s)
 	}
 }
 
