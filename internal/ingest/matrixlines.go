@@ -184,11 +184,22 @@ func ingestMatrixLines(c *ch.Client, studyID string, fileNum int, f *parser.Data
 	if err != nil {
 		return FileStat{}, err
 	}
+	// The lines go to lineStreams inserts at once, in turn: ClickHouse
+	// builds one insert's rows on one thread.
 	var cells uint64
-	pr, pw := io.Pipe()
+	readers := make([]*io.PipeReader, lineStreams)
+	writers := make([]*io.PipeWriter, lineStreams)
+	outs := make([]io.Writer, lineStreams)
+	for i := range readers {
+		readers[i], writers[i] = io.Pipe()
+		outs[i] = writers[i]
+	}
 	go func() {
 		defer in.Close()
-		pw.CloseWithError(writeMatrixLines(pw, in, len(shape.IDColumns), len(shape.SampleColumns), &cells))
+		err := writeMatrixLines(outs, in, len(shape.IDColumns), len(shape.SampleColumns), &cells)
+		for _, w := range writers {
+			w.CloseWithError(err)
+		}
 	}()
 
 	k := len(shape.IDColumns)
@@ -208,9 +219,22 @@ func ingestMatrixLines(c *ch.Client, studyID string, fileNum int, f *parser.Data
 		c.Database(), linesTable(table), backtick(cols), strings.Join(consts, ", "), fileNum, strings.Join(ids, ", "),
 		k+3, len(shape.SampleColumns))
 	start := time.Now()
-	if err := c.InsertStream(sql, pr); err != nil {
-		pr.CloseWithError(err)
-		return FileStat{}, fmt.Errorf("streaming %s: %w", f.DataPath, err)
+	errs := make([]error, lineStreams)
+	var wg sync.WaitGroup
+	for i, r := range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if errs[i] = c.InsertStream(sql, r); errs[i] != nil {
+				r.CloseWithError(errs[i])
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return FileStat{}, fmt.Errorf("streaming %s: %w", f.DataPath, err)
+		}
 	}
 	secs := time.Since(start).Seconds()
 	loaded, err := countCells(c, table, studyID, source)
@@ -220,12 +244,19 @@ func ingestMatrixLines(c *ch.Client, studyID string, fileNum int, f *parser.Data
 	return FileStat{Table: table, SourceFile: source, RowsLoaded: loaded, RowsExpected: cells, Bytes: size, Secs: secs}, nil
 }
 
-// writeMatrixLines copies a matrix file's data lines to w, each prefixed
-// with the number of cells before it and its own number of non-empty
-// cells, and counts the non-empty cells.
-func writeMatrixLines(w io.Writer, in io.Reader, idCount, sampleCount int, cells *uint64) error {
+// lineStreams is how many inserts one matrix file's lines are split over.
+const lineStreams = 4
+
+// writeMatrixLines copies a matrix file's data lines to ws in turn, each
+// prefixed with the number of cells before it and its own number of
+// non-empty cells, and counts the non-empty cells.
+func writeMatrixLines(ws []io.Writer, in io.Reader, idCount, sampleCount int, cells *uint64) error {
 	r := bufio.NewReaderSize(in, 1<<20)
-	out := bufio.NewWriterSize(w, 1<<20)
+	outs := make([]*bufio.Writer, len(ws))
+	for i, w := range ws {
+		outs[i] = bufio.NewWriterSize(w, 256<<10)
+	}
+	next := 0
 	header := true
 	seen := map[string]struct{}{}
 	var base uint64
@@ -265,16 +296,25 @@ func writeMatrixLines(w io.Writer, in io.Reader, idCount, sampleCount int, cells
 				n++
 			}
 		}
+		out := outs[next]
+		next = (next + 1) % len(outs)
 		out.WriteString(strconv.FormatUint(base, 10))
 		out.WriteByte('\t')
 		out.WriteString(strconv.FormatUint(n, 10))
 		out.WriteByte('\t')
 		out.Write(line)
-		out.WriteByte('\n')
+		if err := out.WriteByte('\n'); err != nil {
+			return err
+		}
 		base += n
 	}
 	*cells = base
-	return out.Flush()
+	for _, out := range outs {
+		if err := out.Flush(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // countCells is the number of staged cells of one file of a staging table:
