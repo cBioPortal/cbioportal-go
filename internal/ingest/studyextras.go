@@ -182,14 +182,23 @@ func ingestGenericAssayEntities(c *ch.Client, s *parser.Study) error {
 		}
 		cond := fmt.Sprintf("study_id = '%s' AND profile_stable_id = '%s' AND source_file = '%s'",
 			ch.SQLLit(s.StudyID), ch.SQLLit(f.StableID), ch.SQLLit(fileName(f.DataPath)))
+		// An entity is listed when it has a value: read as lines, one with a
+		// non-empty cell.
+		source := "generic_assay_matrix"
+		if lines, err := stagesLines(c, source); err != nil {
+			return err
+		} else if lines {
+			source = linesTable(source)
+			cond += " AND cells > 0"
+		}
 		if _, err := c.Execute(fmt.Sprintf(
 			"INSERT INTO `%[1]s`.generic_assay_profile_entity SELECT DISTINCT study_id, profile_stable_id, entity_stable_id "+
-				"FROM `%[1]s`.generic_assay_matrix WHERE %[2]s", db, cond)); err != nil {
+				"FROM `%[1]s`.`%[3]s` WHERE %[2]s", db, cond, source)); err != nil {
 			return err
 		}
 		if _, err := c.Execute(fmt.Sprintf(
 			"INSERT INTO `%[1]s`.generic_assay_entity_meta SELECT study_id, entity_stable_id, 'GENERIC_ASSAY', %[3]s "+
-				"FROM `%[1]s`.generic_assay_matrix WHERE %[2]s GROUP BY study_id, entity_stable_id", db, cond, props)); err != nil {
+				"FROM `%[1]s`.`%[4]s` WHERE %[2]s GROUP BY study_id, entity_stable_id", db, cond, props, source)); err != nil {
 			return err
 		}
 	}

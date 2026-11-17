@@ -267,6 +267,13 @@ func ingestMatrix(c *ch.Client, studyID string, fileNum int, f *parser.DataFile)
 			shape.SampleColumns[i] = parser.SampleID(id)
 		}
 	}
+	lines, err := stagesLines(c, f.StageSlug)
+	if err != nil {
+		return FileStat{}, err
+	}
+	if lines {
+		return ingestMatrixLines(c, studyID, fileNum, f, shape)
+	}
 	cols := append(append([]string{}, shape.IDColumns...), "sample_id", "value")
 	var emitted uint64
 	body, err := parser.OpenMatrix(f.DataPath, shape, &emitted)
@@ -285,8 +292,9 @@ func pruneRemovedFiles(c *ch.Client, s *parser.Study, current map[string]bool) e
 		Table string `json:"table"`
 	}
 	tables, err := ch.QueryP[tableRow](c,
-		"SELECT table FROM system.columns WHERE database = {db:String} AND name IN ('study_id', 'source_file') "+
-			"GROUP BY table HAVING count() = 2 ORDER BY table", ch.Params{"db": c.Database()})
+		"SELECT c.table AS table FROM system.columns c JOIN system.tables t ON t.database = c.database AND t.name = c.table "+
+			"WHERE c.database = {db:String} AND c.name IN ('study_id', 'source_file') AND t.engine LIKE '%MergeTree' "+
+			"GROUP BY c.table HAVING count() = 2 ORDER BY c.table", ch.Params{"db": c.Database()})
 	if err != nil {
 		return err
 	}
@@ -313,8 +321,7 @@ func pruneRemovedFiles(c *ch.Client, s *parser.Study, current map[string]bool) e
 }
 
 func deleteExisting(c *ch.Client, f *parser.DataFile, studyID string) error {
-	return c.DeleteWhere(f.StageSlug, fmt.Sprintf(
-		"study_id = '%s' AND source_file = '%s'", ch.SQLLit(studyID), ch.SQLLit(fileName(f.DataPath))))
+	return deleteFileRows(c, f.StageSlug, studyID, fileName(f.DataPath))
 }
 
 // studyFileNames returns the names of the files in a study directory.

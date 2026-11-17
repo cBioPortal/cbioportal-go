@@ -433,6 +433,15 @@ func (c *Client) forgetTables() {
 	c.tables.mu.Unlock()
 }
 
+// TableEngine returns a table's engine (e.g. "MergeTree", "View"), or ""
+// when the client's database has no such table.
+func (c *Client) TableEngine(table string) (string, error) {
+	out, err := c.Execute(fmt.Sprintf(
+		"SELECT engine FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated",
+		SQLLit(c.database), SQLLit(table)))
+	return strings.TrimSpace(out), err
+}
+
 // TableExists reports whether a table exists in the client's database.
 func (c *Client) TableExists(table string) (bool, error) {
 	sql := fmt.Sprintf(

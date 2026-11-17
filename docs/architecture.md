@@ -240,6 +240,17 @@ does and why.
   way, `ALTER … DELETE`, rewrites every part of the table that holds one of
   the rows. That is many times slower: removing a 1,500-row study from a
   163-million-row table took 3 seconds instead of 52.
+- **Matrix files are stored as lines.** A matrix file has a gene or entity
+  per line and a value per sample. The importer stores each line as one
+  row, with the line's values as a list (`<matrix>_lines`), and each
+  file's sample ids once (`matrix_samples`). The matrix's own name, such
+  as `mrna_expression_matrix`, is a view that unpacks the lines into one
+  row per sample and gene, which is what the transform and the API read.
+  A filter on study, profile or gene reaches the lines table's sort key,
+  so reading one gene reads one line. Writing a 100 MB expression file
+  this way takes about a second instead of ten, because ClickHouse stores
+  about 20,000 rows instead of 12 million. A raw database created before
+  this keeps storing those files as one row per value.
 - **Unchanged files are not loaded again.** The raw database keeps a list
   of every staged file (`_staged_files`): its table, its row count and a
   fingerprint of the data file, its meta file and its position in the

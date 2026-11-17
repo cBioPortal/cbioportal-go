@@ -107,7 +107,7 @@ func unchanged(c *ch.Client, studyID string, listed map[string]stagedFile, table
 	if !ok || l.Fingerprint != fp {
 		return false, nil
 	}
-	n, err := c.CountForFile(table, studyID, source)
+	n, err := countCells(c, table, studyID, source)
 	if err != nil {
 		return false, err
 	}
@@ -124,7 +124,7 @@ func pruneListedFiles(c *ch.Client, studyID string, listed map[string]stagedFile
 			continue
 		}
 		where := fmt.Sprintf("study_id = '%s' AND source_file = '%s'", ch.SQLLit(studyID), ch.SQLLit(f.SourceFile))
-		if err := c.DeleteWhere(f.StageTable, where); err != nil {
+		if err := deleteFileRows(c, f.StageTable, studyID, f.SourceFile); err != nil {
 			return false, err
 		}
 		if headerTables[f.StageTable] {
