@@ -16,7 +16,7 @@ import "fmt"
 // study prefix stripped (e.g. `gistic`, `log2CNA`, `mrna`), which in our staging
 // is already the bare `profile_stable_id` column. alteration_value drops NA
 // and empty just as prod does (prod maps empty to NULL then filters out NA).
-func geneticAlterationDerivedSQL(rawDB, targetDB string) string {
+func geneticAlterationDerivedSQL(c *client, rawDB, targetDB string) string {
 	part := func(table, from string) string {
 		return fmt.Sprintf(
 			"SELECT concat(t.study_id, '_', t.sample_id) AS sample_unique_id, "+
@@ -34,11 +34,46 @@ func geneticAlterationDerivedSQL(rawDB, targetDB string) string {
 	// RPPA lines are keyed by their Composite.Element.REF value.
 	protein := fmt.Sprintf("(SELECT *, if(composite_element_ref != '', composite_element_ref, hugo_symbol) AS gene_key "+
 		"FROM `%s`.protein_level_matrix)", rawDB)
+	matrix := func(name, from string) string {
+		if lines := matrixLines(c, name); lines != "" {
+			return linesPart(c, rawDB, targetDB, name, lines)
+		}
+		return part(name, from)
+	}
 	return part("cna_discrete_long", table("cna_discrete_long")) + " UNION ALL " +
-		part("cna_matrix", table("cna_matrix")) + " UNION ALL " +
-		part("methylation_matrix", table("methylation_matrix")) + " UNION ALL " +
-		part("mrna_expression_matrix", table("mrna_expression_matrix")) + " UNION ALL " +
-		part("protein_level_matrix", protein)
+		matrix("cna_matrix", table("cna_matrix")) + " UNION ALL " +
+		matrix("methylation_matrix", table("methylation_matrix")) + " UNION ALL " +
+		matrix("mrna_expression_matrix", table("mrna_expression_matrix")) + " UNION ALL " +
+		matrix("protein_level_matrix", protein)
+}
+
+// linesPart is a matrix's genetic_alteration_derived rows read from its
+// lines: each line is resolved through gene_key_map once, then unpacked
+// into its samples' values, instead of resolving every cell.
+func linesPart(c *client, rawDB, targetDB, table, lines string) string {
+	cols, _ := c.TableColumns(lines)
+	col := func(n string) string {
+		if cols[n] {
+			return "`" + n + "`"
+		}
+		return "''"
+	}
+	key := col("hugo_symbol")
+	if cols["composite_element_ref"] {
+		// RPPA lines are keyed by their Composite.Element.REF value.
+		key = fmt.Sprintf("if(composite_element_ref != '', composite_element_ref, %s)", key)
+	}
+	return fmt.Sprintf(
+		"SELECT concat(t.study_id, '_', cell.2) AS sample_unique_id, t.study_id AS cancer_study_identifier, "+
+			"t.hugo_gene_symbol AS hugo_gene_symbol, t.profile_stable_id AS profile_type, nullIf(cell.1, '') AS alteration_value "+
+			"FROM (SELECT l.study_id AS study_id, l.profile_stable_id AS profile_stable_id, gk.resolved_hugo_gene_symbol AS hugo_gene_symbol, "+
+			"arrayZip(arrayResize(l.values, length(s.samples), ''), s.samples) AS cells "+
+			"FROM (SELECT study_id, source_file, profile_stable_id, %[1]s AS gene_key, %[2]s AS entrez_gene_id, `values` "+
+			"FROM `%[3]s`.`%[4]s` WHERE cells > 0) l "+
+			"INNER JOIN `%[3]s`.matrix_samples s ON s.study_id = l.study_id AND s.source_file = l.source_file AND s.stage_table = '%[5]s'%[6]s"+
+			") t ARRAY JOIN t.cells AS cell "+
+			"WHERE cell.1 NOT IN ('NA', '') AND cell.2 != ''",
+		key, col("entrez_gene_id"), rawDB, lines, table, geneKeyJoin(targetDB, table, "l", "gene_key", "entrez_gene_id"))
 }
 
 // genericAssayDataDerivedSQL builds prod's `generic_assay_data_derived` from the

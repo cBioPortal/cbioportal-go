@@ -258,7 +258,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			genomicEventDerivedSQL(c, rawDB, refDB, targetDB, hasGenomeGenes)},
 		{"genetic_alteration_derived", "(cancer_study_identifier, hugo_gene_symbol, profile_type, sample_unique_id)",
 			"cancer_study_identifier, hugo_gene_symbol, profile_type",
-			geneticAlterationDerivedSQL(rawDB, targetDB)},
+			geneticAlterationDerivedSQL(c, rawDB, targetDB)},
 		{"generic_assay_data_derived", "(profile_type, entity_stable_id, patient_unique_id, sample_unique_id)",
 			"profile_type, profile_stable_id, generic_assay_type, datatype",
 			genericAssayDataDerivedSQL(rawDB, refDB, targetDB,

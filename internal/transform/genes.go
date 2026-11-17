@@ -142,7 +142,15 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 	}
 	var parts []string
 	add := func(src geneKeySource) {
-		cols, _ := c.TableColumns(src.table)
+		from := src.table
+		lines := ""
+		if src.mode == geneMatrix {
+			lines = matrixLines(c, src.table)
+		}
+		if lines != "" {
+			from = lines
+		}
+		cols, _ := c.TableColumns(from)
 		if !cols["study_id"] || !cols[src.symCol] && !cols[src.entCol] {
 			return
 		}
@@ -164,7 +172,19 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 			"SELECT DISTINCT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent FROM `%s`.`%s`%s",
 			prof, col(src.symCol), col(src.entCol), rawDB, src.table, where)
 		firstRow := "toUInt64(0)"
-		if src.mode == geneMatrix && cols["row_num"] {
+		if lines != "" {
+			// A line's first cell is row_base + 1; a line without values
+			// has no cells.
+			cond := " WHERE cells > 0"
+			if src.where != "" {
+				cond += " AND " + src.where
+			}
+			keys = fmt.Sprintf(
+				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_base + 1) AS first_row FROM `%s`.`%s`%s "+
+					"GROUP BY study_id, profile_stable_id, sym, ent",
+				prof, col(src.symCol), col(src.entCol), rawDB, lines, cond)
+			firstRow = "first_row"
+		} else if src.mode == geneMatrix && cols["row_num"] {
 			keys = fmt.Sprintf(
 				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_num) AS first_row FROM `%s`.`%s`%s "+
 					"GROUP BY study_id, profile_stable_id, sym, ent",
@@ -236,6 +256,18 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		return fmt.Errorf("creating table gene_key_map: %w", err)
 	}
 	return nil
+}
+
+// matrixLines returns the lines table a raw matrix is stored in, when the
+// matrix is ingest's view of its lines' cells, or "".
+func matrixLines(c *client, table string) string {
+	if engine, err := c.TableEngine(table); err != nil || engine != "View" {
+		return ""
+	}
+	if ok, err := c.TableExists(table + "_lines"); err != nil || !ok {
+		return ""
+	}
+	return table + "_lines"
 }
 
 // geneKeyJoin joins alias a of a staging table to its gene_key_map rows as
