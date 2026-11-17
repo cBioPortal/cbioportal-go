@@ -43,7 +43,9 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 			return err
 		}
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 
 	values := []string{s.StudyID}
 	for _, f := range studyMetaFields {
@@ -89,7 +91,9 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 			return err
 		}
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 
 	for i := range s.Files {
 		f := &s.Files[i]
@@ -133,7 +137,9 @@ func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 	if err := addOrderColumns(c, table, existing); err != nil {
 		return err
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 
 	var b strings.Builder
 	for i := range s.Files {
@@ -219,7 +225,9 @@ func ingestGenePanels(c *ch.Client, s *parser.Study) error {
 	if err := ensureGenePanelTable(c); err != nil {
 		return err
 	}
-	c.DeleteWhere("gene_panel", fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere("gene_panel", fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
 		return err
@@ -244,7 +252,9 @@ func LoadGenePanelsDir(c *ch.Client, dir string) (int, int, error) {
 	if err := ensureGenePanelTable(c); err != nil {
 		return 0, 0, err
 	}
-	c.DeleteWhere("gene_panel", "study_id = ''")
+	if err := c.DeleteWhere("gene_panel", "study_id = ''"); err != nil {
+		return 0, 0, err
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, 0, err
@@ -284,7 +294,9 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 		c.Database(), table)); err != nil {
 		return err
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 
 	dir := s.Dir + "/case_lists"
 	entries, err := os.ReadDir(dir)
@@ -341,7 +353,9 @@ func recordImportOrder(c *ch.Client, studyID, kind string, seq map[string]int) e
 		c.Database(), table)); err != nil {
 		return err
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s' AND kind = '%s'", ch.SQLLit(studyID), ch.SQLLit(kind)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s' AND kind = '%s'", ch.SQLLit(studyID), ch.SQLLit(kind))); err != nil {
+		return err
+	}
 	if len(seq) == 0 {
 		return nil
 	}
@@ -360,7 +374,9 @@ func ingestClinicalMeta(c *ch.Client, s *parser.Study) error {
 		c.Database(), table)); err != nil {
 		return err
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 
 	clean := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 	for i := range s.Files {

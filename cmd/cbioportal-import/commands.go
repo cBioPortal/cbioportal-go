@@ -138,6 +138,9 @@ transform afterwards to make the study queryable.`,
 				mismatch++
 				mark = " !"
 			}
+			if st.Skipped != "" {
+				mark += " (" + st.Skipped + ")"
+			}
 			fmt.Fprintf(w, "%-24s %10d %9.1f %8.2f %8.0f %9.1f%s\n",
 				st.SourceFile, st.RowsLoaded, float64(st.Bytes)/1e6, st.Secs, st.MBPerS(), st.RowsPerS()/1000, mark)
 			totalRows += st.RowsLoaded

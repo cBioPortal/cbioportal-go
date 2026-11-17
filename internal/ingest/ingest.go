@@ -270,17 +270,7 @@ func ingestMatrix(c *ch.Client, studyID string, fileNum int, f *parser.DataFile)
 // longer in the study directory (removed or renamed since its last ingest),
 // in every staging table that records source files, so a re-ingested study
 // holds only its current files' rows. It runs before anything is loaded.
-func pruneRemovedFiles(c *ch.Client, s *parser.Study) error {
-	current := map[string]bool{}
-	err := filepath.WalkDir(s.Dir, func(_ string, d fs.DirEntry, err error) error {
-		if err == nil && !d.IsDir() {
-			current[d.Name()] = true
-		}
-		return err
-	})
-	if err != nil {
-		return err
-	}
+func pruneRemovedFiles(c *ch.Client, s *parser.Study, current map[string]bool) error {
 	type tableRow struct {
 		Table string `json:"table"`
 	}
@@ -302,28 +292,109 @@ func pruneRemovedFiles(c *ch.Client, s *parser.Study) error {
 		}
 		for _, f := range files {
 			if f.File != "" && !current[f.File] {
-				c.DeleteWhere(t.Table, fmt.Sprintf("study_id = '%s' AND source_file = '%s'",
-					ch.SQLLit(s.StudyID), ch.SQLLit(f.File)))
+				if err := c.DeleteWhere(t.Table, fmt.Sprintf("study_id = '%s' AND source_file = '%s'",
+					ch.SQLLit(s.StudyID), ch.SQLLit(f.File))); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
 }
 
-func deleteExisting(c *ch.Client, f *parser.DataFile, studyID string) {
-	c.DeleteWhere(f.StageSlug, fmt.Sprintf(
+func deleteExisting(c *ch.Client, f *parser.DataFile, studyID string) error {
+	return c.DeleteWhere(f.StageSlug, fmt.Sprintf(
 		"study_id = '%s' AND source_file = '%s'", ch.SQLLit(studyID), ch.SQLLit(fileName(f.DataPath))))
+}
+
+// studyFileNames returns the names of the files in a study directory.
+func studyFileNames(dir string) (map[string]bool, error) {
+	current := map[string]bool{}
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			current[d.Name()] = true
+		}
+		return err
+	})
+	return current, err
+}
+
+// fileStager stages a study's data files, skipping a file whose staged rows
+// are still current (see stagedFilesTable).
+type fileStager struct {
+	c      *ch.Client
+	study  string
+	listed map[string]stagedFile
+	// genericAssay is set when a generic assay file is staged or removed,
+	// so the study's generic assay entities are rebuilt.
+	genericAssay bool
+}
+
+func (st *fileStager) stage(fileNum int, f *parser.DataFile, load func() (FileStat, error)) (FileStat, error) {
+	source := fileName(f.DataPath)
+	fp, err := fingerprint(st.study, fileNum, f)
+	if err != nil {
+		return FileStat{}, err
+	}
+	same, err := unchanged(st.c, st.study, st.listed, f.StageSlug, source, fp)
+	if err != nil {
+		return FileStat{}, err
+	}
+	if same {
+		n := st.listed[stagedKey(f.StageSlug, source)].Rows
+		return FileStat{Table: f.StageSlug, SourceFile: source, RowsLoaded: n, RowsExpected: n, Skipped: "unchanged"}, nil
+	}
+	if err := deleteExisting(st.c, f, st.study); err != nil {
+		return FileStat{}, err
+	}
+	stat, err := load()
+	if err != nil {
+		return FileStat{}, err
+	}
+	if f.StageSlug == "generic_assay_matrix" {
+		st.genericAssay = true
+	}
+	// A file whose rows did not all arrive stays unlisted, so it is staged
+	// again next time.
+	if stat.RowsLoaded == stat.RowsExpected {
+		err = recordStagedFile(st.c, st.study, stagedFile{SourceFile: source, StageTable: f.StageSlug, Fingerprint: fp, Rows: stat.RowsLoaded})
+	} else {
+		err = forgetStagedFile(st.c, st.study, stagedFile{SourceFile: source, StageTable: f.StageSlug})
+	}
+	return stat, err
 }
 
 // IngestStudy ingests every data file in a study plus the study/profile/panel/
 // clinical-attribute dimensions. Idempotent: a study's prior rows are deleted
-// before loading.
+// before loading. A data file whose staged rows are still current (same
+// content, position and meta file) is not loaded again.
 func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	if err := c.CreateDatabase(); err != nil {
 		return nil, err
 	}
-	if err := pruneRemovedFiles(c, s); err != nil {
+	if err := ensureStagedFiles(c); err != nil {
 		return nil, err
+	}
+	listed, err := readStagedFiles(c, s.StudyID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := studyFileNames(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	st := &fileStager{c: c, study: s.StudyID, listed: listed}
+	if len(listed) == 0 {
+		// Staged before files were listed, or never staged: find removed
+		// files by their rows, and stage every file.
+		st.genericAssay = true
+		if err := pruneRemovedFiles(c, s, current); err != nil {
+			return nil, err
+		}
+	} else if removedGA, err := pruneListedFiles(c, s.StudyID, listed, current); err != nil {
+		return nil, err
+	} else if removedGA {
+		st.genericAssay = true
 	}
 	if err := ingestStudyMeta(c, s); err != nil {
 		return nil, err
@@ -361,12 +432,11 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		default:
 			continue
 		}
-		deleteExisting(c, f, s.StudyID)
-		st, err := fn(c, s.StudyID, i+1, f)
+		stat, err := st.stage(i+1, f, func() (FileStat, error) { return fn(c, s.StudyID, i+1, f) })
 		if err != nil {
 			return nil, err
 		}
-		stats = append(stats, st)
+		stats = append(stats, stat)
 	}
 	seq := map[string]int{}
 	for _, f := range s.Files {
@@ -375,12 +445,14 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	if err := recordImportOrder(c, s.StudyID, "data", seq); err != nil {
 		return nil, err
 	}
-	if err := ingestGenericAssayEntities(c, s); err != nil {
-		return nil, err
-	}
-	mutsig, err := ingestMutSig(c, s)
+	mutsig, err := ingestMutSig(st, s)
 	if err != nil {
 		return nil, err
+	}
+	if st.genericAssay {
+		if err := ingestGenericAssayEntities(c, s); err != nil {
+			return nil, err
+		}
 	}
 	return append(stats, mutsig...), nil
 }

@@ -284,11 +284,17 @@ func insertSQLHead(q string) string {
 // deleted instead of rewriting the table's data; background merges remove
 // them later. It waits until every replica hides the rows
 // (lightweight_deletes_sync = 2), so they are gone before any later count,
-// making re-ingest idempotent.
-func (c *Client) DeleteWhere(table, where string) {
-	c.Execute(fmt.Sprintf(
+// making re-ingest idempotent. A table that does not exist yet has nothing
+// to delete; any other failure is returned, since the rows it leaves would
+// be loaded a second time.
+func (c *Client) DeleteWhere(table, where string) error {
+	_, err := c.Execute(fmt.Sprintf(
 		"DELETE FROM `%s`.`%s` WHERE %s SETTINGS lightweight_deletes_sync = 2",
 		c.database, table, where))
+	if err != nil && strings.Contains(err.Error(), "UNKNOWN_TABLE") {
+		return nil
+	}
+	return err
 }
 
 // CreateDatabase creates the client's database if it does not exist.

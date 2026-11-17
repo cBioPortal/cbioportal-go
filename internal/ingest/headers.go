@@ -25,8 +25,9 @@ func recordHeader(c *ch.Client, studyID, table, source string, columns, raw []st
 		c.Database(), sourceHeaderTable)); err != nil {
 		return err
 	}
-	c.DeleteWhere(sourceHeaderTable, fmt.Sprintf("study_id = '%s' AND source_file = '%s' AND table_name = '%s'",
-		ch.SQLLit(studyID), ch.SQLLit(source), ch.SQLLit(table)))
+	if err := c.DeleteWhere(sourceHeaderTable, fmt.Sprintf("study_id = '%s' AND source_file = '%s' AND table_name = '%s'", ch.SQLLit(studyID), ch.SQLLit(source), ch.SQLLit(table))); err != nil {
+		return err
+	}
 	rows := make([]string, len(columns))
 	for i, col := range columns {
 		rows[i] = fmt.Sprintf("('%s', '%s', '%s', %d, '%s', '%s')", ch.SQLLit(studyID), ch.SQLLit(source),

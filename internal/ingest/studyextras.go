@@ -21,7 +21,9 @@ func ingestStudyTags(c *ch.Client, s *parser.Study) error {
 		c.Database(), table)); err != nil {
 		return err
 	}
-	c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID)))
+	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+		return err
+	}
 	name := s.Meta["tags_file"]
 	if name == "" {
 		return nil
@@ -103,28 +105,29 @@ func mutSigRows(path string) ([]string, error) {
 }
 
 // ingestMutSig stages every MUTSIG file of the study.
-func ingestMutSig(c *ch.Client, s *parser.Study) ([]FileStat, error) {
+func ingestMutSig(st *fileStager, s *parser.Study) ([]FileStat, error) {
 	var stats []FileStat
 	for i := range s.Files {
 		f := &s.Files[i]
 		if f.StageSlug != "mutsig" {
 			continue
 		}
-		rows, err := mutSigRows(f.DataPath)
+		stat, err := st.stage(i+1, f, func() (FileStat, error) {
+			rows, err := mutSigRows(f.DataPath)
+			if err != nil {
+				return FileStat{}, err
+			}
+			emitted := uint64(len(rows))
+			var body strings.Builder
+			for j, r := range rows {
+				fmt.Fprintf(&body, "%d\t%s\n", j+1, r)
+			}
+			return runInsert(st.c, f, s.StudyID, i+1, mutSigColumns, strings.NewReader(body.String()), &emitted)
+		})
 		if err != nil {
 			return nil, err
 		}
-		deleteExisting(c, f, s.StudyID)
-		emitted := uint64(len(rows))
-		var body strings.Builder
-		for j, r := range rows {
-			fmt.Fprintf(&body, "%d\t%s\n", j+1, r)
-		}
-		st, err := runInsert(c, f, s.StudyID, i+1, mutSigColumns, strings.NewReader(body.String()), &emitted)
-		if err != nil {
-			return nil, err
-		}
-		stats = append(stats, st)
+		stats = append(stats, stat)
 	}
 	return stats, nil
 }
@@ -148,8 +151,12 @@ func ingestGenericAssayEntities(c *ch.Client, s *parser.Study) error {
 		return err
 	}
 	where := fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))
-	c.DeleteWhere("generic_assay_profile_entity", where)
-	c.DeleteWhere("generic_assay_entity_meta", where)
+	if err := c.DeleteWhere("generic_assay_profile_entity", where); err != nil {
+		return err
+	}
+	if err := c.DeleteWhere("generic_assay_entity_meta", where); err != nil {
+		return err
+	}
 	for i := range s.Files {
 		f := &s.Files[i]
 		if f.StageSlug != "generic_assay_matrix" {

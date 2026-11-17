@@ -240,6 +240,16 @@ does and why.
   way, `ALTER … DELETE`, rewrites every part of the table that holds one of
   the rows. That is many times slower: removing a 1,500-row study from a
   163-million-row table took 3 seconds instead of 52.
+- **Unchanged files are not loaded again.** The raw database keeps a list
+  of every staged file (`_staged_files`): its table, its row count and a
+  fingerprint of the data file, its meta file and its position in the
+  study. When a study is ingested again, a file with the same fingerprint
+  and row count is skipped, so updating one file of a study loads only
+  that file. The list also tells the importer which files were removed,
+  without reading the staging tables. A study staged before the list
+  existed is loaded in full once, and listed from then on. When ingest
+  starts turning files into rows differently, `stageFormat` in
+  `internal/ingest/manifest.go` is raised, so every file is loaded again.
 - **Deletes wait until they are done.** The importer adds
   `SETTINGS lightweight_deletes_sync = 2`. ClickHouse then waits until every
   copy hides the old rows before the importer counts the new ones.
