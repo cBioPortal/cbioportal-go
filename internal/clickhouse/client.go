@@ -35,6 +35,16 @@ type Client struct {
 	// ctx, when set (WithContext), bounds every query of this client:
 	// cancelling it stops the query on the server.
 	ctx context.Context
+	// tables caches the database's table names for EnsureTable, shared by
+	// the clients derived from this one.
+	tables *tableCache
+}
+
+// tableCache is the set of a database's tables EnsureTable knows exist.
+type tableCache struct {
+	mu     sync.Mutex
+	loaded bool
+	names  map[string]bool
 }
 
 // driverPool is a clickhouse-go connection pool, opened on first use.
@@ -138,6 +148,7 @@ func New(baseURL, database string) *Client {
 		database: database,
 		http:     &http.Client{Timeout: time.Hour, Transport: rt},
 		drv:      &driverPool{},
+		tables:   &tableCache{},
 	}
 }
 
@@ -184,13 +195,30 @@ func (c *Client) Database() string { return c.database }
 // Execute runs a statement/query against the client's database and returns the
 // text response. Used for DDL and small scalar reads.
 func (c *Client) Execute(sql string) (string, error) {
+	c.noteDDL(sql)
 	return c.post(url.Values{"database": {c.database}}, strings.NewReader(c.rewrite(sql)))
 }
 
 // ExecuteServerwide runs a statement without selecting a database (for CREATE
 // DATABASE, which must not assume the target exists).
 func (c *Client) ExecuteServerwide(sql string) (string, error) {
+	c.noteDDL(sql)
 	return c.post(nil, strings.NewReader(sql))
+}
+
+// noteDDL forgets the cached table names (EnsureTable) before a statement
+// that can remove or rename tables.
+func (c *Client) noteDDL(sql string) {
+	if c.tables == nil {
+		return
+	}
+	head := strings.ToUpper(strings.TrimSpace(sql))
+	for _, p := range []string{"DROP", "RENAME", "EXCHANGE"} {
+		if strings.HasPrefix(head, p) {
+			c.forgetTables()
+			return
+		}
+	}
 }
 
 // InsertStream streams body as the payload of an INSERT. insertSQL must end with
@@ -360,6 +388,49 @@ func (c *Client) TableColumns(table string) (map[string]bool, error) {
 		}
 	}
 	return cols, nil
+}
+
+// EnsureTable runs ddl, a CREATE TABLE IF NOT EXISTS of table, unless the
+// table is known to exist. Every DDL statement waits for all replicas on
+// ClickHouse Cloud (up to a second), even one that changes nothing, so the
+// database's tables are listed once and only missing ones are created.
+func (c *Client) EnsureTable(table, ddl string) error {
+	t := c.tables
+	if t == nil {
+		_, err := c.Execute(ddl)
+		return err
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.loaded {
+		text, err := c.Execute(fmt.Sprintf(
+			"SELECT name FROM system.tables WHERE database = '%s' FORMAT TabSeparated", SQLLit(c.database)))
+		if err != nil {
+			return err
+		}
+		t.names = map[string]bool{}
+		for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
+			if line != "" {
+				t.names[line] = true
+			}
+		}
+		t.loaded = true
+	}
+	if t.names[table] {
+		return nil
+	}
+	if _, err := c.Execute(ddl); err != nil {
+		return err
+	}
+	t.names[table] = true
+	return nil
+}
+
+// forgetTables drops the cached table names after DDL that removes tables.
+func (c *Client) forgetTables() {
+	c.tables.mu.Lock()
+	c.tables.loaded = false
+	c.tables.mu.Unlock()
 }
 
 // TableExists reports whether a table exists in the client's database.

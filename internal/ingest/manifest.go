@@ -36,7 +36,7 @@ func (f stagedFile) key() string { return f.StageTable + "\x00" + f.SourceFile }
 func stagedKey(table, source string) string { return table + "\x00" + source }
 
 func ensureStagedFiles(c *ch.Client) error {
-	_, err := c.Execute(fmt.Sprintf(
+	err := c.EnsureTable(stagedFilesTable, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, stage_table String, "+
 			"fingerprint String, `rows` UInt64, staged_at DateTime64(3)) "+
 			"ENGINE = ReplacingMergeTree(staged_at) ORDER BY (study_id, stage_table, source_file)",

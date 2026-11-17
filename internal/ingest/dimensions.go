@@ -29,7 +29,7 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 		for i, col := range cols {
 			defs[i] = fmt.Sprintf("`%s` String", col)
 		}
-		if _, err := c.Execute(fmt.Sprintf(
+		if err := c.EnsureTable(table, fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY study_id",
 			c.Database(), table, strings.Join(defs, ", "))); err != nil {
 			return err
@@ -74,7 +74,7 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 		for i, col := range cols {
 			defs[i] = fmt.Sprintf("`%s` String", col)
 		}
-		if _, err := c.Execute(fmt.Sprintf(
+		if err := c.EnsureTable(table, fmt.Sprintf(
 			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY molecular_profile_id",
 			c.Database(), table, strings.Join(defs, ", "))); err != nil {
 			return err
@@ -125,7 +125,7 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 // file's among the study's data files and its own among the file's ids.
 func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 	table := "profile_sample"
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable(table, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, profile_stable_id String, kind String, sample_id String, %s) ENGINE = MergeTree ORDER BY (study_id, profile_stable_id)",
 		c.Database(), table, strings.Join(orderColumnDefs[:], ", "))); err != nil {
 		return err
@@ -187,7 +187,7 @@ func ingestProfileSamples(c *ch.Client, s *parser.Study) error {
 }
 
 func ensureGenePanelTable(c *ch.Client) error {
-	_, err := c.Execute(fmt.Sprintf(
+	err := c.EnsureTable("gene_panel", fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.gene_panel (study_id String, gene_panel_id String, description String, hugo_symbol String) ENGINE = MergeTree ORDER BY (study_id, gene_panel_id)",
 		c.Database()))
 	return err
@@ -289,7 +289,7 @@ func IngestCaseLists(c *ch.Client, s *parser.Study) error {
 // sample_list staging table: one row per (list, sample).
 func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 	table := "sample_list"
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable(table, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, list_id String, category String, name String, description String, sample_id String) ENGINE = MergeTree ORDER BY (study_id, list_id)",
 		c.Database(), table)); err != nil {
 		return err
@@ -348,7 +348,7 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 // of its kind, from which the transform numbers rows as the importer does.
 func recordImportOrder(c *ch.Client, studyID, kind string, seq map[string]int) error {
 	table := "import_order"
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable(table, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, kind String, name String, seq UInt32) ENGINE = MergeTree ORDER BY (study_id, kind, name)",
 		c.Database(), table)); err != nil {
 		return err
@@ -369,7 +369,7 @@ func recordImportOrder(c *ch.Client, studyID, kind string, seq map[string]int) e
 
 func ingestClinicalMeta(c *ch.Client, s *parser.Study) error {
 	table := "clinical_attribute_meta"
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable(table, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, attr_id String, display_name String, description String, datatype String, priority String, patient_attribute UInt8) ENGINE = MergeTree ORDER BY (study_id, attr_id)",
 		c.Database(), table)); err != nil {
 		return err

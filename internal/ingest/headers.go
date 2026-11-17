@@ -19,7 +19,7 @@ var headerTables = map[string]bool{"timeline": true}
 // recordHeader replaces the recorded header of one staged file: position
 // is the column's 0-based index in the header, column its staged name.
 func recordHeader(c *ch.Client, studyID, table, source string, columns, raw []string) error {
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable(sourceHeaderTable, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, table_name String, "+
 			"position UInt32, column_name String, header String) ENGINE = MergeTree ORDER BY (study_id, source_file)",
 		c.Database(), sourceHeaderTable)); err != nil {

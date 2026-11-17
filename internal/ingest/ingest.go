@@ -12,10 +12,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
+	"golang.org/x/sync/errgroup"
 )
 
 var provColumns = [5]string{"study_id", "source_file", "alteration_type", "datatype", "profile_stable_id"}
@@ -87,9 +90,17 @@ func stagingSortKey(dataColumns []string) string {
 	return "(study_id, source_file)"
 }
 
+// schemaLocks holds a mutex per database and staging table (ensureSchema).
+var schemaLocks sync.Map
+
 // ensureSchema creates the staging table (provenance, file_num, row_num and
 // the data columns as String) or adds any missing columns to an existing one.
 func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
+	// Files loading at once into one table check and extend its columns in
+	// turn, so each sees the columns the other added.
+	mu, _ := schemaLocks.LoadOrStore(c.Database()+"."+table, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	existing, err := c.TableColumns(table)
 	if err != nil {
 		return err
@@ -106,8 +117,7 @@ func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 		}
 		ddl := fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY %s",
 			c.Database(), table, strings.Join(defs, ", "), stagingSortKey(dataColumns))
-		_, err := c.Execute(ddl)
-		return err
+		return c.EnsureTable(table, ddl)
 	}
 	var defs []string
 	for i, col := range []string{fileNumColumn, rowNumColumn} {
@@ -327,8 +337,12 @@ type fileStager struct {
 	listed map[string]stagedFile
 	// genericAssay is set when a generic assay file is staged or removed,
 	// so the study's generic assay entities are rebuilt.
-	genericAssay bool
+	genericAssay atomic.Bool
 }
+
+// fileWorkers is how many of a study's data files load at once. A large
+// matrix insert uses up to about 4.5 GiB of ClickHouse memory.
+const fileWorkers = 3
 
 func (st *fileStager) stage(fileNum int, f *parser.DataFile, load func() (FileStat, error)) (FileStat, error) {
 	source := fileName(f.DataPath)
@@ -352,7 +366,7 @@ func (st *fileStager) stage(fileNum int, f *parser.DataFile, load func() (FileSt
 		return FileStat{}, err
 	}
 	if f.StageSlug == "generic_assay_matrix" {
-		st.genericAssay = true
+		st.genericAssay.Store(true)
 	}
 	// A file whose rows did not all arrive stays unlisted, so it is staged
 	// again next time.
@@ -387,14 +401,14 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	if len(listed) == 0 {
 		// Staged before files were listed, or never staged: find removed
 		// files by their rows, and stage every file.
-		st.genericAssay = true
+		st.genericAssay.Store(true)
 		if err := pruneRemovedFiles(c, s, current); err != nil {
 			return nil, err
 		}
 	} else if removedGA, err := pruneListedFiles(c, s.StudyID, listed, current); err != nil {
 		return nil, err
 	} else if removedGA {
-		st.genericAssay = true
+		st.genericAssay.Store(true)
 	}
 	if err := ingestStudyMeta(c, s); err != nil {
 		return nil, err
@@ -418,7 +432,11 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		return nil, err
 	}
 
-	var stats []FileStat
+	// Data files load fileWorkers at a time: each insert waits mostly on
+	// ClickHouse, which parses one file's rows on a few cores.
+	loaded := make([]*FileStat, len(s.Files))
+	g := new(errgroup.Group)
+	g.SetLimit(fileWorkers)
 	for i := range s.Files {
 		f := &s.Files[i]
 		var fn func(*ch.Client, string, int, *parser.DataFile) (FileStat, error)
@@ -432,11 +450,23 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 		default:
 			continue
 		}
-		stat, err := st.stage(i+1, f, func() (FileStat, error) { return fn(c, s.StudyID, i+1, f) })
-		if err != nil {
-			return nil, err
+		g.Go(func() error {
+			stat, err := st.stage(i+1, f, func() (FileStat, error) { return fn(c, s.StudyID, i+1, f) })
+			if err != nil {
+				return err
+			}
+			loaded[i] = &stat
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	var stats []FileStat
+	for _, st := range loaded {
+		if st != nil {
+			stats = append(stats, *st)
 		}
-		stats = append(stats, stat)
 	}
 	seq := map[string]int{}
 	for _, f := range s.Files {
@@ -449,7 +479,7 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	if err != nil {
 		return nil, err
 	}
-	if st.genericAssay {
+	if st.genericAssay.Load() {
 		if err := ingestGenericAssayEntities(c, s); err != nil {
 			return nil, err
 		}

@@ -16,7 +16,7 @@ import (
 // cbioportal-core's CancerStudyTagsReader.
 func ingestStudyTags(c *ch.Client, s *parser.Study) error {
 	table := "cancer_study_tags"
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable(table, fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, source_file String, tags String) ENGINE = MergeTree ORDER BY study_id",
 		c.Database(), table)); err != nil {
 		return err
@@ -140,12 +140,12 @@ func ingestMutSig(st *fileStager, s *parser.Study) ([]FileStat, error) {
 // matrices are staged; the values come from generic_assay_matrix.
 func ingestGenericAssayEntities(c *ch.Client, s *parser.Study) error {
 	db := c.Database()
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable("generic_assay_profile_entity", fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.generic_assay_profile_entity (study_id String, profile_stable_id String, entity_stable_id String) "+
 			"ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, entity_stable_id)", db)); err != nil {
 		return err
 	}
-	if _, err := c.Execute(fmt.Sprintf(
+	if err := c.EnsureTable("generic_assay_entity_meta", fmt.Sprintf(
 		"CREATE TABLE IF NOT EXISTS `%s`.generic_assay_entity_meta (study_id String, entity_stable_id String, entity_type String, "+
 			"properties Map(String, String)) ENGINE = MergeTree ORDER BY (entity_stable_id, study_id)", db)); err != nil {
 		return err
