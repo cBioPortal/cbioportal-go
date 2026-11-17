@@ -113,18 +113,29 @@ func serve(h http.Handler, r fixtureRequest) *httptest.ResponseRecorder {
 
 // TestLiveBulkLimits checks that the queries of the bulk endpoints run with
 // the bulk limits: for each request, the query that reads the most rows
-// carries the limits' settings.
+// carries the limits' settings. Each request is sent once to fill the
+// shared metadata cache, whose loads are not the request's own queries,
+// and checked the second time.
 func TestLiveBulkLimits(t *testing.T) {
 	run := fmt.Sprintf("bulk-limits-test-%d-%d", os.Getpid(), time.Now().UnixNano())
 	limits := core.BulkLimits{MaxMemory: 10<<30 + 7, MaxTime: 9 * time.Minute, MaxRows: 2e9 + 11, SortSpill: 1<<30 + 3}
 	var admin *ch.Client
-	comments := map[string]string{}
+	comments, started := map[string]string{}, map[string]string{}
 	for i, r := range fixtureRequests(t, bulkRequests) {
 		comment := fmt.Sprintf("%s-%d", run, i)
 		var s *State
 		s, admin = liveFixtureState(t, comment)
 		s.SetBulkLimits(limits)
-		if w := serve(NewRouter(s), r); w.Code != http.StatusOK {
+		h := NewRouter(s)
+		if w := serve(h, r); w.Code != http.StatusOK {
+			t.Fatalf("%s %s: %d %s", r.method, r.path, w.Code, w.Body.String())
+		}
+		out, err := admin.Execute("SELECT toString(now64(6))")
+		if err != nil {
+			t.Fatal(err)
+		}
+		started[comment] = strings.TrimSpace(out)
+		if w := serve(h, r); w.Code != http.StatusOK {
 			t.Fatalf("%s %s: %d %s", r.method, r.path, w.Code, w.Body.String())
 		}
 		comments[comment] = r.method + " " + r.path
@@ -137,8 +148,10 @@ func TestLiveBulkLimits(t *testing.T) {
 		ReadRows uint64            `json:"read_rows"`
 		Settings map[string]string `json:"Settings"`
 		Query    string            `json:"query"`
+		Start    string            `json:"start"`
 	}
-	rows, err := ch.Query[logged](admin, "SELECT log_comment, read_rows, Settings, query FROM system.query_log "+
+	rows, err := ch.Query[logged](admin, "SELECT log_comment, read_rows, Settings, query, "+
+		"toString(query_start_time_microseconds) AS start FROM system.query_log "+
 		"WHERE event_date >= yesterday() AND type = 'QueryFinish' AND query_kind = 'Select' AND startsWith(log_comment, '"+run+"-') "+
 		"ORDER BY log_comment, read_rows DESC, event_time_microseconds")
 	if err != nil {
@@ -147,7 +160,7 @@ func TestLiveBulkLimits(t *testing.T) {
 	want := limits.Settings()
 	checked := map[string]bool{}
 	for _, row := range rows {
-		if checked[row.Comment] {
+		if checked[row.Comment] || row.Start < started[row.Comment] {
 			continue
 		}
 		checked[row.Comment] = true
