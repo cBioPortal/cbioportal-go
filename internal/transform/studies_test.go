@@ -105,6 +105,50 @@ func TestLiveStudyBuild(t *testing.T) {
 	apply("full build: the importer, reference data or shared gene panels changed")
 }
 
+// TestLiveBatchedBuild checks that a full build that fills the tables a
+// batch of studies at a time gives the portal the same tables as one that
+// fills them in one go.
+func TestLiveBatchedBuild(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "bb_ref")
+	rawDB := goldenDatabase(t, base, "bb_raw")
+	evo := t.TempDir()
+	copyDir(t, filepath.Join(goldenDir, "evolution", "v1"), evo)
+	for _, dir := range []string{
+		filepath.Join(goldenDir, "studies", "golden_a"), filepath.Join(goldenDir, "studies", "golden_b"),
+		filepath.Join(goldenDir, "studies", "golden_c"), evo,
+	} {
+		ingestGolden(t, base, rawDB, dir)
+	}
+	whole, batched := goldenDatabase(t, base, "bb_whole"), goldenDatabase(t, base, "bb_batched")
+	if _, err := Apply(ch.New(base, rawDB), rawDB, whole, refDB); err != nil {
+		t.Fatal(err)
+	}
+	var logged []string
+	Logf = func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	defer func(n int) { batchStudies, Logf = n, nil }(batchStudies)
+	batchStudies = 1
+	if _, err := Apply(ch.New(base, rawDB), rawDB, batched, refDB); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(logged, "transform: filling the tables in 4 batches of up to 1 studies") {
+		t.Fatalf("build logged %q, want 4 batches", logged)
+	}
+	got, want := dump(t, base, batched), dump(t, base, whole)
+	delete(got, "_objects")
+	delete(want, "_objects")
+	for name, body := range want {
+		if got[name] != body {
+			t.Errorf("%s differs from a build in one go:\n%s", name, diffLines(body, got[name]))
+		}
+	}
+	for name := range got {
+		if _, ok := want[name]; !ok {
+			t.Errorf("%s is not in a build in one go", name)
+		}
+	}
+}
+
 // idOrderDump is dump with every internal id column replaced by the id's
 // position among the column's ids (per type in clinical_data_derived,
 // whose internal_id is a sample's or a patient's).

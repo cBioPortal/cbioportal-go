@@ -368,14 +368,29 @@ func prepareStudyBuild(c *client, rawDB, targetDB string, b *studyBuild) error {
 		return err
 	}
 
-	// Every raw table with a study_id column is read for the rebuilt
-	// studies and the rows all studies share (study_id '').
+	filtered, err := c.studyFilter(rawDB, targetDB, studies)
+	if err != nil {
+		return err
+	}
+	c.part = &partialBuild{
+		targetDB: targetDB,
+		studies:  studies,
+		filtered: filtered,
+	}
+	return nil
+}
+
+// studyFilter returns a client that reads only the given studies' rows and
+// the rows all studies share (study_id ”) of every raw table with a
+// study_id column, and only the given studies' rows of the portal tables
+// built so far (by their staged names).
+func (c *client) studyFilter(rawDB, targetDB string, studies []string) (*ch.Client, error) {
 	text, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT t.name FROM system.tables t INNER JOIN system.columns c ON c.database = t.database AND c.table = t.name "+
 			"WHERE t.database = '%s' AND t.engine LIKE '%%MergeTree' AND c.name = 'study_id' ORDER BY t.name FORMAT TabSeparated",
 		ch.SQLLit(rawDB)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ids := []string{"''"}
 	for _, id := range studies {
@@ -388,17 +403,42 @@ func prepareStudyBuild(c *client, rawDB, targetDB string, b *studyBuild) error {
 			filters = append(filters, fmt.Sprintf("'%s': '%s'", ch.SQLLit(rawDB+"."+name), ch.SQLLit(cond)))
 		}
 	}
-	// The portal tables the build reads (by their staged names) hold
-	// every study's rows once built.
 	for name, col := range studyColumns {
 		filters = append(filters, fmt.Sprintf("'%s': '%s'", ch.SQLLit(targetDB+"."+stagePrefix+builtName(name)),
 			ch.SQLLit(strings.Replace(cond, "study_id", "`"+col+"`", 1))))
 	}
-	c.part = &partialBuild{
-		targetDB: targetDB,
-		studies:  studies,
-		filtered: c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}),
+	return c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}), nil
+}
+
+// batchStudies is how many studies a full build fills a table with at a
+// time: a portal with more studies is filled batch by batch, so a query
+// needs the memory of one batch, not of every study.
+var batchStudies = 50
+
+// numberedAcrossStudies are the tables whose ids number the rows of every
+// study in one sequence; a full build fills them in one go.
+var numberedAcrossStudies = map[string]bool{"sample": true, "patient": true, "sample_list": true, "seg": true}
+
+// prepareBatches sets the clients a full build fills the tables holding
+// many studies with, one per batch of studies, when there is more than one
+// batch.
+func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
+	c.batches = nil
+	if len(b.order) <= batchStudies {
+		return nil
 	}
+	for start := 0; start < len(b.order); start += batchStudies {
+		var ids []string
+		for _, s := range b.order[start:min(start+batchStudies, len(b.order))] {
+			ids = append(ids, s.StudyID)
+		}
+		filtered, err := c.studyFilter(rawDB, targetDB, ids)
+		if err != nil {
+			return err
+		}
+		c.batches = append(c.batches, filtered)
+	}
+	logf("transform: filling the tables in %d batches of up to %d studies", len(c.batches), batchStudies)
 	return nil
 }
 
@@ -430,7 +470,9 @@ func nextIDs(offset uint64, order string) string {
 // gets only the changed studies' rows, read from their staged rows alone,
 // into a staged table like the published one; when sel's columns differ
 // from the published table's (a changed study added columns) or none is
-// published, fill returns errFullBuild.
+// published, fill returns errFullBuild. A full build of many studies fills
+// such a table batch by batch (prepareBatches), unless its ids number
+// every study's rows in one sequence.
 func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string) error {
 	study := studyColumns[strings.TrimPrefix(name, snapshotPrefix)]
 	if c.part != nil && study != "" {
@@ -462,9 +504,17 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 	if study != "" {
 		partition = " PARTITION BY `" + study + "`"
 	}
+	batched := study != "" && len(c.batches) > 0 && !numberedAcrossStudies[strings.TrimPrefix(name, snapshotPrefix)]
 	stmts := []string{fmt.Sprintf(
 		"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree%s ORDER BY %s AS %s", targetDB, name, partition, orderBy, sel)}
-	if len(projections) > 0 {
+	if batched {
+		// Each batch of studies is inserted on its own.
+		stmts = []string{fmt.Sprintf(
+			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree%s ORDER BY %s EMPTY AS %s", targetDB, name, partition, orderBy, sel)}
+		for _, p := range projections {
+			stmts = append(stmts, fmt.Sprintf("ALTER TABLE `%s`.`%s` ADD PROJECTION %s", targetDB, name, p))
+		}
+	} else if len(projections) > 0 {
 		// A projection is added to the empty table so the insert builds
 		// it with the rows.
 		stmts = []string{fmt.Sprintf(
@@ -477,6 +527,15 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 	for _, q := range stmts {
 		if _, err := c.Execute(q); err != nil {
 			return fmt.Errorf("creating table %s: %w", name, err)
+		}
+	}
+	if batched {
+		for _, filtered := range c.batches {
+			fc := *c
+			fc.Client = filtered
+			if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
+				return fmt.Errorf("filling table %s: %w", name, err)
+			}
 		}
 	}
 	return nil

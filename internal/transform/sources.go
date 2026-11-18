@@ -74,6 +74,8 @@ type client struct {
 	subst []sourceSubst
 	stage *staging      // nil: portal objects are written in place
 	part  *partialBuild // set in a build of only some studies
+	// batches read one batch of studies each, in a full build of many.
+	batches []*ch.Client
 }
 
 type sourceSubst struct {

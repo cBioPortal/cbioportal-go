@@ -124,6 +124,8 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		if err := prepareStudyBuild(c, rawDB, targetDB, plan); err != nil {
 			return nil, err
 		}
+	} else if err := prepareBatches(c, rawDB, targetDB, plan); err != nil {
+		return nil, err
 	}
 	if err := buildGeneKeyMap(c, rawDB, targetDB, refDB, hasRef); err != nil {
 		return nil, err

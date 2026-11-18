@@ -122,6 +122,13 @@ The transform builds every study again in three cases:
 The table `_transform_build` remembers what the last build used, and
 `study_rank` remembers each study's internal id and ingest time.
 
+**A large build goes 50 studies at a time.** When a portal has more than 50
+studies, a full build fills each table that holds many studies in batches
+of 50, one query per batch. Then a query needs the memory of 50 studies, not
+of every study. The tables whose internal ids count across all studies
+(samples, patients, sample lists and copy-number segments) are still filled
+in one query, so their ids stay in one sequence.
+
 **Nothing changes until the transform finishes.** Each table is first built
 under a temporary name (`__next_<name>`). At the end, all new tables are
 swapped in at once with ClickHouse's `EXCHANGE TABLES`, and the views are
