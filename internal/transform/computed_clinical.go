@@ -62,9 +62,8 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 	}
 	// Materialized: the mutation count scans every mutation, and the clinical
 	// views are read on every study-view query.
-	if _, err := c.Execute(fmt.Sprintf(
-		"CREATE OR REPLACE TABLE `%s`.`clinical_sample_computed` ENGINE = MergeTree ORDER BY (study_id, sample_id, attr_id) AS %s",
-		targetDB, strings.Join(computed, " UNION ALL "))); err != nil {
+	if err := c.fill(targetDB, "clinical_sample_computed", "(study_id, sample_id, attr_id)",
+		strings.Join(computed, " UNION ALL ")); err != nil {
 		return fmt.Errorf("computed clinical attributes: %w", err)
 	}
 	union := fmt.Sprintf("SELECT study_id, sample_id, attr_id, attr_value FROM `%s`.clinical_sample_computed", targetDB)

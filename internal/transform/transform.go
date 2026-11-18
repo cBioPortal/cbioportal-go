@@ -44,7 +44,12 @@ type ViewCount struct {
 // all of them are complete, so a failed run leaves the portal database as it
 // was, and the API keeps serving the previous objects while a run builds.
 func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
-	c := newClient(base.WithSettings(map[string]string{"max_insert_threads": strconv.Itoa(insertThreads)}), rawDB)
+	c := newClient(base.WithSettings(map[string]string{
+		"max_insert_threads": strconv.Itoa(insertThreads),
+		// Tables have a partition per study, and an insert writes rows of
+		// every study (see studies.go).
+		"throw_on_max_partitions_per_insert_block": "0",
+	}), rawDB)
 	if err := c.EnsureDatabase(targetDB); err != nil {
 		return nil, err
 	}
@@ -84,18 +89,28 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		"SELECT count() FROM system.tables WHERE database = '%s' AND name IN ('reference_genome', 'reference_genome_gene') FORMAT TabSeparated", refDB))
 	hasGenomeGenes := strings.TrimSpace(genomeText) == "2"
 
+	plan, err := planBuild(c, rawDB, targetDB, refDB)
+	if err != nil {
+		return nil, err
+	}
+	if err := writeBuildState(c, targetDB, plan); err != nil {
+		return nil, err
+	}
+	if plan.partial {
+		if err := prepareStudyBuild(c, rawDB, targetDB, plan); err != nil {
+			return nil, err
+		}
+	}
 	if err := buildGeneKeyMap(c, rawDB, targetDB, refDB, hasRef); err != nil {
 		return nil, err
 	}
-	if _, err := c.Execute(fmt.Sprintf(
-		"CREATE OR REPLACE TABLE `%s`.variant_classification_filter ENGINE = MergeTree ORDER BY (study_id, profile_stable_id) AS %s",
-		targetDB, variantClassificationFilterSQL(c, rawDB))); err != nil {
-		return nil, fmt.Errorf("creating table variant_classification_filter: %w", err)
+	if err := c.fill(targetDB, "variant_classification_filter", "(study_id, profile_stable_id)",
+		variantClassificationFilterSQL(c, rawDB)); err != nil {
+		return nil, err
 	}
-	if _, err := c.Execute(fmt.Sprintf(
-		"CREATE OR REPLACE TABLE `%s`.mutation_merge ENGINE = MergeTree ORDER BY (study_id, profile_stable_id, file_num, row_num) AS %s",
-		targetDB, mutationMergeSQL(c, rawDB, targetDB))); err != nil {
-		return nil, fmt.Errorf("creating table mutation_merge: %w", err)
+	if err := c.fill(targetDB, "mutation_merge", "(study_id, profile_stable_id, file_num, row_num)",
+		mutationMergeSQL(c, rawDB, targetDB)); err != nil {
+		return nil, err
 	}
 
 	var created []string
@@ -134,22 +149,8 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 				return err
 			}
 		}
-		stmts := []string{fmt.Sprintf(
-			"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s AS %s", targetDB, name, orderBy, sel)}
-		if len(projections) > 0 {
-			// A projection is added to the empty table so the insert builds
-			// it with the rows.
-			stmts = []string{fmt.Sprintf(
-				"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree ORDER BY %s EMPTY AS %s", targetDB, name, orderBy, sel)}
-			for _, p := range projections {
-				stmts = append(stmts, fmt.Sprintf("ALTER TABLE `%s`.`%s` ADD PROJECTION %s", targetDB, name, p))
-			}
-			stmts = append(stmts, fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel))
-		}
-		for _, q := range stmts {
-			if _, err := c.Execute(q); err != nil {
-				return fmt.Errorf("creating table %s: %w", name, err)
-			}
+		if err := c.fill(targetDB, name, orderBy, sel, projections...); err != nil {
+			return err
 		}
 		created = append(created, name)
 		return nil
@@ -163,7 +164,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			"c.type_of_cancer AS cancer_type_id, c.groups AS groups, c.pmid AS pmid, c.citation AS citation, "+
 			"c.reference_genome AS reference_genome, c.add_global_case_list = 'true' AS add_global_case_list, "+
 			"toInt64OrDefault(c.status, toInt64(1)) AS status, r.study_rank AS internal_id "+
-			"FROM `%s`.cancer_study c LEFT JOIN (%s) r ON r.study_id = c.study_id", rawDB, studyRankSQL(rawDB))); err != nil {
+			"FROM `%s`.cancer_study c LEFT JOIN (%s) r ON r.study_id = c.study_id", rawDB, studyRanksSQL(targetDB))); err != nil {
 		return nil, err
 	}
 	// type_of_cancer holds the study-supplied cancer types (cbioportal-core
@@ -183,8 +184,8 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	// Samples and patients carry the internal ids cbioportal-core assigns
 	// them; the clinical tables and derived tables built below read them.
 	for _, t := range []struct{ name, key, sql string }{
-		{"sample", "(study_id, sample_id)", sampleSQL(rawDB)},
-		{"patient", "(study_id, patient_id)", patientSQL(rawDB)},
+		{"sample", "(study_id, sample_id)", sampleSQL(rawDB, targetDB, c.idOffset("sample", "internal_id"))},
+		{"patient", "(study_id, patient_id)", patientSQL(rawDB, targetDB, c.idOffset("patient", "internal_id"))},
 	} {
 		if err := materialize(t.name, t.key, t.sql); err != nil {
 			return nil, err
@@ -194,7 +195,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		{"clinical_attribute_meta", fmt.Sprintf(
 			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)},
 		{"molecular_profile", molecularProfileSQL(c, rawDB)},
-		{"sample_list", sampleListSQL(c, rawDB)},
+		{"sample_list", sampleListSQL(c, rawDB, targetDB, c.idOffset("sample_list", "list_internal_id"))},
 		{"gene_panel", genePanelSQL(rawDB, refDB, hasRef)},
 		{"mutation", mutationSQL(c, rawDB, targetDB)},
 		{"structural_variant", structuralVariantSQL(c, rawDB, targetDB)},
@@ -214,9 +215,9 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	if err := createView("seg", fmt.Sprintf(
 		"SELECT g.study_id AS study_id, g.id AS sample_id, g.chrom AS chrom, g.loc_start AS start, g.loc_end AS end, "+
 			"g.num_mark AS num_probes, g.seg_mean AS segment_mean, "+
-			"toUInt64(row_number() OVER (ORDER BY r.study_rank, g.pos)) AS seg_id "+
+			nextIDs(c.idOffset("seg", "seg_id"), "r.study_rank, g.pos")+" AS seg_id "+
 			"FROM (SELECT *, %s AS pos FROM `%s`.cna_seg) g LEFT JOIN (%s) r ON r.study_id = g.study_id",
-		fileOrderSQL, rawDB, studyRankSQL(rawDB))); err != nil {
+		fileOrderSQL, rawDB, studyRanksSQL(targetDB))); err != nil {
 		return nil, err
 	}
 	if err := clinicalLong(c, rawDB, targetDB, "clinical_sample", "sample_id"); err != nil {
@@ -267,7 +268,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 			"cancer_study_identifier, hugo_gene_symbol, profile_type",
 			geneticAlterationDerivedSQL(c, rawDB, targetDB)},
 		{"generic_assay_data_derived", "(profile_type, entity_stable_id, patient_unique_id, sample_unique_id)",
-			"profile_type, profile_stable_id, generic_assay_type, datatype",
+			"profile_type, profile_stable_id, generic_assay_type, datatype, cancer_study_identifier",
 			genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
 				hasColumn(c, rawDB, "genetic_profile", "patient_level") && hasColumn(c, rawDB, "genetic_profile", "generic_assay_type"))},
 		{"clinical_event_derived", "(cancer_study_identifier, event_type, clinical_event_id)", "cancer_study_identifier, event_type",
@@ -343,15 +344,17 @@ var snapshotted = []struct{ name, key, idFrom string }{
 // snapshotView replaces a view with a MergeTree table holding its rows, with
 // the internal_id of idFrom ("table.id_column") added when set.
 func snapshotView(c *client, db, name, orderBy, idFrom string) error {
-	tmp := "__snapshot_" + name
+	tmp := snapshotPrefix + name
 	src := fmt.Sprintf("SELECT * FROM `%s`.`%s`", db, name)
 	if table, col, ok := strings.Cut(idFrom, "."); ok {
 		src = fmt.Sprintf("SELECT v.*, i.internal_id AS internal_id FROM `%[1]s`.`%[2]s` v "+
 			"LEFT JOIN (SELECT study_id, %[4]s, min(internal_id) AS internal_id FROM `%[1]s`.`%[3]s` GROUP BY study_id, %[4]s) i "+
 			"ON i.study_id = v.study_id AND i.%[4]s = v.%[4]s", db, name, table, col)
 	}
+	if err := c.fill(db, tmp, orderBy, src); err != nil {
+		return fmt.Errorf("materializing %s: %w", name, err)
+	}
 	stmts := []string{
-		fmt.Sprintf("CREATE OR REPLACE TABLE `%[1]s`.`%[2]s` ENGINE = MergeTree ORDER BY %[3]s AS %[4]s", db, tmp, orderBy, src),
 		fmt.Sprintf("DROP VIEW `%s`.`%s`", db, name),
 		fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, tmp, name),
 	}

@@ -124,6 +124,10 @@ func dump(t *testing.T, base, db string, only ...string) map[string]string {
 		if len(only) > 0 && !slices.Contains(only, name) {
 			continue
 		}
+		// The build state holds import times and the importer's hash.
+		if name == studyRanksTable || name == buildTable {
+			continue
+		}
 		objects = append(objects, line)
 		var names, types, cols []string
 		for _, col := range lines(query(fmt.Sprintf(

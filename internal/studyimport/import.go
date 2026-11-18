@@ -127,6 +127,7 @@ func Run(o Options, dirs []string) (*Result, error) {
 	}
 
 	o.logf("transform")
+	transform.Logf = o.logf
 	start := time.Now()
 	counts, err := transform.Apply(ch.New(o.URL, o.RawDB), o.RawDB, o.DB, o.RefDB)
 	if err == nil {

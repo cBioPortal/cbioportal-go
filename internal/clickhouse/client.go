@@ -66,6 +66,15 @@ func (c *Client) WithSettings(settings map[string]string) *Client {
 	return &d
 }
 
+// WithDatabase returns a client over the same connections whose statements
+// run in database db.
+func (c *Client) WithDatabase(db string) *Client {
+	d := *c
+	d.database = db
+	d.tables = &tableCache{}
+	return &d
+}
+
 // WithContext returns a client over the same connections whose queries are
 // bound to ctx, such as an API request's context: when the caller goes
 // away, ClickHouse stops the query instead of running it to its time limit.

@@ -72,7 +72,8 @@ var positionedSources = map[string]bool{
 type client struct {
 	*ch.Client
 	subst []sourceSubst
-	stage *staging // nil: portal objects are written in place
+	stage *staging      // nil: portal objects are written in place
+	part  *partialBuild // set in a build of only some studies
 }
 
 type sourceSubst struct {

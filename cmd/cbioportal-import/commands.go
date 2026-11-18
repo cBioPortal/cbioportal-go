@@ -264,9 +264,14 @@ func newTransformCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "transform",
 		Short: "build the portal database's tables from the raw and reference databases",
-		Long: `Transform rebuilds every derived table and view of the portal database
+		Long: `Transform builds every derived table and view of the portal database
 from the staged studies (--raw-db) and the reference data (--ref-db), and
 prints the row count of each. The API serves the portal database (--db).
+
+When at most half of the studies were staged or removed since the previous
+build, and the importer, the reference data and the shared gene panels are
+the same, only those studies' rows are built again; the other studies'
+rows are kept as they are. Otherwise every study is built.
 
 --from-prod is for the migration from Java cBioPortal only: it builds go's
 tables from Java's. --ref-db is then a clone of a cBioPortal production
@@ -291,6 +296,7 @@ same three databases.`,
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		w := cmd.OutOrStdout()
 		start := time.Now()
+		transform.Logf = stderrLog
 		var counts []transform.ViewCount
 		var err error
 		if *fromProd {

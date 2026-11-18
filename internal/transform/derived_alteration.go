@@ -87,6 +87,8 @@ func linesPart(c *client, rawDB, targetDB, table, lines string) string {
 // sample-level profile the LEFT JOIN keeps rows whose sample id is not in
 // clinical data (prod's INNER JOIN would drop them). hasProfileMeta says the
 // staging genetic_profile has the generic_assay_type and patient_level columns.
+// cancer_study_identifier, which prod's table lacks, keeps each study's
+// rows in a partition of their own.
 func genericAssayDataDerivedSQL(rawDB, refDB, targetDB string, hasProfileMeta bool) string {
 	_ = refDB
 	gaType, patientLevel := "''", "toUInt8(0)"
@@ -107,7 +109,7 @@ func genericAssayDataDerivedSQL(rawDB, refDB, targetDB string, hasProfileMeta bo
 			"toString(cityHash64(m.entity_stable_id)) AS genetic_entity_id, "+
 			"m.value AS value, m.generic_assay_type AS generic_assay_type, m.profile_stable_id AS profile_stable_id, "+
 			"m.entity_stable_id AS entity_stable_id, m.datatype AS datatype, m.patient_level AS patient_level, "+
-			"m.profile_type AS profile_type ", sampleCol, patientCol)
+			"m.profile_type AS profile_type, m.study_id AS cancer_study_identifier ", sampleCol, patientCol)
 	}
 	return inTarget(targetDB, cols("m.case_id", "s.patient_id")+
 		"FROM ("+inner+") m LEFT JOIN {{target}}.sample s ON s.study_id = m.study_id AND s.sample_id = m.case_id "+

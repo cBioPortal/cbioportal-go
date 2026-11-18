@@ -36,41 +36,29 @@ func StagingOrderSQL(prefix string, hasOrderColumns, hasStorage bool) string {
 // supply the order columns where the table lacks them.
 var fileOrderSQL = StagingOrderSQL("", true, true)
 
-// studyRankSQL numbers the staged studies in import order (study_id,
-// study_rank): by the time the study was ingested (a re-ingested study comes
-// last, as a re-imported one does), else by the position of its row. Only
-// studies staged before import_time was recorded tie on it; cancer_study has
-// no order columns, so its row position is the storage position.
-func studyRankSQL(rawDB string) string {
-	return fmt.Sprintf(
-		"SELECT study_id, toUInt64(row_number() OVER (ORDER BY t, pos, study_id)) AS study_rank FROM ("+
-			"SELECT study_id, max(import_time) AS t, min(%s) AS pos FROM `%s`.cancer_study GROUP BY study_id)",
-		fileOrderSQL, rawDB)
-}
-
 // sampleSQL builds the samples with ImportClinicalData's internal ids: in the
 // order of the sample file, study by study.
-func sampleSQL(rawDB string) string {
+func sampleSQL(rawDB, targetDB string, offset uint64) string {
 	return fmt.Sprintf(
 		"SELECT s.study_id AS study_id, s.sample_id AS sample_id, s.patient_id AS patient_id, "+
-			"toUInt64(row_number() OVER (ORDER BY r.study_rank, s.pos, s.study_id, s.sample_id, s.patient_id)) AS internal_id "+
+			nextIDs(offset, "r.study_rank, s.pos, s.study_id, s.sample_id, s.patient_id")+" AS internal_id "+
 			"FROM (SELECT study_id, sample_id, patient_id, min(%[1]s) AS pos FROM `%[2]s`.clinical_sample "+
 			"WHERE sample_id != '' GROUP BY study_id, sample_id, patient_id) s "+
 			"LEFT JOIN (%[3]s) r ON r.study_id = s.study_id",
-		fileOrderSQL, rawDB, studyRankSQL(rawDB))
+		fileOrderSQL, rawDB, studyRanksSQL(targetDB))
 }
 
 // patientSQL builds the patients with ImportClinicalData's internal ids: the
 // sample file adds each patient at its first sample, the patient file then
 // adds the patients without samples, study by study.
-func patientSQL(rawDB string) string {
+func patientSQL(rawDB, targetDB string, offset uint64) string {
 	return fmt.Sprintf(
 		"SELECT p.study_id AS study_id, p.patient_id AS patient_id, "+
-			"toUInt64(row_number() OVER (ORDER BY r.study_rank, p.pos, p.study_id, p.patient_id)) AS internal_id "+
+			nextIDs(offset, "r.study_rank, p.pos, p.study_id, p.patient_id")+" AS internal_id "+
 			"FROM (SELECT study_id, patient_id, min(pos) AS pos FROM ("+
 			"SELECT study_id, patient_id, (0, %[1]s) AS pos FROM `%[2]s`.clinical_sample WHERE sample_id != '' AND patient_id != '' "+
 			"UNION ALL SELECT study_id, patient_id, (1, %[1]s) AS pos FROM `%[2]s`.clinical_patient WHERE patient_id != ''"+
 			") GROUP BY study_id, patient_id) p "+
 			"LEFT JOIN (%[3]s) r ON r.study_id = p.study_id",
-		fileOrderSQL, rawDB, studyRankSQL(rawDB))
+		fileOrderSQL, rawDB, studyRanksSQL(targetDB))
 }

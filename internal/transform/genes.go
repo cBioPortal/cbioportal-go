@@ -249,13 +249,8 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		parts = append(parts, "SELECT '' AS source, '' AS study_id, '' AS profile_stable_id, '' AS hugo_symbol, '' AS entrez_gene_id, "+
 			"toInt64(0) AS resolved_entrez_gene_id, '' AS resolved_hugo_gene_symbol, toUInt8(0) AS mirna WHERE 0")
 	}
-	_, err := c.Execute(fmt.Sprintf(
-		"CREATE OR REPLACE TABLE `%s`.gene_key_map ENGINE = MergeTree ORDER BY (source, study_id, profile_stable_id, hugo_symbol, entrez_gene_id) AS %s",
-		targetDB, strings.Join(parts, " UNION ALL ")))
-	if err != nil {
-		return fmt.Errorf("creating table gene_key_map: %w", err)
-	}
-	return nil
+	return c.fill(targetDB, "gene_key_map", "(source, study_id, profile_stable_id, hugo_symbol, entrez_gene_id)",
+		strings.Join(parts, " UNION ALL "))
 }
 
 // matrixLines returns the lines table a raw matrix is stored in, when the
