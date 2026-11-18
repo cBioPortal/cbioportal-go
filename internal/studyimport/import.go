@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -111,16 +112,11 @@ func Run(o Options, dirs []string) (*Result, error) {
 		o.logf("loading the shared gene panels failed: %v", err)
 	}
 
+	res.Studies = o.stageAll(raw, dirs)
 	var imported []int
-	for i, dir := range dirs {
-		o.logf("[%d/%d] %s", i+1, len(dirs), dir)
-		r := o.stage(raw, dir)
-		res.Studies = append(res.Studies, r)
-		if o.Progress != nil {
-			o.Progress(r)
-		}
+	for i, r := range res.Studies {
 		if r.Status == Imported {
-			imported = append(imported, len(res.Studies)-1)
+			imported = append(imported, i)
 		}
 	}
 	// A failed study was removed from RawDB, so the transform runs to take
@@ -227,14 +223,79 @@ func Plan(o Options, dirs []string) (*ImportPlan, error) {
 	return p, nil
 }
 
-// stage ingests one study directory, removing it from RawDB on failure.
-func (o *Options) stage(raw *ch.Client, dir string) StudyResult {
+// studyWorkers is how many studies stage at once. A small study's staging
+// is mostly round trips to ClickHouse and the next study's Prepare, which
+// overlap well; the data files of all of them share the ingest's limit on
+// files loading at once.
+const studyWorkers = 3
+
+// stageAll stages the study directories studyWorkers at a time and returns
+// their results in the order of dirs. Prepare runs for one study at a
+// time, and Done, Progress and Logf one call at a time, so callers need not
+// make them safe to run at once; Prepare may run while one of the others
+// does.
+func (o Options) stageAll(raw *ch.Client, dirs []string) []StudyResult {
+	var prepareMu, mu sync.Mutex
+	if prepare := o.Prepare; prepare != nil {
+		o.Prepare = func(dir string) error {
+			prepareMu.Lock()
+			defer prepareMu.Unlock()
+			return prepare(dir)
+		}
+	}
+	if done := o.Done; done != nil {
+		o.Done = func(dir string) {
+			mu.Lock()
+			defer mu.Unlock()
+			done(dir)
+		}
+	}
+	if logf := o.Logf; logf != nil {
+		o.Logf = func(format string, args ...any) {
+			mu.Lock()
+			defer mu.Unlock()
+			logf(format, args...)
+		}
+	}
+	results := make([]StudyResult, len(dirs))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, studyWorkers)
+	var last time.Time
+	for i, dir := range dirs {
+		slots <- struct{}{}
+		// Import times follow the order of dirs, whichever study finishes
+		// first.
+		imported := time.Now().Truncate(time.Microsecond)
+		if !imported.After(last) {
+			imported = last.Add(time.Microsecond)
+		}
+		last = imported
+		wg.Add(1)
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			o.logf("[%d/%d] %s", i+1, len(dirs), dir)
+			r := o.stage(raw, dir, imported)
+			results[i] = r
+			if o.Progress != nil {
+				mu.Lock()
+				o.Progress(r)
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
+// stage ingests one study directory with the given import time, removing
+// it from RawDB on failure.
+func (o *Options) stage(raw *ch.Client, dir string, imported time.Time) StudyResult {
 	r := StudyResult{Dir: dir}
 	if o.Done != nil {
 		defer o.Done(dir)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "meta_study.txt")); err != nil {
-		o.logf("  no meta_study.txt, skipped")
+		o.logf("  %s: no meta_study.txt, skipped", dir)
 		r.Status, r.Err = Skipped, err
 		return r
 	}
@@ -251,7 +312,7 @@ func (o *Options) stage(raw *ch.Client, dir string) StudyResult {
 			return err
 		}
 		r.StudyID = s.StudyID
-		_, err = ingest.IngestStudy(raw, s)
+		_, err = ingest.IngestStudyAt(raw, s, imported)
 		return err
 	}()
 	r.Duration = time.Since(start)
@@ -261,7 +322,7 @@ func (o *Options) stage(raw *ch.Client, dir string) StudyResult {
 		return r
 	}
 	r.Status, r.Err = Failed, err
-	o.logf("  staging failed: %v", err)
+	o.logf("  staging %s failed: %v", dir, err)
 	if r.StudyID != "" {
 		o.logf("  removing %s from the portal", r.StudyID)
 		if _, rmErr := ingest.RemoveStudy(raw, r.StudyID); rmErr != nil {

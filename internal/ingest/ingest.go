@@ -359,9 +359,13 @@ type fileStager struct {
 	genericAssay atomic.Bool
 }
 
-// fileWorkers is how many of a study's data files load at once. A large
-// matrix insert uses up to about 4.5 GiB of ClickHouse memory.
+// fileWorkers is how many data files load at once, across all the studies
+// this process is loading. A large matrix insert uses up to about 4.5 GiB of
+// ClickHouse memory.
 const fileWorkers = 3
+
+// fileSlots holds a token per data file loading.
+var fileSlots = make(chan struct{}, fileWorkers)
 
 func (st *fileStager) stage(fileNum int, f *parser.DataFile, load func() (FileStat, error)) (FileStat, error) {
 	source := fileName(f.DataPath)
@@ -402,6 +406,14 @@ func (st *fileStager) stage(fileNum int, f *parser.DataFile, load func() (FileSt
 // before loading. A data file whose staged rows are still current (same
 // content, position and meta file) is not loaded again.
 func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
+	return IngestStudyAt(c, s, time.Now())
+}
+
+// IngestStudyAt is IngestStudy with the study's import time given. The
+// transform numbers studies in the order of their import times, so an
+// importer staging several studies at once gives them times in the order
+// it was given the studies.
+func IngestStudyAt(c *ch.Client, s *parser.Study, imported time.Time) ([]FileStat, error) {
 	if err := c.CreateDatabase(); err != nil {
 		return nil, err
 	}
@@ -429,7 +441,7 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	} else if removedGA {
 		st.genericAssay.Store(true)
 	}
-	if err := ingestStudyMeta(c, s); err != nil {
+	if err := ingestStudyMeta(c, s, imported); err != nil {
 		return nil, err
 	}
 	if err := ingestProfiles(c, s); err != nil {
@@ -454,8 +466,7 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 	// Data files load fileWorkers at a time: each insert waits mostly on
 	// ClickHouse, which parses one file's rows on a few cores.
 	loaded := make([]*FileStat, len(s.Files))
-	g := new(errgroup.Group)
-	g.SetLimit(fileWorkers)
+	var g errgroup.Group
 	for i := range s.Files {
 		f := &s.Files[i]
 		var fn func(*ch.Client, string, int, *parser.DataFile) (FileStat, error)
@@ -470,6 +481,8 @@ func IngestStudy(c *ch.Client, s *parser.Study) ([]FileStat, error) {
 			continue
 		}
 		g.Go(func() error {
+			fileSlots <- struct{}{}
+			defer func() { <-fileSlots }()
 			stat, err := st.stage(i+1, f, func() (FileStat, error) { return fn(c, s.StudyID, i+1, f) })
 			if err != nil {
 				return err

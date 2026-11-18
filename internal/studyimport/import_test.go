@@ -95,4 +95,30 @@ func TestLiveRun(t *testing.T) {
 	if n := count("SELECT count() FROM `" + db + "`.sample_derived WHERE cancer_study_identifier = 'golden_a'"); n != "0" {
 		t.Errorf("%s samples of the failed study still served", n)
 	}
+
+	// Studies staged at once rank in the order they were given, whichever
+	// finishes first.
+	o.Prepare = nil
+	studies := []string{"golden_c", "golden_b", "golden_a"}
+	dirs := make([]string, len(studies))
+	for i, s := range studies {
+		dirs[i] = filepath.Join(golden, "studies", s)
+	}
+	if res, err = Run(o, dirs); err != nil || res.Count(Imported) != len(dirs) || res.TransformErr != nil {
+		t.Fatalf("three studies: %+v, %v", res, err)
+	}
+	for i, r := range res.Studies {
+		if r.StudyID != studies[i] {
+			t.Errorf("result %d is %s, want %s", i, r.StudyID, studies[i])
+		}
+	}
+	want := strings.Join(studies, ",")
+	if got := count("SELECT arrayStringConcat(groupArray(study_id), ',') FROM (SELECT study_id FROM `" + raw +
+		"`.cancer_study ORDER BY import_time)"); got != want {
+		t.Errorf("studies by import time %s, want %s", got, want)
+	}
+	if got := count("SELECT arrayStringConcat(groupArray(study_id), ',') FROM (SELECT study_id, min(internal_id) AS i FROM `" +
+		db + "`.sample GROUP BY study_id ORDER BY i)"); got != want {
+		t.Errorf("studies by sample internal id %s, want %s", got, want)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -125,7 +126,10 @@ type run struct {
 	invalid     int                   // studies with validation errors
 	order       []string              // validated study directories, in order
 	running     []*runningValidation  // started, not yet collected
-	byDir       map[string]*runningValidation
+	// byDir holds the validations whose study is still importing. The
+	// import starts and ends studies concurrently, so byDirMu guards it.
+	byDir   map[string]*runningValidation
+	byDirMu sync.Mutex
 }
 
 func (r *run) importLog() string { return fmt.Sprintf("`%s`.`_hub_import_log`", r.Raw) }
@@ -382,6 +386,8 @@ func (r *run) validate(ctx context.Context, name, dir string) {
 	}
 	v := &runningValidation{name: name, dir: dir, done: make(chan Validation, 1)}
 	v.users.Store(2)
+	r.byDirMu.Lock()
+	defer r.byDirMu.Unlock()
 	if r.byDir == nil {
 		r.byDir = map[string]*runningValidation{}
 	}
@@ -397,8 +403,11 @@ func (r *run) validate(ctx context.Context, name, dir string) {
 // studyDone is the import's end with a study directory: it is deleted, or
 // left to its validation to delete.
 func (r *run) studyDone(dir string) {
-	if v, ok := r.byDir[dir]; ok {
-		delete(r.byDir, dir)
+	r.byDirMu.Lock()
+	v, ok := r.byDir[dir]
+	delete(r.byDir, dir)
+	r.byDirMu.Unlock()
+	if ok {
 		v.release()
 		return
 	}

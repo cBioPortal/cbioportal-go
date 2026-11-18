@@ -42,6 +42,9 @@ safe to run against a portal that is being served:
   - A study that fails to stage is removed from the portal. When the
     transform fails, this run's studies are removed and the portal is
     rebuilt without them.
+  - Up to three studies stage at once, and at most three data files load
+    at once across them. The portal still numbers the studies' samples and
+    patients in the order the directories were given.
 
 The reference database is loaded from --seed when it has no genes yet, and
 the shared gene panels from --gene-panels when the raw database has none

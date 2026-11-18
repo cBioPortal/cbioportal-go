@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
@@ -14,7 +15,7 @@ var studyMetaFields = []string{
 	"pmid", "citation", "reference_genome", "add_global_case_list",
 }
 
-func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
+func ingestStudyMeta(c *ch.Client, s *parser.Study, imported time.Time) error {
 	if len(s.Meta) == 0 {
 		return nil
 	}
@@ -55,8 +56,8 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study) error {
 	for i, v := range values {
 		quoted[i] = "'" + ch.SQLLit(v) + "'"
 	}
-	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s, import_time) SELECT %s, now64(6)",
-		c.Database(), table, backtick(cols), strings.Join(quoted, ", ")))
+	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s, import_time) SELECT %s, fromUnixTimestamp64Micro(%d)",
+		c.Database(), table, backtick(cols), strings.Join(quoted, ", "), imported.UnixMicro()))
 	return err
 }
 
