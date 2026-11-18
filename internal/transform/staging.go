@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
 
 // stagePrefix names the objects a transform builds before it publishes
@@ -93,28 +95,19 @@ func stagedObjects(c *client, db string) ([]dbObject, error) {
 }
 
 // dropStaged drops every staged object of db: those of a run that failed,
-// and after publishing, the objects the run replaced. Views go first, as
-// they may read the tables.
+// and after publishing, the objects the run replaced. One statement drops
+// them all, as each statement waits for every replica.
 func dropStaged(c *client, db string) error {
 	objs, err := stagedObjects(c, db)
-	if err != nil {
+	if err != nil || len(objs) == 0 {
 		return err
 	}
-	for _, views := range []bool{true, false} {
-		for _, o := range objs {
-			if (o.engine == "View") != views {
-				continue
-			}
-			kind := "TABLE"
-			if views {
-				kind = "VIEW"
-			}
-			if _, err := c.Client.Execute(fmt.Sprintf("DROP %s IF EXISTS `%s`.`%s`", kind, db, o.name)); err != nil {
-				return err
-			}
-		}
+	names := make([]string, len(objs))
+	for i, o := range objs {
+		names[i] = fmt.Sprintf("`%s`.`%s`", db, o.name)
 	}
-	return nil
+	_, err = c.Client.Execute("DROP TABLE IF EXISTS " + strings.Join(names, ", "))
+	return err
 }
 
 // publish moves the staged objects under their own names. In a study
@@ -135,16 +128,23 @@ func publish(c *client, s *staging) error {
 	if err != nil {
 		return err
 	}
-	engines := map[string]string{}
-	text, err := c.Client.Execute(fmt.Sprintf(
-		"SELECT name, engine FROM system.tables WHERE database = '%s' AND NOT startsWith(name, '%s') FORMAT TabSeparated",
-		s.db, stagePrefix))
+	engines, queries := map[string]string{}, map[string]string{}
+	type object struct {
+		Name     string `json:"name"`
+		Engine   string `json:"engine"`
+		AsSelect string `json:"as_select"`
+	}
+	rows, err := ch.QueryP[object](c.Client, "SELECT name, engine, as_select FROM system.tables WHERE database = {db:String}",
+		ch.Params{"db": s.db})
 	if err != nil {
 		return err
 	}
-	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
-		if name, engine, ok := strings.Cut(line, "\t"); ok {
-			engines[name] = engine
+	for _, r := range rows {
+		if strings.HasPrefix(r.Name, stagePrefix) {
+			queries[r.Name] = r.AsSelect
+		} else {
+			engines[r.Name] = r.Engine
+			queries[r.Name] = r.AsSelect
 		}
 	}
 	exec := func(q string) error {
@@ -180,6 +180,11 @@ func publish(c *client, s *staging) error {
 	for _, v := range s.views {
 		if tables[v] {
 			continue // snapshotted into a table after the view was created
+		}
+		// A published view with the staged one's query, over the published
+		// names, is left as it is.
+		if engines[v] == "View" && queries[v] != "" && strings.ReplaceAll(queries[stagePrefix+v], stagePrefix, "") == queries[v] {
+			continue
 		}
 		if e := engines[v]; e != "" && e != "View" {
 			if err := exec(fmt.Sprintf("DROP TABLE `%s`.`%s`", s.db, v)); err != nil {

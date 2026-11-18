@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/sync/errgroup"
+
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/javaorder"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
@@ -85,10 +87,16 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	}
 	// Counted once published: in a study build, the staged tables hold
 	// only the changed studies' rows.
+	var g errgroup.Group
+	g.SetLimit(8)
 	for i, v := range counts {
-		text, _ := c.Client.Execute(fmt.Sprintf("SELECT count() FROM `%s`.`%s` FORMAT TabSeparated", targetDB, v.Name))
-		fmt.Sscan(strings.TrimSpace(text), &counts[i].Rows)
+		g.Go(func() error {
+			text, _ := c.Client.Execute(fmt.Sprintf("SELECT count() FROM `%s`.`%s` FORMAT TabSeparated", targetDB, v.Name))
+			fmt.Sscan(strings.TrimSpace(text), &counts[i].Rows)
+			return nil
+		})
 	}
+	g.Wait()
 	return counts, nil
 }
 
