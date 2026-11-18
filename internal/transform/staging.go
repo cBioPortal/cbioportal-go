@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"golang.org/x/sync/errgroup"
 )
 
 // stagePrefix names the objects a transform builds before it publishes
@@ -94,20 +95,31 @@ func stagedObjects(c *client, db string) ([]dbObject, error) {
 	return out, nil
 }
 
+// dropStagedStatements is how many DROP statements share the staged
+// objects. A replicated service drops the objects of one statement one
+// after another, each waiting for every replica, so a few statements at
+// once finish sooner than one.
+const dropStagedStatements = 8
+
 // dropStaged drops every staged object of db: those of a run that failed,
-// and after publishing, the objects the run replaced. One statement drops
-// them all, as each statement waits for every replica.
+// and after publishing, the objects the run replaced.
 func dropStaged(c *client, db string) error {
 	objs, err := stagedObjects(c, db)
 	if err != nil || len(objs) == 0 {
 		return err
 	}
-	names := make([]string, len(objs))
+	groups := make([][]string, min(dropStagedStatements, len(objs)))
 	for i, o := range objs {
-		names[i] = fmt.Sprintf("`%s`.`%s`", db, o.name)
+		groups[i%len(groups)] = append(groups[i%len(groups)], fmt.Sprintf("`%s`.`%s`", db, o.name))
 	}
-	_, err = c.Client.Execute("DROP TABLE IF EXISTS " + strings.Join(names, ", "))
-	return err
+	var g errgroup.Group
+	for _, names := range groups {
+		g.Go(func() error {
+			_, err := c.Client.Execute("DROP TABLE IF EXISTS " + strings.Join(names, ", "))
+			return err
+		})
+	}
+	return g.Wait()
 }
 
 // publish moves the staged objects under their own names. In a study

@@ -434,16 +434,27 @@ func nextIDs(offset uint64, order string) string {
 func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string) error {
 	study := studyColumns[strings.TrimPrefix(name, snapshotPrefix)]
 	if c.part != nil && study != "" {
-		if same, err := c.sameColumns(targetDB, name, sel); err != nil {
-			return err
-		} else if !same {
+		// The rows are inserted while their columns are checked: rows
+		// with other columns are dropped with the staged table when the
+		// build turns into a full build.
+		var same bool
+		var checkErr, insertErr error
+		var wg sync.WaitGroup
+		wg.Go(func() { same, checkErr = c.sameColumns(targetDB, name, sel) })
+		wg.Go(func() {
+			fc := *c
+			fc.Client = c.part.filtered
+			_, insertErr = fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel))
+		})
+		wg.Wait()
+		switch {
+		case checkErr != nil:
+			return checkErr
+		case !same:
 			logf("transform: %s has other columns than the published table", name)
 			return errFullBuild
-		}
-		fc := *c
-		fc.Client = c.part.filtered
-		if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
-			return fmt.Errorf("filling table %s: %w", name, err)
+		case insertErr != nil:
+			return fmt.Errorf("filling table %s: %w", name, insertErr)
 		}
 		return nil
 	}

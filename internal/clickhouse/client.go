@@ -208,7 +208,7 @@ func (c *Client) Execute(sql string) (string, error) {
 	sql = c.rewrite(sql)
 	for wait := alterRetryWait; ; wait *= 2 {
 		out, err := c.post(url.Values{"database": {c.database}}, strings.NewReader(sql))
-		if err == nil || !strings.Contains(err.Error(), "(CANNOT_ASSIGN_ALTER)") || wait > alterRetryMax {
+		if err == nil || !refusedAlter(err) || wait > alterRetryMax {
 			return out, err
 		}
 		time.Sleep(wait)
@@ -216,13 +216,20 @@ func (c *Client) Execute(sql string) (string, error) {
 }
 
 // ClickHouse refuses an ALTER or DELETE on a table while an earlier ALTER
-// of it is still being applied (CANNOT_ASSIGN_ALTER), without running it,
-// so Execute runs such a statement again, waiting alterRetryWait and then
-// twice as long each time, up to about a minute in all.
+// of it is still being applied (CANNOT_ASSIGN_ALTER), and an ALTER of a
+// table another replica changed meanwhile (UNFINISHED), without running
+// it, so Execute runs such a statement again, waiting alterRetryWait and
+// then twice as long each time, up to about a minute in all.
 const (
 	alterRetryWait = 250 * time.Millisecond
 	alterRetryMax  = 16 * time.Second
 )
+
+func refusedAlter(err error) bool {
+	m := err.Error()
+	return strings.Contains(m, "(CANNOT_ASSIGN_ALTER)") ||
+		strings.Contains(m, "(UNFINISHED)") && strings.Contains(m, "has been changed by another replica")
+}
 
 // ExecuteServerwide runs a statement without selecting a database (for CREATE
 // DATABASE, which must not assume the target exists).

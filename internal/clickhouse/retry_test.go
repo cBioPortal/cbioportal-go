@@ -8,18 +8,27 @@ import (
 	"testing"
 )
 
-const assignAlterError = "Code: 517. DB::Exception: Previous mutation query is not finished yet. " +
-	"You can retry this error. (CANNOT_ASSIGN_ALTER) (version 26.6.1.2455 (official build))"
+const (
+	assignAlterError = "Code: 517. DB::Exception: Previous mutation query is not finished yet. " +
+		"You can retry this error. (CANNOT_ASSIGN_ALTER) (version 26.6.1.2455 (official build))"
+	changedTableError = "Code: 341. DB::Exception: Table clinical_sample has been changed by another replica. " +
+		"(UNFINISHED) (version 26.6.1.2455 (official build))"
+)
 
 // TestExecuteRetriesRefusedAlter checks that a statement ClickHouse refused
-// because an earlier ALTER of its table was still being applied runs again,
-// and that other errors are returned at once.
+// because an earlier ALTER of its table was still being applied, or because
+// another replica changed the table meanwhile, runs again, and that other
+// errors are returned at once.
 func TestExecuteRetriesRefusedAlter(t *testing.T) {
 	var calls atomic.Int32
 	refusals := int32(2)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if calls.Add(1) <= refusals {
+		switch calls.Add(1) {
+		case 1:
 			http.Error(w, assignAlterError, http.StatusInternalServerError)
+			return
+		case 2:
+			http.Error(w, changedTableError, http.StatusInternalServerError)
 			return
 		}
 		w.Write([]byte("ok"))
