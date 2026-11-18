@@ -17,12 +17,19 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/javaorder"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
+
+// insertThreads is how many threads write the rows of each INSERT ... SELECT
+// and CREATE TABLE ... AS SELECT. ClickHouse writes them on one thread
+// unless told otherwise, and the largest tables (hundreds of millions of
+// rows) take about four times as long to build that way.
+const insertThreads = 8
 
 type ViewCount struct {
 	Name string
@@ -37,7 +44,7 @@ type ViewCount struct {
 // all of them are complete, so a failed run leaves the portal database as it
 // was, and the API keeps serving the previous objects while a run builds.
 func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
-	c := newClient(base, rawDB)
+	c := newClient(base.WithSettings(map[string]string{"max_insert_threads": strconv.Itoa(insertThreads)}), rawDB)
 	if err := c.EnsureDatabase(targetDB); err != nil {
 		return nil, err
 	}
