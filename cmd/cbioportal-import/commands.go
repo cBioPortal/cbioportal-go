@@ -269,9 +269,10 @@ from the staged studies (--raw-db) and the reference data (--ref-db), and
 prints the row count of each. The API serves the portal database (--db).
 
 When at most half of the studies were staged or removed since the previous
-build, and the importer, the reference data and the shared gene panels are
-the same, only those studies' rows are built again and swapped in; the
-other studies' rows are kept as they are. Otherwise every study is built.
+build, and the transform's code, the reference data and the shared gene
+panels are the same, only those studies' rows are built again and swapped
+in; the other studies' rows are kept as they are. Otherwise every study is
+built.
 
 --from-prod is for the migration from Java cBioPortal only: it builds go's
 tables from Java's. --ref-db is then a clone of a cBioPortal production

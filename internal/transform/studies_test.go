@@ -2,6 +2,7 @@ package transform
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,8 @@ import (
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/ingest"
+	"github.com/cbioportal/cbioportal-go/internal/javaorder"
+	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
 // TestLiveStudyBuild checks that a build of the changed studies alone
@@ -102,7 +105,33 @@ func TestLiveStudyBuild(t *testing.T) {
 		"INSERT INTO `%s`.gene_panel (study_id, gene_panel_id, description, hugo_symbol) VALUES ('', 'SHARED_X', '', 'TP53')", rawDB)); err != nil {
 		t.Fatal(err)
 	}
-	apply("full build: the importer, reference data or shared gene panels changed")
+	apply("full build: the transform code, reference data or shared gene panels changed")
+
+	// The build records the version of the transform that made it.
+	text, err := ch.New(base, db).Execute("SELECT transform_version FROM `" + db + "`._transform_build FORMAT TabSeparated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(text); got != sourceHash() {
+		t.Errorf("transform_version = %q, want %q", got, sourceHash())
+	}
+}
+
+// TestSourceHash checks that the transform's version covers the Go files of
+// each package that decides what it builds, and leaves out their tests.
+func TestSourceHash(t *testing.T) {
+	if len(sourceHash()) != 64 {
+		t.Fatalf("sourceHash() = %q", sourceHash())
+	}
+	for _, src := range []fs.FS{Source, ch.Source, parser.Source, javaorder.Source} {
+		files, err := fs.Glob(src, "*.go")
+		if err != nil || len(files) < 2 {
+			t.Errorf("embedded files %v, %v", files, err)
+		}
+	}
+	if _, err := fs.Stat(Source, "studies.go"); err != nil {
+		t.Errorf("transform source: %v", err)
+	}
 }
 
 // TestLiveBatchedBuild checks that a full build that fills the tables a

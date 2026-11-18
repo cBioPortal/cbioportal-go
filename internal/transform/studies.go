@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +15,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/javaorder"
+	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
 // A build of the portal database either rebuilds every study (a full
@@ -84,7 +86,8 @@ const (
 	// studyRanksTable holds every study's rank (its internal id) and the
 	// import time it was built from.
 	studyRanksTable = "study_rank"
-	// buildTable holds the fingerprint of the build.
+	// buildTable holds the fingerprint of the build and the version of the
+	// transform that made it (sourceHash).
 	buildTable = "_transform_build"
 )
 
@@ -186,7 +189,7 @@ func planBuild(c *client, rawDB, targetDB, refDB string, full bool) (*studyBuild
 		"SELECT fingerprint FROM `%s`.`%s` FORMAT TabSeparated", targetDB, buildTable)); err != nil {
 		return nil, err
 	} else if strings.TrimSpace(text) != b.fingerprint {
-		reason = "the importer, reference data or shared gene panels changed"
+		reason = "the transform code, reference data or shared gene panels changed"
 	}
 	for name, col := range studyColumns {
 		if key, ok := published[name]; reason == "" && ok && key != col {
@@ -224,13 +227,13 @@ func publishedTables(c *client, targetDB string) (map[string]string, error) {
 }
 
 // buildFingerprint identifies what a build reads besides the studies' own
-// rows: the importer itself, the reference database and the raw rows
+// rows: the code that builds the tables (sourceHash), the reference database and the raw rows
 // shared by all studies (an empty study_id, such as the shared gene panels). The
 // reference genes the transform adds for the phosphoproteins of RPPA files
 // (negative Entrez ids) come from the studies' own rows and are left out.
 func buildFingerprint(c *client, rawDB, refDB string) (string, error) {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%s\n%s\n", executableHash(), rawDB, refDB)
+	fmt.Fprintf(h, "%s\n%s\n%s\n", sourceHash(), rawDB, refDB)
 	text, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT t.database, t.name, countIf(c.name = 'study_id'), countIf(c.name = 'entrez_gene_id') FROM system.tables t "+
 			"LEFT JOIN system.columns c ON c.database = t.database AND c.table = t.name "+
@@ -267,19 +270,23 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-var executableHash = sync.OnceValue(func() string {
-	path, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
+// sourceHash hashes the Go files (tests aside) of the packages that decide
+// what the transform builds.
+var sourceHash = sync.OnceValue(func() string {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return ""
+	for _, pkg := range []struct {
+		name string
+		src  fs.FS
+	}{{"transform", Source}, {"clickhouse", ch.Source}, {"parser", parser.Source}, {"javaorder", javaorder.Source}} {
+		files, _ := fs.Glob(pkg.src, "*.go")
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			body, _ := fs.ReadFile(pkg.src, f)
+			fmt.Fprintf(h, "%s/%s %d\n", pkg.name, f, len(body))
+			h.Write(body)
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 })
@@ -311,8 +318,9 @@ func writeBuildState(c *client, targetDB string, b *studyBuild) error {
 	stmts := []string{
 		fmt.Sprintf("CREATE OR REPLACE TABLE `%s`.`%s` (study_id String, import_time DateTime64(6), rank UInt64) "+
 			"ENGINE = MergeTree ORDER BY study_id", targetDB, studyRanksTable),
-		fmt.Sprintf("CREATE OR REPLACE TABLE `%s`.`%s` (fingerprint String) ENGINE = MergeTree ORDER BY tuple()", targetDB, buildTable),
-		fmt.Sprintf("INSERT INTO `%s`.`%s` VALUES ('%s')", targetDB, buildTable, b.fingerprint),
+		fmt.Sprintf("CREATE OR REPLACE TABLE `%s`.`%s` (fingerprint String, transform_version String) ENGINE = MergeTree ORDER BY tuple()",
+			targetDB, buildTable),
+		fmt.Sprintf("INSERT INTO `%s`.`%s` VALUES ('%s', '%s')", targetDB, buildTable, b.fingerprint, sourceHash()),
 	}
 	if len(values) > 0 {
 		stmts = append(stmts, fmt.Sprintf("INSERT INTO `%s`.`%s` VALUES %s", targetDB, studyRanksTable, strings.Join(values, ", ")))

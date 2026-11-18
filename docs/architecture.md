@@ -115,12 +115,19 @@ sorts last, as a study imported again in Java does.
 The transform builds every study again in three cases:
 
 - more than half of the studies changed,
-- something all studies share changed: the importer program itself, the
-  reference genes, or the shared gene panels, or
+- something all studies share changed: the code that builds the tables,
+  the reference genes, or the shared gene panels, or
 - the changed study's data would give a table different columns.
 
 The table `_transform_build` remembers what the last build used, and
 `study_rank` remembers each study's internal id and ingest time.
+
+The transform's version is a hash of the code that builds the tables (the
+transform and the packages it uses to write SQL). `_transform_build` stores
+it in the column `transform_version`. A new release that changes only
+other code, such as the API, keeps the version, so the next import is still
+a study build. Any change to that code, even to a comment, gives a new
+version, and the next import builds every study.
 
 **A large build goes 50 studies at a time.** When a portal has more than 50
 studies, a full build fills each table that holds many studies in batches
