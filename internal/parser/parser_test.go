@@ -288,3 +288,17 @@ func TestSampleID(t *testing.T) {
 		}
 	}
 }
+
+func TestPatientID(t *testing.T) {
+	for in, want := range map[string]string{
+		"TCGA-3L-AA1B-01A":             "TCGA-3L-AA1B",
+		"TCGA-RZ-AB0B-01A-11D-A39W-08": "TCGA-RZ-AB0B",
+		"TCGA-RZ-AB0B":                 "TCGA-RZ-AB0B",
+		"TCGA-RZ":                      "TCGA-RZ-01",
+		"P-0001776":                    "P-0001776",
+	} {
+		if got := PatientID(in); got != want {
+			t.Errorf("PatientID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -163,8 +163,9 @@ func TestIngestRowNumbers(t *testing.T) {
 	}
 }
 
-// TestLiveSampleIDSQL checks parser.SampleIDSQL against parser.SampleID on
-// the server named by CLICKHOUSE_TEST_URL.
+// TestLiveSampleIDSQL checks parser.SampleIDSQL against parser.SampleID,
+// and parser.PatientIDSQL against parser.PatientID, on the server named by
+// CLICKHOUSE_TEST_URL.
 func TestLiveSampleIDSQL(t *testing.T) {
 	base := os.Getenv("CLICKHOUSE_TEST_URL")
 	if base == "" {
@@ -172,13 +173,20 @@ func TestLiveSampleIDSQL(t *testing.T) {
 	}
 	c := ch.New(base, "default")
 	for _, id := range []string{"TCGA-RZ-AB0B-01A", "TCGA-RZ-AB0B-01A-11D-A39W-08", "TCGA-RZ-AB0B-01", "TCGA-RZ-AB0B",
-		"TCGA-13-1479-Tumor", "TCGA-13-1479-Normal", "TCGA-XY-1234-1A", "P-0001776-T02-IM6", "TCGAX"} {
+		"TCGA-13-1479-Tumor", "TCGA-13-1479-Normal", "TCGA-XY-1234-1A", "P-0001776-T02-IM6", "TCGAX", "TCGA-RZ"} {
 		out, err := c.Execute("SELECT " + parser.SampleIDSQL("'"+ch.SQLLit(id)+"'") + " FORMAT TabSeparatedRaw")
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got, want := strings.TrimSpace(out), parser.SampleID(id); got != want {
 			t.Errorf("%q: SQL %q, Go %q", id, got, want)
+		}
+		out, err = c.Execute("SELECT " + parser.PatientIDSQL("'"+ch.SQLLit(id)+"'") + " FORMAT TabSeparatedRaw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := strings.TrimSpace(out), parser.PatientID(id); got != want {
+			t.Errorf("%q: patient SQL %q, Go %q", id, got, want)
 		}
 	}
 }

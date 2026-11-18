@@ -3,6 +3,8 @@ package transform
 import (
 	"fmt"
 	"strings"
+
+	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
 // view is a named view definition.
@@ -88,10 +90,11 @@ func studyExtraViews(c *client, rawDB, targetDB, refDB string, hasRef bool, exis
 		}
 		for _, id := range idCols {
 			where = append(where, trim(id)+" != ''")
+			// ImportResourceData stores the ids as StableIdUtil reads them.
 			if id == "patient_id" {
-				patient = "CAST(" + trim(id) + " AS Nullable(String))"
+				patient = "CAST(" + parser.PatientIDSQL(trim(id)) + " AS Nullable(String))"
 			} else {
-				sample = "CAST(" + trim(id) + " AS Nullable(String))"
+				sample = "CAST(" + parser.SampleIDSQL(trim(id)) + " AS Nullable(String))"
 			}
 		}
 		where = append(where, fmt.Sprintf(

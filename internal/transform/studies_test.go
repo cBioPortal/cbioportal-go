@@ -117,6 +117,52 @@ func TestLiveStudyBuild(t *testing.T) {
 	}
 }
 
+// TestLiveResourceTCGABarcodes checks that resource rows naming samples and
+// patients by longer TCGA barcodes are stored under the ids of the
+// study's samples and patients, as ImportResourceData reads them through
+// StableIdUtil.
+func TestLiveResourceTCGABarcodes(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "rt_ref")
+	rawDB, db := goldenDatabase(t, base, "rt_raw"), goldenDatabase(t, base, "rt")
+	dir := t.TempDir()
+	files := map[string]string{
+		"meta_study.txt": "type_of_cancer: coad\ncancer_study_identifier: rt_tcga\nname: TCGA resources\n" +
+			"short_name: RT\ndescription: d\nreference_genome: hg19\n",
+		"meta_clinical_sample.txt": "cancer_study_identifier: rt_tcga\ngenetic_alteration_type: CLINICAL\n" +
+			"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+		"data_clinical_sample.txt": "#Patient Identifier\tSample Identifier\n#p\t#s\n#STRING\tSTRING\n#1\t1\n" +
+			"PATIENT_ID\tSAMPLE_ID\nTCGA-3L-AA1B\tTCGA-3L-AA1B-01\n",
+		"meta_resource_definition.txt": "cancer_study_identifier: rt_tcga\nresource_type: DEFINITION\n" +
+			"data_filename: data_resource_definition.txt\n",
+		"data_resource_definition.txt": "RESOURCE_ID\tDISPLAY_NAME\tDESCRIPTION\tRESOURCE_TYPE\tOPEN_BY_DEFAULT\tPRIORITY\n" +
+			"SLIDE\tSlide\td\tSAMPLE\ttrue\t1\nNOTES\tNotes\td\tPATIENT\tfalse\t2\n",
+		"meta_resource_sample.txt": "cancer_study_identifier: rt_tcga\nresource_type: SAMPLE\n" +
+			"data_filename: data_resource_sample.txt\n",
+		"data_resource_sample.txt": "PATIENT_ID\tSAMPLE_ID\tRESOURCE_ID\tURL\nTCGA-3L-AA1B\tTCGA-3L-AA1B-01A\tSLIDE\thttp://slide\n",
+		"meta_resource_patient.txt": "cancer_study_identifier: rt_tcga\nresource_type: PATIENT\n" +
+			"data_filename: data_resource_patient.txt\n",
+		"data_resource_patient.txt": "PATIENT_ID\tRESOURCE_ID\tURL\nTCGA-3L-AA1B-01A\tNOTES\thttp://notes\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingestGolden(t, base, rawDB, dir)
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ch.New(base, db).Execute("SELECT resource_scope, patient_id, sample_id FROM `" + db +
+		"`.resource ORDER BY resource_scope FORMAT TabSeparated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "PATIENT\tTCGA-3L-AA1B\t\\N\nSAMPLE\tTCGA-3L-AA1B\tTCGA-3L-AA1B-01\n"; got != want {
+		t.Errorf("resource rows:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // TestSourceHash checks that the transform's version covers the Go files of
 // each package that decides what it builds, and leaves out their tests.
 func TestSourceHash(t *testing.T) {

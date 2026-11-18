@@ -46,3 +46,33 @@ func SampleIDSQL(x string) string {
 	return fmt.Sprintf("if(startsWith(%[1]s, 'TCGA'), if(length(splitByChar('-', %[2]s)) < 4, concat(%[1]s, '-01'), "+
 		"if(%[3]s != '', %[3]s, %[4]s)), %[1]s)", x, clean, sample, short)
 }
+
+// PatientID is cbioportal-core's StableIdUtil.getPatientId, which
+// ImportResourceData applies to the patient ids of resource files: a TCGA
+// barcode is cut to its patient part ("TCGA-RZ-AB0B-01A" -> "TCGA-RZ-AB0B"),
+// with "Tumor" read as "01" and "Normal" as "11", and a barcode of fewer
+// than three parts gets "-01". Other ids stay as they are.
+func PatientID(id string) string {
+	if !strings.HasPrefix(id, "TCGA") {
+		return id
+	}
+	clean := id
+	if strings.Contains(id, "Tumor") {
+		clean = strings.ReplaceAll(id, "Tumor", "01")
+	} else if strings.Contains(id, "Normal") {
+		clean = strings.ReplaceAll(id, "Normal", "11")
+	}
+	parts := strings.Split(clean, "-")
+	if len(parts) < 3 {
+		return id + "-01"
+	}
+	return strings.Join(parts[:3], "-")
+}
+
+// PatientIDSQL is PatientID as a ClickHouse expression over a String
+// expression.
+func PatientIDSQL(x string) string {
+	clean := fmt.Sprintf("if(position(%[1]s, 'Tumor') > 0, replaceAll(%[1]s, 'Tumor', '01'), replaceAll(%[1]s, 'Normal', '11'))", x)
+	return fmt.Sprintf("if(startsWith(%[1]s, 'TCGA'), if(length(splitByChar('-', %[2]s)) < 3, concat(%[1]s, '-01'), "+
+		"arrayStringConcat(arraySlice(splitByChar('-', %[2]s), 1, 3), '-')), %[1]s)", x, clean)
+}
