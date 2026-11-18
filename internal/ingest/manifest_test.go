@@ -85,7 +85,11 @@ func TestIngestSkipsUnchangedFiles(t *testing.T) {
 	writeFiles(t, dir, map[string]string{expression: "Hugo_Symbol\tEntrez_Gene_Id\tS1\tS2\nTP53\t7157\t1.5\t2\nKRAS\t3845\t0.1\t0.2\n"})
 	want("changed file", ingest("changed file"), map[string]string{clinical: "unchanged", expression: ""}, "2\t4")
 
-	if err := c.DeleteWhere("clinical_sample", "sample_id = 'S2'"); err != nil {
+	stored, err := storageTable(c, "clinical_sample")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteWhere(stored, "row_num = 2"); err != nil {
 		t.Fatal(err)
 	}
 	want("missing rows", ingest("missing rows"), map[string]string{clinical: "", expression: "unchanged"}, "2\t4")

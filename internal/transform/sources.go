@@ -110,11 +110,21 @@ func newClient(c *ch.Client, rawDB string) *client {
 					add = append(add, "toUInt64(0) AS row_num")
 				}
 			}
+			// A MergeTree table has the storage position as virtual
+			// columns, which SELECT * leaves out; a view without them
+			// (a record table stored as rows) gets constants.
+			if positionedSources[table] && !have["_part"] {
+				engine, _ := c.TableEngine(table)
+				if strings.HasSuffix(engine, "MergeTree") {
+					if len(add) > 0 {
+						add = append([]string{"_part", "_part_offset"}, add...)
+					}
+				} else {
+					add = append(add, "'' AS _part", "toUInt64(0) AS _part_offset")
+				}
+			}
 			if len(add) == 0 {
 				continue
-			}
-			if positionedSources[table] && !have["_part"] {
-				add = append([]string{"_part", "_part_offset"}, add...)
 			}
 			with = fmt.Sprintf("(SELECT *, %s FROM `%s`.`%s`)", strings.Join(add, ", "), rawDB, table)
 		}

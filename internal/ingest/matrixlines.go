@@ -318,14 +318,19 @@ func writeMatrixLines(ws []io.Writer, in io.Reader, idCount, sampleCount int, ce
 }
 
 // countCells is the number of staged cells of one file of a staging table:
-// its rows, or for a matrix staged as lines, its lines' non-empty cells.
+// its rows (in its rows table for a record table stored as rows), or for a
+// matrix staged as lines, its lines' non-empty cells.
 func countCells(c *ch.Client, table, studyID, source string) (uint64, error) {
 	lines, err := stagesLines(c, table)
 	if err != nil {
 		return 0, err
 	}
 	if !lines || !isMatrixTable(table) {
-		return c.CountForFile(table, studyID, source)
+		stored, err := storageTable(c, table)
+		if err != nil {
+			return 0, err
+		}
+		return c.CountForFile(stored, studyID, source)
 	}
 	out, err := c.Execute(fmt.Sprintf("SELECT sum(cells) FROM `%s`.`%s` WHERE study_id = '%s' AND source_file = '%s' FORMAT TabSeparated",
 		c.Database(), linesTable(table), ch.SQLLit(studyID), ch.SQLLit(source)))
@@ -338,8 +343,9 @@ func countCells(c *ch.Client, table, studyID, source string) (uint64, error) {
 	return strconv.ParseUint(strings.TrimSpace(out), 10, 64)
 }
 
-// deleteFileRows deletes one file's staged rows from a staging table: for a
-// matrix staged as lines, its lines and its sample list.
+// deleteFileRows deletes one file's staged rows from a staging table: from
+// its rows table for a record table stored as rows, and for a matrix staged
+// as lines, its lines and its sample list.
 func deleteFileRows(c *ch.Client, table, studyID, source string) error {
 	where := fmt.Sprintf("study_id = '%s' AND source_file = '%s'", ch.SQLLit(studyID), ch.SQLLit(source))
 	lines, err := stagesLines(c, table)
@@ -347,7 +353,11 @@ func deleteFileRows(c *ch.Client, table, studyID, source string) error {
 		return err
 	}
 	if !lines || !isMatrixTable(table) {
-		return c.DeleteWhere(table, where)
+		stored, err := storageTable(c, table)
+		if err != nil {
+			return err
+		}
+		return c.DeleteWhere(stored, where)
 	}
 	if err := c.DeleteWhere(linesTable(table), where); err != nil {
 		return err

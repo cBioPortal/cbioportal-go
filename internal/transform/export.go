@@ -22,10 +22,11 @@ var MafExportColumns = []string{
 // MutationFilter and merging of duplicate records as the `mutation` table — with every MafExportColumns column
 // (empty when the staged file lacks it), the reference gene as hugo / entrez,
 // the stored protein_change, and the record's position in the staged file
-// (ord, StagingOrderSQL). table is the staging table (mutation_extended or
-// mutation_uncalled) as referenced in SQL; has lists its columns. The study
-// and profile are the query parameters {study:String} and {profile:String}.
-func MafRecordsSQL(table, source, targetDB string, has map[string]bool) string {
+// (ord, the expression order orders them by, StagingOrderSQL over "m.").
+// table is the staging table (mutation_extended or mutation_uncalled) as
+// referenced in SQL; has lists its columns. The study and profile are the
+// query parameters {study:String} and {profile:String}.
+func MafRecordsSQL(table, source, targetDB string, has map[string]bool, order string) string {
 	cols := make([]string, 0, len(MafExportColumns))
 	for _, c := range MafExportColumns {
 		if has[c] {
@@ -43,7 +44,7 @@ func MafRecordsSQL(table, source, targetDB string, has map[string]bool) string {
 		"SELECT %s, gk.resolved_hugo_gene_symbol AS hugo, gk.resolved_entrez_gene_id AS entrez, %s AS protein_change, "+
 			"%s AS ord "+
 			"FROM %s m%s WHERE m.study_id = {study:String} AND m.profile_stable_id = {profile:String} AND %s",
-		strings.Join(cols, ", "), proteinChangeSQL(has), StagingOrderSQL("m.", has["row_num"], true), table,
+		strings.Join(cols, ", "), proteinChangeSQL(has), order, table,
 		geneKeyJoin(targetDB, source, "m", "hugo_symbol", "entrez_gene_id"),
 		filter)
 }

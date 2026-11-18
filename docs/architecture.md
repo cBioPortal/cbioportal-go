@@ -251,6 +251,19 @@ does and why.
   this way takes about a second instead of ten, because ClickHouse stores
   about 20,000 rows instead of 12 million. A raw database created before
   this keeps storing those files as one row per value.
+- **Clinical, mutation, structural variant and timeline files keep their
+  columns in a map.** Their headers differ a lot between studies: after a
+  few dozen studies the mutation table would have hundreds of columns,
+  most of them empty for any one study. The importer stores each of these
+  rows in `<table>_rows` with the provenance and order columns, plus one
+  map from column name to value that holds the row's non-empty values.
+  The table's own name, such as `mutation_extended`, is a view with one
+  column per name any file of that type has had, so the transform and the
+  API read the same columns as before. A file with a new column name
+  replaces the view, which takes a fraction of a second. Adding a column
+  to a table instead waits for every replica of a ClickHouse Cloud
+  service, about a second each time. A raw database created before this
+  keeps a column per header for these tables.
 - **Unchanged files are not loaded again.** The raw database keeps a list
   of every staged file (`_staged_files`): its table, its row count and a
   fingerprint of the data file, its meta file and its position in the

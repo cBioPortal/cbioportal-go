@@ -727,7 +727,7 @@ func (e *studyExport) maf(alterationType, table string) error {
 		var rows []map[string]string
 		if len(cols) > 0 {
 			rows, err = ch.QueryP[map[string]string](e.s.CH, "SELECT * EXCEPT (entrez, ord), toString(entrez) AS entrez FROM ("+
-				transform.MafRecordsSQL("cbioportal_raw."+table, table, e.s.CH.Database(), has)+
+				transform.MafRecordsSQL("cbioportal_raw."+table, table, e.s.CH.Database(), has, e.s.RawFileOrder(table, "m."))+
 				") ORDER BY ord", ch.Params{"study": e.studyID, "profile": p.StableID})
 			if err != nil {
 				return err

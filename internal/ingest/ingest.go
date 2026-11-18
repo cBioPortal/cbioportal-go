@@ -201,16 +201,28 @@ func runInsert(c *ch.Client, f *parser.DataFile, studyID string, fileNum int, da
 	if fi, err := os.Stat(f.DataPath); err == nil {
 		size = fi.Size()
 	}
-	if err := ensureSchema(c, table, dataColumns); err != nil {
+	rows, err := stagesRows(c, table)
+	if err != nil {
 		return FileStat{}, err
 	}
-	sql := insertSQL(c, table, provenance(studyID, f), fileNum, dataColumns)
+	var sql string
+	if rows {
+		if err := ensureRowsSchema(c, table, dataColumns); err != nil {
+			return FileStat{}, err
+		}
+		sql = rowsInsertSQL(c, table, provenance(studyID, f), fileNum, dataColumns)
+	} else {
+		if err := ensureSchema(c, table, dataColumns); err != nil {
+			return FileStat{}, err
+		}
+		sql = insertSQL(c, table, provenance(studyID, f), fileNum, dataColumns)
+	}
 	start := time.Now()
 	if err := c.InsertStream(sql, body); err != nil {
 		return FileStat{}, fmt.Errorf("streaming %s: %w", f.DataPath, err)
 	}
 	secs := time.Since(start).Seconds()
-	loaded, err := c.CountForFile(table, studyID, source)
+	loaded, err := countCells(c, table, studyID, source)
 	if err != nil {
 		return FileStat{}, err
 	}
