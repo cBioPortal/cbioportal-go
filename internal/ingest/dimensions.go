@@ -21,28 +21,34 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study, imported time.Time) error {
 	}
 	table := "cancer_study"
 	cols := append([]string{"study_id"}, studyMetaFields...)
-	existing, err := c.TableColumns(table)
-	if err != nil {
+	if err := func() error {
+		defer lockSchema(c, table)()
+		existing, err := c.TableColumns(table)
+		if err != nil {
+			return err
+		}
+		if len(existing) == 0 {
+			defs := make([]string, len(cols))
+			for i, col := range cols {
+				defs[i] = fmt.Sprintf("`%s` String", col)
+			}
+			if err := c.EnsureTable(table, fmt.Sprintf(
+				"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY study_id",
+				c.Database(), table, strings.Join(defs, ", "))); err != nil {
+				return err
+			}
+		}
+		// import_time orders the studies as cbioportal-core numbers them: by
+		// import, a re-imported study last.
+		if !existing["import_time"] {
+			if _, err := c.Execute(fmt.Sprintf(
+				"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS import_time DateTime64(6)", c.Database(), table)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}(); err != nil {
 		return err
-	}
-	if len(existing) == 0 {
-		defs := make([]string, len(cols))
-		for i, col := range cols {
-			defs[i] = fmt.Sprintf("`%s` String", col)
-		}
-		if err := c.EnsureTable(table, fmt.Sprintf(
-			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY study_id",
-			c.Database(), table, strings.Join(defs, ", "))); err != nil {
-			return err
-		}
-	}
-	// import_time orders the studies as cbioportal-core numbers them: by
-	// import, a re-imported study last.
-	if !existing["import_time"] {
-		if _, err := c.Execute(fmt.Sprintf(
-			"ALTER TABLE `%s`.`%s` ADD COLUMN IF NOT EXISTS import_time DateTime64(6)", c.Database(), table)); err != nil {
-			return err
-		}
 	}
 	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
 		return err
@@ -56,7 +62,7 @@ func ingestStudyMeta(c *ch.Client, s *parser.Study, imported time.Time) error {
 	for i, v := range values {
 		quoted[i] = "'" + ch.SQLLit(v) + "'"
 	}
-	_, err = c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s, import_time) SELECT %s, fromUnixTimestamp64Micro(%d)",
+	_, err := c.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (%s, import_time) SELECT %s, fromUnixTimestamp64Micro(%d)",
 		c.Database(), table, backtick(cols), strings.Join(quoted, ", "), imported.UnixMicro()))
 	return err
 }
@@ -66,31 +72,37 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 	cols := []string{"molecular_profile_id", "study_id", "profile_stable_id",
 		"alteration_type", "datatype", "name", "description", "show_in_analysis", "generic_assay_type", "namespaces",
 		"gene_panel", "patient_level", "pivot_threshold", "sort_order", "variant_classification_filter"}
-	existing, err := c.TableColumns(table)
-	if err != nil {
-		return err
-	}
-	if len(existing) == 0 {
-		defs := make([]string, len(cols))
-		for i, col := range cols {
-			defs[i] = fmt.Sprintf("`%s` String", col)
-		}
-		if err := c.EnsureTable(table, fmt.Sprintf(
-			"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY molecular_profile_id",
-			c.Database(), table, strings.Join(defs, ", "))); err != nil {
+	if err := func() error {
+		defer lockSchema(c, table)()
+		existing, err := c.TableColumns(table)
+		if err != nil {
 			return err
 		}
-	} else {
-		// Schema evolution: add columns absent from an older table.
-		var defs []string
-		for _, col := range cols {
-			if !existing[col] {
-				defs = append(defs, fmt.Sprintf("`%s` String", col))
+		if len(existing) == 0 {
+			defs := make([]string, len(cols))
+			for i, col := range cols {
+				defs[i] = fmt.Sprintf("`%s` String", col)
+			}
+			if err := c.EnsureTable(table, fmt.Sprintf(
+				"CREATE TABLE IF NOT EXISTS `%s`.`%s` (%s) ENGINE = MergeTree ORDER BY molecular_profile_id",
+				c.Database(), table, strings.Join(defs, ", "))); err != nil {
+				return err
+			}
+		} else {
+			// Schema evolution: add columns absent from an older table.
+			var defs []string
+			for _, col := range cols {
+				if !existing[col] {
+					defs = append(defs, fmt.Sprintf("`%s` String", col))
+				}
+			}
+			if err := addColumns(c, table, defs); err != nil {
+				return err
 			}
 		}
-		if err := addColumns(c, table, defs); err != nil {
-			return err
-		}
+		return nil
+	}(); err != nil {
+		return err
 	}
 	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
 		return err

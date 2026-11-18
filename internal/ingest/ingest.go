@@ -90,17 +90,25 @@ func stagingSortKey(dataColumns []string) string {
 	return "(study_id, source_file)"
 }
 
-// schemaLocks holds a mutex per database and staging table (ensureSchema).
+// schemaLocks holds a mutex per database and table (lockSchema).
 var schemaLocks sync.Map
+
+// lockSchema locks a table's schema within this process and returns the
+// unlock function. Whoever checks a table's columns and then extends it
+// holds the lock, so studies and files loading at once see each other's
+// columns and do not alter the table at the same time.
+func lockSchema(c *ch.Client, table string) func() {
+	mu, _ := schemaLocks.LoadOrStore(c.Database()+"."+table, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	return mu.(*sync.Mutex).Unlock
+}
 
 // ensureSchema creates the staging table (provenance, file_num, row_num and
 // the data columns as String) or adds any missing columns to an existing one.
 func ensureSchema(c *ch.Client, table string, dataColumns []string) error {
 	// Files loading at once into one table check and extend its columns in
 	// turn, so each sees the columns the other added.
-	mu, _ := schemaLocks.LoadOrStore(c.Database()+"."+table, &sync.Mutex{})
-	mu.(*sync.Mutex).Lock()
-	defer mu.(*sync.Mutex).Unlock()
+	defer lockSchema(c, table)()
 	existing, err := c.TableColumns(table)
 	if err != nil {
 		return err
