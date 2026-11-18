@@ -18,7 +18,8 @@ import (
 // the values of the internal ids (a study build keeps the unchanged
 // studies' ids and numbers the changed ones after them, a full build
 // numbers all from 1): after a study is staged again, after one is
-// removed, and after one is staged with new columns.
+// removed, and after one is staged with new columns; and that a table
+// whose columns changed makes it a full build.
 func TestLiveStudyBuild(t *testing.T) {
 	base := goldenServer(t)
 	refDB := goldenReference(t, base, "sb_ref")
@@ -86,13 +87,13 @@ func TestLiveStudyBuild(t *testing.T) {
 	apply("rebuilding 1 changed and 0 removed of 3 studies: golden_evo")
 	compareFull("golden_evo staged with new columns")
 
-	// A table whose columns differ from what the build makes is built
-	// from every study.
+	// When a table's columns differ from what the build makes, every
+	// study is built.
 	if _, err := ch.New(base, db).Execute("ALTER TABLE `" + db + "`.sample_derived ADD COLUMN extra String"); err != nil {
 		t.Fatal(err)
 	}
 	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_c"))
-	apply("sample_derived: rebuilding every study, its columns changed")
+	apply("transform: full build: a study build could not build every table")
 	compareFull("sample_derived with other columns")
 
 	// A changed fingerprint (here: the shared gene panels) builds every

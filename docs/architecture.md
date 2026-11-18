@@ -101,21 +101,26 @@ A few rules keep the results the same as Java:
 **Only the changed studies are built again.** Each table that holds many
 studies keeps every study's rows in a separate part of the table (a
 ClickHouse *partition*). When a transform finds that only some studies were
-staged or removed since the last build, it copies the last build's tables,
-which takes no time because ClickHouse shares the files instead of copying
-them. It then deletes those studies' partitions and builds just those
-studies again. Importing one study into a portal of hundreds then takes about
-as long as building that one study.
+staged or removed since the last build, it builds just those studies, into
+new tables beside the published ones. At the end it swaps each of those
+studies' partitions into the published tables (ClickHouse's `REPLACE
+PARTITION`), and a removed study's partitions are emptied. Importing one
+study into a portal of hundreds then takes about as long as building that
+one study.
 
 Like the Java importer, this keeps the other studies' internal ids and gives
 the changed study new ids after the highest one in use. So the changed study
-sorts last, as a study imported again in Java does. The transform builds
-every study again when more than half of them changed, or when something
-all studies share changed: the importer program itself, the reference
-genes, or the shared gene panels. It also builds a table from every study
-when the changed study's data gives the table different columns. The table
-`_transform_build` remembers what the last build used, and `study_rank`
-remembers each study's internal id and ingest time.
+sorts last, as a study imported again in Java does.
+
+The transform builds every study again in three cases:
+
+- more than half of the studies changed,
+- something all studies share changed: the importer program itself, the
+  reference genes, or the shared gene panels, or
+- the changed study's data would give a table different columns.
+
+The table `_transform_build` remembers what the last build used, and
+`study_rank` remembers each study's internal id and ingest time.
 
 **Nothing changes until the transform finishes.** Each table is first built
 under a temporary name (`__next_<name>`). At the end, all new tables are

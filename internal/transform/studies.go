@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -121,8 +122,9 @@ type rankedStudy struct {
 	Rank       uint64 `json:"rank,string"`
 }
 
-// planBuild decides between a full and a study build.
-func planBuild(c *client, rawDB, targetDB, refDB string) (*studyBuild, error) {
+// planBuild decides between a full and a study build; full asks for a full
+// build.
+func planBuild(c *client, rawDB, targetDB, refDB string, full bool) (*studyBuild, error) {
 	b := &studyBuild{}
 	var err error
 	if b.fingerprint, err = buildFingerprint(c, rawDB, refDB); err != nil {
@@ -174,7 +176,9 @@ func planBuild(c *client, rawDB, targetDB, refDB string) (*studyBuild, error) {
 	slices.Sort(b.removed)
 
 	reason := ""
-	if _, ok := published[buildTable]; !ok {
+	if full {
+		reason = "a study build could not build every table"
+	} else if _, ok := published[buildTable]; !ok {
 		reason = "the previous build has no fingerprint"
 	} else if 2*(len(b.changed)+len(b.removed)) > len(b.order) {
 		reason = "more than half of the studies changed"
@@ -324,41 +328,38 @@ func writeBuildState(c *client, targetDB string, b *studyBuild) error {
 // partialBuild is the state of a study build.
 type partialBuild struct {
 	targetDB string
+	// studies are the changed and removed studies, whose partitions
+	// publishStudies replaces.
+	studies []string
 	// filtered reads only the rebuilt studies' rows of the raw staging
 	// tables and of the portal tables built so far.
 	filtered *ch.Client
 }
 
-// prepareStudyBuild copies each published table partitioned by study to
-// its staged name, without the partitions of the changed and removed
-// studies, and sets c up to read only those studies' staged rows.
+// errFullBuild stops a study build that cannot be finished as one: a
+// table's columns changed, or a table is new. Apply then builds every
+// study.
+var errFullBuild = errors.New("a study build cannot build this table")
+
+// prepareStudyBuild creates, under its staged name, an empty table like
+// each published table partitioned by study, for the changed studies' rows,
+// and sets c up to read only those studies' staged rows.
 func prepareStudyBuild(c *client, rawDB, targetDB string, b *studyBuild) error {
 	studies := append(append([]string{}, b.changed...), b.removed...)
 	published, err := publishedTables(c, targetDB)
 	if err != nil {
 		return err
 	}
-	target := c.Client.WithDatabase(targetDB)
 	var g errgroup.Group
 	g.SetLimit(8)
 	for name := range studyColumns {
 		if _, ok := published[name]; !ok {
 			continue
 		}
-		staged := stagePrefix + builtName(name)
 		g.Go(func() error {
-			if _, err := target.Execute(fmt.Sprintf("CREATE TABLE `%s` CLONE AS `%s`", staged, name)); err != nil {
-				return fmt.Errorf("copying %s: %w", name, err)
-			}
-			if len(studies) == 0 {
-				return nil
-			}
-			drops := make([]string, len(studies))
-			for i, id := range studies {
-				drops[i] = fmt.Sprintf("DROP PARTITION '%s'", ch.SQLLit(id))
-			}
-			if _, err := target.Execute(fmt.Sprintf("ALTER TABLE `%s` %s", staged, strings.Join(drops, ", "))); err != nil {
-				return fmt.Errorf("removing the changed studies from %s: %w", name, err)
+			if _, err := c.Client.Execute(fmt.Sprintf("CREATE TABLE `%[1]s`.`%[2]s` AS `%[1]s`.`%[3]s`",
+				targetDB, stagePrefix+builtName(name), name)); err != nil {
+				return fmt.Errorf("creating the staged %s: %w", name, err)
 			}
 			return nil
 		})
@@ -395,20 +396,21 @@ func prepareStudyBuild(c *client, rawDB, targetDB string, b *studyBuild) error {
 	}
 	c.part = &partialBuild{
 		targetDB: targetDB,
+		studies:  studies,
 		filtered: c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}),
 	}
 	return nil
 }
 
-// idOffset is the highest id (column col) of a table's rows kept from the
-// previous build, after which a study build numbers the changed studies'
-// rows; 0 in a full build.
+// idOffset is the highest id (column col) of the published table name,
+// after which a study build numbers the changed studies' rows; 0 in a full
+// build.
 func (c *client) idOffset(name, col string) uint64 {
 	if c.part == nil {
 		return 0
 	}
 	text, err := c.Client.Execute(fmt.Sprintf("SELECT max(`%s`) FROM `%s`.`%s` FORMAT TabSeparated",
-		col, c.part.targetDB, stagePrefix+builtName(name)))
+		col, c.part.targetDB, name))
 	if err != nil {
 		return 0
 	}
@@ -424,25 +426,26 @@ func nextIDs(offset uint64, order string) string {
 
 // fill builds table name of targetDB (its built name: see builtName) from
 // sel, sorted by orderBy, with the projections. A table holding rows of
-// many studies gets a partition per study. In a study build, a table copied
-// from the previous build gets the changed studies' rows inserted, read
-// from their staged rows alone, unless sel's columns differ from the copy's
-// (a changed study added columns): then, like every other table, it is
-// built from all the studies.
+// many studies gets a partition per study. In a study build, such a table
+// gets only the changed studies' rows, read from their staged rows alone,
+// into a staged table like the published one; when sel's columns differ
+// from the published table's (a changed study added columns) or none is
+// published, fill returns errFullBuild.
 func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string) error {
 	study := studyColumns[strings.TrimPrefix(name, snapshotPrefix)]
 	if c.part != nil && study != "" {
 		if same, err := c.sameColumns(targetDB, name, sel); err != nil {
 			return err
-		} else if same {
-			fc := *c
-			fc.Client = c.part.filtered
-			if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
-				return fmt.Errorf("filling table %s: %w", name, err)
-			}
-			return nil
+		} else if !same {
+			logf("transform: %s has other columns than the published table", name)
+			return errFullBuild
 		}
-		logf("transform: %s: rebuilding every study, its columns changed", name)
+		fc := *c
+		fc.Client = c.part.filtered
+		if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
+			return fmt.Errorf("filling table %s: %w", name, err)
+		}
+		return nil
 	}
 	partition := ""
 	if study != "" {
@@ -468,8 +471,8 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 	return nil
 }
 
-// sameColumns reports whether the staged copy of table name exists and
-// has the columns sel returns, in order.
+// sameColumns reports whether the staged table name exists and has the
+// columns sel returns, in order.
 func (c *client) sameColumns(targetDB, name, sel string) (bool, error) {
 	have, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT name, type FROM system.columns WHERE database = '%s' AND table = '%s' ORDER BY position FORMAT TabSeparated",
@@ -510,4 +513,39 @@ func decodeRows[T any](text string, rows *[]T) error {
 // studyRanksSQL reads the ranks (study_id, study_rank).
 func studyRanksSQL(targetDB string) string {
 	return fmt.Sprintf("SELECT study_id, rank AS study_rank FROM `%s`.`%s`", targetDB, studyRanksTable)
+}
+
+// publishStudies moves the changed studies' rows of each staged table
+// partitioned by study into the published table: REPLACE PARTITION swaps
+// in a study's partition of the staged table, or removes the study's rows
+// where the staged table has none. The staged tables are left to
+// dropStaged.
+func publishStudies(c *client, p *partialBuild) error {
+	objs, err := stagedObjects(c, p.targetDB)
+	if err != nil {
+		return err
+	}
+	replaces := make([]string, len(p.studies))
+	for i, id := range p.studies {
+		replaces[i] = fmt.Sprintf("REPLACE PARTITION '%s' FROM `%s`.`%%s`", ch.SQLLit(id), p.targetDB)
+	}
+	var g errgroup.Group
+	g.SetLimit(8)
+	for _, o := range objs {
+		name := strings.TrimPrefix(o.name, stagePrefix)
+		if o.engine == "View" || studyColumns[name] == "" || len(replaces) == 0 {
+			continue
+		}
+		g.Go(func() error {
+			cmds := make([]string, len(replaces))
+			for i, r := range replaces {
+				cmds[i] = fmt.Sprintf(r, o.name)
+			}
+			if _, err := c.Client.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` %s", p.targetDB, name, strings.Join(cmds, ", "))); err != nil {
+				return fmt.Errorf("publishing %s: %w", name, err)
+			}
+			return nil
+		})
+	}
+	return g.Wait()
 }

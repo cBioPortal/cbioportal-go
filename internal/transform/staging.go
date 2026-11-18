@@ -117,13 +117,20 @@ func dropStaged(c *client, db string) error {
 	return nil
 }
 
-// publish moves the staged objects under their own names. Each table is
-// swapped in with EXCHANGE TABLES (the replaced table stays behind under the
+// publish moves the staged objects under their own names. In a study
+// build, the tables partitioned by study get the changed studies'
+// partitions (publishStudies). Each other table is swapped in with
+// EXCHANGE TABLES (the replaced table stays behind under the
 // staged name until dropStaged), then each view is recreated with its
 // definition over the published names. Every object the API reads exists
 // throughout; only an object that turns from a view into a table or back is
 // briefly absent.
 func publish(c *client, s *staging) error {
+	if c.part != nil {
+		if err := publishStudies(c, c.part); err != nil {
+			return err
+		}
+	}
 	objs, err := stagedObjects(c, s.db)
 	if err != nil {
 		return err
@@ -153,6 +160,9 @@ func publish(c *client, s *staging) error {
 		}
 		final := strings.TrimPrefix(o.name, stagePrefix)
 		tables[final] = true
+		if c.part != nil && studyColumns[final] != "" {
+			continue // its changed studies' partitions are published
+		}
 		switch engines[final] {
 		case "":
 			err = exec(fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", s.db, o.name, final))

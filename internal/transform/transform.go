@@ -14,6 +14,7 @@
 package transform
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -57,7 +58,16 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 		return nil, err
 	}
 	c.stage = newStaging(targetDB)
-	counts, err := build(c, rawDB, targetDB, refDB)
+	counts, err := build(c, rawDB, targetDB, refDB, false)
+	if errors.Is(err, errFullBuild) {
+		logf("transform: full build instead")
+		if err := dropStaged(c, targetDB); err != nil {
+			return nil, err
+		}
+		c.part = nil
+		c.stage = newStaging(targetDB)
+		counts, err = build(c, rawDB, targetDB, refDB, true)
+	}
 	if err == nil && beforePublish != nil {
 		err = beforePublish()
 	}
@@ -73,15 +83,21 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	if err := dropStaged(c, targetDB); err != nil {
 		return nil, err
 	}
+	// Counted once published: in a study build, the staged tables hold
+	// only the changed studies' rows.
+	for i, v := range counts {
+		text, _ := c.Client.Execute(fmt.Sprintf("SELECT count() FROM `%s`.`%s` FORMAT TabSeparated", targetDB, v.Name))
+		fmt.Sscan(strings.TrimSpace(text), &counts[i].Rows)
+	}
 	return counts, nil
 }
 
 // beforePublish, when set (by tests), runs between the build and publishing.
 var beforePublish func() error
 
-// build creates every object of targetDB through c and returns their row
-// counts.
-func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
+// build creates every object of targetDB through c and returns their names
+// (Apply counts their rows); full makes it build every study.
+func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, error) {
 	hasRefText, _ := c.Execute(fmt.Sprintf(
 		"SELECT count() FROM system.tables WHERE database = '%s' AND name = 'gene' FORMAT TabSeparated", refDB))
 	hasRef := strings.TrimSpace(hasRefText) != "0" && strings.TrimSpace(hasRefText) != ""
@@ -89,7 +105,7 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		"SELECT count() FROM system.tables WHERE database = '%s' AND name IN ('reference_genome', 'reference_genome_gene') FORMAT TabSeparated", refDB))
 	hasGenomeGenes := strings.TrimSpace(genomeText) == "2"
 
-	plan, err := planBuild(c, rawDB, targetDB, refDB)
+	plan, err := planBuild(c, rawDB, targetDB, refDB, full)
 	if err != nil {
 		return nil, err
 	}
@@ -306,12 +322,9 @@ func build(c *client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 		}
 	}
 
-	var counts []ViewCount
-	for _, v := range created {
-		text, _ := c.Execute(fmt.Sprintf("SELECT count() FROM `%s`.`%s` FORMAT TabSeparated", targetDB, v))
-		var n uint64
-		fmt.Sscan(strings.TrimSpace(text), &n)
-		counts = append(counts, ViewCount{Name: v, Rows: n})
+	counts := make([]ViewCount, len(created))
+	for i, v := range created {
+		counts[i] = ViewCount{Name: v}
 	}
 	return counts, nil
 }

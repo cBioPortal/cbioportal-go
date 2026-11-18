@@ -191,8 +191,9 @@ func TestLiveTransformPublishesAtomically(t *testing.T) {
 		if got := samples("sample"); got != "A1,A2" {
 			t.Errorf("during the build the API reads samples %q, want the previous A1,A2", got)
 		}
-		if got := samples(stagePrefix + "sample"); got != "A1,A2,B1" {
-			t.Errorf("staged samples %q, want A1,A2,B1", got)
+		// A study build stages only the new study's rows.
+		if got := samples(stagePrefix + "sample"); got != "B1" {
+			t.Errorf("staged samples %q, want B1", got)
 		}
 		return failure
 	}
