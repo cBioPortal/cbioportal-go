@@ -1,7 +1,8 @@
 # Command-line conventions
 
-go has four programs. `cbioportal-import` loads studies, and
-`cbioportal-api` serves the portal. `cbioportal-ops` runs the cBioPortal
+go has five programs. `cbioportal-import` loads studies, and
+`cbioportal-api` serves the portal. `cbioportal-local` does both on one
+computer, with ClickHouse inside the program. `cbioportal-ops` runs the cBioPortal
 team's own jobs for cbioportal.org. `cbioportal-rewrite-test` compares go
 with the Java cBioPortal it replaces, for example by copying production's
 database and replaying production's requests. This page lists the rules they share. The rules make
@@ -59,6 +60,7 @@ names stay the same from one version to the next.
 |---|---|
 | `cbioportal-import` | `plan`, `ingest`, `remove-study`, `ingest-case-lists`, `load-reference`, `load-genesets`, `load-gene-panels`, `import-study`, `fetch-datahub`, `transform`, `version` |
 | `cbioportal-api` | `config`, `check`, `version` |
+| `cbioportal-local` | `version` |
 | `cbioportal-ops` | `version` |
 
 For example, `cbioportal-import plan <study-dir> --json` lists each data

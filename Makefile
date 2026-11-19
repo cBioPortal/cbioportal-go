@@ -4,13 +4,19 @@ CBIOPORTAL_DB ?= cbioportal
 PORT ?= 8080
 API ?= http://localhost:18090
 
-.PHONY: build test fmt vet lint contract e2e run frontend testdb clean help
+.PHONY: build local test fmt vet lint contract e2e run frontend testdb clean help
 
 build: ## build the programs into bin/
 	go build -o bin/cbioportal-import ./cmd/cbioportal-import
 	go build -o bin/cbioportal-api ./cmd/cbioportal-api
 	go build -o bin/cbioportal-ops ./ops/cbioportal.org/cmd/cbioportal-ops
 	go build -o bin/cbioportal-rewrite-test ./rewrite/cmd/cbioportal-rewrite-test
+	CGO_ENABLED=0 go build -o bin/cbioportal-local ./cmd/cbioportal-local
+
+local: ## bin/cbioportal-local with the website built in (needs frontend/dist)
+	test -f frontend/dist/index.html || { echo "build the frontend first (make frontend)"; exit 1; }
+	tar -czf cmd/cbioportal-local/frontend.tar.gz -C frontend/dist .
+	CGO_ENABLED=0 go build -tags embedfrontend -o bin/cbioportal-local ./cmd/cbioportal-local
 
 test: ## unit tests (no services needed)
 	go test ./internal/... ./cmd/... ./ops/... ./rewrite/...

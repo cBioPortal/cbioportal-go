@@ -28,6 +28,7 @@ which is rebuilt within an hour after each new import on production.
 
 - [How it fits together](#how-it-fits-together)
 - [Quick start](#quick-start)
+- [Run a portal on your own computer](#run-a-portal-on-your-own-computer)
 - [Development](#development)
 - [What is still missing](#what-is-still-missing)
 - [Documentation](#documentation)
@@ -93,6 +94,27 @@ Loading a study takes two steps. `ingest` copies the study's files into the
 database as they are. `transform` then turns them into the tables the API
 uses. To add more studies, run `ingest` for each one and then run
 `transform` again. The running API notices the new tables on its own.
+
+## Run a portal on your own computer
+
+`cbioportal-local` runs a whole portal from study folders in one command,
+with no database server to install. ClickHouse runs inside the program
+(with [chDB](https://github.com/chdb-io/chdb), embedded ClickHouse), and
+the data stays in a folder on your computer. It is meant for curators who
+want to see how their study looks before they submit it.
+
+```bash
+make frontend && make local     # build bin/cbioportal-local, website included
+bin/cbioportal-local datahub/public/acbc_mskcc_2015 --open
+```
+
+- The first run downloads the ClickHouse engine once, about 120 to 180 MB.
+- The study folder can also be a folder of studies.
+- In a datahub checkout, the reference genes and the shared gene panels are
+  found on their own. Elsewhere, pass them with `--seed` and `--gene-panels`.
+- When you save a change to a study's files, the program imports that
+  study again, in a few seconds. Reload the page to see the change.
+- `cbioportal-local --help` lists the options.
 
 ## Development
 
