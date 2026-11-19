@@ -19,7 +19,8 @@ import (
 
 // Golden tests: tiny fixture studies (testdata/golden/studies) and a slice
 // of a Java-schema database (testdata/golden/prod) are transformed on the
-// ClickHouse server named by CLICKHOUSE_TEST_URL, and every object of the
+// ClickHouse server named by CLICKHOUSE_TEST_URL (or in the process with
+// chDB, when CHDB_TEST_LIB names libchdb), and every object of the
 // resulting databases is compared with its dump under
 // testdata/golden/expected. -update rewrites the dumps.
 var (
@@ -32,6 +33,9 @@ const goldenDir = "testdata/golden"
 
 func goldenServer(t *testing.T) string {
 	t.Helper()
+	if lib := os.Getenv("CHDB_TEST_LIB"); lib != "" {
+		return chdbServer(t, lib)
+	}
 	base := os.Getenv("CLICKHOUSE_TEST_URL")
 	if base == "" {
 		t.Skip("CLICKHOUSE_TEST_URL not set")

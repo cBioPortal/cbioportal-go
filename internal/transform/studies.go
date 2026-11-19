@@ -153,7 +153,7 @@ func planBuild(c *client, rawDB, targetDB, refDB string, full bool) (*studyBuild
 	}
 	var ranks []rankedStudy
 	text, err = c.Client.Execute(fmt.Sprintf(
-		"SELECT study_id, toString(import_time) AS import_time, rank FROM `%s`.`%s` FORMAT JSONEachRow", targetDB, studyRanksTable))
+		"SELECT study_id, toString(import_time) AS import_time, toString(rank) AS rank FROM `%s`.`%s` FORMAT JSONEachRow", targetDB, studyRanksTable))
 	if err != nil {
 		return nil, err
 	}
@@ -595,29 +595,51 @@ func studyRanksSQL(targetDB string) string {
 
 // publishStudies moves the changed studies' rows of each staged table
 // partitioned by study into the published table: REPLACE PARTITION swaps
-// in a study's partition of the staged table, or removes the study's rows
-// where the staged table has none. The staged tables are left to
+// in a study's partition of the staged table, and DROP PARTITION removes
+// the study's rows where the staged table has none (ClickHouse refuses to
+// replace a partition from an empty one). The staged tables are left to
 // dropStaged.
 func publishStudies(c *client, p *partialBuild) error {
 	objs, err := stagedObjects(c, p.targetDB)
 	if err != nil {
 		return err
 	}
-	replaces := make([]string, len(p.studies))
-	for i, id := range p.studies {
-		replaces[i] = fmt.Sprintf("REPLACE PARTITION '%s' FROM `%s`.`%%s`", ch.SQLLit(id), p.targetDB)
+	if len(p.studies) == 0 {
+		return nil
+	}
+	type tableParts struct {
+		Table      string   `json:"table"`
+		Partitions []string `json:"partitions"`
+	}
+	parts, err := ch.QueryP[tableParts](c.Client,
+		"SELECT table, groupUniqArray(partition) AS partitions FROM system.parts "+
+			"WHERE database = {db:String} AND active AND startsWith(table, {prefix:String}) GROUP BY table",
+		ch.Params{"db": p.targetDB, "prefix": stagePrefix})
+	if err != nil {
+		return err
+	}
+	has := map[string]map[string]bool{}
+	for _, t := range parts {
+		has[t.Table] = map[string]bool{}
+		for _, id := range t.Partitions {
+			has[t.Table][strings.Trim(id, "'")] = true
+		}
 	}
 	var g errgroup.Group
 	g.SetLimit(8)
 	for _, o := range objs {
 		name := strings.TrimPrefix(o.name, stagePrefix)
-		if o.engine == "View" || studyColumns[name] == "" || len(replaces) == 0 {
+		if o.engine == "View" || studyColumns[name] == "" {
 			continue
 		}
 		g.Go(func() error {
-			cmds := make([]string, len(replaces))
-			for i, r := range replaces {
-				cmds[i] = fmt.Sprintf(r, o.name)
+			cmds := make([]string, len(p.studies))
+			for i, id := range p.studies {
+				if has[o.name][id] {
+					cmds[i] = fmt.Sprintf("REPLACE PARTITION '%s' FROM `%s`.`%s`", ch.SQLLit(id), p.targetDB, o.name)
+				} else {
+					cmds[i] = fmt.Sprintf("DROP PARTITION '%s'", ch.SQLLit(id))
+				}
 			}
 			if _, err := c.Client.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` %s", p.targetDB, name, strings.Join(cmds, ", "))); err != nil {
 				return fmt.Errorf("publishing %s: %w", name, err)

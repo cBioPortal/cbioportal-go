@@ -140,9 +140,9 @@ func (c *Client) rewrite(sql string) string {
 // CLICKHOUSE_USER / CLICKHOUSE_PASSWORD; without them requests are sent as
 // ClickHouse's default user.
 func New(baseURL, database string) *Client {
-	var rt http.RoundTripper = transport
+	rt := baseTransport
 	if user := os.Getenv("CLICKHOUSE_USER"); user != "" {
-		rt = authTransport{base: transport, user: user, password: os.Getenv("CLICKHOUSE_PASSWORD")}
+		rt = authTransport{base: baseTransport, user: user, password: os.Getenv("CLICKHOUSE_PASSWORD")}
 	}
 	comment := logComment
 	if comment == "" {
@@ -198,6 +198,19 @@ var transport = func() *http.Transport {
 	t.MaxIdleConnsPerHost = 256
 	return t
 }()
+
+// baseTransport carries the requests of the clients New creates.
+var baseTransport http.RoundTripper = transport
+
+// UseTransport makes the clients New creates from now on send their
+// requests through rt instead of the network, e.g. to a ClickHouse engine
+// in the process (internal/chdb). Their reads then decode JSON rows, as
+// with CLICKHOUSE_DECODE=json, since clickhouse-go opens connections of
+// its own.
+func UseTransport(rt http.RoundTripper) {
+	baseTransport = rt
+	nativeReads = false
+}
 
 func (c *Client) Database() string { return c.database }
 

@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/KimMachineGun/automemlimit v1.0.0
+	github.com/ebitengine/purego v0.10.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	go.yaml.in/yaml/v3 v3.0.5
