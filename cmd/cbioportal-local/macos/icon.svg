@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- cBioPortal's mark on a macOS app tile (Big Sur grid: 824 px tile, 100 px margin). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef0f3"/></linearGradient>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="125%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.22"/></filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#sh)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="185" fill="none" stroke="#000" stroke-opacity="0.06"/>
+  <path d="M647.0 232H316.0A84.0 84.0 0 0 0 232 316.0V507.0H267.0V316.0A49.0 49.0 0 0 1 316.0 267.0H647.0Z" fill="#c0bfc3"/>
+  <path d="M647.0 232H316.0A84.0 84.0 0 0 0 232 316.0V507.0H267.0V316.0A49.0 49.0 0 0 1 316.0 267.0H647.0Z" fill="#c0bfc3" transform="rotate(180 512 512)"/>
+  <rect x="657.0" y="237.0" width="130" height="130" fill="#3885c6"/>
+  <path d="M507.0 507.0H377.0A130 130 0 0 1 507.0 377.0Z" fill="#cd193d"/> <rect x="517.0" y="377.0" width="130" height="130" fill="#137a44"/> <path d="M657.0 377.0H787.0A130 130 0 0 1 657.0 507.0Z" fill="#3885c6"/>
+  <path d="M367.0 647.0H237.0A130 130 0 0 1 367.0 517.0Z" fill="#3885c6"/> <rect x="377.0" y="517.0" width="130" height="130" fill="#137a44"/> <path d="M517.0 517.0H647.0A130 130 0 0 1 517.0 647.0Z" fill="#cd193d"/>
+  <rect x="237.0" y="657.0" width="130" height="130" fill="#3885c6"/>
+</svg>

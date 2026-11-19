@@ -4,7 +4,7 @@ CBIOPORTAL_DB ?= cbioportal
 PORT ?= 8080
 API ?= http://localhost:18090
 
-.PHONY: build local local-macos macos-app test fmt vet lint contract e2e run frontend testdb clean help
+.PHONY: build local local-macos macos-app local-app local-app-zip local-app-icon test fmt vet lint contract e2e run frontend testdb clean help
 
 build: ## build the programs into bin/
 	go build -o bin/cbioportal-import ./cmd/cbioportal-import
@@ -33,6 +33,43 @@ macos-app:
 	cp cmd/cbioportal-local/macos/launch "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS/launch"
 	sed "s/VERSION/$$(git describe --tags --always)/" cmd/cbioportal-local/macos/Info.plist > "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/Info.plist"
 	cd "bin/macos-$(ARCH)" && zip -qryFS "../cBioPortal-Local-macos-$(ARCH).zip" "cBioPortal Local.app"
+
+# The macOS app with a window of its own (Wails; cmd/cbioportal-local/app.go).
+# Unlike the rest it needs cgo, so it builds on a Mac only. ARCH is
+# universal (one app for Apple silicon and Intel, joined with lipo), arm64
+# or amd64. SIGN_IDENTITY signs it for distribution ("Developer ID
+# Application: ..."), with the hardened runtime; without it the app is
+# signed ad hoc, enough to open it on the Mac it was built on. PUREGO=1
+# builds it without cgo instead (Wails's purego backend, newer), which any
+# computer can build; signing still wants a Mac.
+comma := ,
+ARCH ?= universal
+APP_DIR = bin/app-$(ARCH)
+APP = $(APP_DIR)/cBioPortal Local.app
+APP_ARCHS = $(if $(filter universal,$(ARCH)),arm64 amd64,$(ARCH))
+local-app: ## bin/app-universal/cBioPortal Local.app: the macOS app in a window (needs a Mac, Xcode tools, frontend/dist)
+	if test -f frontend/dist/index.html; then tar -czf cmd/cbioportal-local/frontend.tar.gz -C frontend/dist .; \
+	elif ! test -f cmd/cbioportal-local/frontend.tar.gz; then echo "build the frontend first (make frontend)"; exit 1; fi
+	mkdir -p "$(APP)/Contents/MacOS" "$(APP)/Contents/Resources"
+	for a in $(APP_ARCHS); do \
+		CGO_ENABLED=$(if $(PUREGO),0,1) GOOS=darwin GOARCH=$$a CC="clang -arch $$(test $$a = amd64 && echo x86_64 || echo arm64)" MACOSX_DEPLOYMENT_TARGET=13.0 \
+		go build -tags wails,production,embedfrontend$(if $(PUREGO),$(comma)purego) -trimpath -ldflags="-s -w -extldflags=-mmacosx-version-min=13.0" -o "$(APP_DIR)/cbioportal-local-$$a" ./cmd/cbioportal-local || exit 1; \
+	done
+	lipo -create $(foreach a,$(APP_ARCHS),"$(APP_DIR)/cbioportal-local-$(a)") -output "$(APP)/Contents/MacOS/cbioportal-local"
+	cp cmd/cbioportal-local/macos/icon.icns "$(APP)/Contents/Resources/icon.icns"
+	sed "s/VERSION/$$(git describe --tags --always | sed 's/^v//')/" cmd/cbioportal-local/macos/App-Info.plist > "$(APP)/Contents/Info.plist"
+	codesign --force --options runtime --timestamp$(if $(SIGN_IDENTITY),,=none) \
+		--entitlements cmd/cbioportal-local/macos/app.entitlements -s "$(or $(SIGN_IDENTITY),-)" "$(APP)"
+
+local-app-zip: local-app ## bin/cBioPortal-Local-app-$(ARCH).zip, ready for notarization
+	cd "$(APP_DIR)" && ditto -c -k --keepParent "cBioPortal Local.app" "../cBioPortal-Local-app-$(ARCH).zip"
+
+# The app's icon, from icon.svg (needs rsvg-convert: brew install librsvg).
+local-app-icon:
+	d="$$(mktemp -d)/icon.iconset" && mkdir -p "$$d" && for n in 16 32 128 256 512; do \
+		rsvg-convert -w $$n cmd/cbioportal-local/macos/icon.svg -o "$$d/icon_$${n}x$${n}.png" && \
+		rsvg-convert -w $$((n*2)) cmd/cbioportal-local/macos/icon.svg -o "$$d/icon_$${n}x$${n}@2x.png" || exit 1; done && \
+	iconutil -c icns "$$d" -o cmd/cbioportal-local/macos/icon.icns
 
 test: ## unit tests (no services needed)
 	go test ./internal/... ./cmd/... ./ops/... ./rewrite/...

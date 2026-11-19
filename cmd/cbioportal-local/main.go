@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,9 +46,22 @@ const (
 	refDB    = "cbioportal_ref"
 )
 
-func main() {
-	os.Exit(cli.Execute(newRootCmd(), os.Args[1:], os.Stdout, os.Stderr, os.Getenv))
-}
+// The places the program meets the person using it. In a terminal they are
+// the web browser and the system's folder picker; the macOS app
+// (app.go, built with -tags wails) shows the pages in its window and opens
+// its own folder dialog.
+var (
+	// showPage shows a page of the portal.
+	showPage = openBrowser
+	// chooseFolder asks for a folder; "" when the person cancels.
+	chooseFolder = pickFolder
+	// logTo receives the log too.
+	logTo io.Writer = io.Discard
+	// baseCtx ends the run when it is cancelled.
+	baseCtx = context.Background()
+	// serving is set once the portal answers on its port.
+	serving atomic.Bool
+)
 
 type options struct {
 	dataDir, cacheDir string
@@ -123,10 +137,12 @@ func run(o *options, args []string) error {
 	}
 	// The log also goes to a file in the data folder: the app has no
 	// terminal.
+	logFile := io.Discard
 	if f, err := os.OpenFile(filepath.Join(o.dataDir, name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		defer f.Close()
-		log.SetOutput(io.MultiWriter(os.Stderr, f))
+		logFile = f
 	}
+	log.SetOutput(io.MultiWriter(os.Stderr, logFile, logTo))
 	logf := func(format string, args ...any) { log.Printf(format, args...) }
 	appMode := len(args) == 0
 
@@ -134,7 +150,7 @@ func run(o *options, args []string) error {
 	page := fmt.Sprintf("http://%s/local", net.JoinHostPort(loopbackHost(o.host), fmt.Sprint(o.port)))
 	if appMode && running(page) {
 		logf("already running; opening %s", page)
-		openBrowser(page)
+		showPage(page)
 		return nil
 	}
 	given, err := studyDirs(args)
@@ -227,11 +243,11 @@ func run(o *options, args []string) error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	ctx, stop := signal.NotifyContext(baseCtx, syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	status.quit = stop
 	status.addFolder = func() error {
-		dir, err := pickFolder("Choose a study folder, or a folder of studies")
+		dir, err := chooseFolder("Choose a study folder, or a folder of studies")
 		if err != nil || dir == "" {
 			return err
 		}
@@ -261,6 +277,7 @@ func run(o *options, args []string) error {
 	}
 	srv := &http.Server{Handler: status.handler(api.NewRouter(state))}
 	go srv.Serve(ln)
+	serving.Store(true)
 	url := fmt.Sprintf("http://%s", net.JoinHostPort(loopbackHost(o.host), fmt.Sprint(port)))
 	if o.host == "0.0.0.0" || o.host == "" {
 		host, _ := os.Hostname()
@@ -268,9 +285,9 @@ func run(o *options, args []string) error {
 	}
 	logf("cBioPortal is at %s, and its import page at %s/local", url, url)
 	if appMode {
-		openBrowser(url + "/local")
+		showPage(url + "/local")
 	} else if o.open {
-		openBrowser(url)
+		showPage(url)
 	}
 
 	// Folders unchanged since their last import are served as they are;
@@ -285,7 +302,7 @@ func run(o *options, args []string) error {
 	}
 	go imp.add(changed)
 	if o.watch {
-		go watch(ctx, status.dirs, o.watchInterval, func(dirs []string) {
+		go watch(ctx, imp.watched, o.watchInterval, func(dirs []string) {
 			logf("files changed in %s; importing again", strings.Join(dirs, ", "))
 			imp.run(dirs)
 		})
@@ -304,6 +321,38 @@ type importer struct {
 	opts    studyimport.Options
 	status  *importStatus
 	folders *folderStore
+
+	// downloading are the public studies being downloaded, which the
+	// watcher leaves alone: their files change until they are complete,
+	// and they are imported then.
+	downloadMu  sync.Mutex
+	downloading map[string]bool
+}
+
+// watched are the listed study folders, less those being downloaded.
+func (m *importer) watched() []string {
+	m.downloadMu.Lock()
+	defer m.downloadMu.Unlock()
+	var out []string
+	for _, d := range m.status.dirs() {
+		if !m.downloading[d] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func (m *importer) setDownloading(dir string, on bool) {
+	m.downloadMu.Lock()
+	defer m.downloadMu.Unlock()
+	if m.downloading == nil {
+		m.downloading = map[string]bool{}
+	}
+	if on {
+		m.downloading[dir] = true
+	} else {
+		delete(m.downloading, dir)
+	}
 }
 
 // add lists and remembers dirs, then imports them.
@@ -321,6 +370,8 @@ func (m *importer) addPublic(dir string, ids []string) {
 	var dirs []string
 	for _, id := range ids {
 		dest := filepath.Join(dir, id)
+		m.setDownloading(dest, true)
+		defer m.setDownloading(dest, false)
 		m.status.set(dest, id, "downloading", "")
 		got, err := downloadStudy(dir, id)
 		if err != nil {

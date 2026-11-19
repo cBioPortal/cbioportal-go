@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- libchdb is downloaded on the first run and loaded with dlopen; it is
+	     not signed by our team, so library validation must be off. -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<!-- ClickHouse compiles some expressions to machine code at run time. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+</dict>
+</plist>
