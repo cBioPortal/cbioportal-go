@@ -153,7 +153,8 @@ func run(o *options, args []string) error {
 		URL: chdb.URL, DB: portalDB, RawDB: rawDB, RefDB: refDB,
 		Seed: seed, GenePanels: panels, Logf: logf,
 	}
-	importStudies(opts, dirs)
+	status := newImportStatus(dirs)
+	importStudies(opts, status, dirs)
 
 	client := ch.New(chdb.URL, portalDB)
 	client.SetDatabaseAliases(rawDB, refDB)
@@ -180,21 +181,21 @@ func run(o *options, args []string) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: api.NewRouter(state)}
+	srv := &http.Server{Handler: status.handler(api.NewRouter(state))}
 	go srv.Serve(ln)
 	url := "http://" + addr
 	if o.host == "0.0.0.0" || o.host == "" {
 		host, _ := os.Hostname()
 		url = fmt.Sprintf("http://%s:%d", host, o.port)
 	}
-	logf("cBioPortal is at %s (press Ctrl+C to stop)", url)
+	logf("cBioPortal is at %s, and the import status at %s/local (press Ctrl+C to stop)", url, url)
 	if o.open {
 		openBrowser(url)
 	}
 	if o.watch {
 		go watch(ctx, dirs, o.watchInterval, func(changed []string) {
 			logf("files changed in %s; importing again", strings.Join(changed, ", "))
-			importStudies(opts, changed)
+			importStudies(opts, status, changed)
 		})
 	}
 	<-ctx.Done()
@@ -204,11 +205,14 @@ func run(o *options, args []string) error {
 	return srv.Shutdown(shutdown)
 }
 
-// importStudies imports dirs and logs each study's outcome; a study that
-// fails is reported and left out, the others are served.
-func importStudies(o studyimport.Options, dirs []string) {
+// importStudies imports dirs, records the outcome in status and logs each
+// study's; a study that fails is reported and left out, the others are
+// served.
+func importStudies(o studyimport.Options, status *importStatus, dirs []string) {
 	start := time.Now()
+	status.start(dirs)
 	res, err := studyimport.Run(o, dirs)
+	status.done(dirs, res, err, time.Since(start))
 	if err != nil {
 		log.Printf("import failed: %v", err)
 		return

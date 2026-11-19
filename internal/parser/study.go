@@ -2,6 +2,7 @@ package parser
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -110,6 +111,15 @@ type Study struct {
 	StudyID string
 	Meta    map[string]string
 	Files   []DataFile
+	// Warnings are problems with the study's files that left a file out,
+	// such as a meta file naming a data file that does not exist.
+	Warnings []string
+}
+
+// missingDataFile is the warning for a meta file whose data file is
+// missing; the meta file is left out.
+func missingDataFile(metaPath, dataName string) string {
+	return fmt.Sprintf("%s names the data file %s, which does not exist; it was left out", filepath.Base(metaPath), dataName)
 }
 
 func classify(at, dt string) (Layout, string) {
@@ -192,7 +202,9 @@ func Scan(dir string) (*Study, error) {
 			// Resource files (meta_resource_*) carry resource_type instead of
 			// genetic_alteration_type/datatype.
 			dataPath := filepath.Join(dir, dataName)
-			if _, err := os.Stat(dataPath); err == nil {
+			if _, err := os.Stat(dataPath); err != nil {
+				s.Warnings = append(s.Warnings, missingDataFile(mp, dataName))
+			} else {
 				s.Files = append(s.Files, DataFile{
 					MetaPath: mp, DataPath: dataPath, AlterationType: "RESOURCE", Datatype: strings.ToUpper(rt),
 					Layout: Record, StageSlug: "resource_" + strings.ToLower(rt), ImportSeq: seq[filepath.Base(mp)],
@@ -205,6 +217,7 @@ func Scan(dir string) (*Study, error) {
 		}
 		dataPath := filepath.Join(dir, dataName)
 		if _, err := os.Stat(dataPath); err != nil {
+			s.Warnings = append(s.Warnings, missingDataFile(mp, dataName))
 			continue
 		}
 		layout, slug := classify(at, dt)

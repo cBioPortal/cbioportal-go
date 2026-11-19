@@ -59,6 +59,8 @@ type StudyResult struct {
 	Status   Status
 	Err      error
 	Duration time.Duration // of staging it
+	// Warnings are problems with the study's files that left a file out.
+	Warnings []string
 }
 
 // Result is the outcome of Run.
@@ -312,7 +314,10 @@ func (o *Options) stage(raw *ch.Client, dir string, imported time.Time) StudyRes
 		if err != nil {
 			return err
 		}
-		r.StudyID = s.StudyID
+		r.StudyID, r.Warnings = s.StudyID, s.Warnings
+		for _, w := range s.Warnings {
+			o.logf("  %s: %s", s.StudyID, w)
+		}
 		_, err = ingest.IngestStudyAt(raw, s, imported)
 		return err
 	}()

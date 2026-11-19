@@ -302,3 +302,30 @@ func TestPatientID(t *testing.T) {
 		}
 	}
 }
+
+// TestScanWarnsOfMissingDataFiles checks that a meta file naming a data
+// file that does not exist is left out with a warning.
+func TestScanWarnsOfMissingDataFiles(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"meta_study.txt": "type_of_cancer: brca\ncancer_study_identifier: warn_study\nname: n\ndescription: d\n",
+		"meta_clinical_sample.txt": "cancer_study_identifier: warn_study\ngenetic_alteration_type: CLINICAL\n" +
+			"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+		"meta_resource_sample.txt": "cancer_study_identifier: warn_study\nresource_type: SAMPLE\ndata_filename: data_resource_sample.txt\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"meta_clinical_sample.txt names the data file data_clinical_sample.txt, which does not exist; it was left out",
+		"meta_resource_sample.txt names the data file data_resource_sample.txt, which does not exist; it was left out",
+	}
+	if len(s.Files) != 0 || !reflect.DeepEqual(s.Warnings, want) {
+		t.Errorf("files %v, warnings %q, want none and %q", s.Files, s.Warnings, want)
+	}
+}
