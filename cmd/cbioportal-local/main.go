@@ -81,9 +81,12 @@ folder on this computer.
   5. It watches the study folders. When a study's files change, it imports
      that study again; only that study is rebuilt.
 
-Without a folder, it asks for one with the system's folder picker. The
-status page (/local) lists the studies, their errors and warnings, and
-adds more study folders.
+Without a folder, as when the app is opened, it opens its import page
+(/local) in the web browser: a short wizard that adds study folders with
+the system's folder picker, or downloads public studies from cBioPortal,
+and shows each study's import with its errors and warnings. The study
+folders are remembered for next time; only the ones that changed are
+imported again. A second start while it runs opens the running one.
 
 Sessions (virtual studies, groups, custom data) are kept in a file in the
 data folder. There is no login.`,
@@ -115,35 +118,45 @@ data folder. There is no login.`,
 }
 
 func run(o *options, args []string) error {
-	logf := func(format string, args ...any) { log.Printf(format, args...) }
-	if len(args) == 0 {
-		dir, err := pickFolder("Choose a study folder, or a folder of studies")
-		if err != nil {
-			return cli.Usage(err)
-		}
-		if dir == "" {
-			return cli.Usagef("no folder chosen")
-		}
-		args = []string{dir}
-		o.open = true
+	if err := os.MkdirAll(o.dataDir, 0o755); err != nil {
+		return err
 	}
-	dirs, err := studyDirs(args)
+	// The log also goes to a file in the data folder: the app has no
+	// terminal.
+	if f, err := os.OpenFile(filepath.Join(o.dataDir, name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
+		defer f.Close()
+		log.SetOutput(io.MultiWriter(os.Stderr, f))
+	}
+	logf := func(format string, args ...any) { log.Printf(format, args...) }
+	appMode := len(args) == 0
+
+	// Started again while it runs: show the running one.
+	page := fmt.Sprintf("http://%s/local", net.JoinHostPort(loopbackHost(o.host), fmt.Sprint(o.port)))
+	if appMode && running(page) {
+		logf("already running; opening %s", page)
+		openBrowser(page)
+		return nil
+	}
+	given, err := studyDirs(args)
 	if err != nil {
 		return cli.Usage(err)
 	}
-	if len(dirs) == 0 {
+	if !appMode && len(given) == 0 {
 		return cli.Usagef("no study folders (with a meta_study.txt) in %s", strings.Join(args, ", "))
 	}
+	folders := loadFolders(o.dataDir)
+	folders.add(given)
+	all := folders.list()
+
 	seed, panels := o.seed, o.genePanels
-	if seed == "" || panels == "" {
-		s, p := findDatahubReference(dirs[0])
+	if len(all) > 0 && (seed == "" || panels == "") {
+		s, p := findDatahubReference(all[0])
 		seed, panels = cmp(seed, s), cmp(panels, p)
 	}
 	frontend, err := frontendDir(o)
 	if err != nil {
 		return err
 	}
-
 	lib := o.chdbLib
 	if lib == "" {
 		if lib, err = chdb.Library(o.cacheDir, logf); err != nil {
@@ -186,27 +199,15 @@ func run(o *options, args []string) error {
 		}
 	}
 	transform.Logf = logf
-	opts := studyimport.Options{
-		URL: chdb.URL, DB: portalDB, RawDB: rawDB, RefDB: refDB,
-		Seed: seed, GenePanels: panels, Logf: logf,
+	imp := &importer{
+		opts: studyimport.Options{
+			URL: chdb.URL, DB: portalDB, RawDB: rawDB, RefDB: refDB,
+			Seed: seed, GenePanels: panels, Logf: logf,
+		},
+		status:  newImportStatus(),
+		folders: folders,
 	}
-	status := newImportStatus(dirs)
-	status.addFolder = func() error {
-		dir, err := pickFolder("Choose a study folder, or a folder of studies")
-		if err != nil || dir == "" {
-			return err
-		}
-		found, err := studyDirs([]string{dir})
-		if err != nil {
-			return err
-		}
-		if added := status.add(found); len(added) > 0 {
-			logf("added %s", strings.Join(added, ", "))
-			go importStudies(opts, status, added)
-		}
-		return nil
-	}
-	importStudies(opts, status, dirs)
+	status := imp.status
 
 	client := ch.New(chdb.URL, portalDB)
 	client.SetDatabaseAliases(rawDB, refDB)
@@ -228,26 +229,65 @@ func run(o *options, args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	addr := net.JoinHostPort(o.host, fmt.Sprint(o.port))
-	ln, err := net.Listen("tcp", addr)
+	status.quit = stop
+	status.addFolder = func() error {
+		dir, err := pickFolder("Choose a study folder, or a folder of studies")
+		if err != nil || dir == "" {
+			return err
+		}
+		found, err := studyDirs([]string{dir})
+		if err != nil {
+			return err
+		}
+		if len(found) == 0 {
+			return fmt.Errorf("%s has no study (no meta_study.txt in it or the folders inside it)", dir)
+		}
+		go imp.add(found)
+		return nil
+	}
+	status.addPublic = func(ids []string) error {
+		for _, id := range ids {
+			if !studyIDPattern.MatchString(id) {
+				return fmt.Errorf("%q is not a study id", id)
+			}
+		}
+		go imp.addPublic(filepath.Join(o.dataDir, "public-studies"), ids)
+		return nil
+	}
+
+	ln, port, err := listen(o.host, o.port)
 	if err != nil {
 		return err
 	}
 	srv := &http.Server{Handler: status.handler(api.NewRouter(state))}
 	go srv.Serve(ln)
-	url := "http://" + addr
+	url := fmt.Sprintf("http://%s", net.JoinHostPort(loopbackHost(o.host), fmt.Sprint(port)))
 	if o.host == "0.0.0.0" || o.host == "" {
 		host, _ := os.Hostname()
-		url = fmt.Sprintf("http://%s:%d", host, o.port)
+		url = fmt.Sprintf("http://%s:%d", host, port)
 	}
-	logf("cBioPortal is at %s, and the import status at %s/local (press Ctrl+C to stop)", url, url)
-	if o.open {
+	logf("cBioPortal is at %s, and its import page at %s/local", url, url)
+	if appMode {
+		openBrowser(url + "/local")
+	} else if o.open {
 		openBrowser(url)
 	}
+
+	// Folders unchanged since their last import are served as they are;
+	// the others are imported.
+	var changed []string
+	for _, d := range all {
+		if folders.unchanged(d) {
+			status.add([]string{d}, "imported")
+		} else {
+			changed = append(changed, d)
+		}
+	}
+	go imp.add(changed)
 	if o.watch {
-		go watch(ctx, status.dirs, o.watchInterval, func(changed []string) {
-			logf("files changed in %s; importing again", strings.Join(changed, ", "))
-			importStudies(opts, status, changed)
+		go watch(ctx, status.dirs, o.watchInterval, func(dirs []string) {
+			logf("files changed in %s; importing again", strings.Join(dirs, ", "))
+			imp.run(dirs)
 		})
 	}
 	<-ctx.Done()
@@ -257,24 +297,63 @@ func run(o *options, args []string) error {
 	return srv.Shutdown(shutdown)
 }
 
-// importMu runs one import at a time.
-var importMu sync.Mutex
+// importer imports study folders one batch at a time, and records them in
+// the wizard's status and the remembered folders.
+type importer struct {
+	mu      sync.Mutex
+	opts    studyimport.Options
+	status  *importStatus
+	folders *folderStore
+}
 
-// importStudies imports dirs, records the outcome in status and logs each
-// study's; a study that fails is reported and left out, the others are
-// served.
-func importStudies(o studyimport.Options, status *importStatus, dirs []string) {
-	importMu.Lock()
-	defer importMu.Unlock()
+// add lists and remembers dirs, then imports them.
+func (m *importer) add(dirs []string) {
+	if len(dirs) == 0 {
+		return
+	}
+	m.status.add(dirs, "waiting")
+	m.folders.add(dirs)
+	m.run(dirs)
+}
+
+// addPublic downloads public studies into dir and imports them.
+func (m *importer) addPublic(dir string, ids []string) {
+	var dirs []string
+	for _, id := range ids {
+		dest := filepath.Join(dir, id)
+		m.status.set(dest, id, "downloading", "")
+		got, err := downloadStudy(dir, id)
+		if err != nil {
+			log.Printf("downloading %s: %v", id, err)
+			m.status.set(dest, id, "failed", err.Error())
+			continue
+		}
+		dirs = append(dirs, got)
+	}
+	m.add(dirs)
+}
+
+// run imports dirs, records the outcome and logs each study's; a study
+// that fails is reported and left out, the others are served.
+func (m *importer) run(dirs []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sigs := map[string]string{}
+	for _, d := range dirs {
+		sigs[d] = signature(d)
+	}
 	start := time.Now()
-	status.start(dirs)
-	res, err := studyimport.Run(o, dirs)
-	status.done(dirs, res, err, time.Since(start))
+	m.status.start(dirs)
+	res, err := studyimport.Run(m.opts, dirs)
+	m.status.done(dirs, res, err, time.Since(start))
 	if err != nil {
 		log.Printf("import failed: %v", err)
 		return
 	}
 	for _, s := range res.Studies {
+		if s.Status == studyimport.Imported {
+			m.folders.imported(s.Dir, sigs[s.Dir])
+		}
 		if s.Err != nil {
 			log.Printf("  %s: %s: %v", s.StudyID, s.Status, s.Err)
 		} else {
@@ -282,6 +361,42 @@ func importStudies(o studyimport.Options, status *importStatus, dirs []string) {
 		}
 	}
 	log.Printf("imported %d of %d studies in %s", res.Count(studyimport.Imported), len(dirs), time.Since(start).Round(time.Second))
+}
+
+// running reports whether a cbioportal-local answers at its page URL.
+func running(page string) bool {
+	c := &http.Client{Timeout: 2 * time.Second}
+	resp, err := c.Get(page + "/status")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// listen opens host:port, or the next free port of the 20 after it when
+// another program has it.
+func listen(host string, port int) (net.Listener, int, error) {
+	var first error
+	for p := port; p < port+20; p++ {
+		ln, err := net.Listen("tcp", net.JoinHostPort(host, fmt.Sprint(p)))
+		if err == nil {
+			return ln, p, nil
+		}
+		if first == nil {
+			first = err
+		}
+	}
+	return nil, 0, first
+}
+
+// loopbackHost is the address to reach a server listening on host from
+// this computer.
+func loopbackHost(host string) string {
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return "127.0.0.1"
+	}
+	return host
 }
 
 // studyDirs are the study folders among args: each arg that has a

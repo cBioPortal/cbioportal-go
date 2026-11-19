@@ -108,6 +108,11 @@ make frontend && make local     # build bin/cbioportal-local, website included
 bin/cbioportal-local datahub/public/acbc_mskcc_2015 --open
 ```
 
+- Without a folder, as when the macOS app (`make local-macos`) is opened, it
+  opens an import page in the browser. There you add your own study
+  folders, or pick public studies from cBioPortal to download, and see each
+  study's import with its errors and warnings. Studies are remembered for
+  next time.
 - The first run downloads the ClickHouse engine once, about 120 to 180 MB.
 - The study folder can also be a folder of studies.
 - In a datahub checkout, the reference genes and the shared gene panels are

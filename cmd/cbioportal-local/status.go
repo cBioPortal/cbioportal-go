@@ -1,8 +1,8 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
-	"html/template"
 	"net"
 	"net/http"
 	"sort"
@@ -12,15 +12,22 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/studyimport"
 )
 
+//go:embed wizard.html
+var wizardPage []byte
+
 // importStatus is what the last import of each study folder did, for the
-// status page.
+// wizard page, with the page's actions.
 type importStatus struct {
 	mu      sync.Mutex
 	studies map[string]*studyStatus // by folder
-	running []string                // folders being imported now
+
 	// addFolder asks for a study folder with the system's folder picker
-	// and imports it.
+	// and imports it; addPublic downloads public studies and imports them;
+	// quit stops the program.
 	addFolder func() error
+	addPublic func(ids []string) error
+	quit      func()
+	catalog   *publicCatalog
 }
 
 type studyStatus struct {
@@ -33,27 +40,40 @@ type studyStatus struct {
 	Seconds  float64   `json:"seconds"`
 }
 
-func newImportStatus(dirs []string) *importStatus {
-	s := &importStatus{studies: map[string]*studyStatus{}}
-	for _, d := range dirs {
-		s.studies[d] = &studyStatus{Dir: d, Status: "waiting"}
-	}
-	return s
+func newImportStatus() *importStatus {
+	return &importStatus{studies: map[string]*studyStatus{}, catalog: &publicCatalog{}}
 }
 
-// add starts listing the folders of dirs it does not list yet, and
-// returns them.
-func (s *importStatus) add(dirs []string) []string {
+// add starts listing the folders of dirs it does not list yet, with
+// status, and returns them.
+func (s *importStatus) add(dirs []string, status string) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var added []string
 	for _, d := range dirs {
 		if s.studies[d] == nil {
-			s.studies[d] = &studyStatus{Dir: d, Status: "waiting"}
+			id, _ := studyimport.StudyID(d)
+			s.studies[d] = &studyStatus{Dir: d, StudyID: id, Status: status}
 			added = append(added, d)
 		}
 	}
 	return added
+}
+
+// set changes the status of one listed folder (or lists it), keeping the
+// last import's details.
+func (s *importStatus) set(dir, studyID, status, errText string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.studies[dir]
+	if st == nil {
+		st = &studyStatus{Dir: dir}
+		s.studies[dir] = st
+	}
+	if studyID != "" {
+		st.StudyID = studyID
+	}
+	st.Status, st.Error = status, errText
 }
 
 // dirs are the study folders it lists.
@@ -71,7 +91,6 @@ func (s *importStatus) dirs() []string {
 func (s *importStatus) start(dirs []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.running = dirs
 	for _, d := range dirs {
 		if st := s.studies[d]; st != nil {
 			st.Status = "importing"
@@ -82,7 +101,6 @@ func (s *importStatus) start(dirs []string) {
 func (s *importStatus) done(dirs []string, res *studyimport.Result, err error, took time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.running = nil
 	now := time.Now()
 	for _, d := range dirs {
 		st := s.studies[d]
@@ -120,52 +138,64 @@ func (s *importStatus) list() []studyStatus {
 	return out
 }
 
-var statusPage = template.Must(template.New("status").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="3"><title>Local portal</title>
-<style>
-:root { --bg: #fff; --fg: #1d2330; --muted: #5b6475; --line: #e3e6ec; --ok: #1a7f37; --bad: #b42318; --busy: #9a6700; }
-@media (prefers-color-scheme: dark) { :root { --bg: #14171c; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2a2f38; --ok: #4ac26b; --bad: #ff7b72; --busy: #d29922; } }
-body { background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 24px 16px; }
-h1 { font-size: 22px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 20px; }
-table { border-collapse: collapse; width: 100%; } form { margin: 0 0 16px; }
-button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; } th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
-th { color: var(--muted); font-weight: 600; font-size: 13px; } code { font-size: 13px; word-break: break-all; }
-.imported { color: var(--ok); } .failed, .removed { color: var(--bad); } .importing, .waiting { color: var(--busy); }
-.err { color: var(--bad); white-space: pre-wrap; font-size: 13px; } .warn { color: var(--busy); font-size: 13px; } a { color: inherit; }
-</style></head><body>
-<h1>Local portal</h1>
-<p>The study folders this portal imports and watches. A study is imported again when its files change. <a href="/">Open the portal</a></p>
-<form method="post" action="/local/add"><button type="submit">Add a study folder…</button></form>
-<table><tr><th>Study</th><th>Status</th><th>Last import</th><th>Folder</th></tr>
-{{range .}}<tr><td>{{if .StudyID}}<a href="/study/summary?id={{.StudyID}}">{{.StudyID}}</a>{{else}}–{{end}}</td>
-<td class="{{.Status}}">{{.Status}}</td>
-<td>{{if not .Imported.IsZero}}{{.Imported.Format "15:04:05"}} ({{printf "%.0f" .Seconds}} s){{end}}</td>
-<td><code>{{.Dir}}</code>{{if .Error}}<div class="err">{{.Error}}</div>{{end}}{{range .Warnings}}<div class="warn">{{.}}</div>{{end}}</td></tr>
-{{end}}</table></body></html>`))
-
-// handler serves the status page at /local and its data at /local/status,
-// and everything else from next.
+// handler serves the wizard at /local and its endpoints under /local/, and
+// everything else from next. Only someone at this computer may change
+// anything: open its folder picker, download studies, or stop it.
 func (s *importStatus) handler(next http.Handler) http.Handler {
+	local := func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodPost || !fromThisComputer(r) {
+			http.Error(w, "this works only on the computer running the portal", http.StatusForbidden)
+			return false
+		}
+		return true
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/local", "/local/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			statusPage.Execute(w, s.list())
+			w.Write(wizardPage)
+		case "/local/status":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(s.list())
+		case "/local/public-studies":
+			studies, err := s.catalog.list()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(studies)
 		case "/local/add":
-			// Only someone at this computer may open its folder picker.
-			if r.Method != http.MethodPost || !fromThisComputer(r) {
-				http.Error(w, "adding folders works only on the computer running the portal", http.StatusForbidden)
+			if !local(w, r) {
 				return
 			}
 			if err := s.addFolder(); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			http.Redirect(w, r, "/local", http.StatusSeeOther)
-		case "/local/status":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(s.list())
+			w.WriteHeader(http.StatusNoContent)
+		case "/local/public":
+			if !local(w, r) {
+				return
+			}
+			var body struct {
+				StudyIDs []string `json:"studyIds"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := s.addPublic(body.StudyIDs); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+		case "/local/quit":
+			if !local(w, r) {
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			go s.quit()
 		default:
 			next.ServeHTTP(w, r)
 		}

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cBioPortal Local</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --fg: #1d2330; --muted: #5b6475; --line: #e3e6ec;
+  --accent: #2f6fb3; --accent-fg: #ffffff; --ok: #1a7f37; --bad: #b42318; --busy: #9a6700; --chip: #eef2f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #111419; --card: #191d24; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2a2f38;
+    --accent: #5b9be0; --accent-fg: #0b0e12; --ok: #4ac26b; --bad: #ff7b72; --busy: #d29922; --chip: #232934; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 28px 16px 64px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+h1 { font-size: 24px; margin: 0; } h2 { font-size: 17px; margin: 0 0 4px; }
+p { margin: 0 0 12px; color: var(--muted); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+.choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+button, .button { font: inherit; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--fg); padding: 7px 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+input[type=search] { font: inherit; width: 100%; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); margin: 8px 0; }
+.list { max-height: 380px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.row { display: flex; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+.row:last-child { border-bottom: 0; }
+.row label { flex: 1; cursor: pointer; min-width: 0; }
+.row .meta { color: var(--muted); font-size: 13px; }
+.chip { background: var(--chip); border-radius: 999px; padding: 1px 8px; font-size: 12px; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-size: 13px; font-weight: 600; }
+td code { font-size: 12px; color: var(--muted); word-break: break-all; }
+.imported { color: var(--ok); } .failed, .removed { color: var(--bad); } .importing, .waiting, .downloading { color: var(--busy); }
+.err { color: var(--bad); font-size: 13px; white-space: pre-wrap; } .warn { color: var(--busy); font-size: 13px; }
+.empty { color: var(--muted); padding: 12px 0; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.note { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>cBioPortal Local</h1>
+      <p>A cBioPortal running on this computer. Your data stays here.</p>
+    </div>
+    <div class="toolbar">
+      <a class="button primary" id="open" href="/">Open the portal</a>
+      <button id="quit" title="Stop the portal and this program">Stop</button>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>1. Add studies</h2>
+    <p>Add your own study folder, or download public studies from cBioPortal.</p>
+    <div class="choices">
+      <div>
+        <h2>Your own study</h2>
+        <p>A folder with a <code>meta_study.txt</code>, or a folder of such folders. When you save a change to its files, the study is imported again.</p>
+        <button class="primary" id="add">Choose a folder…</button>
+        <div class="note" id="addNote"></div>
+      </div>
+      <div>
+        <h2>Public studies</h2>
+        <p>The studies of <a href="https://www.cbioportal.org/datasets" target="_blank" rel="noopener">cbioportal.org/datasets</a>, downloaded to this computer.</p>
+        <button id="browse">Choose public studies…</button>
+      </div>
+    </div>
+    <div id="publicBox" hidden>
+      <input type="search" id="search" placeholder="Search by name, id or cancer type">
+      <div class="list" id="publicList"><div class="empty">Loading the list…</div></div>
+      <div class="toolbar">
+        <button class="primary" id="download" disabled>Download and import</button>
+        <span class="note" id="selected"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. Import</h2>
+    <p>Each study is imported into the portal. Problems with a study's files show here.</p>
+    <table>
+      <thead><tr><th>Study</th><th>Status</th><th>Last import</th><th>Folder</th></tr></thead>
+      <tbody id="studies"><tr><td colspan="4" class="empty">No studies yet. Add one above.</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>3. Explore</h2>
+    <p>When a study shows <span class="imported">imported</span>, open it in the portal. Reload the portal's page after a study is imported again.</p>
+    <a class="button primary" href="/">Open the portal</a>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let publicStudies = null, chosen = new Set(), have = new Set();
+
+async function refresh() {
+  try {
+    const rows = await (await fetch('/local/status')).json();
+    have = new Set(rows.map(r => r.studyId).filter(Boolean));
+    $('studies').innerHTML = rows.length ? rows.map(r => `<tr>
+      <td>${r.studyId && r.status === 'imported' ? `<a href="/study/summary?id=${encodeURIComponent(r.studyId)}">${esc(r.studyId)}</a>` : esc(r.studyId || '–')}</td>
+      <td class="${esc(r.status)}">${esc(r.status)}</td>
+      <td>${r.imported && !r.imported.startsWith('0001') ? new Date(r.imported).toLocaleTimeString() + ` (${Math.round(r.seconds)} s)` : ''}</td>
+      <td><code>${esc(r.dir)}</code>${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}${(r.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('')}</td>
+    </tr>`).join('') : '<tr><td colspan="4" class="empty">No studies yet. Add one above.</td></tr>';
+    if (publicStudies) renderPublic();
+  } catch (e) {
+    $('studies').innerHTML = '<tr><td colspan="4" class="err">The portal is not running.</td></tr>';
+  }
+}
+
+function renderPublic() {
+  const q = $('search').value.trim().toLowerCase();
+  const shown = publicStudies.filter(s => !q || [s.name, s.studyId, s.cancerTypeId].some(v => (v || '').toLowerCase().includes(q))).slice(0, 300);
+  $('publicList').innerHTML = shown.length ? shown.map(s => `<div class="row">
+    <input type="checkbox" id="s_${esc(s.studyId)}" data-id="${esc(s.studyId)}" ${chosen.has(s.studyId) ? 'checked' : ''} ${have.has(s.studyId) ? 'disabled' : ''}>
+    <label for="s_${esc(s.studyId)}"><div>${esc(s.name)} ${have.has(s.studyId) ? '<span class="chip">added</span>' : ''}</div>
+    <div class="meta">${esc(s.studyId)}${s.cancerTypeId ? ' · ' + esc(s.cancerTypeId) : ''}${s.allSampleCount ? ' · ' + s.allSampleCount.toLocaleString() + ' samples' : ''}</div></label>
+  </div>`).join('') : '<div class="empty" style="padding:12px">No study matches.</div>';
+  $('selected').textContent = chosen.size ? `${chosen.size} selected` : '';
+  $('download').disabled = chosen.size === 0;
+}
+
+$('publicList').addEventListener('change', e => {
+  const id = e.target.dataset.id; if (!id) return;
+  e.target.checked ? chosen.add(id) : chosen.delete(id);
+  renderPublic();
+});
+$('search').addEventListener('input', renderPublic);
+$('browse').onclick = async () => {
+  $('publicBox').hidden = false;
+  if (publicStudies) return;
+  try {
+    const r = await fetch('/local/public-studies');
+    if (!r.ok) throw new Error(await r.text());
+    publicStudies = await r.json();
+    renderPublic();
+  } catch (e) { $('publicList').innerHTML = `<div class="err" style="padding:12px">Could not load the list of public studies: ${esc(e.message)}</div>`; }
+};
+$('download').onclick = async () => {
+  const ids = [...chosen]; chosen.clear(); renderPublic();
+  const r = await fetch('/local/public', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({studyIds: ids})});
+  if (!r.ok) alert(await r.text());
+  refresh();
+};
+$('add').onclick = async () => {
+  $('add').disabled = true; $('addNote').textContent = 'A folder picker opened on this computer.';
+  const r = await fetch('/local/add', {method: 'POST'});
+  $('add').disabled = false; $('addNote').textContent = r.ok ? '' : await r.text();
+  refresh();
+};
+$('quit').onclick = async () => {
+  if (!confirm('Stop the portal? Your studies stay on this computer for next time.')) return;
+  await fetch('/local/quit', {method: 'POST'}).catch(() => {});
+  document.body.innerHTML = '<main><h1>cBioPortal Local has stopped.</h1><p>Open the app again to start it.</p></main>';
+};
+refresh(); setInterval(refresh, 1500);
+</script>
+</body>
+</html>
