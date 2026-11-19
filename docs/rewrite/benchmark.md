@@ -48,9 +48,10 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
   about $1,500 with their Redis caches. go would need about $160
   ([details](#cost-estimate)). www and api, the portals go can replace today,
   account for about $500 of that.
-- **Import:** go loads a study 2.6 to 3.6 times faster than Java's importer.
-  The 50,000-sample MSK-IMPACT study takes 80 s instead of 289 s, with 0.2 GB
-  of memory instead of 3.9 GB ([Import](#import)). In a portal with all 496
+- **Import:** in a test on 2026-10-08, go loaded a study and built its tables
+  2.3 to 3.7 times faster than Java's importer. The 50,000-sample MSK-IMPACT
+  study took about 90 s instead of about 320 s, with 0.2 GB of memory instead
+  of 3.9 GB ([Import](#import)). In a portal with all 496
   datahub studies, importing one study again takes 48 to 88 s, as long as
   in a portal of 10 ([details](#a-portal-with-all-of-datahub)).
 - **Build and start-up:** after a one-file change, go's API rebuilds in
