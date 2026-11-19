@@ -80,6 +80,9 @@ type client struct {
 	batchIDs [][]string
 	// resume records a full build's finished steps (resume.go).
 	resume *resumeState
+	// hashes identify the build's objects, to keep unchanged tables
+	// (reuse.go).
+	hashes *objectHashes
 }
 
 type sourceSubst struct {
@@ -151,6 +154,9 @@ func tableRef(db, table string) *regexp.Regexp {
 // transform stages its build, portal objects under their staged names.
 func (c *client) Execute(sql string) (string, error) {
 	if c.stage != nil {
+		if sub := c.stage.createRef.FindStringSubmatch(sql); sub != nil {
+			c.objectHash(c.stage.db, sub[1]+sub[2], "view", sql)
+		}
 		c.stage.record(sql)
 		sql = c.stage.rewrite(sql)
 	}

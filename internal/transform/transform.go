@@ -129,6 +129,9 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	if err := writeBuildState(c, targetDB, plan); err != nil {
 		return nil, err
 	}
+	if err := loadHashes(c, targetDB, plan.dataKey); err != nil {
+		return nil, err
+	}
 	if plan.partial {
 		if err := prepareStudyBuild(c, rawDB, targetDB, plan); err != nil {
 			return nil, err
@@ -341,6 +344,9 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		}
 	}
 
+	if err := writeHashes(c, targetDB); err != nil {
+		return nil, err
+	}
 	counts := make([]ViewCount, len(created))
 	for i, v := range created {
 		counts[i] = ViewCount{Name: v}

@@ -103,6 +103,9 @@ func logf(format string, args ...any) {
 // studyBuild is what a build does with the staged studies.
 type studyBuild struct {
 	fingerprint string
+	// data identifies the reference data and shared rows (buildFingerprint);
+	// dataKey adds the staged studies and their ranks (writeBuildState).
+	data, dataKey string
 	// order lists the staged studies in import order, with their import
 	// times.
 	order []stagedStudy
@@ -130,7 +133,7 @@ type rankedStudy struct {
 func planBuild(c *client, rawDB, targetDB, refDB string, full bool) (*studyBuild, error) {
 	b := &studyBuild{}
 	var err error
-	if b.fingerprint, err = buildFingerprint(c, rawDB, refDB); err != nil {
+	if b.fingerprint, b.data, err = buildFingerprint(c, rawDB, refDB); err != nil {
 		return nil, err
 	}
 	text, err := c.Execute(fmt.Sprintf(
@@ -231,16 +234,17 @@ func publishedTables(c *client, targetDB string) (map[string]string, error) {
 // shared by all studies (an empty study_id, such as the shared gene panels). The
 // reference genes the transform adds for the phosphoproteins of RPPA files
 // (negative Entrez ids) come from the studies' own rows and are left out.
-func buildFingerprint(c *client, rawDB, refDB string) (string, error) {
+// The second result leaves out the code.
+func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%s\n%s\n", sourceHash(), rawDB, refDB)
+	fmt.Fprintf(h, "%s\n%s\n", rawDB, refDB)
 	text, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT t.database, t.name, countIf(c.name = 'study_id'), countIf(c.name = 'entrez_gene_id') FROM system.tables t "+
 			"LEFT JOIN system.columns c ON c.database = t.database AND c.table = t.name "+
 			"WHERE t.database IN ('%s', '%s') AND t.engine LIKE '%%MergeTree' AND NOT startsWith(t.name, '_') "+
 			"GROUP BY t.database, t.name ORDER BY t.database, t.name FORMAT TabSeparated", ch.SQLLit(rawDB), ch.SQLLit(refDB)))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	var parts []string
 	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
@@ -263,11 +267,13 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, error) {
 	if len(parts) > 0 {
 		text, err := c.Client.Execute("SELECT * FROM (" + strings.Join(parts, " UNION ALL ") + ") ORDER BY t FORMAT TabSeparated")
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		io.WriteString(h, text)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	data := hex.EncodeToString(h.Sum(nil))
+	full := sha256.Sum256([]byte(sourceHash() + "\n" + data))
+	return hex.EncodeToString(full[:]), data, nil
 }
 
 // sourceHash hashes the Go files (tests aside) of the packages that decide
@@ -294,10 +300,13 @@ var sourceHash = sync.OnceValue(func() string {
 // writeBuildState writes the study ranks and the build's fingerprint. A
 // full build numbers the studies in import order from 1; a study build
 // keeps the ranks of the unchanged studies and numbers the changed ones
-// after the highest previous rank.
+// after the highest previous rank. A full build of the studies the
+// previous build had keeps their ranks too, so its unchanged tables can be
+// kept (reuse.go).
 func writeBuildState(c *client, targetDB string, b *studyBuild) error {
+	keep := b.partial || (len(b.previous) > 0 && len(b.changed) == 0 && len(b.removed) == 0)
 	var top uint64
-	if b.partial {
+	if keep {
 		for _, r := range b.previous {
 			top = max(top, r.Rank)
 		}
@@ -309,12 +318,14 @@ func writeBuildState(c *client, targetDB string, b *studyBuild) error {
 	values := make([]string, 0, len(b.order))
 	for _, s := range b.order {
 		rank := b.previous[s.StudyID].Rank
-		if !b.partial || changed[s.StudyID] {
+		if !keep || changed[s.StudyID] {
 			top++
 			rank = top
 		}
 		values = append(values, fmt.Sprintf("('%s', '%s', %d)", ch.SQLLit(s.StudyID), ch.SQLLit(s.ImportTime), rank))
 	}
+	key := sha256.Sum256([]byte(b.data + "\n" + strings.Join(values, ",")))
+	b.dataKey = hex.EncodeToString(key[:])
 	stmts := []string{
 		fmt.Sprintf("CREATE OR REPLACE TABLE `%s`.`%s` (study_id String, import_time DateTime64(6), rank UInt64) "+
 			"ENGINE = MergeTree ORDER BY study_id", targetDB, studyRanksTable),
@@ -484,6 +495,7 @@ func nextIDs(offset uint64, order string) string {
 // every study's rows in one sequence.
 func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string) error {
 	study := studyColumns[strings.TrimPrefix(name, snapshotPrefix)]
+	hash := c.objectHash(targetDB, name, "table", study, orderBy, sel, strings.Join(projections, "\n"))
 	if c.part != nil && study != "" {
 		// The rows are inserted while their columns are checked: rows
 		// with other columns are dropped with the staged table when the
@@ -511,6 +523,11 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 	}
 	if c.tableDone(targetDB, name) {
 		return nil
+	}
+	if kept, err := c.keepTable(targetDB, name, hash); err != nil {
+		return err
+	} else if kept {
+		return c.markDone("table:" + name)
 	}
 	partition := ""
 	if study != "" {

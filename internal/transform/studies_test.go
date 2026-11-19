@@ -91,6 +91,59 @@ func TestLiveStudyBuild(t *testing.T) {
 	apply("rebuilding 1 changed and 0 removed of 3 studies: golden_evo")
 	compareFull("golden_evo staged with new columns")
 
+	// A new release of the transform keeps the tables it would build the
+	// same, after a study build too.
+	release := func(version string) {
+		prev := sourceHash
+		sourceHash = func() string { return version }
+		t.Cleanup(func() { sourceHash = prev })
+	}
+	release("release-1")
+	apply("full build: the transform code, reference data or shared gene panels changed")
+	keptTables := func() []string {
+		for _, l := range logged {
+			if _, names, ok := strings.Cut(l, "unchanged tables: "); ok {
+				return strings.Split(names, ", ")
+			}
+		}
+		return nil
+	}
+	for _, name := range []string{"sample", "patient", "gene_key_map", "genetic_alteration_derived", "clinical_data_derived", "mutation"} {
+		if !slices.Contains(keptTables(), name) {
+			t.Errorf("release-1 rebuilt %s, kept %v", name, keptTables())
+		}
+	}
+	compareFull("release-1")
+
+	// A release that changes a table builds it again, and the tables that
+	// read it.
+	hashSalt = func(name string) string {
+		if name == "gene_key_map" {
+			return "changed"
+		}
+		return ""
+	}
+	t.Cleanup(func() { hashSalt = nil })
+	release("release-2")
+	apply("full build: the transform code, reference data or shared gene panels changed")
+	kept := keptTables()
+	// Mutations are matched to genes through gene_key_map, and the
+	// mutation count in clinical_data_derived counts them.
+	for _, name := range []string{"gene_key_map", "genetic_alteration_derived", "mutation", "clinical_data_derived"} {
+		if slices.Contains(kept, name) {
+			t.Errorf("release-2 kept %s", name)
+		}
+	}
+	for _, name := range []string{"sample", "patient", "clinical_event_derived"} {
+		if !slices.Contains(kept, name) {
+			t.Errorf("release-2 rebuilt %s, kept %v", name, kept)
+		}
+	}
+	compareFull("release-2")
+	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_b"))
+	apply("rebuilding 1 changed and 0 removed of 3 studies: golden_b")
+	compareFull("golden_b staged again after release-2")
+
 	// When a table's columns differ from what the build makes, every
 	// study is built.
 	if _, err := ch.New(base, db).Execute("ALTER TABLE `" + db + "`.sample_derived ADD COLUMN extra String"); err != nil {

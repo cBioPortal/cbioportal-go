@@ -128,8 +128,8 @@ func dump(t *testing.T, base, db string, only ...string) map[string]string {
 		if len(only) > 0 && !slices.Contains(only, name) {
 			continue
 		}
-		// The build state holds import times and the importer's hash.
-		if name == studyRanksTable || name == buildTable {
+		// The build state holds import times and the importer's hashes.
+		if name == studyRanksTable || name == buildTable || name == hashTable {
 			continue
 		}
 		objects = append(objects, line)
