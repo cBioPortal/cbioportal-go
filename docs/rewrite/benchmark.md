@@ -193,6 +193,44 @@ November 5, Java used about 75 ms of CPU per request and go about 20 ms.
 Java answers repeated requests from its Redis cache, which go doesn't have
 yet, so this comparison favors Java slightly.
 
+#### ClickHouse
+
+The pods above are only half of the cost: both backends send their queries
+to the same ClickHouse service (2 replicas of 8 cores). The table shows its
+average CPU per day, from ClickHouse's own query log, split by who sent the
+queries. "Other users" are everything else on the same service, such as
+analytics notebooks and other teams' tools. "Whole service" also counts
+ClickHouse's background work, such as merging newly written data.
+
+| Day (UTC) | Java | go | Other users | Whole service | Whole service, busiest 5% of 5-minute periods |
+|---|---|---|---|---|---|
+| 2026-11-06 (from 10:30) | 2.91 | 0.83 | 0.59 | 6.00 | 9.0 |
+| 2026-11-07 | 2.00 | 0.46 | 0.70 | 4.56 | 8.3 |
+| 2026-11-08 | 2.01 | 0.52 | 0.44 | 4.34 | 7.6 |
+| 2026-11-09 | 2.41 | 0.70 | 0.83 | 6.52 | 14.3 |
+| 2026-11-10 | 2.54 | 0.91 | 0.53 | 5.89 | 12.5 |
+| 2026-11-11 | 2.75 | 1.57 | 0.38 | 6.54 | 10.9 |
+| 2026-11-12 | 2.64 | 1.24 | 0.45 | 6.15 | 9.4 |
+| 2026-11-13 | 2.73 | 1.31 | 0.84 | 6.79 | 11.4 |
+| **Average** | **2.50** | **0.94** | **0.60** | **5.85** | |
+
+All figures are CPU cores. In this period go received a quarter of www's
+API traffic as a copy, plus go.cbioportal.org's own visitors and the
+nightly parity check, while Java answered all of www and api. So go's
+column is not a like-for-like share; per request it is in the
+[ClickHouse load per request](#clickhouse-load-per-request) section.
+
+Other users can load the service far more than this, unannounced. On
+2026-11-19 from 00:00 to 01:30 UTC, an automated batch of another tool's
+queries alone used 3 to 3.6 cores on average, and one replica briefly
+reached all 8 cores. That load had nothing to do with go or Java. A
+ClickHouse figure for a single day therefore says little about go on its
+own; the per-group split above does.
+
+The query log keeps about a week, so each day is saved as it ends. Days
+from 2026-11-14 to 2026-11-18 are missing: ClickHouse's servers were
+replaced on 2026-11-18, which cleared the log before those days were saved.
+
 ## Why go uses less memory
 
 A Java API pod used about 1.8 GB of memory on average and a go pod about
