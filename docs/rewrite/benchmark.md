@@ -50,7 +50,9 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
   account for about $500 of that.
 - **Import:** go loads a study 2.6 to 3.6 times faster than Java's importer.
   The 50,000-sample MSK-IMPACT study takes 80 s instead of 289 s, with 0.2 GB
-  of memory instead of 3.9 GB ([Import](#import)).
+  of memory instead of 3.9 GB ([Import](#import)). In a portal with all 496
+  datahub studies, importing one study again takes 48 to 88 s, as long as
+  in a portal of 10 ([details](#a-portal-with-all-of-datahub)).
 - **Build and start-up:** after a one-file change, go's API rebuilds in
   1.5 s and Java's in 47 s. go answers its first request 0.14 s after it
   starts, Java after 16 to 19 s. go's image is 80 MB to download, Java's
@@ -73,6 +75,8 @@ These numbers come from real API traffic on 2026-10-06, 05:00–15:20 UTC.
 - [Frontend e2e run](#frontend-e2e-run)
 - [Cost estimate](#cost-estimate)
 - [Import](#import)
+  - [A portal with all of datahub](#a-portal-with-all-of-datahub)
+  - [On your own computer](#on-your-own-computer)
 - [Build and start-up time](#build-and-start-up-time)
 - [Code size](#code-size)
 
@@ -433,6 +437,98 @@ differences remain:
 - Java's `clinical_data_derived` table also keeps a row for each empty value.
 - Java skips copy-number segments whose start is not before their end (4 on
   chord, 10 on 50k). go keeps them.
+
+### A portal with all of datahub
+
+The tests above load one study into an empty portal. A real portal holds
+hundreds of studies, and one study changes at a time. This test loads all
+496 public studies of datahub into one portal, then imports single studies
+again, the way a weekly update does.
+
+How it was run: on 2026-11-18 and 2026-11-19, with go's importer, against a
+ClickHouse Cloud compute service of its own (2 replicas, each with 8 cores
+and 32 GB of memory), with the studies as they are on datahub's master
+branch.
+
+| Step | Time |
+|---|---|
+| Stage all 496 studies (copy their files into ClickHouse), 3 at a time | 33 min |
+| Build every table for all 496 studies (a *full build*) | 54 min |
+| Import `acc_2019` again (1,049 samples, 1.4 million matrix values) | 48–66 s |
+| Import `brca_tcga` again (1,108 samples, 157 million matrix values) | 88 s |
+| Import `brca_tcga_pan_can_atlas_2018` again (1,084 samples, 141 million matrix values) | 87 s |
+
+The portal holds 388,339 samples and 5.3 billion matrix values (expression,
+copy number, methylation and protein levels).
+
+Each single-study import is the study's staging (12–30 s) plus building its
+tables (37–71 s). Building one study takes as long in this portal of 496
+studies as in a test portal of 10 (36 s for `acc_2019`, 64 s for
+`brca_tcga`): only the changed study's rows are built.
+
+For comparison, Java's importer loads about 2 MB of study files a second
+(the table above), and datahub's studies are roughly 60 to 100 GB of files.
+Loading all of them with Java would take an estimated 10 to 20 hours, one
+study at a time. That is an estimate from the two studies above, not a
+measurement.
+
+#### Why go imports a study in about a minute
+
+- **Files are copied as they are.** Staging streams each file into
+  ClickHouse without changing it. Clinical, mutation and other record files
+  keep each row's values in one map column, so a study with new columns
+  needs no change to the tables.
+- **Three studies stage at once,** each sending up to three files at a time.
+- **ClickHouse does the work.** The tables the API reads are built with SQL
+  inside ClickHouse, not in the importer, so the importer needs little
+  memory (it runs with 1.5 GB).
+- **Only the changed study is built again.** Every table that holds many
+  studies keeps each study's rows in a part of its own (a ClickHouse
+  *partition*). An import builds the changed study's rows into new tables,
+  then swaps its partitions into the served tables in one step each
+  (`REPLACE PARTITION`). The other 495 studies are not touched. The portal
+  keeps serving the old rows until the new ones are swapped in.
+- **The same ids as Java.** The study keeps the other studies' internal ids
+  and numbers its own after the highest one in use, as Java does.
+
+#### Why a full build of all of datahub works
+
+A full build is needed when the code that builds the tables changes, or the
+reference genes or shared gene panels do. Building 496 studies at once at
+first ran out of memory on ClickHouse, then took long on two tables. Three
+changes fixed it:
+
+- **50 studies at a time.** Each table that holds many studies is filled in
+  batches of 50 studies, one query per batch, so a query needs the memory of
+  50 studies. The largest used 12 GB of the 28.5 GB a replica allows.
+- **Clinical data read once per value.** The clinical tables were read
+  through a view with a column for each of datahub's 2,448 clinical
+  attributes, so 950 million values were built and dropped to keep 7.7
+  million. Reading each row's map of values directly takes 0.9 s for all of
+  datahub. The two clinical tables went from about 8 minutes each to under 2.
+- **Resumable.** A full build that stops part of the way, for example
+  because its server went away, is resumed by the next import: the tables
+  and batches it finished are kept.
+
+Half of the full build is one table: `genetic_alteration_derived`, which
+holds every value of every expression, copy-number, methylation and protein
+matrix as its own row, 5.3 billion rows. Production's table of the
+same name holds the same rows.
+
+### On your own computer
+
+`cbioportal-local` runs the importer and the API in one program, with
+ClickHouse inside it (chDB), on a laptop. On a Linux server with cBioPortal's
+5 test studies:
+
+| Step | Time |
+|---|---|
+| Import the 5 test studies into an empty portal | 8–9 s |
+| Show an edited clinical value in the API, after the file is saved | 9 s |
+| Download and import `acc_2019` from cbioportal.org's study archives | 25 s |
+
+The API contract tests that CI runs against a full server pass against it
+(224 of 227; the other 3 expect the test portal's login settings).
 
 ## Build and start-up time
 
