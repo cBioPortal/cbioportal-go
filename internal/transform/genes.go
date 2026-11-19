@@ -171,7 +171,11 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		keys := fmt.Sprintf(
 			"SELECT DISTINCT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent FROM `%s`.`%s`%s",
 			prof, col(src.symCol), col(src.entCol), rawDB, src.table, where)
-		firstRow := "toUInt64(0)"
+		// For a matrix staged as lines, gene_key_map keeps each gene's first
+		// line (first_row, its first cell, and line_cells): the importer
+		// stores a gene's first line and skips the later ones, also lines
+		// with the very same symbol and Entrez id.
+		firstRow, keptRow, keptCells := "toUInt64(0)", "toUInt64(0)", "toUInt64(0)"
 		if lines != "" {
 			// A line's first cell is row_base + 1; a line without values
 			// has no cells.
@@ -180,10 +184,11 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 				cond += " AND " + src.where
 			}
 			keys = fmt.Sprintf(
-				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_base + 1) AS first_row FROM `%s`.`%s`%s "+
+				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_base + 1) AS first_row, "+
+					"argMin(cells, row_base) AS first_cells FROM `%s`.`%s`%s "+
 					"GROUP BY study_id, profile_stable_id, sym, ent",
 				prof, col(src.symCol), col(src.entCol), rawDB, lines, cond)
-			firstRow = "first_row"
+			firstRow, keptRow, keptCells = "first_row", "toUInt64(first_row)", "toUInt64(first_cells)"
 		} else if src.mode == geneMatrix && cols["row_num"] {
 			keys = fmt.Sprintf(
 				"SELECT study_id, %s AS profile_stable_id, %s AS sym, %s AS ent, min(row_num) AS first_row FROM `%s`.`%s`%s "+
@@ -197,12 +202,16 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 			src.table, resolve(src.mode, keys))
 		if src.mode == geneMatrix {
 			sel = fmt.Sprintf(
-				"SELECT source, study_id, profile_stable_id, hugo_symbol, entrez_gene_id, resolved_entrez_gene_id, resolved_hugo_gene_symbol, mirna FROM ("+
+				"SELECT source, study_id, profile_stable_id, hugo_symbol, entrez_gene_id, resolved_entrez_gene_id, resolved_hugo_gene_symbol, mirna, "+
+					"kept_row AS first_row, kept_cells AS line_cells FROM ("+
 					"SELECT '%s' AS source, study_id, profile_stable_id, sym AS hugo_symbol, ent AS entrez_gene_id, "+
-					"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, gene_mirna AS mirna, gene_direct, %s AS first_row FROM (%s)) "+
+					"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, gene_mirna AS mirna, gene_direct, %s AS first_row, "+
+					"%s AS kept_row, %s AS kept_cells FROM (%s)) "+
 					"ORDER BY study_id, profile_stable_id, resolved_entrez_gene_id, first_row, gene_direct DESC, hugo_symbol, entrez_gene_id "+
 					"LIMIT 1 BY study_id, profile_stable_id, resolved_entrez_gene_id",
-				src.table, firstRow, resolve(src.mode, keys))
+				src.table, firstRow, keptRow, keptCells, resolve(src.mode, keys))
+		} else {
+			sel = "SELECT *, toUInt64(0) AS first_row, toUInt64(0) AS line_cells FROM (" + sel + ")"
 		}
 		parts = append(parts, sel)
 	}
@@ -220,7 +229,8 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 				return err
 			}
 		}
-		parts = append(parts, rppaGeneKeysSQL(rawDB, refDB, protein["entrez_gene_id"], protein["row_num"], hasRef))
+		parts = append(parts, "SELECT *, toUInt64(0) AS first_row, toUInt64(0) AS line_cells FROM ("+
+			rppaGeneKeysSQL(rawDB, refDB, protein["entrez_gene_id"], protein["row_num"], hasRef)+")")
 	} else {
 		add(geneKeySource{table: "protein_level_matrix", mode: geneMatrix, symCol: "hugo_symbol", entCol: "entrez_gene_id"})
 	}
@@ -242,12 +252,14 @@ func buildGeneKeyMap(c *client, rawDB, targetDB, refDB string, hasRef bool) erro
 		}
 		parts = append(parts, fmt.Sprintf(
 			"SELECT 'structural_variant' AS source, study_id, profile_stable_id, sym AS hugo_symbol, ent AS entrez_gene_id, "+
-				"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, toUInt8(0) AS mirna FROM (%s)",
+				"gene_entrez AS resolved_entrez_gene_id, gene_hugo AS resolved_hugo_gene_symbol, toUInt8(0) AS mirna, "+
+				"toUInt64(0) AS first_row, toUInt64(0) AS line_cells FROM (%s)",
 			resolve(geneSV, "SELECT DISTINCT * FROM ("+strings.Join(svKeys, " UNION ALL ")+")")))
 	}
 	if len(parts) == 0 {
 		parts = append(parts, "SELECT '' AS source, '' AS study_id, '' AS profile_stable_id, '' AS hugo_symbol, '' AS entrez_gene_id, "+
-			"toInt64(0) AS resolved_entrez_gene_id, '' AS resolved_hugo_gene_symbol, toUInt8(0) AS mirna WHERE 0")
+			"toInt64(0) AS resolved_entrez_gene_id, '' AS resolved_hugo_gene_symbol, toUInt8(0) AS mirna, "+
+			"toUInt64(0) AS first_row, toUInt64(0) AS line_cells WHERE 0")
 	}
 	return c.fill(targetDB, "gene_key_map", "(source, study_id, profile_stable_id, hugo_symbol, entrez_gene_id)",
 		strings.Join(parts, " UNION ALL "))

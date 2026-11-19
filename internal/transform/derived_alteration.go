@@ -49,7 +49,8 @@ func geneticAlterationDerivedSQL(c *client, rawDB, targetDB string) string {
 
 // linesPart is a matrix's genetic_alteration_derived rows read from its
 // lines: each line is resolved through gene_key_map once, then unpacked
-// into its samples' values, instead of resolving every cell.
+// into its samples' values, instead of resolving every cell. Only a gene's
+// first line is read, as the importer stores it (gene_key_map's first_row).
 func linesPart(c *client, rawDB, targetDB, table, lines string) string {
 	cols, _ := c.TableColumns(lines)
 	col := func(n string) string {
@@ -68,9 +69,10 @@ func linesPart(c *client, rawDB, targetDB, table, lines string) string {
 			"t.hugo_gene_symbol AS hugo_gene_symbol, t.profile_stable_id AS profile_type, nullIf(cell.1, '') AS alteration_value "+
 			"FROM (SELECT l.study_id AS study_id, l.profile_stable_id AS profile_stable_id, gk.resolved_hugo_gene_symbol AS hugo_gene_symbol, "+
 			"arrayZip(arrayResize(l.values, length(s.samples), ''), s.samples) AS cells "+
-			"FROM (SELECT study_id, source_file, profile_stable_id, %[1]s AS gene_key, %[2]s AS entrez_gene_id, `values` "+
+			"FROM (SELECT study_id, source_file, profile_stable_id, %[1]s AS gene_key, %[2]s AS entrez_gene_id, `values`, row_base "+
 			"FROM `%[3]s`.`%[4]s` WHERE cells > 0) l "+
 			"INNER JOIN `%[3]s`.matrix_samples s ON s.study_id = l.study_id AND s.source_file = l.source_file AND s.stage_table = '%[5]s'%[6]s"+
+			" WHERE gk.first_row = 0 OR gk.first_row = l.row_base + 1"+
 			") t ARRAY JOIN t.cells AS cell "+
 			"WHERE cell.1 NOT IN ('NA', '') AND cell.2 != ''",
 		key, col("entrez_gene_id"), rawDB, lines, table, geneKeyJoin(targetDB, table, "l", "gene_key", "entrez_gene_id"))

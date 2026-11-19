@@ -210,6 +210,54 @@ func TestLiveInvalidSegments(t *testing.T) {
 	}
 }
 
+// TestLiveDuplicateMatrixLines checks that a matrix gene listed on more
+// than one line, with the very same symbol and Entrez id, is stored once
+// from its first line, as ImportTabDelimData skips the later ones: in
+// genetic_alteration_derived and in the discrete copy-number events.
+func TestLiveDuplicateMatrixLines(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "dup_ref")
+	rawDB, db := goldenDatabase(t, base, "dup_raw"), goldenDatabase(t, base, "dup")
+	dir := t.TempDir()
+	files := map[string]string{
+		"meta_study.txt": "type_of_cancer: coad\ncancer_study_identifier: dup_study\nname: Duplicates\nshort_name: D\ndescription: d\nreference_genome: hg19\n",
+		"meta_clinical_sample.txt": "cancer_study_identifier: dup_study\ngenetic_alteration_type: CLINICAL\n" +
+			"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+		"data_clinical_sample.txt": "#Patient Identifier\tSample Identifier\n#p\t#s\n#STRING\tSTRING\n#1\t1\nPATIENT_ID\tSAMPLE_ID\nP1\tS1\nP2\tS2\n",
+		"meta_cna.txt": "cancer_study_identifier: dup_study\ngenetic_alteration_type: COPY_NUMBER_ALTERATION\ndatatype: DISCRETE\n" +
+			"stable_id: gistic\nshow_profile_in_analysis_tab: true\nprofile_name: CNA\nprofile_description: CNA\ndata_filename: data_cna.txt\n",
+		// TP53 twice with the same symbol and Entrez id, on two cytobands
+		// (as datahub's copy-number files list some genes): the first line
+		// wins.
+		"data_cna.txt": "Hugo_Symbol\tEntrez_Gene_Id\tCytoband\tS1\tS2\nTP53\t7157\t17p13.1\t-2\t0\n" +
+			"KRAS\t3845\t12p12.1\t2\t1\nTP53\t7157\t5q23.1\t2\t-1\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingestGolden(t, base, rawDB, dir)
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	c := ch.New(base, db)
+	for _, q := range []struct{ sql, want string }{
+		{"SELECT sample_unique_id, toString(hugo_gene_symbol), alteration_value FROM genetic_alteration_derived ORDER BY 2, 1",
+			"dup_study_S1\tKRAS\t2\ndup_study_S2\tKRAS\t1\ndup_study_S1\tTP53\t-2\ndup_study_S2\tTP53\t0"},
+		{"SELECT sample_id, hugo_symbol, alteration FROM cna ORDER BY hugo_symbol, sample_id",
+			"S1\tKRAS\t2\nS2\tKRAS\t1\nS1\tTP53\t-2\nS2\tTP53\t0"},
+	} {
+		got, err := c.Execute(q.sql + " FORMAT TabSeparated")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(got) != q.want {
+			t.Errorf("%s:\n%s\nwant:\n%s", q.sql, got, q.want)
+		}
+	}
+}
+
 // TestSourceHash checks that the transform's version covers the Go files of
 // each package that decides what it builds, and leaves out their tests.
 func TestSourceHash(t *testing.T) {

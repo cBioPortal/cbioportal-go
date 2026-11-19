@@ -608,7 +608,8 @@ func cnaSQL(c *client, rawDB, targetDB string, fromMatrix, fromLong bool) string
 			"SELECT c.study_id AS study_id, c.sample_id AS sample_id, gk.resolved_hugo_gene_symbol AS hugo_symbol, "+
 				"toString(gk.resolved_entrez_gene_id) AS entrez_gene_id, if(c.value = '-1.5', '-2', c.value) AS alteration, c.profile_stable_id AS profile_stable_id, "+
 				"'' AS cbp_driver, '' AS cbp_driver_tiers, '' AS cbp_driver_annotation, '' AS cbp_driver_tiers_annotation, '{}' AS namespace_columns "+
-				"FROM `%s`.cna_matrix c%s WHERE c.datatype = 'DISCRETE' AND gk.mirna = 0 AND alteration IN %s",
+				"FROM `%s`.cna_matrix c%s WHERE c.datatype = 'DISCRETE' AND gk.mirna = 0 AND alteration IN %s"+
+				" AND (gk.first_row = 0 OR c.row_num >= gk.first_row AND c.row_num < gk.first_row + gk.line_cells)",
 			rawDB, geneKeyJoin(targetDB, "cna_matrix", "c", "hugo_symbol", "entrez_gene_id"), levels))
 	}
 	if fromLong {

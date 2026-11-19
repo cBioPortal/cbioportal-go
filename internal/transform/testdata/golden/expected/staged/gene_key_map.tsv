@@ -1,54 +1,54 @@
-entrez_gene_id	hugo_symbol	mirna	profile_stable_id	resolved_entrez_gene_id	resolved_hugo_gene_symbol	source	study_id
-String	String	UInt8	String	Int64	String	String	String
-	BRCA2|BRCA2_pS1234	0	rppa	-1	BRCA2_PS1234	protein_level_matrix	golden_a
-	EGFR ERBB2|EGFR-ERBB2	0	rppa	1956	EGFR	protein_level_matrix	golden_a
-	EGFR ERBB2|EGFR-ERBB2	0	rppa	2064	ERBB2	protein_level_matrix	golden_a
-	EGFR|1956	0	gistic	1956	EGFR	cna_matrix	golden_a
-	EGFR|EGFR_pY1068	0	rppa	-2	EGFR_PY1068	protein_level_matrix	golden_a
-	EML4 ALK|Eml4_pT10_alk	0	rppa	-5	EML4_PT10	protein_level_matrix	golden_a
-	EML4 ALK|Eml4_pT10_alk	0	rppa	-6	ALK_PT10	protein_level_matrix	golden_a
-	ERBB2	0	gistic	2064	ERBB2	cna_matrix	golden_a
-	ERBB2	0	structural_variants	2064	ERBB2	structural_variant	golden_a
-	ERBB2 KRAS|HER2_pY1248_Y1250	0	rppa	-3	ERBB2_PY1248_Y1250	protein_level_matrix	golden_a
-	ERBB2 KRAS|HER2_pY1248_Y1250	0	rppa	-4	KRAS_PY1248_Y1250	protein_level_matrix	golden_a
-	HER2	0	protein_quantification	2064	ERBB2	protein_level_matrix	golden_b
-	KRAS2	0	mutations	3845	KRAS	mutation_extended	golden_a
-	MIR-21	1	gistic	406991	MIR21	cna_matrix	golden_a
-	MIR21 BRCA1|mir_line	1	rppa	406991	MIR21	protein_level_matrix	golden_a
-	PTEN	0	cna	5728	PTEN	cna_discrete_long	golden_b
-	PTEN NOTAGENE NA|PTEN	0	rppa	5728	PTEN	protein_level_matrix	golden_a
-	p53|p53_alias	0	rppa	7157	TP53	protein_level_matrix	golden_a
-1956	EGFR	0	cna	1956	EGFR	cna_discrete_long	golden_b
-1956	EGFR	0	mutations	1956	EGFR	mutation_extended	golden_a
-1956	EGFR	0	mutations	1956	EGFR	mutation_extended	golden_c
-1956	EGFR	0	structural_variants	1956	EGFR	structural_variant	golden_a
-2064		0	cna	2064	ERBB2	cna_discrete_long	golden_b
-2064	ERBB2	0	log2CNA	2064	ERBB2	cna_matrix	golden_a
-2064	ERBB2	0	mutations	2064	ERBB2	mutation_extended	golden_c
-238	ALK	0	mutations	238	ALK	mutation_extended	golden_c
-238	ALK	0	mutations_uncalled	238	ALK	mutation_uncalled	golden_c
-238	ALK	0	structural_variants	238	ALK	structural_variant	golden_a
-27436	EML4	0	mutations	27436	EML4	mutation_extended	golden_c
-3845	KRAS	0	mrna	3845	KRAS	mrna_expression_matrix	golden_a
-3845	KRAS	0	mutations	3845	KRAS	mutation_extended	golden_b
-3845	KRAS	0	mutations	3845	KRAS	mutation_extended	golden_c
-5290	PIK3CA	0	mutations	5290	PIK3CA	mutation_extended	golden_a
-5290	PIK3CA	0	mutations	5290	PIK3CA	mutation_extended	golden_c
-5728		0	mrna	5728	PTEN	mrna_expression_matrix	golden_a
-5728	PTEN	0	mutations	5728	PTEN	mutation_extended	golden_b
-5728	PTEN	0	mutations	5728	PTEN	mutation_extended	golden_c
-5728	PTEN	0	protein_quantification	5728	PTEN	protein_level_matrix	golden_b
-672	BRCA1	0	methylation_hm27	672	BRCA1	methylation_matrix	golden_a
-672	BRCA1	0	mutations	672	BRCA1	mutation_extended	golden_a
-672	BRCA1	0	mutations	672	BRCA1	mutation_extended	golden_c
-675	BRCA2	0	mutations	675	BRCA2	mutation_extended	golden_c
-7157	P53	0	mutations	7157	TP53	mutation_extended	golden_b
-7157	TP53	0	cna	7157	TP53	cna_discrete_long	golden_b
-7157	TP53	0	gistic	7157	TP53	cna_matrix	golden_a
-7157	TP53	0	log2CNA	7157	TP53	cna_matrix	golden_a
-7157	TP53	0	mrna	7157	TP53	mrna_expression_matrix	golden_a
-7157	TP53	0	mutations	7157	TP53	mutation_extended	golden_a
-7157	TP53	0	mutations	7157	TP53	mutation_extended	golden_c
-7157	TP53	0	mutations_uncalled	7157	TP53	mutation_uncalled	golden_c
-7157	TP53	0	protein_quantification	7157	TP53	protein_level_matrix	golden_b
-NA	EML4	0	structural_variants	27436	EML4	structural_variant	golden_a
+entrez_gene_id	first_row	hugo_symbol	line_cells	mirna	profile_stable_id	resolved_entrez_gene_id	resolved_hugo_gene_symbol	source	study_id
+String	UInt64	String	UInt64	UInt8	String	Int64	String	String	String
+	0	BRCA2|BRCA2_pS1234	0	0	rppa	-1	BRCA2_PS1234	protein_level_matrix	golden_a
+	0	EGFR ERBB2|EGFR-ERBB2	0	0	rppa	1956	EGFR	protein_level_matrix	golden_a
+	0	EGFR ERBB2|EGFR-ERBB2	0	0	rppa	2064	ERBB2	protein_level_matrix	golden_a
+	0	EGFR|EGFR_pY1068	0	0	rppa	-2	EGFR_PY1068	protein_level_matrix	golden_a
+	0	EML4 ALK|Eml4_pT10_alk	0	0	rppa	-5	EML4_PT10	protein_level_matrix	golden_a
+	0	EML4 ALK|Eml4_pT10_alk	0	0	rppa	-6	ALK_PT10	protein_level_matrix	golden_a
+	0	ERBB2	0	0	structural_variants	2064	ERBB2	structural_variant	golden_a
+	0	ERBB2 KRAS|HER2_pY1248_Y1250	0	0	rppa	-3	ERBB2_PY1248_Y1250	protein_level_matrix	golden_a
+	0	ERBB2 KRAS|HER2_pY1248_Y1250	0	0	rppa	-4	KRAS_PY1248_Y1250	protein_level_matrix	golden_a
+	0	KRAS2	0	0	mutations	3845	KRAS	mutation_extended	golden_a
+	0	MIR21 BRCA1|mir_line	0	1	rppa	406991	MIR21	protein_level_matrix	golden_a
+	0	PTEN	0	0	cna	5728	PTEN	cna_discrete_long	golden_b
+	0	PTEN NOTAGENE NA|PTEN	0	0	rppa	5728	PTEN	protein_level_matrix	golden_a
+	0	p53|p53_alias	0	0	rppa	7157	TP53	protein_level_matrix	golden_a
+	13	MIR-21	4	1	gistic	406991	MIR21	cna_matrix	golden_a
+	17	EGFR|1956	4	0	gistic	1956	EGFR	cna_matrix	golden_a
+	3	HER2	2	0	protein_quantification	2064	ERBB2	protein_level_matrix	golden_b
+	5	ERBB2	4	0	gistic	2064	ERBB2	cna_matrix	golden_a
+1956	0	EGFR	0	0	cna	1956	EGFR	cna_discrete_long	golden_b
+1956	0	EGFR	0	0	mutations	1956	EGFR	mutation_extended	golden_a
+1956	0	EGFR	0	0	mutations	1956	EGFR	mutation_extended	golden_c
+1956	0	EGFR	0	0	structural_variants	1956	EGFR	structural_variant	golden_a
+2064	0		0	0	cna	2064	ERBB2	cna_discrete_long	golden_b
+2064	0	ERBB2	0	0	mutations	2064	ERBB2	mutation_extended	golden_c
+2064	4	ERBB2	3	0	log2CNA	2064	ERBB2	cna_matrix	golden_a
+238	0	ALK	0	0	mutations	238	ALK	mutation_extended	golden_c
+238	0	ALK	0	0	mutations_uncalled	238	ALK	mutation_uncalled	golden_c
+238	0	ALK	0	0	structural_variants	238	ALK	structural_variant	golden_a
+27436	0	EML4	0	0	mutations	27436	EML4	mutation_extended	golden_c
+3845	0	KRAS	0	0	mutations	3845	KRAS	mutation_extended	golden_b
+3845	0	KRAS	0	0	mutations	3845	KRAS	mutation_extended	golden_c
+3845	4	KRAS	3	0	mrna	3845	KRAS	mrna_expression_matrix	golden_a
+5290	0	PIK3CA	0	0	mutations	5290	PIK3CA	mutation_extended	golden_a
+5290	0	PIK3CA	0	0	mutations	5290	PIK3CA	mutation_extended	golden_c
+5728	0	PTEN	0	0	mutations	5728	PTEN	mutation_extended	golden_b
+5728	0	PTEN	0	0	mutations	5728	PTEN	mutation_extended	golden_c
+5728	1	PTEN	2	0	protein_quantification	5728	PTEN	protein_level_matrix	golden_b
+5728	7		3	0	mrna	5728	PTEN	mrna_expression_matrix	golden_a
+672	0	BRCA1	0	0	mutations	672	BRCA1	mutation_extended	golden_a
+672	0	BRCA1	0	0	mutations	672	BRCA1	mutation_extended	golden_c
+672	1	BRCA1	2	0	methylation_hm27	672	BRCA1	methylation_matrix	golden_a
+675	0	BRCA2	0	0	mutations	675	BRCA2	mutation_extended	golden_c
+7157	0	P53	0	0	mutations	7157	TP53	mutation_extended	golden_b
+7157	0	TP53	0	0	cna	7157	TP53	cna_discrete_long	golden_b
+7157	0	TP53	0	0	mutations	7157	TP53	mutation_extended	golden_a
+7157	0	TP53	0	0	mutations	7157	TP53	mutation_extended	golden_c
+7157	0	TP53	0	0	mutations_uncalled	7157	TP53	mutation_uncalled	golden_c
+7157	1	TP53	3	0	log2CNA	7157	TP53	cna_matrix	golden_a
+7157	1	TP53	3	0	mrna	7157	TP53	mrna_expression_matrix	golden_a
+7157	1	TP53	4	0	gistic	7157	TP53	cna_matrix	golden_a
+7157	5	TP53	1	0	protein_quantification	7157	TP53	protein_level_matrix	golden_b
+NA	0	EML4	0	0	structural_variants	27436	EML4	structural_variant	golden_a
