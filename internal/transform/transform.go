@@ -653,9 +653,31 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 	}
 	sort.Strings(names)
 	var sel string
-	if len(names) == 0 {
+	rows, err := clinicalRowsTable(c, srcTable)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case len(names) == 0:
 		sel = fmt.Sprintf("SELECT study_id, `%s` AS %s, '' AS attr_id, '' AS attr_value FROM `%s`.`%s` WHERE 1 = 0", idCol, idCol, rawDB, srcTable)
-	} else {
+	case rows != "":
+		// The staged rows keep only their non-empty values, in one map:
+		// unpacking it reads each value once, instead of a column for
+		// every attribute any study has.
+		var skipped []string
+		for n := range skip {
+			skipped = append(skipped, "'"+n+"'")
+		}
+		sort.Strings(skipped)
+		value := "kv.2"
+		if srcTable == "clinical_patient" {
+			value = survivalStatusSQL("upper(kv.1)", "kv.2")
+		}
+		sel = fmt.Sprintf(
+			"SELECT study_id, `__values`['%[1]s'] AS %[1]s, upper(kv.1) AS attr_id, %[2]s AS attr_value FROM `%[3]s`.`%[4]s` "+
+				"ARRAY JOIN `__values` AS kv WHERE kv.1 NOT IN (%[5]s) AND NOT %[6]s",
+			idCol, value, rawDB, rows, strings.Join(skipped, ", "), missingClinicalValue("kv.2"))
+	default:
 		pairs := make([]string, len(names))
 		for i, n := range names {
 			pairs[i] = fmt.Sprintf("('%s', `%s`)", strings.ToUpper(n), n)
@@ -667,6 +689,8 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 		sel = fmt.Sprintf(
 			"SELECT study_id, `%s` AS %s, kv.1 AS attr_id, %s AS attr_value FROM `%s`.`%s` ARRAY JOIN [%s] AS kv WHERE NOT %s",
 			idCol, idCol, value, rawDB, srcTable, strings.Join(pairs, ", "), missingClinicalValue("kv.2"))
+	}
+	if len(names) > 0 {
 		renames, err := attrIDRenames(c, rawDB)
 		if err != nil {
 			return "", err
@@ -679,6 +703,20 @@ func clinicalLongSQL(c *client, rawDB, srcTable, idCol string) (string, error) {
 		}
 	}
 	return sel, nil
+}
+
+// clinicalRowsTable returns the table ingest stores a clinical staging
+// table's rows in, with their non-empty values in one map (`__values`),
+// when table is ingest's view over it, or "".
+func clinicalRowsTable(c *client, table string) (string, error) {
+	if engine, err := c.TableEngine(table); err != nil || engine != "View" {
+		return "", err
+	}
+	cols, err := c.TableColumns(table + "_rows")
+	if err != nil || !cols["__values"] {
+		return "", err
+	}
+	return table + "_rows", nil
 }
 
 // attrIDRenames selects (study_id, col, attr_id) for the clinical attributes
