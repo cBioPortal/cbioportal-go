@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -122,6 +123,25 @@ func missingDataFile(metaPath, dataName string) string {
 	return fmt.Sprintf("%s names the data file %s, which does not exist; it was left out", filepath.Base(metaPath), dataName)
 }
 
+// lfsPointer starts a Git LFS pointer file: what a datahub checkout holds
+// in place of a data file until git lfs pull fetches it.
+const lfsPointer = "version https://git-lfs.github.com/spec/"
+
+// unreadableDataFile is the warning for a data file that is missing, or
+// is only a Git LFS pointer; "" when the file can be imported.
+func unreadableDataFile(metaPath, dataPath, dataName string) string {
+	f, err := os.Open(dataPath)
+	if err != nil {
+		return missingDataFile(metaPath, dataName)
+	}
+	defer f.Close()
+	head := make([]byte, len(lfsPointer))
+	if n, _ := io.ReadFull(f, head); n == len(head) && string(head) == lfsPointer {
+		return fmt.Sprintf("%s is a Git LFS pointer, not the data (run git lfs pull in the checkout); it was left out", dataName)
+	}
+	return ""
+}
+
 func classify(at, dt string) (Layout, string) {
 	up := strings.ToUpper(at)
 	udt := strings.ToUpper(dt)
@@ -202,8 +222,8 @@ func Scan(dir string) (*Study, error) {
 			// Resource files (meta_resource_*) carry resource_type instead of
 			// genetic_alteration_type/datatype.
 			dataPath := filepath.Join(dir, dataName)
-			if _, err := os.Stat(dataPath); err != nil {
-				s.Warnings = append(s.Warnings, missingDataFile(mp, dataName))
+			if w := unreadableDataFile(mp, dataPath, dataName); w != "" {
+				s.Warnings = append(s.Warnings, w)
 			} else {
 				s.Files = append(s.Files, DataFile{
 					MetaPath: mp, DataPath: dataPath, AlterationType: "RESOURCE", Datatype: strings.ToUpper(rt),
@@ -216,8 +236,8 @@ func Scan(dir string) (*Study, error) {
 			continue
 		}
 		dataPath := filepath.Join(dir, dataName)
-		if _, err := os.Stat(dataPath); err != nil {
-			s.Warnings = append(s.Warnings, missingDataFile(mp, dataName))
+		if w := unreadableDataFile(mp, dataPath, dataName); w != "" {
+			s.Warnings = append(s.Warnings, w)
 			continue
 		}
 		layout, slug := classify(at, dt)
