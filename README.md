@@ -47,8 +47,8 @@ flowchart LR
 
     files --> importer -->|loads| db
     db -->|serves| api
-    api -->|website and /api| browser
-    api -->|/api| clients
+    api -->|the website| browser
+    api -->|REST API| clients
 ```
 
 | Part | What it does |
