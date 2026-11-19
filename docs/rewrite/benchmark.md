@@ -491,7 +491,8 @@ branch.
 | Step | Time |
 |---|---|
 | Stage all 496 studies (copy their files into ClickHouse), 3 at a time | 33 min |
-| Build every table for all 496 studies (a *full build*) | 54 min |
+| Build every table for all 496 studies (a *full build*) | 54–60 min |
+| Build again after a new importer release that changes no table | 22 s |
 | Import `acc_2019` again (1,049 samples, 1.4 million matrix values) | 48–66 s |
 | Import `brca_tcga` again (1,108 samples, 157 million matrix values) | 88 s |
 | Import `brca_tcga_pan_can_atlas_2018` again (1,084 samples, 141 million matrix values) | 87 s |
@@ -512,8 +513,8 @@ measurement.
 
 #### Why go imports a study in about a minute
 
-- **Files are copied as they are.** Staging streams each file into
-  ClickHouse without changing it. Clinical, mutation and other record files
+- **Files are stored as they are.** Staging streams each file's values
+  into ClickHouse as text, without checking or converting them. Clinical, mutation and other record files
   keep each row's values in one map column, so a study with new columns
   needs no change to the tables.
 - **Three studies stage at once,** each sending up to three files at a time.
@@ -552,6 +553,22 @@ Half of the full build is one table: `genetic_alteration_derived`, which
 holds every value of every expression, copy-number, methylation and protein
 matrix as its own row, 5.3 billion rows. Production's table of the
 same name holds the same rows.
+
+#### Why a new release builds in seconds
+
+Any change to the code that builds the tables asks for a full build,
+because the import cannot tell which tables the change affects. A full
+build first works out, for each table, a hash (a fingerprint) of its SQL,
+the tables it reads and the studies and reference data. When a table's
+hash matches the one recorded by the build that published it, the table
+would come out the same, so it is kept as it is: the build reads the
+published table, and nothing is copied. Only the tables whose SQL changed
+and the tables that read them are built again.
+
+On datahub, a release that changes no table's SQL finishes in 22 seconds
+and keeps all 24 tables. A release that changes, for example, how the
+mutation count is computed rebuilds the clinical tables, which take a few
+minutes, but keeps `genetic_alteration_derived`.
 
 ### On your own computer
 
