@@ -2,8 +2,10 @@ package ingest
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"golang.org/x/sync/errgroup"
 )
 
 // TableRows is a table of the raw database and its number of rows of one
@@ -53,15 +55,24 @@ func RemoveStudy(c *ch.Client, studyID string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	for i, t := range tables {
-		// A lightweight DELETE marks the rows deleted without rewriting the
-		// table. lightweight_deletes_sync = 2 waits for every replica, so the
-		// next transform reads none of the rows.
-		if _, err := c.Execute(fmt.Sprintf(
-			"DELETE FROM `%s`.`%s` WHERE study_id = '%s' SETTINGS lightweight_deletes_sync = 2",
-			c.Database(), t.Table, ch.SQLLit(studyID))); err != nil {
-			return i, fmt.Errorf("removing study %s from %s: %w", studyID, t.Table, err)
-		}
+	// A lightweight DELETE marks the rows deleted without rewriting the
+	// table. lightweight_deletes_sync = 2 waits for every replica, so the
+	// next transform reads none of the rows. That wait is about a second on
+	// ClickHouse Cloud, so the tables are deleted from at once.
+	var g errgroup.Group
+	g.SetLimit(8)
+	var removed atomic.Int64
+	for _, t := range tables {
+		g.Go(func() error {
+			if _, err := c.Execute(fmt.Sprintf(
+				"DELETE FROM `%s`.`%s` WHERE study_id = '%s' SETTINGS lightweight_deletes_sync = 2",
+				c.Database(), t.Table, ch.SQLLit(studyID))); err != nil {
+				return fmt.Errorf("removing study %s from %s: %w", studyID, t.Table, err)
+			}
+			removed.Add(1)
+			return nil
+		})
 	}
-	return len(tables), nil
+	err = g.Wait()
+	return int(removed.Load()), err
 }

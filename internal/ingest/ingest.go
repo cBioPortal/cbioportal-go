@@ -449,25 +449,25 @@ func IngestStudyAt(c *ch.Client, s *parser.Study, imported time.Time) ([]FileSta
 	} else if removedGA {
 		st.genericAssay.Store(true)
 	}
-	if err := ingestStudyMeta(c, s, imported); err != nil {
-		return nil, err
-	}
-	if err := ingestProfiles(c, s); err != nil {
-		return nil, err
-	}
-	if err := ingestProfileSamples(c, s); err != nil {
-		return nil, err
-	}
-	if err := ingestGenePanels(c, s); err != nil {
-		return nil, err
-	}
-	if err := ingestClinicalMeta(c, s); err != nil {
-		return nil, err
-	}
-	if err := ingestCaseLists(c, s); err != nil {
-		return nil, err
-	}
-	if err := ingestStudyTags(c, s); err != nil {
+	// The study's metadata steps each replace its rows in tables of their
+	// own, so they run at once: replacing rows waits for every replica to
+	// apply the DELETE, about a second on ClickHouse Cloud.
+	var meta errgroup.Group
+	meta.Go(func() error { return ingestStudyMeta(c, s, imported) })
+	meta.Go(func() error { return ingestProfiles(c, s) })
+	meta.Go(func() error { return ingestProfileSamples(c, s) })
+	meta.Go(func() error { return ingestGenePanels(c, s) })
+	meta.Go(func() error { return ingestClinicalMeta(c, s) })
+	meta.Go(func() error { return ingestCaseLists(c, s) })
+	meta.Go(func() error { return ingestStudyTags(c, s) })
+	meta.Go(func() error {
+		seq := map[string]int{}
+		for _, f := range s.Files {
+			seq[fileName(f.DataPath)] = f.ImportSeq
+		}
+		return recordImportOrder(c, s.StudyID, "data", seq)
+	})
+	if err := meta.Wait(); err != nil {
 		return nil, err
 	}
 
@@ -507,13 +507,6 @@ func IngestStudyAt(c *ch.Client, s *parser.Study, imported time.Time) ([]FileSta
 		if st != nil {
 			stats = append(stats, *st)
 		}
-	}
-	seq := map[string]int{}
-	for _, f := range s.Files {
-		seq[fileName(f.DataPath)] = f.ImportSeq
-	}
-	if err := recordImportOrder(c, s.StudyID, "data", seq); err != nil {
-		return nil, err
 	}
 	mutsig, err := ingestMutSig(st, s)
 	if err != nil {
