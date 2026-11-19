@@ -18,8 +18,9 @@ local: ## bin/cbioportal-local with the website built in (needs frontend/dist)
 	tar -czf cmd/cbioportal-local/frontend.tar.gz -C frontend/dist .
 	CGO_ENABLED=0 go build -tags embedfrontend -o bin/cbioportal-local ./cmd/cbioportal-local
 
-# A macOS app per processor: the program and the app's Info.plist, zipped.
-# Opened without a folder, the program shows its import page in the browser.
+# A macOS app per processor: the program, the script that starts it, and
+# the app's Info.plist, zipped. Opened without a folder, the program shows
+# its import page in the browser.
 local-macos: ## bin/cBioPortal-Local-macos-{arm64,amd64}.zip: double-clickable macOS apps (needs frontend/dist)
 	test -f frontend/dist/index.html || { echo "build the frontend first (make frontend)"; exit 1; }
 	tar -czf cmd/cbioportal-local/frontend.tar.gz -C frontend/dist .
@@ -29,6 +30,7 @@ local-macos: ## bin/cBioPortal-Local-macos-{arm64,amd64}.zip: double-clickable m
 macos-app:
 	mkdir -p "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS"
 	GOOS=darwin GOARCH=$(ARCH) CGO_ENABLED=0 go build -tags embedfrontend -o "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS/cbioportal-local" ./cmd/cbioportal-local
+	cp cmd/cbioportal-local/macos/launch "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS/launch"
 	sed "s/VERSION/$$(git describe --tags --always)/" cmd/cbioportal-local/macos/Info.plist > "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/Info.plist"
 	cd "bin/macos-$(ARCH)" && zip -qryFS "../cBioPortal-Local-macos-$(ARCH).zip" "cBioPortal Local.app"
 

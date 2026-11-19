@@ -9,7 +9,7 @@
 	<key>CFBundleIdentifier</key>
 	<string>org.cbioportal.local</string>
 	<key>CFBundleExecutable</key>
-	<string>cbioportal-local</string>
+	<string>launch</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
