@@ -4,7 +4,7 @@ CBIOPORTAL_DB ?= cbioportal
 PORT ?= 8080
 API ?= http://localhost:18090
 
-.PHONY: build local test fmt vet lint contract e2e run frontend testdb clean help
+.PHONY: build local local-macos macos-app test fmt vet lint contract e2e run frontend testdb clean help
 
 build: ## build the programs into bin/
 	go build -o bin/cbioportal-import ./cmd/cbioportal-import
@@ -17,6 +17,21 @@ local: ## bin/cbioportal-local with the website built in (needs frontend/dist)
 	test -f frontend/dist/index.html || { echo "build the frontend first (make frontend)"; exit 1; }
 	tar -czf cmd/cbioportal-local/frontend.tar.gz -C frontend/dist .
 	CGO_ENABLED=0 go build -tags embedfrontend -o bin/cbioportal-local ./cmd/cbioportal-local
+
+# A macOS app per processor: the program, a launcher that opens it in a
+# Terminal window, and the app's Info.plist, zipped.
+local-macos: ## bin/cBioPortal-Local-macos-{arm64,amd64}.zip: double-clickable macOS apps (needs frontend/dist)
+	test -f frontend/dist/index.html || { echo "build the frontend first (make frontend)"; exit 1; }
+	tar -czf cmd/cbioportal-local/frontend.tar.gz -C frontend/dist .
+	$(MAKE) macos-app ARCH=arm64
+	$(MAKE) macos-app ARCH=amd64
+
+macos-app:
+	mkdir -p "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS"
+	GOOS=darwin GOARCH=$(ARCH) CGO_ENABLED=0 go build -tags embedfrontend -o "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS/cbioportal-local" ./cmd/cbioportal-local
+	cp cmd/cbioportal-local/macos/launch "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/MacOS/launch"
+	sed "s/VERSION/$$(git describe --tags --always)/" cmd/cbioportal-local/macos/Info.plist > "bin/macos-$(ARCH)/cBioPortal Local.app/Contents/Info.plist"
+	cd "bin/macos-$(ARCH)" && zip -qryFS "../cBioPortal-Local-macos-$(ARCH).zip" "cBioPortal Local.app"
 
 test: ## unit tests (no services needed)
 	go test ./internal/... ./cmd/... ./ops/... ./rewrite/...

@@ -21,6 +21,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -63,7 +64,7 @@ type options struct {
 func newRootCmd() *cobra.Command {
 	o := &options{}
 	cmd := &cobra.Command{
-		Use:   name + " <study-or-folder>...",
+		Use:   name + " [study-or-folder]...",
 		Short: "run cBioPortal on this computer from study folders",
 		Long: `cbioportal-local runs a whole cBioPortal on this computer, from study
 folders, in one command. Nothing is sent anywhere: the data stays in a
@@ -80,14 +81,18 @@ folder on this computer.
   5. It watches the study folders. When a study's files change, it imports
      that study again; only that study is rebuilt.
 
+Without a folder, it asks for one with the system's folder picker. The
+status page (/local) lists the studies, their errors and warnings, and
+adds more study folders.
+
 Sessions (virtual studies, groups, custom data) are kept in a file in the
 data folder. There is no login.`,
-		Args: cobra.MinimumNArgs(1),
+		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error { return run(o, args) },
 	}
 	cache, _ := os.UserCacheDir()
 	fs := cmd.Flags()
-	fs.StringVar(&o.dataDir, "data", filepath.Join(cache, "cbioportal-local", "data"), "`folder` the portal's databases are kept in")
+	fs.StringVar(&o.dataDir, "data", defaultDataDir(), "`folder` the portal's databases are kept in")
 	fs.StringVar(&o.cacheDir, "cache", filepath.Join(cache, "cbioportal-local"), "`folder` for the downloaded engine and website")
 	fs.StringVar(&o.chdbLib, "chdb-lib", "", "use this libchdb `file` instead of downloading one")
 	fs.StringVar(&o.frontendDir, "frontend-dir", "", "serve this frontend build `folder` instead of the built-in one")
@@ -111,6 +116,17 @@ data folder. There is no login.`,
 
 func run(o *options, args []string) error {
 	logf := func(format string, args ...any) { log.Printf(format, args...) }
+	if len(args) == 0 {
+		dir, err := pickFolder("Choose a study folder, or a folder of studies")
+		if err != nil {
+			return cli.Usage(err)
+		}
+		if dir == "" {
+			return cli.Usagef("no folder chosen")
+		}
+		args = []string{dir}
+		o.open = true
+	}
 	dirs, err := studyDirs(args)
 	if err != nil {
 		return cli.Usage(err)
@@ -148,12 +164,48 @@ func run(o *options, args []string) error {
 			return err
 		}
 	}
+	// Without a datahub checkout, the reference genes and shared gene panels
+	// are downloaded once, unless the data folder has them already.
+	count := func(sql string) int {
+		out, err := admin.Execute(sql)
+		if err != nil {
+			return 0
+		}
+		var n int
+		fmt.Sscan(strings.TrimSpace(out), &n)
+		return n
+	}
+	if seed == "" && count("SELECT count() FROM `"+refDB+"`.gene") == 0 {
+		if seed, err = downloadSeed(o.cacheDir, logf); err != nil {
+			return err
+		}
+	}
+	if panels == "" && count("SELECT count() FROM `"+rawDB+"`.gene_panel WHERE study_id = ''") == 0 {
+		if panels, err = downloadGenePanels(o.cacheDir, logf); err != nil {
+			return err
+		}
+	}
 	transform.Logf = logf
 	opts := studyimport.Options{
 		URL: chdb.URL, DB: portalDB, RawDB: rawDB, RefDB: refDB,
 		Seed: seed, GenePanels: panels, Logf: logf,
 	}
 	status := newImportStatus(dirs)
+	status.addFolder = func() error {
+		dir, err := pickFolder("Choose a study folder, or a folder of studies")
+		if err != nil || dir == "" {
+			return err
+		}
+		found, err := studyDirs([]string{dir})
+		if err != nil {
+			return err
+		}
+		if added := status.add(found); len(added) > 0 {
+			logf("added %s", strings.Join(added, ", "))
+			go importStudies(opts, status, added)
+		}
+		return nil
+	}
 	importStudies(opts, status, dirs)
 
 	client := ch.New(chdb.URL, portalDB)
@@ -193,7 +245,7 @@ func run(o *options, args []string) error {
 		openBrowser(url)
 	}
 	if o.watch {
-		go watch(ctx, dirs, o.watchInterval, func(changed []string) {
+		go watch(ctx, status.dirs, o.watchInterval, func(changed []string) {
 			logf("files changed in %s; importing again", strings.Join(changed, ", "))
 			importStudies(opts, status, changed)
 		})
@@ -205,10 +257,15 @@ func run(o *options, args []string) error {
 	return srv.Shutdown(shutdown)
 }
 
+// importMu runs one import at a time.
+var importMu sync.Mutex
+
 // importStudies imports dirs, records the outcome in status and logs each
 // study's; a study that fails is reported and left out, the others are
 // served.
 func importStudies(o studyimport.Options, status *importStatus, dirs []string) {
+	importMu.Lock()
+	defer importMu.Unlock()
 	start := time.Now()
 	status.start(dirs)
 	res, err := studyimport.Run(o, dirs)
@@ -253,6 +310,22 @@ func studyDirs(args []string) ([]string, error) {
 	return out, nil
 }
 
+// defaultDataDir keeps the databases where the system keeps an app's own
+// data, not in a cache folder the system may empty: Application Support on
+// macOS, $XDG_DATA_HOME (~/.local/share) elsewhere.
+func defaultDataDir() string {
+	if runtime.GOOS == "darwin" {
+		if d, err := os.UserConfigDir(); err == nil {
+			return filepath.Join(d, "cbioportal-local")
+		}
+	}
+	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
+		return filepath.Join(d, "cbioportal-local")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "share", "cbioportal-local")
+}
+
 func isStudy(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, "meta_study.txt"))
 	return err == nil
@@ -292,12 +365,13 @@ func cmp(a, b string) string {
 	return b
 }
 
-// watch calls changed with the study folders whose files changed since
-// the last look, once the changes have settled for one interval.
-func watch(ctx context.Context, dirs []string, interval time.Duration, changed func([]string)) {
+// watch calls changed with the study folders (as dirs lists them at each
+// look) whose files changed since the last look, once the changes have
+// settled for one interval.
+func watch(ctx context.Context, dirs func() []string, interval time.Duration, changed func([]string)) {
 	last := map[string]string{}
 	pending := map[string]string{}
-	for _, d := range dirs {
+	for _, d := range dirs() {
 		last[d] = signature(d)
 	}
 	t := time.NewTicker(interval)
@@ -309,8 +383,12 @@ func watch(ctx context.Context, dirs []string, interval time.Duration, changed f
 		case <-t.C:
 		}
 		var ready []string
-		for _, d := range dirs {
+		for _, d := range dirs() {
 			sig := signature(d)
+			if _, seen := last[d]; !seen {
+				last[d] = sig // added since; imported when added
+				continue
+			}
 			switch {
 			case sig == last[d]:
 				delete(pending, d)

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"html/template"
+	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -17,6 +18,9 @@ type importStatus struct {
 	mu      sync.Mutex
 	studies map[string]*studyStatus // by folder
 	running []string                // folders being imported now
+	// addFolder asks for a study folder with the system's folder picker
+	// and imports it.
+	addFolder func() error
 }
 
 type studyStatus struct {
@@ -35,6 +39,33 @@ func newImportStatus(dirs []string) *importStatus {
 		s.studies[d] = &studyStatus{Dir: d, Status: "waiting"}
 	}
 	return s
+}
+
+// add starts listing the folders of dirs it does not list yet, and
+// returns them.
+func (s *importStatus) add(dirs []string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var added []string
+	for _, d := range dirs {
+		if s.studies[d] == nil {
+			s.studies[d] = &studyStatus{Dir: d, Status: "waiting"}
+			added = append(added, d)
+		}
+	}
+	return added
+}
+
+// dirs are the study folders it lists.
+func (s *importStatus) dirs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.studies))
+	for d := range s.studies {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (s *importStatus) start(dirs []string) {
@@ -97,13 +128,15 @@ var statusPage = template.Must(template.New("status").Parse(`<!doctype html>
 @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --fg: #e6e9ef; --muted: #9aa3b2; --line: #2a2f38; --ok: #4ac26b; --bad: #ff7b72; --busy: #d29922; } }
 body { background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 960px; padding: 24px 16px; }
 h1 { font-size: 22px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 20px; }
-table { border-collapse: collapse; width: 100%; } th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
+table { border-collapse: collapse; width: 100%; } form { margin: 0 0 16px; }
+button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; } th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; text-align: left; vertical-align: top; }
 th { color: var(--muted); font-weight: 600; font-size: 13px; } code { font-size: 13px; word-break: break-all; }
 .imported { color: var(--ok); } .failed, .removed { color: var(--bad); } .importing, .waiting { color: var(--busy); }
 .err { color: var(--bad); white-space: pre-wrap; font-size: 13px; } .warn { color: var(--busy); font-size: 13px; } a { color: inherit; }
 </style></head><body>
 <h1>Local portal</h1>
 <p>The study folders this portal imports and watches. A study is imported again when its files change. <a href="/">Open the portal</a></p>
+<form method="post" action="/local/add"><button type="submit">Add a study folder…</button></form>
 <table><tr><th>Study</th><th>Status</th><th>Last import</th><th>Folder</th></tr>
 {{range .}}<tr><td>{{if .StudyID}}<a href="/study/summary?id={{.StudyID}}">{{.StudyID}}</a>{{else}}–{{end}}</td>
 <td class="{{.Status}}">{{.Status}}</td>
@@ -119,6 +152,17 @@ func (s *importStatus) handler(next http.Handler) http.Handler {
 		case "/local", "/local/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			statusPage.Execute(w, s.list())
+		case "/local/add":
+			// Only someone at this computer may open its folder picker.
+			if r.Method != http.MethodPost || !fromThisComputer(r) {
+				http.Error(w, "adding folders works only on the computer running the portal", http.StatusForbidden)
+				return
+			}
+			if err := s.addFolder(); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			http.Redirect(w, r, "/local", http.StatusSeeOther)
 		case "/local/status":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(s.list())
@@ -126,4 +170,15 @@ func (s *importStatus) handler(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+// fromThisComputer reports whether r came from the computer the portal
+// runs on.
+func fromThisComputer(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
