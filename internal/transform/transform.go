@@ -402,6 +402,9 @@ func snapshotView(c *client, db, name, orderBy, idFrom string) error {
 	if err := c.fill(db, tmp, orderBy, src); err != nil {
 		return fmt.Errorf("materializing %s: %w", name, err)
 	}
+	if c.stage != nil && c.stage.isKept(name) {
+		return nil
+	}
 	stmts := []string{
 		fmt.Sprintf("DROP VIEW `%s`.`%s`", db, name),
 		fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, tmp, name),

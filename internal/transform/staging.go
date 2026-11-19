@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"golang.org/x/sync/errgroup"
@@ -23,6 +24,11 @@ type staging struct {
 	createRef *regexp.Regexp
 	views     []string          // published view names, in creation order
 	viewSQL   map[string]string // the last definition of each view
+	// kept are the published tables the build keeps as they are
+	// (reuse.go): they have no staged object, and statements read them
+	// under their own names.
+	mu   sync.Mutex
+	kept map[string]bool
 }
 
 func newStaging(db string) *staging {
@@ -33,15 +39,33 @@ func newStaging(db string) *staging {
 		ref:       regexp.MustCompile(dbRef + "(?:`([^`]+)`|([A-Za-z_][A-Za-z0-9_]*))"),
 		createRef: regexp.MustCompile("^\\s*CREATE\\s+(?:OR\\s+REPLACE\\s+)?VIEW\\s+" + dbRef + "(?:`([^`]+)`|([A-Za-z_][A-Za-z0-9_]*))"),
 		viewSQL:   map[string]string{},
+		kept:      map[string]bool{},
 	}
 }
 
+// keep makes statements read the published table name from now on.
+func (s *staging) keep(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.kept[name] = true
+}
+
+// isKept reports whether the build keeps the published table name.
+func (s *staging) isKept(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.kept[name]
+}
+
 // rewrite points every reference to an object of the portal database at its
-// staged name.
+// staged name, but a kept table's at the published table.
 func (s *staging) rewrite(sql string) string {
 	return s.ref.ReplaceAllStringFunc(sql, func(m string) string {
 		sub := s.ref.FindStringSubmatch(m)
 		name := sub[1] + sub[2]
+		if s.isKept(name) {
+			return fmt.Sprintf("`%s`.`%s`", s.db, name)
+		}
 		return fmt.Sprintf("`%s`.`%s`", s.db, s.name(name))
 	})
 }
@@ -166,6 +190,11 @@ func publish(c *client, s *staging) error {
 		return nil
 	}
 	tables := map[string]bool{}
+	s.mu.Lock()
+	for name := range s.kept {
+		tables[name] = true // stays as published
+	}
+	s.mu.Unlock()
 	for _, o := range objs {
 		if o.engine == "View" || o.name == resumeTable {
 			continue

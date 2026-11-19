@@ -17,8 +17,8 @@ import (
 // in the portal database and the staged studies and reference data are
 // those of the build that published it. A new release of the transform
 // that changes only some tables then rebuilds only those and the tables
-// that read them. The kept table gets the published one's parts, which
-// copies no data.
+// that read them. A kept table is not copied: the build reads the
+// published table, and publishing leaves it in place.
 //
 // Each table and view of a build gets a hash of its definition, the hashes
 // of the portal objects it reads, and the build's data key (the staged
@@ -98,9 +98,12 @@ func (c *client) objectHash(targetDB, name string, parts ...string) string {
 	return out
 }
 
-// keepTable copies the parts of the published table holding name's rows
-// into name's staged table when the published build recorded hash for it. A snapshot
-// (snapshotPrefix) is published under the name of the view it replaces.
+// keepTable keeps the published table holding name's rows when the
+// published build recorded hash for it: the table gets no staged copy,
+// statements read the published table from then on, and publish leaves it
+// as it is. A snapshot (snapshotPrefix) is published under the name of the
+// view it replaces; the staged view, which objects built since may read,
+// then reads the published table.
 func (c *client) keepTable(targetDB, name, hash string) (bool, error) {
 	h := c.hashes
 	if hash == "" || h == nil || c.part != nil || h.previous[name] != hash {
@@ -113,16 +116,17 @@ func (c *client) keepTable(targetDB, name, hash string) (bool, error) {
 	if err != nil || !strings.HasSuffix(strings.TrimSpace(engine), "MergeTree") {
 		return false, err
 	}
-	staged := c.stage.name(name)
-	for _, q := range []string{
-		fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s`", targetDB, staged),
-		fmt.Sprintf("CREATE TABLE `%[1]s`.`%[2]s` AS `%[1]s`.`%[3]s`", targetDB, staged, published),
-		fmt.Sprintf("ALTER TABLE `%[1]s`.`%[2]s` ATTACH PARTITION ALL FROM `%[1]s`.`%[3]s`", targetDB, staged, published),
-	} {
+	stmts := []string{fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s`", targetDB, c.stage.name(name))}
+	if published != name {
+		stmts = append(stmts, fmt.Sprintf("CREATE OR REPLACE VIEW `%[1]s`.`%[2]s` AS SELECT * FROM `%[1]s`.`%[3]s`",
+			targetDB, c.stage.name(published), published))
+	}
+	for _, q := range stmts {
 		if _, err := c.Client.Execute(q); err != nil {
 			return false, fmt.Errorf("keeping table %s: %w", name, err)
 		}
 	}
+	c.stage.keep(published)
 	h.mu.Lock()
 	h.kept = append(h.kept, published)
 	h.mu.Unlock()

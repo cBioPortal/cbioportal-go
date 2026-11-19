@@ -133,9 +133,9 @@ version, and the next import builds every study.
 table and view gets a hash of its SQL, of the hashes of the tables it
 reads, and of the staged studies and reference data. `_table_hashes`
 stores them. When a new version builds every study but the studies are
-the same, a table with the same hash as before is not built again. Its new
-copy gets the published table's data parts, which takes seconds and
-copies no data. A table whose SQL changed is built again, and so is every
+the same, a table with the same hash as before is not built again. The
+build reads the published table instead, and publishing leaves that table
+where it is, so keeping a table takes no time. A table whose SQL changed is built again, and so is every
 table that reads it. For example, a change to how the mutation count is
 computed rebuilds the clinical tables, but not the expression and
 copy-number values, which are most of the rows.
