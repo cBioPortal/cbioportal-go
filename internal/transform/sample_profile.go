@@ -127,33 +127,8 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 	// the gene panel matrix, whose panel overrides the meta-file panel.
 	var sources []string
 
-	if exists("gene_panel_matrix") {
-		cols, _ := c.TableColumns("gene_panel_matrix")
-		skip := map[string]bool{"study_id": true, "source_file": true, "alteration_type": true,
-			"datatype": true, "profile_stable_id": true, "sample_id": true}
-		var names []string
-		for n := range cols {
-			if !skip[n] && !OrderColumns[n] {
-				names = append(names, n)
-			}
-		}
-		sort.Strings(names)
-		if len(names) > 0 {
-			pairs := make([]string, len(names))
-			for i, n := range names {
-				pairs[i] = fmt.Sprintf("('%s', m.`%s`)", n, n)
-			}
-			sources = append(sources, fmt.Sprintf(
-				"SELECT u.study_id AS study_id, u.sample_id AS sample_id, pm.profile_stable_id AS profile_stable_id, "+
-					"if(upper(u.panel) IN ('WXS', 'WGS', 'WXS/WGS'), '', u.panel) AS panel, toUInt8(0) AS prio "+
-					"FROM (SELECT m.study_id AS study_id, m.sample_id AS sample_id, kv.1 AS col, kv.2 AS panel "+
-					"FROM `%[1]s`.gene_panel_matrix m ARRAY JOIN [%[2]s] AS kv WHERE kv.2 != '' AND kv.2 != 'NA') u "+
-					"INNER JOIN (SELECT DISTINCT study_id, profile_stable_id, "+
-					"arrayJoin([%[3]s, %[4]s]) AS col FROM `%[1]s`.genetic_profile) pm "+
-					"ON u.study_id = pm.study_id AND u.col = pm.col",
-				rawDB, strings.Join(pairs, ", "),
-				sanitizeIdentSQL("profile_stable_id"), sanitizeIdentSQL("concat(study_id, '_', profile_stable_id)")))
-		}
+	if m := genePanelMatrixProfilesSQL(c, rawDB); m != "" {
+		sources = append(sources, m)
 	}
 
 	record := func(table, sampleCol, where string) {
@@ -249,4 +224,40 @@ func sampleProfileSQL(c *client, rawDB, targetDB string) (sql string, profiled b
 			"WHERE (sl.study_id, sl.sample_id) NOT IN (SELECT study_id, sample_id FROM base WHERE alteration_type = 'MUTATION_EXTENDED')",
 		rawDB, samples)
 	return "WITH base AS (" + base + ") SELECT * FROM base UNION ALL " + missing, profiled
+}
+
+// genePanelMatrixProfilesSQL selects (study_id, sample_id,
+// profile_stable_id, panel, prio 0) for each profile a sample's gene panel
+// matrix row names, or is "" without a gene panel matrix.
+func genePanelMatrixProfilesSQL(c *client, rawDB string) string {
+	if ok, _ := c.TableExists("gene_panel_matrix"); !ok {
+		return ""
+	}
+	cols, _ := c.TableColumns("gene_panel_matrix")
+	skip := map[string]bool{"study_id": true, "source_file": true, "alteration_type": true,
+		"datatype": true, "profile_stable_id": true, "sample_id": true}
+	var names []string
+	for n := range cols {
+		if !skip[n] && !OrderColumns[n] {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return ""
+	}
+	pairs := make([]string, len(names))
+	for i, n := range names {
+		pairs[i] = fmt.Sprintf("('%s', m.`%s`)", n, n)
+	}
+	return fmt.Sprintf(
+		"SELECT u.study_id AS study_id, u.sample_id AS sample_id, pm.profile_stable_id AS profile_stable_id, "+
+			"if(upper(u.panel) IN ('WXS', 'WGS', 'WXS/WGS'), '', u.panel) AS panel, toUInt8(0) AS prio "+
+			"FROM (SELECT m.study_id AS study_id, m.sample_id AS sample_id, kv.1 AS col, kv.2 AS panel "+
+			"FROM `%[1]s`.gene_panel_matrix m ARRAY JOIN [%[2]s] AS kv WHERE kv.2 != '' AND kv.2 != 'NA') u "+
+			"INNER JOIN (SELECT DISTINCT study_id, profile_stable_id, "+
+			"arrayJoin([%[3]s, %[4]s]) AS col FROM `%[1]s`.genetic_profile) pm "+
+			"ON u.study_id = pm.study_id AND u.col = pm.col",
+		rawDB, strings.Join(pairs, ", "),
+		sanitizeIdentSQL("profile_stable_id"), sanitizeIdentSQL("concat(study_id, '_', profile_stable_id)"))
 }

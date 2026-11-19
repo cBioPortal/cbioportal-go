@@ -13,6 +13,7 @@ CANCER_TYPE	Breast Cancer	golden_a	4	golden_a_GA-P3	golden_a_GA-P3-01	sample
 FRACTION_GENOME_ALTERED	0.1552	golden_a	1	golden_a_GA-P1	golden_a_GA-P1-01	sample
 FRACTION_GENOME_ALTERED	0.2487	golden_a	3	golden_a_GA-P2	golden_a_GA-P2-01	sample
 MUTATION_COUNT	0	golden_a	4	golden_a_GA-P3	golden_a_GA-P3-01	sample
+MUTATION_COUNT	0	golden_c	9	golden_c_GC-P3	golden_c_GC-P3-01	sample
 MUTATION_COUNT	1	golden_a	2	golden_a_GA-P1	golden_a_GA-P1-02	sample
 MUTATION_COUNT	1	golden_a	3	golden_a_GA-P2	golden_a_GA-P2-01	sample
 MUTATION_COUNT	1	golden_b	5	golden_b_GB-P1	golden_b_GB-P1-01	sample

@@ -10,11 +10,11 @@ import (
 //   - MUTATION_COUNT: distinct non-germline variants (chr, start, end, ref,
 //     tumor allele, as the importer stores them)
 //     of the stored (gene-resolved, filtered) mutations per sample of each
-//     mutation profile, 0 for samples the MAF profiles without any
-//     (DaoMutation.createMutationCountClinicalData). Samples profiled only
-//     through a gene panel matrix or the `*_sequenced` case list get none:
-//     the importer computes the count before those add them to
-//     sample_profile.
+//     mutation profile, 0 for profiled samples without any
+//     (DaoMutation.createMutationCountClinicalData). The importer counts
+//     when it loads the MAF and again after the gene panel matrix: samples
+//     the MAF or the gene panel matrix profile get a count, those profiled
+//     only through the `*_sequenced` case list (added later) get none.
 //   - FRACTION_GENOME_ALTERED: share of segmented length with |segment mean| >=
 //     0.2, rounded to 4 decimals (DaoCopyNumberSegment), as Java's
 //     Double.toString writes it ("1.0", "0.8079", "2.0E-4").
@@ -25,16 +25,19 @@ import (
 func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations, hasSegments bool) error {
 	var computed []string
 	if hasMutations {
-		// The importer counts when it loads the MAF, so only the samples the
-		// MAF itself profiles get a count: those with a stored record and
-		// those its #sequenced_samples header lists, not those a gene panel
-		// matrix adds later.
+		// The importer counts when it loads the MAF and again after the gene
+		// panel matrix: the samples with a stored record, those the MAF's
+		// #sequenced_samples header lists, and those the gene panel matrix
+		// profiles get a count.
 		profiled := fmt.Sprintf(
 			"SELECT r.study_id, r.tumor_sample_barcode, r.profile_stable_id FROM `%s`.mutation_extended r%s WHERE %s",
 			rawDB, geneKeyJoin(targetDB, "mutation_extended", "r", "hugo_symbol", "entrez_gene_id"),
 			mutationFilterSQL("r", "gk.resolved_entrez_gene_id", targetDB))
 		if ok, _ := c.TableExists("profile_sample"); ok {
 			profiled += fmt.Sprintf(" UNION ALL SELECT study_id, sample_id, profile_stable_id FROM `%s`.profile_sample WHERE kind = 'sequenced_samples'", rawDB)
+		}
+		if m := genePanelMatrixProfilesSQL(c, rawDB); m != "" {
+			profiled += " UNION ALL SELECT study_id, sample_id, profile_stable_id FROM (" + m + ")"
 		}
 		computed = append(computed, fmt.Sprintf(
 			"SELECT sp.study_id AS study_id, sp.sample_id AS sample_id, 'MUTATION_COUNT' AS attr_id, "+
