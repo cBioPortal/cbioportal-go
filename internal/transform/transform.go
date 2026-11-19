@@ -251,8 +251,8 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		"SELECT g.study_id AS study_id, g.id AS sample_id, g.chrom AS chrom, g.loc_start AS start, g.loc_end AS end, "+
 			"g.num_mark AS num_probes, g.seg_mean AS segment_mean, "+
 			nextIDs(c.idOffset("seg", "seg_id"), "r.study_rank, g.pos")+" AS seg_id "+
-			"FROM (SELECT *, %s AS pos FROM `%s`.cna_seg) g LEFT JOIN (%s) r ON r.study_id = g.study_id",
-		fileOrderSQL, rawDB, studyRanksSQL(targetDB))); err != nil {
+			"FROM (SELECT *, %s AS pos FROM `%s`.cna_seg WHERE %s) g LEFT JOIN (%s) r ON r.study_id = g.study_id",
+		fileOrderSQL, rawDB, validSegment, studyRanksSQL(targetDB))); err != nil {
 		return nil, err
 	}
 	if err := clinicalLong(c, rawDB, targetDB, "clinical_sample", "sample_id"); err != nil {
@@ -346,6 +346,16 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		counts[i] = ViewCount{Name: v}
 	}
 	return counts, nil
+}
+
+// validSegment keeps the staged copy-number segments the importer stores:
+// ImportCopyNumberSegmentData skips a segment whose start is not below its
+// end, both read as whole numbers.
+const validSegment = "toInt64(toFloat64OrZero(loc_start)) < toInt64(toFloat64OrZero(loc_end))"
+
+// segmentsSQL is the staged segments the importer stores (validSegment).
+func segmentsSQL(rawDB string) string {
+	return fmt.Sprintf("(SELECT * FROM `%s`.cna_seg WHERE %s)", rawDB, validSegment)
 }
 
 // withLowCardinality wraps sel so the named columns (comma-separated) are

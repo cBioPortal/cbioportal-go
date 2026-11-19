@@ -57,8 +57,8 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 				"SELECT study_id, id AS sample_id, 'FRACTION_GENOME_ALTERED' AS attr_id, "+
 				"round(sumIf(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start), abs(toFloat64OrZero(seg_mean)) >= 0.2) / "+
 				"sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)), 4) AS fga "+
-				"FROM `%s`.cna_seg GROUP BY study_id, id HAVING sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)) > 0)",
-			javaDoubleString4("fga"), rawDB))
+				"FROM %s GROUP BY study_id, id HAVING sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)) > 0)",
+			javaDoubleString4("fga"), segmentsSQL(rawDB)))
 	}
 	if len(computed) == 0 {
 		return nil

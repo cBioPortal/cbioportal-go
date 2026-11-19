@@ -126,7 +126,6 @@ stores less where Java stores empty rows.
 | `clinical-data-bin-counts` where the filtered samples have no value for an attribute | Java counts each sample as NA once for every selected study that defines the attribute, so there can be more NA samples than samples. | go counts each sample once. |
 | Clinical data counts and bins for an attribute that some selected studies store per patient and others per sample | Java counts every sample of the selected patients, also samples outside the selection. | go counts only the selected samples. |
 | Import: `clinical_data_derived` | Java stores a row for every attribute and case, even empty ones. | go stores only real values. The API answers the same. |
-| Import: copy-number segments | Java skips segments whose start is not below their end. | go keeps them. There are 4 on msk_chord_2024 and 10 on msk_impact_50k_2026. |
 | Import: timeline rows | Java drops rows for patients not in the study, and rows with more fields than the header. | go keeps them. |
 
 ## What go adds

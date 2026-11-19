@@ -164,6 +164,52 @@ func TestLiveResourceTCGABarcodes(t *testing.T) {
 	}
 }
 
+// TestLiveInvalidSegments checks that copy-number segments whose start is
+// not below their end are left out, as ImportCopyNumberSegmentData skips
+// them: from the segments, the fraction of genome altered, and whether a
+// sample has segments.
+func TestLiveInvalidSegments(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "seg_ref")
+	rawDB, db := goldenDatabase(t, base, "seg_raw"), goldenDatabase(t, base, "seg")
+	dir := t.TempDir()
+	files := map[string]string{
+		"meta_study.txt": "type_of_cancer: coad\ncancer_study_identifier: seg_study\nname: Segments\nshort_name: S\ndescription: d\nreference_genome: hg19\n",
+		"meta_clinical_sample.txt": "cancer_study_identifier: seg_study\ngenetic_alteration_type: CLINICAL\n" +
+			"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+		"data_clinical_sample.txt": "#Patient Identifier\tSample Identifier\n#p\t#s\n#STRING\tSTRING\n#1\t1\nPATIENT_ID\tSAMPLE_ID\nP1\tS1\nP2\tS2\n",
+		"meta_cna_seg.txt": "cancer_study_identifier: seg_study\ngenetic_alteration_type: COPY_NUMBER_ALTERATION\ndatatype: SEG\n" +
+			"reference_genome_id: hg19\ndescription: Segments\ndata_filename: data_cna.seg\n",
+		// S1: one segment, and one that ends where it starts; S2: one that
+		// ends before it starts (whole numbers, as Java reads them).
+		"data_cna.seg": "ID\tchrom\tloc.start\tloc.end\tnum.mark\tseg.mean\n" +
+			"S1\t1\t100\t1000\t10\t0.5\nS1\t1\t2000.2\t2000.9\t5\t0.1\nS2\t1\t500\t400\t5\t1.0\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingestGolden(t, base, rawDB, dir)
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	c := ch.New(base, db)
+	for _, q := range []struct{ sql, want string }{
+		{"SELECT sample_id, start, end FROM seg ORDER BY sample_id, start", "S1\t100\t1000"},
+		{"SELECT sample_id, attr_value FROM clinical_sample WHERE attr_id = 'FRACTION_GENOME_ALTERED' ORDER BY sample_id", "S1\t1.0"},
+		{"SELECT sample_stable_id, copy_number_segment_present FROM sample_derived ORDER BY sample_stable_id", "S1\t1\nS2\t0"},
+	} {
+		got, err := c.Execute(q.sql + " FORMAT TabSeparated")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(got) != q.want {
+			t.Errorf("%s:\n%s\nwant:\n%s", q.sql, got, q.want)
+		}
+	}
+}
+
 // TestSourceHash checks that the transform's version covers the Go files of
 // each package that decides what it builds, and leaves out their tests.
 func TestSourceHash(t *testing.T) {

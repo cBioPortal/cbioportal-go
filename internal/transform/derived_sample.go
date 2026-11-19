@@ -13,8 +13,8 @@ import (
 //     SAMPLE_TYPE value from the `clinical_sample` view, else Primary Solid
 //     Tumor;
 //   - sequenced is membership in the `<study>_sequenced` sample list;
-//   - copy_number_segment_present is whether the sample has rows in the raw
-//     cna_seg staging table.
+//   - copy_number_segment_present is whether the sample has segments the
+//     importer stores (segmentsSQL).
 func sampleDerivedSQL(rawDB, refDB, targetDB string) string {
 	return inTarget(targetDB, fmt.Sprintf(`SELECT
   concat(s.study_id, '_', s.sample_id) AS sample_unique_id,
@@ -39,7 +39,7 @@ func sampleDerivedSQL(rawDB, refDB, targetDB string) string {
       'Primary Solid Tumor'),
     'Primary Solid Tumor') AS sample_type,
   if(concat(s.study_id, '_', s.sample_id) IN (SELECT concat(study_id, '_', sample_id) FROM {{target}}.sample_list WHERE list_id = concat(study_id, '_sequenced')), 1, 0) AS sequenced,
-  if(concat(s.study_id, '_', s.sample_id) IN (SELECT concat(study_id, '_', id) FROM `+"`%s`"+`.cna_seg), 1, 0) AS copy_number_segment_present
+  if(concat(s.study_id, '_', s.sample_id) IN (SELECT concat(study_id, '_', id) FROM %s), 1, 0) AS copy_number_segment_present
 FROM {{target}}.sample s
 LEFT JOIN {{target}}.patient pt ON pt.study_id = s.study_id AND pt.patient_id = s.patient_id
 LEFT JOIN (
@@ -47,7 +47,7 @@ LEFT JOIN (
   FROM {{target}}.clinical_sample
   WHERE attr_id = 'SAMPLE_TYPE'
   GROUP BY study_id, sample_id
-) st ON s.study_id = st.study_id AND s.sample_id = st.sample_id`, rawDB))
+) st ON s.study_id = st.study_id AND s.sample_id = st.sample_id`, segmentsSQL(rawDB)))
 }
 
 // clinicalDataDerivedSQL reproduces prod's `clinical_data_derived` table. Prod

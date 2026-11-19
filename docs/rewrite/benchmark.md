@@ -432,12 +432,11 @@ These numbers come from one local ClickHouse server, not production. They
 count only queries on the benchmark's own databases.
 
 Both importers produced the same samples, patients, clinical data, mutations,
-structural variants, alterations and generic-assay rows. Two small
-differences remain:
-
-- Java's `clinical_data_derived` table also keeps a row for each empty value.
-- Java skips copy-number segments whose start is not before their end (4 on
-  chord, 10 on 50k). go keeps them.
+structural variants, alterations and generic-assay rows. One small
+difference remains: Java's `clinical_data_derived` table also keeps a row
+for each empty value. (In this test go also kept the copy-number segments
+whose start is not before their end, 4 on chord and 10 on 50k; it now skips
+them as Java does.)
 
 ### A portal with all of datahub
 
