@@ -136,6 +136,15 @@ of every study. The tables whose internal ids count across all studies
 (samples, patients, sample lists and copy-number segments) are still filled
 in one query, so their ids stay in one sequence.
 
+**A full build that stops part of the way can be resumed.** A full build
+of all of datahub takes about an hour. If it stops, from an error or a lost
+server, its finished tables stay under their temporary names, with a list of
+the steps it finished. The next full build of the same studies, with the
+same import times, keeps those tables and does only the rest. A table that
+is filled 50 studies at a time keeps its finished batches. If anything
+changed in between, such as a study staged again, it starts over. A build
+that stopped while publishing also starts over.
+
 **Nothing changes until the transform finishes.** Each table is first built
 under a temporary name (`__next_<name>`). At the end, all new tables are
 swapped in at once with ClickHouse's `EXCHANGE TABLES`, and the views are

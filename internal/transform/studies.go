@@ -431,7 +431,7 @@ var numberedAcrossStudies = map[string]bool{"sample": true, "patient": true, "sa
 // many studies with, one per batch of studies, when there is more than one
 // batch.
 func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
-	c.batches = nil
+	c.batches, c.batchIDs = nil, nil
 	if len(b.order) <= batchStudies {
 		return nil
 	}
@@ -445,6 +445,7 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 			return err
 		}
 		c.batches = append(c.batches, filtered)
+		c.batchIDs = append(c.batchIDs, ids)
 	}
 	logf("transform: filling the tables in %d batches of up to %d studies", len(c.batches), batchStudies)
 	return nil
@@ -508,6 +509,9 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 		}
 		return nil
 	}
+	if c.tableDone(targetDB, name) {
+		return nil
+	}
 	partition := ""
 	if study != "" {
 		partition = " PARTITION BY `" + study + "`"
@@ -532,21 +536,54 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 		}
 		stmts = append(stmts, fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel))
 	}
-	for _, q := range stmts {
-		if _, err := c.Execute(q); err != nil {
-			return fmt.Errorf("creating table %s: %w", name, err)
+	// A batched table created by a resumed build keeps its finished
+	// batches.
+	created := batched && c.stepDone("created:"+name)
+	if created {
+		if ok, err := stagedExists(c, targetDB, name); err != nil || !ok {
+			created = false
+		}
+	}
+	if !created {
+		for _, q := range stmts {
+			if _, err := c.Execute(q); err != nil {
+				return fmt.Errorf("creating table %s: %w", name, err)
+			}
+		}
+		if batched {
+			if err := c.markDone("created:" + name); err != nil {
+				return err
+			}
 		}
 	}
 	if batched {
-		for _, filtered := range c.batches {
+		for i, filtered := range c.batches {
+			step := fmt.Sprintf("batch:%s:%d", name, i)
+			if created && c.stepDone(step) {
+				continue
+			}
+			if created {
+				// The batch may have been filled in part when the build
+				// stopped.
+				drops := make([]string, len(c.batchIDs[i]))
+				for j, id := range c.batchIDs[i] {
+					drops[j] = fmt.Sprintf("DROP PARTITION '%s'", ch.SQLLit(id))
+				}
+				if _, err := c.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` %s", targetDB, name, strings.Join(drops, ", "))); err != nil {
+					return fmt.Errorf("emptying a batch of table %s: %w", name, err)
+				}
+			}
 			fc := *c
 			fc.Client = filtered
 			if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
 				return fmt.Errorf("filling table %s: %w", name, err)
 			}
+			if err := c.markDone(step); err != nil {
+				return err
+			}
 		}
 	}
-	return nil
+	return c.markDone("table:" + name)
 }
 
 // sameColumns reports whether the staged table name exists and has the

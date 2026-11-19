@@ -56,9 +56,8 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 	if err := c.EnsureDatabase(targetDB); err != nil {
 		return nil, err
 	}
-	if err := dropStaged(c, targetDB); err != nil {
-		return nil, err
-	}
+	// The staged objects of an earlier build are dropped, or kept to
+	// resume it, once the build is planned (startStaging).
 	c.stage = newStaging(targetDB)
 	counts, err := build(c, rawDB, targetDB, refDB, false)
 	if errors.Is(err, errFullBuild) {
@@ -74,9 +73,16 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 		err = beforePublish()
 	}
 	if err != nil {
-		if dropErr := dropStaged(c, targetDB); dropErr != nil {
-			return nil, fmt.Errorf("%w (and removing the staged objects: %v)", err, dropErr)
+		// A full build's staged tables stay for the next build to resume
+		// (resume.go); a study build's are dropped.
+		if c.resume == nil {
+			if dropErr := dropStaged(c, targetDB); dropErr != nil {
+				return nil, fmt.Errorf("%w (and removing the staged objects: %v)", err, dropErr)
+			}
 		}
+		return nil, err
+	}
+	if err := c.markDone(publishingStep); err != nil {
 		return nil, err
 	}
 	if err := publish(c, c.stage); err != nil {
@@ -115,6 +121,9 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 
 	plan, err := planBuild(c, rawDB, targetDB, refDB, full)
 	if err != nil {
+		return nil, err
+	}
+	if err := startStaging(c, targetDB, plan); err != nil {
 		return nil, err
 	}
 	if err := writeBuildState(c, targetDB, plan); err != nil {

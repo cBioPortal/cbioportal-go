@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -221,6 +222,74 @@ func TestLiveBatchedBuild(t *testing.T) {
 		if _, ok := want[name]; !ok {
 			t.Errorf("%s is not in a build in one go", name)
 		}
+	}
+}
+
+// TestLiveResumedBuild checks that a full build that stopped part of the
+// way (here: in the middle of a table filled batch by batch) is resumed by
+// the next build of the same staged studies, and gives the same tables as
+// a build that ran through; and that a build of other inputs starts over.
+func TestLiveResumedBuild(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "rb_ref")
+	rawDB := goldenDatabase(t, base, "rb_raw")
+	for _, study := range []string{"golden_a", "golden_b", "golden_c"} {
+		ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", study))
+	}
+	defer func(n int) { batchStudies, stepHook, Logf = n, nil, nil }(batchStudies)
+	batchStudies = 1
+	whole, resumed := goldenDatabase(t, base, "rb_whole"), goldenDatabase(t, base, "rb_resumed")
+	if _, err := Apply(ch.New(base, rawDB), rawDB, whole, refDB); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := errors.New("stopped")
+	stepHook = func(step string) error {
+		if step == "batch:genetic_alteration_derived:1" {
+			return stop
+		}
+		return nil
+	}
+	if _, err := Apply(ch.New(base, rawDB), rawDB, resumed, refDB); !errors.Is(err, stop) {
+		t.Fatalf("stopped build: %v", err)
+	}
+	stepHook = nil
+	var logged []string
+	Logf = func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	if _, err := Apply(ch.New(base, rawDB), rawDB, resumed, refDB); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "transform: resuming the previous build") }) {
+		t.Fatalf("build logged %q, want it to resume", logged)
+	}
+	got, want := dump(t, base, resumed), dump(t, base, whole)
+	for name, body := range want {
+		if name != "_objects" && got[name] != body {
+			t.Errorf("%s differs from a build that ran through:\n%s", name, diffLines(body, got[name]))
+		}
+	}
+
+	// A build of other inputs does not resume an unfinished one. Staging
+	// two of the three studies again makes a full build.
+	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_a"))
+	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_b"))
+	stepHook = func(step string) error {
+		if step == "batch:genetic_alteration_derived:1" {
+			return stop
+		}
+		return nil
+	}
+	if _, err := Apply(ch.New(base, rawDB), rawDB, resumed, refDB); !errors.Is(err, stop) {
+		t.Fatalf("stopped build: %v", err)
+	}
+	stepHook = nil
+	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_c"))
+	logged = nil
+	if _, err := Apply(ch.New(base, rawDB), rawDB, resumed, refDB); err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(logged, func(l string) bool { return strings.HasPrefix(l, "transform: resuming") }) {
+		t.Errorf("a build of other inputs resumed: %q", logged)
 	}
 }
 

@@ -167,7 +167,7 @@ func publish(c *client, s *staging) error {
 	}
 	tables := map[string]bool{}
 	for _, o := range objs {
-		if o.engine == "View" {
+		if o.engine == "View" || o.name == resumeTable {
 			continue
 		}
 		final := strings.TrimPrefix(o.name, stagePrefix)
