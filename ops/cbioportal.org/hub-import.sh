@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Imports the studies a cBioPortal/datahub pull request changes into
-# hub.cbioportal.org and reports the result on the pull request: the per-PR
-# Job of the `datahub-pr-import-set` ApplicationSet.
+# Imports the studies a cBioPortal/datahub pull request changes into the
+# pull request's own preview (datahub-pr-<N>.gopreview.cbioportal.org) and
+# reports the result on the pull request: the per-PR Job of the
+# `datahub-pr-import-set` ApplicationSet.
 #
 #   PR_NUMBER=2327 HEAD_SHA=<sha> /app/deploy/hub-import.sh
 #

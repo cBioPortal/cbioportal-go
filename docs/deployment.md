@@ -2,7 +2,8 @@
 
 This page explains how cbioportal-go is packaged and where it runs. It covers
 the container image, the public preview at go.cbioportal.org, the hub that
-previews new datahub studies, and the per-pull-request previews.
+follows datahub and previews its pull requests, and the per-pull-request
+previews of cbioportal-go.
 
 ## Contents
 
@@ -13,6 +14,8 @@ previews new datahub studies, and the per-pull-request previews.
   - [Loading studies](#loading-studies)
   - [Mirroring production](#mirroring-production)
 - [hub.cbioportal.org](#hubcbioportalorg)
+  - [Following datahub's master branch](#following-datahubs-master-branch)
+  - [Pull request previews](#pull-request-previews)
 - [PR previews](#pr-previews)
 
 ## Container image
@@ -312,34 +315,100 @@ only one or two cores for it.
 
 ## hub.cbioportal.org
 
-The hub shows a preview of the studies in each cBioPortal/datahub pull
-request labelled `preview`. It uses the same ClickHouse Cloud service, with
-the databases `dev_cbioportal_hub_go`, `_raw` and `_ref`. Its manifests are
-in knowledgesystems-k8s-deployment under `apps/cbioportal-hub/`.
+hub.cbioportal.org shows every study on datahub's `master` branch, kept up
+to date within a few minutes of each merge. Each cBioPortal/datahub pull
+request labelled `preview` also gets a preview of its own, at
+`https://datahub-pr-<N>.gopreview.cbioportal.org`. Both use the same
+ClickHouse Cloud service as go.cbioportal.org. Their manifests are in
+knowledgesystems-k8s-deployment under `apps/cbioportal-hub/`.
 
-For each new commit on such a pull request, Argo CD (the tool that deploys to
-the cluster) starts a job that runs
+### Following datahub's master branch
+
+The hub's databases are `dev_cbioportal_hub_go`, `_raw` and `_ref`. A
+CronJob runs `cbioportal-ops hub sync-master` every minute. Only one runs
+at a time: a new one is not started while the last is still running. Each
+run:
+
+1. Asks GitHub which commit `master` points at (`git ls-remote`). This
+   takes about a second.
+2. Compares it with the last commit the hub imported, which is recorded in
+   `_hub_master_sync` in the raw database. When they are the same, the run
+   stops there. So most runs do nothing and end within seconds.
+3. Otherwise, it lists the files that changed between the last imported
+   commit and the new one. Several merges since the last run are handled
+   together: the run imports the studies as they are at the newest commit,
+   and never the commits in between one by one.
+4. It takes the hub's import lock and imports every changed study in one
+   import, as `cbioportal-import import-study` does (see
+   [Loading studies](#loading-studies)). It removes the studies that were
+   deleted from `master`, and loads the shared gene panels again when they
+   changed.
+5. It records the new commit as imported only when the import succeeded.
+
+A study that fails to load is left out of the hub, and the commit still
+counts as imported. The study is tried again when a later commit changes
+it. When the whole import fails, for example because the build of the
+portal tables failed, the commit is not recorded. The next runs wait 30
+minutes (`RETRY_AFTER`) before they try that commit again, so a broken
+commit does not start a new import every minute. A newer commit is tried
+at once.
+
+The very first run finds no imported commit, so it imports every study on
+`master`. That is a full build of all of datahub and takes a few hours,
+mostly to download the files. It also removes any study the hub held that
+is not on `master`. A new seed dump in datahub (`seedDB/`) is not loaded
+automatically: the reference data is loaded only into an empty reference
+database.
+
+### Pull request previews
+
+For each new commit of a datahub pull request labelled `preview`, Argo CD
+(the tool that deploys to the cluster) starts a job that runs
 [`ops/cbioportal.org/hub-import.sh`](../ops/cbioportal.org/hub-import.sh),
-which calls `cbioportal-ops hub import-pr`. The job:
+which calls `cbioportal-ops hub import-pr`. The preview has its own
+databases, `dev_cbioportal_go_prdatahub<N>`, `_raw` and `_ref`, and its own
+API pod, so previews never change the hub or each other.
 
-1. It checks out the studies the pull request changes.
-2. It imports them as `cbioportal-import import-study` does (see
-   [Loading studies](#loading-studies)). As each study is imported, the job
-   also starts checking it with cbioportal-core's validator
-   (`validateData.py`). The check runs in the background, so it does not
-   slow the import down.
-3. When the import is done, it releases the import lock, so other pull
-   requests can import. Then it waits for the checks to finish, up to an
+A `hub-preview:` line in the pull request description chooses what the
+preview holds:
+
+| Line | The preview holds |
+|---|---|
+| none, or `hub-preview: changed` | The reference data and the studies the pull request changes. This is the default and the fastest. |
+| `hub-preview: all` | A copy of every study on hub.cbioportal.org, with the pull request's studies imported on top. Use it to see a study next to all the others, for example in a query across studies. |
+
+With `all`, the first import copies the hub's staged studies and reference
+data into the preview's databases. The copy takes about 20 seconds,
+because ClickHouse attaches the data instead of rewriting it. The preview's
+portal tables are then built from all the studies, which takes about an
+hour for all of datahub. Later commits of the pull request import only
+their studies on top, in about a minute each. The copy is of the hub as
+it was when the preview was first built. Changing the `hub-preview:` line
+rebuilds the preview from empty with the next commit.
+
+A `hub-import-only:` list in the description (`- public/<study>` lines)
+limits the import to those of the pull request's studies, in both modes.
+
+The job:
+
+1. Checks out the studies the pull request changes.
+2. Imports them into the preview, as `cbioportal-import import-study` does.
+   As each study is imported, the job also starts checking it with
+   cbioportal-core's validator (`validateData.py`). The check runs in the
+   background, so it does not slow the import down.
+3. When the import is done, it waits for the checks to finish, up to an
    hour per study.
-4. It reports a Check Run and a Deployment on the pull request.
+4. It reports a Check Run and a Deployment on the pull request. The
+   Deployment links to the preview.
 
 **Validation.** The validator compares each study with the hub's reference
 data: cancer types, genes, gene sets and gene panels. The job reads these
-once from the hub's own API and saves them as files for the validator (its
-`-p` option). If the pull request adds or changes gene panel files, those
-panels replace the hub's, because the hub loads them only during the import.
-Their genes are matched by Hugo symbol or Entrez id only. Gene aliases are
-not checked, as when the validator asks a portal's API directly.
+once from hub.cbioportal.org's API and saves them as files for the
+validator (its `-p` option). If the pull request adds or changes gene
+panel files, those panels replace the hub's, because the preview loads
+them only during the import. Their genes are matched by Hugo symbol or
+Entrez id only. Gene aliases are not checked, as when the validator asks a
+portal's API directly.
 
 A study is imported whatever the validator finds, so the preview can always
 be looked at. The Check Run shows, for each study, whether validation passed
@@ -351,13 +420,19 @@ whose studies all imported is not imported again, even if validation failed.
 If the validator is missing or the hub's API cannot be read, the studies are
 imported without validation and the summary says so.
 
-Imports from different pull requests wait for each other, using a lock table
-in the raw database. If a study fails to load, it is removed. If the
-transform fails, the pull request's studies are removed and the hub is
-rebuilt without them. Meanwhile the hub keeps serving its previous build.
-The settings are listed in [ops/cbioportal.org](../ops/cbioportal.org/). The
-job can also run locally against any ClickHouse and GitHub API
-(`GITHUB_API`).
+If a study fails to load, it is removed from the preview. If the build of
+the portal tables fails, the pull request's studies are removed and the
+preview is rebuilt without them. Meanwhile the preview keeps serving its
+previous build.
+
+Closing the pull request or removing the label deletes the preview's API
+pod, and a cleanup step (`cbioportal-ops hub teardown <N>`) drops its
+databases. A daily job (`cbioportal-ops hub gc`) also removes the previews
+of closed or unlabelled pull requests that the cleanup missed.
+
+The settings are listed in [ops/cbioportal.org](../ops/cbioportal.org/).
+The jobs can also run locally against any ClickHouse, datahub copy
+(`DATAHUB_GIT`) and GitHub API (`GITHUB_API`).
 
 ## PR previews
 

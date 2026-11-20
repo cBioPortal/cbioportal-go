@@ -52,14 +52,14 @@ func TestSummary(t *testing.T) {
 		failed,
 		{Dir: repo + "/public/gone", Status: studyimport.Skipped},
 	}}
-	if p := r.progressSummary(); p != "- :x: `bad` — import failed (see logs); removed from the hub\n" {
+	if p := r.progressSummary(); p != "- :x: `bad` — import failed (see logs); removed from the preview\n" {
 		t.Errorf("progress summary %q", p)
 	}
 	r.ok, r.fails = Tally(res, true)
 	r.addFailed()
 	r.addResults(res, repo, true)
 	want := strings.Join([]string{
-		"- :x: `bad` — import failed (see logs); removed from the hub",
+		"- :x: `bad` — import failed (see logs); removed from the preview",
 		"- :white_check_mark: reference gene panels",
 		"- :white_check_mark: [a](https://hub.example.org/study/summary?id=a) (12s)",
 		"- :heavy_minus_sign: `public/gone` — no meta_study.txt in the PR, skipped",
@@ -87,7 +87,7 @@ func TestSummary(t *testing.T) {
 	}}
 	r.ok, r.fails = Tally(res, false)
 	r.addResults(res, repo, false)
-	if got := r.summary.String(); got != "- :x: `a` — building the hub failed (see logs); removed from the hub\n" || r.fails != 1 {
+	if got := r.summary.String(); got != "- :x: `a` — building the preview failed (see logs); removed from the preview\n" || r.fails != 1 {
 		t.Errorf("removed: %q, %d failed", got, r.fails)
 	}
 }

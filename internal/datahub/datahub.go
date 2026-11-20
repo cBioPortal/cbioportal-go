@@ -112,8 +112,94 @@ func (c *Checkout) Fetch(ctx context.Context, ref string, paths []string) (strin
 // CheckoutFetched checks out the commit of the last Fetch. Large files stay
 // LFS pointer files until PullLFS replaces them.
 func (c *Checkout) CheckoutFetched(ctx context.Context) error {
-	_, err := c.git(ctx, nil, "-c", "advice.ignoredHook=false", "checkout", "-q", "FETCH_HEAD")
+	_, err := c.git(ctx, nil, "-c", "advice.ignoredHook=false", "checkout", "-q", c.fetched)
 	return err
+}
+
+// HeadCommit returns the commit branch points at in the repository at
+// gitURL, without fetching anything (git ls-remote).
+func HeadCommit(ctx context.Context, gitURL, branch string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", gitURL, "refs/heads/"+branch)
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git ls-remote %s: %w: %s", branch, err, strings.TrimSpace(stderr.String()))
+	}
+	sha, _, _ := strings.Cut(stdout.String(), "\t")
+	if sha = strings.TrimSpace(sha); sha == "" {
+		return "", fmt.Errorf("git ls-remote: no branch %s", branch)
+	}
+	return sha, nil
+}
+
+// FetchCommit fetches one more commit into the repository of the last
+// Fetch, shallow and without blobs, so ChangedFiles can compare it with
+// the fetched commit. It does not change what CheckoutFetched checks out.
+func (c *Checkout) FetchCommit(ctx context.Context, sha string) error {
+	_, err := c.git(ctx, nil, "fetch", "-q", "--depth=1", "--filter=blob:none", "origin", sha)
+	return err
+}
+
+// Files lists the paths of every file in commit rev, from its tree alone.
+func (c *Checkout) Files(ctx context.Context, rev string) ([]string, error) {
+	out, err := c.git(ctx, nil, "ls-tree", "-r", "--name-only", rev)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
+// ChangedFiles lists the paths that differ between commits from and to:
+// added, changed and deleted files. A renamed file counts as deleted at its
+// old path and added at its new one.
+func (c *Checkout) ChangedFiles(ctx context.Context, from, to string) ([]string, error) {
+	out, err := c.git(ctx, nil, "diff", "--name-only", "--no-renames", from, to)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(out), nil
+}
+
+// Show returns the content of file path in commit rev.
+func (c *Checkout) Show(ctx context.Context, rev, path string) (string, error) {
+	return c.git(ctx, nil, "show", rev+":"+path)
+}
+
+// SetPaths makes the next checkout hold these study paths (and the shared
+// files, see SparsePatterns) instead of the ones Fetch was given.
+func (c *Checkout) SetPaths(ctx context.Context, paths []string) error {
+	patterns := strings.Join(SparsePatterns(paths), "\n") + "\n"
+	_, err := c.git(ctx, strings.NewReader(patterns), "sparse-checkout", "set", "--no-cone", "--stdin")
+	return err
+}
+
+// StudyDirsWithMeta returns the study directories of files (see StudyDirs)
+// that have a meta_study.txt: the studies of a commit, given its files.
+func StudyDirsWithMeta(files []string) []string {
+	have := map[string]bool{}
+	for _, f := range files {
+		if dir, ok := strings.CutSuffix(f, "/meta_study.txt"); ok {
+			have[dir] = true
+		}
+	}
+	var out []string
+	for _, d := range StudyDirs(files) {
+		if have[d] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// StudyIDFromMeta returns the cancer_study_identifier of a meta_study.txt.
+func StudyIDFromMeta(meta string) string {
+	for line := range strings.SplitSeq(meta, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "cancer_study_identifier:"); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 // git runs git in Dir. LFS smudging is off: PullLFS downloads the files.

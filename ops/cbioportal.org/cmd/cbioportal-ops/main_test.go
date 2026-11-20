@@ -26,6 +26,11 @@ func TestRun(t *testing.T) {
 		// A dry run changes nothing, so it needs no ClickHouse or GitHub.
 		{[]string{"preview", "teardown", "12", "--dry-run"}, 0, ""},
 		{[]string{"preview", "teardown", "-dry-run", "12"}, 0, ""},
+		{[]string{"hub"}, 2, "sync-master"},
+		{[]string{"hub", "teardown", "0"}, 2, "not a pull request number"},
+		{[]string{"hub", "gc", "extra"}, 2, `unexpected argument "extra"`},
+		{[]string{"hub", "sync-master", "extra"}, 2, `unexpected argument "extra"`},
+		{[]string{"hub", "teardown", "12", "--dry-run"}, 0, ""},
 	} {
 		var out bytes.Buffer
 		code := run(context.Background(), tc.args, &out, &out)

@@ -1,13 +1,18 @@
 // Command cbioportal-ops runs the cBioPortal team's own jobs for
 // cbioportal.org: the per-pull-request previews of cbioportal-go
-// (pr-<N>.gopreview.cbioportal.org) and the imports of datahub pull
-// requests into hub.cbioportal.org. Settings come from the environment the
-// cluster's Job manifests set; see ops/cbioportal.org/README.md.
+// (pr-<N>.gopreview.cbioportal.org), hub.cbioportal.org (datahub's master
+// branch) and the previews of datahub pull requests
+// (datahub-pr-<N>.gopreview.cbioportal.org). Settings come from the
+// environment the cluster's Job manifests set; see
+// ops/cbioportal.org/README.md.
 //
 //	cbioportal-ops preview setup         build PR_NUMBER's preview databases
 //	cbioportal-ops preview teardown <N>  remove pull request N's preview
 //	cbioportal-ops preview gc            remove previews of closed or unlabelled PRs
-//	cbioportal-ops hub import-pr         import PR_NUMBER's datahub studies into the hub
+//	cbioportal-ops hub sync-master       bring the hub up to datahub's master branch
+//	cbioportal-ops hub import-pr         import datahub PR_NUMBER's studies into its preview
+//	cbioportal-ops hub teardown <N>      remove datahub pull request N's preview
+//	cbioportal-ops hub gc                remove the previews of closed or unlabelled datahub PRs
 package main
 
 import (
@@ -49,8 +54,8 @@ func newRoot(ctx context.Context) *cobra.Command {
 		Use:   name,
 		Short: "run the cBioPortal team's jobs for cbioportal.org",
 		Long: `cbioportal-ops runs the cBioPortal team's jobs for cbioportal.org: the
-previews of cbioportal-go pull requests and the imports of datahub pull
-requests into the hub.
+previews of cbioportal-go pull requests, hub.cbioportal.org (datahub's
+master branch) and the previews of datahub pull requests.
 
 Settings come from the environment the cluster's Job manifests set; see
 ops/cbioportal.org/README.md.
@@ -61,8 +66,8 @@ Exit status: 0 success, 1 failure, 2 invalid command line or settings.`,
 	}
 	previewCmd := &cobra.Command{Use: "preview", Short: "build and remove the previews of cbioportal-go pull requests"}
 	previewCmd.AddCommand(previewSetup(ctx), previewTeardown(ctx), previewGC(ctx))
-	hubCmd := &cobra.Command{Use: "hub", Short: "import datahub pull requests into hub.cbioportal.org"}
-	hubCmd.AddCommand(hubImportPR(ctx))
+	hubCmd := &cobra.Command{Use: "hub", Short: "keep hub.cbioportal.org at datahub's master, and preview datahub pull requests"}
+	hubCmd.AddCommand(hubSyncMaster(ctx), hubImportPR(ctx), hubTeardown(ctx), hubGC(ctx))
 	root.AddCommand(previewCmd, hubCmd)
 	cli.AddVersion(root, name)
 	return root
@@ -130,10 +135,66 @@ func previewGC(ctx context.Context) *cobra.Command {
 	return cmd
 }
 
+func hubSyncMaster(ctx context.Context) *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync-master",
+		Short: "import the studies that changed on datahub's master into the hub",
+		Args:  cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			st, err := hub.MasterSettingsFromEnv()
+			if err != nil {
+				return cli.Usage(err)
+			}
+			return finish(cmd, hub.SyncMaster(ctx, st))
+		},
+	}
+}
+
+func hubTeardown(ctx context.Context) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "teardown <N>",
+		Short: "remove the preview of datahub pull request N",
+		Args: func(_ *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return cli.Usagef("hub teardown takes a pull request number")
+			}
+			if pr, err := strconv.Atoi(args[0]); err != nil || pr <= 0 {
+				return cli.Usagef("not a pull request number: %q", args[0])
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pr, _ := strconv.Atoi(args[0])
+			st := hub.PreviewSettingsFromEnv()
+			st.DryRun = dryRun
+			return finish(cmd, hub.Teardown(ctx, st, github.FromEnv(), pr))
+		},
+	}
+	dryRunFlag(cmd, &dryRun)
+	return cmd
+}
+
+func hubGC(ctx context.Context) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "gc",
+		Short: "remove the previews of closed or unlabelled datahub pull requests",
+		Args:  cli.ArgsBetween(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			st := hub.PreviewSettingsFromEnv()
+			st.DryRun = dryRun
+			return finish(cmd, hub.GC(ctx, st, github.FromEnv()))
+		},
+	}
+	dryRunFlag(cmd, &dryRun)
+	return cmd
+}
+
 func hubImportPR(ctx context.Context) *cobra.Command {
 	return &cobra.Command{
 		Use:   "import-pr",
-		Short: "import the studies of datahub pull request $PR_NUMBER into the hub",
+		Short: "import the studies of datahub pull request $PR_NUMBER into its preview",
 		Args:  cli.ArgsBetween(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			st, err := hub.SettingsFromEnv()

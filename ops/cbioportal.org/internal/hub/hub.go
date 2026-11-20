@@ -1,5 +1,7 @@
-// Package hub imports the studies of cBioPortal/datahub pull requests into
-// hub.cbioportal.org and reports the result on each pull request.
+// Package hub keeps hub.cbioportal.org up to date with datahub's master
+// branch (SyncMaster), and builds a preview of each cBioPortal/datahub pull
+// request labelled `preview` in databases of its own (ImportPR), reporting
+// the result on the pull request.
 package hub
 
 import (
@@ -21,6 +23,7 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/studyimport"
 	"github.com/cbioportal/cbioportal-go/ops/cbioportal.org/internal/github"
 	"github.com/cbioportal/cbioportal-go/ops/cbioportal.org/internal/job"
+	"github.com/cbioportal/cbioportal-go/ops/cbioportal.org/internal/preview"
 )
 
 // DatahubRepo is the GitHub repository of datahub.
@@ -29,12 +32,26 @@ const DatahubRepo = "cBioPortal/datahub"
 // DefaultValidator is where the image keeps cbioportal-core's validator.
 const DefaultValidator = "/opt/cbioportal-core/scripts/importer/validateData.py"
 
-// Settings of an import, from the environment the Job manifest sets.
+// Default names of the pull request previews.
+const (
+	// DefaultPRPrefix starts the database names of a pull request's
+	// preview: <prefix><N>, _raw and _ref.
+	DefaultPRPrefix = "dev_cbioportal_go_prdatahub"
+	// DefaultPRBase is a preview's address; <N> is the pull request.
+	DefaultPRBase = "https://datahub-pr-<N>.gopreview.cbioportal.org"
+)
+
+// Settings of a pull request's import into its own preview, from the
+// environment the Job manifest sets.
 type Settings struct {
-	PR            int
-	HeadSHA       string // the commit this Job is for
-	DB, Raw, Ref  string // HUB_DB, HUB_RAW_DB, HUB_REF_DB
-	Base          string // HUB_BASE, the hub's public URL
+	PR           int
+	HeadSHA      string // the commit this Job is for
+	DB, Raw, Ref string // the preview's databases: HUB_PR_DB_PREFIX plus the PR number
+	// Hub is hub.cbioportal.org's databases (HUB_DB, HUB_RAW_DB,
+	// HUB_REF_DB), which `hub-preview: all` copies.
+	Hub           preview.Databases
+	HubLockTable  string
+	Base          string // the preview's address (HUB_PR_BASE)
 	Workdir       string
 	LogURL        string
 	LockWait      time.Duration
@@ -60,18 +77,21 @@ func SettingsFromEnv() (*Settings, error) {
 	if v == "" || err != nil || pr <= 0 || strings.TrimLeft(v, "0123456789") != "" {
 		return nil, fmt.Errorf("PR_NUMBER must be a number, not %q", v)
 	}
+	pd := preview.DatabasesFor(cli.EnvOr("HUB_PR_DB_PREFIX", DefaultPRPrefix), pr)
 	s := &Settings{
-		PR:         pr,
-		HeadSHA:    os.Getenv("HEAD_SHA"),
-		DB:         cli.EnvOr("HUB_DB", "dev_cbioportal_hub_go"),
-		Base:       cli.EnvOr("HUB_BASE", "https://hub.cbioportal.org"),
-		Workdir:    cli.EnvOr("WORKDIR", "/tmp/hub-import"),
-		DatahubGit: cli.EnvOr("DATAHUB_GIT", datahub.DefaultGit),
+		PR:           pr,
+		HeadSHA:      os.Getenv("HEAD_SHA"),
+		DB:           pd.DB,
+		Raw:          pd.Raw,
+		Ref:          pd.Ref,
+		Hub:          HubDatabases(),
+		HubLockTable: HubLockTable,
+		Base:         strings.ReplaceAll(cli.EnvOr("HUB_PR_BASE", DefaultPRBase), "<N>", strconv.Itoa(pr)),
+		Workdir:      cli.EnvOr("WORKDIR", "/tmp/hub-import"),
+		DatahubGit:   cli.EnvOr("DATAHUB_GIT", datahub.DefaultGit),
 	}
-	s.Raw = cli.EnvOr("HUB_RAW_DB", s.DB+"_raw")
-	s.Ref = cli.EnvOr("HUB_REF_DB", s.DB+"_ref")
 	s.LogURL = cli.EnvOr("LOG_URL", s.Base)
-	s.HubAPI = cli.EnvOr("HUB_API", s.Base)
+	s.HubAPI = cli.EnvOr("HUB_API", cli.EnvOr("HUB_BASE", DefaultHubBase))
 	s.Validator = cli.EnvOr("VALIDATOR", DefaultValidator)
 	if s.Validator == "off" {
 		s.Validator = ""
@@ -134,8 +154,8 @@ type run struct {
 
 func (r *run) importLog() string { return fmt.Sprintf("`%s`.`_hub_import_log`", r.Raw) }
 
-// ImportPR imports the studies a datahub pull request changes into the hub
-// (see the package README for the steps).
+// ImportPR imports the studies a datahub pull request changes into the
+// pull request's own preview (see the package README for the steps).
 func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	r := &run{Settings: st, ctx: ctx, gh: gh, ch: ch.New(job.ClickHouseURL(), "default")}
 	if err := os.MkdirAll(r.Workdir, 0o755); err != nil {
@@ -166,18 +186,17 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		return nil
 	}
 	job.Logf("studies: %s", strings.Join(studies, " "))
+	mode, modeErr := ParseMode(pr.Body)
+	job.Logf("hub-preview: %s", mode)
 
 	// Argo CD recreates a finished Job once its TTL removes it; a commit
-	// that was imported already is not imported again.
-	if err := r.ch.EnsureDatabase(r.Raw); err != nil {
-		return fmt.Errorf("cannot reach ClickHouse: %w", err)
+	// that was imported already in the same mode is not imported again.
+	lastMode, err := r.prepareDatabases(mode)
+	if err != nil {
+		return err
 	}
-	if _, err := r.ch.ExecuteServerwide("CREATE TABLE IF NOT EXISTS " + r.importLog() +
-		" (pr UInt32, sha String, conclusion String, finished DateTime) ENGINE = MergeTree ORDER BY (pr, sha)"); err != nil {
-		return fmt.Errorf("cannot reach ClickHouse: %w", err)
-	}
-	doneAt, err := job.Query(r.ch, fmt.Sprintf("SELECT max(finished) FROM %s WHERE pr = %d AND sha = '%s' HAVING count() > 0 FORMAT TSV",
-		r.importLog(), r.PR, ch.SQLLit(r.HeadSHA)))
+	doneAt, err := job.Query(r.ch, fmt.Sprintf("SELECT max(finished) FROM %s WHERE pr = %d AND sha = '%s' AND mode = '%s' HAVING count() > 0 FORMAT TSV",
+		r.importLog(), r.PR, ch.SQLLit(r.HeadSHA), ch.SQLLit(mode)))
 	if err != nil {
 		return err
 	}
@@ -187,8 +206,12 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	}
 
 	r.status = &github.Status{C: gh, Repo: DatahubRepo, SHA: r.HeadSHA, CheckName: "Hub preview import",
-		Environment: "hub-preview", Description: "Preview on hub.cbioportal.org", LogURL: r.LogURL, Logf: job.Logf}
-	r.status.Start(ctx, "Importing studies...", fmt.Sprintf("[Logs](%s) · [hub.cbioportal.org](%s)", r.LogURL, r.Base), r.Base+"/")
+		Environment: PreviewEnvironment(r.PR), Description: "Preview of datahub#" + strconv.Itoa(r.PR), LogURL: r.LogURL, Logf: job.Logf}
+	r.status.Start(ctx, "Importing studies...", fmt.Sprintf("[Logs](%s) · [preview](%s)", r.LogURL, r.Base), r.Base+"/")
+	if modeErr != nil {
+		r.summary.Add("- :x: %v", modeErr)
+		return r.finish("failure", "Invalid hub-preview setting")
+	}
 
 	// The checkout; LFS files are downloaded per study, just before its
 	// ingest, and the study is deleted after.
@@ -216,20 +239,20 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	r.repo = repo
 	r.setupValidation(ctx, co, files)
 
-	// One import at a time across Jobs.
-	r.lock = &studyimport.Lock{C: r.ch, DB: r.Raw, Table: "_hub_import_lock", Owner: r.Owner,
+	// One import of the preview at a time, across the Jobs of its commits.
+	r.lock = &studyimport.Lock{C: r.ch, DB: r.Raw, Table: HubLockTable, Owner: r.Owner,
 		Wait: r.LockWait, Stale: r.LockStale, Poll: r.LockPoll, Heartbeat: r.LockHeartbeat, Logf: job.Logf}
 	if err := r.lock.Acquire(ctx); err != nil {
 		job.Logf("%v", err)
-		r.summary.Add("- :x: could not take the hub import lock (see logs)")
-		return r.finish("failure", "Could not take the hub import lock")
+		r.summary.Add("- :x: could not take the preview's import lock (see logs)")
+		return r.finish("failure", "Could not take the import lock")
 	}
 	r.unlock = func() {
 		// Only a complete import is recorded: a recreated Job retries a
 		// partial one.
 		if r.complete && r.lock.Held() {
-			if _, err := r.ch.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s SELECT %d, '%s', 'success', now()",
-				r.importLog(), r.PR, ch.SQLLit(r.HeadSHA))); err != nil {
+			if _, err := r.ch.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s SELECT %d, '%s', '%s', 'success', now()",
+				r.importLog(), r.PR, ch.SQLLit(r.HeadSHA), ch.SQLLit(mode))); err != nil {
 				job.Logf("WARN: could not record the import: %v", err)
 			}
 		}
@@ -242,6 +265,16 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	if latest, err := gh.PR(ctx, DatahubRepo, r.PR); err == nil && latest.Head.SHA != "" && latest.Head.SHA != r.HeadSHA {
 		r.summary.Add("- superseded by %s", latest.Head.SHA)
 		return r.finish("skipped", "Superseded by a newer commit")
+	}
+	// The first import in `all` mode starts from a copy of the hub; later
+	// commits import their studies on top of it.
+	if mode == ModeAll && lastMode != ModeAll {
+		r.status.Progress(ctx, "Copying hub.cbioportal.org's studies...", r.summary.String())
+		if err := r.copyHub(ctx); err != nil {
+			job.Logf("%v", err)
+			r.summary.Add("- :x: could not copy hub.cbioportal.org's studies (see logs)")
+			return r.finish("failure", "Could not copy the hub")
+		}
 	}
 
 	dirs := make([]string, len(studies))
@@ -467,9 +500,9 @@ func (r *run) importLine(repo string, st studyimport.StudyResult) string {
 	case studyimport.Skipped:
 		return fmt.Sprintf("- :heavy_minus_sign: `%s` — no meta_study.txt in the PR, skipped", rel(repo, st.Dir))
 	case studyimport.Removed:
-		return fmt.Sprintf("- :x: `%s` — building the hub failed (see logs); removed from the hub", st.StudyID)
+		return fmt.Sprintf("- :x: `%s` — building the preview failed (see logs); removed from the preview", st.StudyID)
 	}
-	return fmt.Sprintf("- :x: `%s` — import failed (see logs); removed from the hub", st.StudyID)
+	return fmt.Sprintf("- :x: `%s` — import failed (see logs); removed from the preview", st.StudyID)
 }
 
 // addResults adds the summary lines after the transform: the gene panels,
@@ -487,7 +520,7 @@ func (r *run) addResults(res *studyimport.Result, repo string, panelsChanged boo
 		r.summary.Add("%s", r.studyLine(repo, st))
 	}
 	if res.RebuildErr != nil {
-		job.Logf("the rebuild failed too; the hub keeps serving its previous build")
+		job.Logf("the rebuild failed too; the preview keeps serving its previous build")
 	}
 }
 
