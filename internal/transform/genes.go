@@ -74,7 +74,7 @@ func resolveGeneSQL(refDB string, mode geneMode, keys string) string {
 		parse := fmt.Sprintf("if(k.ent != '' AND %s, [ge._ge], if(k.sym != '', if(%s, [gh._he], ga._ae), %s))", eFound, hFound, none)
 		all := fmt.Sprintf("arrayDistinct(arrayConcat(%s, if(k.sym != '' AND k.sym = k._symc, ga._ae, %s)))", parse, none)
 		cands = fmt.Sprintf(
-			"if(NOT (%[1]s) OR empty(%[2]s), %[4]s, if(notEmpty(arrayFilter(x -> has(mir._mirs, x), %[3]s)), arrayFilter(x -> has(mir._mirs, x), %[3]s), if(length(%[2]s) = 1, %[2]s, %[4]s)))",
+			"if(NOT (%[1]s) OR empty(%[2]s), %[4]s, if(notEmpty(arrayFilter(x -> has(_mirs, x), %[3]s)), arrayFilter(x -> has(_mirs, x), %[3]s), if(length(%[2]s) = 1, %[2]s, %[4]s)))",
 			valid, parse, all, none)
 	case geneCnaLong:
 		cands = fmt.Sprintf(
@@ -95,21 +95,23 @@ func resolveGeneSQL(refDB string, mode geneMode, keys string) string {
 	case geneRPPA:
 		cands = fmt.Sprintf("if(k.sym = '' OR upper(k.sym) = 'NA', %s, %s)", none, nonAmbiguous)
 	}
-	mirJoin := ""
+	// The microRNA genes are one constant list, not a column copied into
+	// every key's row: a batch of matrices has millions of keys.
+	mirs := ""
 	if mode == geneMatrix {
-		mirJoin = fmt.Sprintf(" CROSS JOIN (SELECT groupArray(entrez_gene_id) AS _mirs FROM `%s`.gene WHERE type = 'miRNA') mir", refDB)
+		mirs = fmt.Sprintf("WITH (SELECT groupArray(entrez_gene_id) FROM `%s`.gene WHERE type = 'miRNA') AS _mirs ", refDB)
 	}
 	return fmt.Sprintf(
 		"SELECT x.* EXCEPT (_symc, _symu, _entn, _symn), gg.hugo_gene_symbol AS gene_hugo, "+
 			"toUInt8(x._entn = x.gene_entrez OR upper(gg.hugo_gene_symbol) = x._symu) AS gene_direct, toUInt8(gg.type = 'miRNA') AS gene_mirna FROM ("+
-			"SELECT k.*, arrayJoin(%[2]s) AS gene_entrez FROM ("+
+			"%[5]sSELECT k.*, arrayJoin(%[2]s) AS gene_entrez FROM ("+
 			"SELECT kk.*, %[3]s AS _symc, upper(_symc) AS _symu, toInt64OrZero(kk.ent) AS _entn, toInt64OrZero(kk.sym) AS _symn FROM (%[4]s) kk) k "+
 			"LEFT JOIN (SELECT entrez_gene_id AS _ge FROM `%[1]s`.gene) ge ON k._entn = ge._ge "+
 			"LEFT JOIN (SELECT entrez_gene_id AS _ge FROM `%[1]s`.gene) gs ON k._symn = gs._ge "+
 			"LEFT JOIN (SELECT upper(hugo_gene_symbol) AS _hs, any(entrez_gene_id) AS _he FROM `%[1]s`.gene GROUP BY _hs) gh ON k._symu = gh._hs "+
 			"LEFT JOIN (SELECT upper(gene_alias) AS _as, arraySort(groupUniqArray(entrez_gene_id)) AS _ae FROM `%[1]s`.gene_alias GROUP BY _as) ga ON k._symu = ga._as"+
-			"%[5]s) x INNER JOIN `%[1]s`.gene gg ON gg.entrez_gene_id = x.gene_entrez",
-		refDB, cands, strings.ReplaceAll(sym, "k.sym", "kk.sym"), keys, mirJoin)
+			") x INNER JOIN `%[1]s`.gene gg ON gg.entrez_gene_id = x.gene_entrez",
+		refDB, cands, strings.ReplaceAll(sym, "k.sym", "kk.sym"), keys, mirs)
 }
 
 // geneKeySource is one staging table whose gene columns are resolved into
