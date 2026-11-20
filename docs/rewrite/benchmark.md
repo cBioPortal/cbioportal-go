@@ -491,7 +491,7 @@ branch.
 | Step | Time |
 |---|---|
 | Stage all 496 studies (copy their files into ClickHouse), 3 at a time | 33 min |
-| Build every table for all 496 studies (a *full build*) | 54–60 min |
+| Build every table for all 496 studies (a *full build*) | 55 min |
 | Build again after a new importer release that changes no table | 22 s |
 | Import `acc_2019` again (1,049 samples, 1.4 million matrix values) | 28 s |
 | Import `acc_2019` again with a new importer release that changes no table | 46 s |
