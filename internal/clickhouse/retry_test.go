@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,5 +70,22 @@ func TestUnfinishedOnInactiveReplicas(t *testing.T) {
 	i = 1
 	if _, err := c.Execute("SELECT * FROM x"); err == nil {
 		t.Error("UNKNOWN_TABLE counted as done")
+	}
+}
+
+func TestOverloaded(t *testing.T) {
+	for _, tt := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{errors.New("clickhouse HTTP 500 : Code: 241. DB::Exception: (total) memory limit exceeded: would use 28.55 GiB. (MEMORY_LIMIT_EXCEEDED)"), true},
+		{errors.New(`clickhouse transport: Post "https://x:8443/": EOF`), true},
+		{errors.New("clickhouse HTTP 503 : service unavailable"), true},
+		{errors.New("clickhouse HTTP 500 : Code: 47. DB::Exception: Unknown expression identifier `x`. (UNKNOWN_IDENTIFIER)"), false},
+	} {
+		if got := Overloaded(tt.err); got != tt.want {
+			t.Errorf("Overloaded(%v) = %v", tt.err, got)
+		}
 	}
 }

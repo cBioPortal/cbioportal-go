@@ -31,6 +31,13 @@ type Options struct {
 	GenePanels   string
 	ReloadPanels bool
 
+	// KeepOnOverload keeps the staged studies when the build fails because
+	// ClickHouse ran out of memory or time or the connection broke
+	// (ch.Overloaded), rather than removing them and rebuilding without
+	// them: such a failure is not the studies' fault, and a later build
+	// can include them. Result.BuildPending is then set.
+	KeepOnOverload bool
+
 	// Prepare, when set, runs before a study is staged (e.g. to download
 	// its files), one study at a time and a few studies ahead of staging;
 	// an error fails that study. Done runs after the study is staged,
@@ -80,6 +87,10 @@ type Result struct {
 	// outcome of building the portal without them.
 	TransformErr error
 	RebuildErr   error
+	// BuildPending is set when the build failed and the studies stayed
+	// staged (Options.KeepOnOverload): the portal keeps serving its
+	// previous build until a later build includes them.
+	BuildPending bool
 }
 
 // Count returns the number of studies with status s.
@@ -164,6 +175,11 @@ func Run(o Options, dirs []string) (*Result, error) {
 	res.TransformErr = err
 	o.logf("transform failed: %v", err)
 	if len(imported) == 0 {
+		return res, nil
+	}
+	if o.KeepOnOverload && ch.Overloaded(err) {
+		res.BuildPending = true
+		o.logf("the studies stay staged for the next build; the portal keeps serving its previous build")
 		return res, nil
 	}
 	o.logf("removing this run's studies and rebuilding without them")

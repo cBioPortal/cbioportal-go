@@ -345,6 +345,25 @@ func unfinishedOnInactiveReplicas(body []byte) bool {
 	return bytes.Contains(body, []byte("Code: 341.")) && bytes.Contains(body, []byte("some replicas are inactive"))
 }
 
+// Overloaded reports whether err is ClickHouse running out of memory or
+// time, being too busy, or the connection to it breaking (a replica that
+// restarts or is replaced): a failure of the moment, not of the statement
+// or the data it reads.
+func Overloaded(err error) bool {
+	if err == nil {
+		return false
+	}
+	m := err.Error()
+	for _, s := range []string{"(MEMORY_LIMIT_EXCEEDED)", "(TIMEOUT_EXCEEDED)", "(SOCKET_TIMEOUT)", "(NETWORK_ERROR)",
+		"(TOO_MANY_SIMULTANEOUS_QUERIES)", "(QUERY_WAS_CANCELLED)", "clickhouse transport:",
+		"clickhouse HTTP 502", "clickhouse HTTP 503", "clickhouse HTTP 504"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // processSettings are added to every request of this process (see
 // SetProcessSettings).
 var processSettings = map[string]string{}

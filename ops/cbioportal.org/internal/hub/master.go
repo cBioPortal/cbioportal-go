@@ -69,12 +69,28 @@ type SyncState struct {
 	// FailedStudies are the study directories whose import failed in the
 	// last sync of Imported, imported again by the next sync.
 	FailedStudies []string
+	// Unbuilt is set when the last sync staged the studies of Last but
+	// building the hub failed for lack of resources (conclusion
+	// "unbuilt"): the raw database holds Last, the hub serves Imported.
+	Unbuilt bool
+}
+
+// base is the commit the raw database holds: the next sync imports the
+// changes since it.
+func (st SyncState) base() string {
+	if st.Unbuilt {
+		return st.Last
+	}
+	return st.Imported
 }
 
 // SyncDecision is what a sync does about master's head commit.
 type SyncDecision struct {
 	Run    bool
 	Reason string
+	// BuildOnly builds the hub from the studies staged by the last sync,
+	// which failed to build it, without staging any.
+	BuildOnly bool
 }
 
 // DecideSync says whether a sync imports head: not when it is the commit
@@ -83,20 +99,27 @@ type SyncDecision struct {
 // RetryAfter.
 func DecideSync(st SyncState, head string, now time.Time, retryAfter time.Duration) SyncDecision {
 	switch {
+	case st.Unbuilt && head == st.Last && now.Sub(st.At) < retryAfter:
+		return SyncDecision{Reason: fmt.Sprintf("building the hub at %s failed at %s; its studies are staged, built again after %s",
+			short(head), st.At.Format(time.DateTime), st.At.Add(retryAfter).Format(time.DateTime))}
+	case st.Unbuilt && head == st.Last:
+		return SyncDecision{Run: true, BuildOnly: true, Reason: fmt.Sprintf("building the hub at %s again from its staged studies", short(head))}
+	case st.Unbuilt:
+		return SyncDecision{Run: true, Reason: fmt.Sprintf("master moved from %s, staged but not built, to %s", short(st.Last), short(head))}
 	case head == st.Imported && len(st.FailedStudies) > 0 && now.Sub(st.At) >= retryAfter:
-		return SyncDecision{true, fmt.Sprintf("trying the %d studies that failed at %s again", len(st.FailedStudies), short(head))}
+		return SyncDecision{Run: true, Reason: fmt.Sprintf("trying the %d studies that failed at %s again", len(st.FailedStudies), short(head))}
 	case head == st.Imported && len(st.FailedStudies) > 0:
-		return SyncDecision{false, fmt.Sprintf("up to date at %s but for %d failed studies, tried again after %s",
+		return SyncDecision{Reason: fmt.Sprintf("up to date at %s but for %d failed studies, tried again after %s",
 			short(head), len(st.FailedStudies), st.At.Add(retryAfter).Format(time.DateTime))}
 	case head == st.Imported:
-		return SyncDecision{false, "up to date at " + short(head)}
+		return SyncDecision{Reason: "up to date at " + short(head)}
 	case head == st.Last && st.Failed && now.Sub(st.At) < retryAfter:
-		return SyncDecision{false, fmt.Sprintf("importing %s failed at %s; trying again after %s",
+		return SyncDecision{Reason: fmt.Sprintf("importing %s failed at %s; trying again after %s",
 			short(head), st.At.Format(time.DateTime), st.At.Add(retryAfter).Format(time.DateTime))}
 	case st.Imported == "":
-		return SyncDecision{true, "first import of " + short(head)}
+		return SyncDecision{Run: true, Reason: "first import of " + short(head)}
 	}
-	return SyncDecision{true, fmt.Sprintf("master moved from %s to %s", short(st.Imported), short(head))}
+	return SyncDecision{Run: true, Reason: fmt.Sprintf("master moved from %s to %s", short(st.Imported), short(head))}
 }
 
 // SyncPlan is what a sync changes on the hub.
@@ -155,6 +178,9 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 	if !d.Run {
 		return nil
 	}
+	if d.BuildOnly {
+		return buildStaged(ctx, c, st, head)
+	}
 
 	repo := filepath.Join(st.Workdir, "datahub")
 	defer os.RemoveAll(repo)
@@ -174,25 +200,26 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 		// syncing it would remove every study from the hub.
 		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("%s at %s has no studies", st.Branch, short(head)))
 	}
+	base := state.base()
 	var changed []string
-	if state.Imported != "" && state.Imported != head {
-		if err := co.FetchCommit(ctx, state.Imported); err != nil {
-			return fmt.Errorf("fetching the last imported commit %s: %w", short(state.Imported), err)
+	if base != "" && base != head {
+		if err := co.FetchCommit(ctx, base); err != nil {
+			return fmt.Errorf("fetching the last imported commit %s: %w", short(base), err)
 		}
-		if changed, err = co.ChangedFiles(ctx, state.Imported, head); err != nil {
+		if changed, err = co.ChangedFiles(ctx, base, head); err != nil {
 			return err
 		}
 	}
-	plan := PlanSync(headStudies, changed, state.FailedStudies, state.Imported == "")
+	plan := PlanSync(headStudies, changed, state.FailedStudies, base == "")
 	var goneIDs []string
 	for _, dir := range plan.Gone {
-		meta, err := co.Show(ctx, state.Imported, dir+"/meta_study.txt")
+		meta, err := co.Show(ctx, base, dir+"/meta_study.txt")
 		if id := datahub.StudyIDFromMeta(meta); err == nil && id != "" {
 			goneIDs = append(goneIDs, id)
 		}
 	}
 	job.Logf("%d studies to import, %d to remove, gene panels changed: %v", len(plan.Import), len(goneIDs), plan.Panels)
-	if len(plan.Import) == 0 && len(goneIDs) == 0 && !plan.Panels {
+	if len(plan.Import) == 0 && len(goneIDs) == 0 && !plan.Panels && !state.Unbuilt {
 		return recordSync(c, st.Hub.Raw, head, "success", 0, 0, nil)
 	}
 	if err := co.SetPaths(ctx, plan.Import); err != nil {
@@ -202,23 +229,18 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 		return err
 	}
 
-	lock := &studyimport.Lock{C: c, DB: st.Hub.Raw, Table: HubLockTable, Owner: owner("master-" + short(head)),
-		Wait: st.LockWait, Stale: st.LockStale, Poll: st.LockPoll, Logf: job.Logf}
-	if err := lock.Acquire(ctx); err != nil {
+	release, err := lockHub(ctx, c, st, head)
+	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := lock.Release(); err != nil {
-			job.Logf("%v", err)
-		}
-	}()
+	defer release()
 
 	dirs := make([]string, len(plan.Import))
 	for i, s := range plan.Import {
 		dirs[i] = filepath.Join(repo, s)
 	}
 	raw := ch.New(job.ClickHouseURL(), st.Hub.Raw)
-	if state.Imported == "" {
+	if base == "" {
 		// The first import also removes the studies the hub holds that
 		// master does not have.
 		extra, err := studiesNotIn(raw, st.Hub.Raw, dirs)
@@ -241,23 +263,20 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 			_, err := co.PullLFS(ctx, rel(repo, dir))
 			return err
 		},
-		Done: func(dir string) { os.RemoveAll(dir) },
-		Logf: job.Logf,
+		Done:           func(dir string) { os.RemoveAll(dir) },
+		KeepOnOverload: true,
+		Logf:           job.Logf,
 	}, dirs)
+	failed := failedStudies(repo, res)
 	switch {
 	case err != nil:
 		return recordFailure(c, st.Hub.Raw, head, err)
+	case res.BuildPending:
+		return recordUnbuilt(c, st.Hub.Raw, head, res, len(goneIDs), failed)
 	case res.TransformErr != nil:
 		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("building the hub: %w", res.TransformErr))
 	case res.PanelsErr != nil:
 		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("loading the gene panels: %w", res.PanelsErr))
-	}
-	var failed []string
-	for _, s := range res.Studies {
-		if s.Status == studyimport.Failed {
-			failed = append(failed, rel(repo, s.Dir))
-			job.Logf("study %s failed to import and is not on the hub: %v", rel(repo, s.Dir), s.Err)
-		}
 	}
 	job.Logf("hub at %s: %d studies imported, %d removed, %d failed", short(head), res.Count(studyimport.Imported), len(goneIDs), len(failed))
 	conclusion := "success"
@@ -265,6 +284,67 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 		conclusion = "partial"
 	}
 	return recordSync(c, st.Hub.Raw, head, conclusion, res.Count(studyimport.Imported), len(goneIDs), failed)
+}
+
+// failedStudies lists the study directories whose import failed.
+func failedStudies(repo string, res *studyimport.Result) []string {
+	var failed []string
+	for _, s := range res.Studies {
+		if s.Status == studyimport.Failed {
+			failed = append(failed, rel(repo, s.Dir))
+			job.Logf("study %s failed to import and is not on the hub: %v", rel(repo, s.Dir), s.Err)
+		}
+	}
+	return failed
+}
+
+// lockHub takes the hub's import lock and returns its release.
+func lockHub(ctx context.Context, c *ch.Client, st *MasterSettings, head string) (func(), error) {
+	lock := &studyimport.Lock{C: c, DB: st.Hub.Raw, Table: HubLockTable, Owner: owner("master-" + short(head)),
+		Wait: st.LockWait, Stale: st.LockStale, Poll: st.LockPoll, Logf: job.Logf}
+	if err := lock.Acquire(ctx); err != nil {
+		return nil, err
+	}
+	return func() {
+		if err := lock.Release(); err != nil {
+			job.Logf("%v", err)
+		}
+	}, nil
+}
+
+// buildStaged builds the hub from the studies the last sync staged at
+// head, after building it failed for lack of resources.
+func buildStaged(ctx context.Context, c *ch.Client, st *MasterSettings, head string) error {
+	release, err := lockHub(ctx, c, st, head)
+	if err != nil {
+		return err
+	}
+	defer release()
+	res, err := studyimport.Run(studyimport.Options{
+		URL: job.ClickHouseURL(), DB: st.Hub.DB, RawDB: st.Hub.Raw, RefDB: st.Hub.Ref,
+		KeepOnOverload: true, Logf: job.Logf,
+	}, nil)
+	switch {
+	case err != nil:
+		return recordFailure(c, st.Hub.Raw, head, err)
+	case res.BuildPending:
+		return recordUnbuilt(c, st.Hub.Raw, head, res, 0, nil)
+	case res.TransformErr != nil:
+		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("building the hub: %w", res.TransformErr))
+	}
+	job.Logf("hub built at %s", short(head))
+	return recordSync(c, st.Hub.Raw, head, "success", 0, 0, nil)
+}
+
+// recordUnbuilt records a sync of sha that staged its studies but could
+// not build the hub for lack of resources, so the next sync after
+// RetryAfter builds it from them, and returns the build's error.
+func recordUnbuilt(c *ch.Client, rawDB, sha string, res *studyimport.Result, removed int, failed []string) error {
+	err := fmt.Errorf("building the hub: %w", res.TransformErr)
+	if recErr := recordSync(c, rawDB, sha, "unbuilt", res.Count(studyimport.Imported), removed, failed, err.Error()); recErr != nil {
+		job.Logf("WARN: could not record the unbuilt sync: %v", recErr)
+	}
+	return err
 }
 
 // studiesNotIn lists the studies of the raw database whose ids are not
@@ -314,7 +394,7 @@ func readSyncState(c *ch.Client, rawDB string) (SyncState, error) {
 	read := func() (string, error) {
 		return job.Query(c, fmt.Sprintf("SELECT argMaxIf(sha, finished, conclusion IN ('success', 'partial')), argMax(sha, finished), "+
 			"argMax(conclusion, finished), toUnixTimestamp(max(finished)), "+
-			"arrayStringConcat(argMaxIf(failed_studies, finished, conclusion IN ('success', 'partial')), ' ') FROM %s FORMAT TSV", syncTableName(rawDB)))
+			"arrayStringConcat(argMaxIf(failed_studies, finished, conclusion IN ('success', 'partial', 'unbuilt')), ' ') FROM %s FORMAT TSV", syncTableName(rawDB)))
 	}
 	text, err := read()
 	if err != nil && strings.Contains(err.Error(), "failed_studies") {
@@ -332,7 +412,7 @@ func readSyncState(c *ch.Client, rawDB string) (SyncState, error) {
 		return SyncState{}, fmt.Errorf("reading %s: unexpected %q", syncTable, text)
 	}
 	at, _ := strconv.ParseInt(f[3], 10, 64)
-	return SyncState{Imported: f[0], Last: f[1], Failed: f[2] == "failure", At: time.Unix(at, 0).UTC(),
+	return SyncState{Imported: f[0], Last: f[1], Failed: f[2] == "failure", Unbuilt: f[2] == "unbuilt", At: time.Unix(at, 0).UTC(),
 		FailedStudies: strings.Fields(f[4])}, nil
 }
 

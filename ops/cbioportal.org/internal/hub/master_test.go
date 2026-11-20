@@ -55,9 +55,15 @@ func TestDecideSync(t *testing.T) {
 		// after RetryAfter.
 		{"studies failed recently", SyncState{Imported: "aaaaaaa1", Last: "aaaaaaa1", At: now.Add(-10 * time.Minute), FailedStudies: []string{"public/b"}}, "aaaaaaa1", false, "but for 1 failed studies"},
 		{"studies failed long ago", SyncState{Imported: "aaaaaaa1", Last: "aaaaaaa1", At: now.Add(-time.Hour), FailedStudies: []string{"public/b"}}, "aaaaaaa1", true, "trying the 1 studies"},
+		// A sync that staged its studies but could not build the hub
+		// builds it again after RetryAfter, or stages what changed since.
+		{"unbuilt recently", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Unbuilt: true, At: now.Add(-10 * time.Minute)}, "bbbbbbb2", false, "built again after"},
+		{"unbuilt long ago", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Unbuilt: true, At: now.Add(-time.Hour)}, "bbbbbbb2", true, "again from its staged studies"},
+		{"unbuilt, then a new commit", SyncState{Last: "bbbbbbb2", Unbuilt: true, At: now}, "ccccccc3", true, "moved from bbbbbbb, staged but not built"},
 	} {
 		d := DecideSync(tt.st, tt.head, now, retry)
-		if d.Run != tt.run || !strings.Contains(d.Reason, tt.about) {
+		buildOnly := tt.st.Unbuilt && tt.head == tt.st.Last && tt.run
+		if d.Run != tt.run || d.BuildOnly != buildOnly || !strings.Contains(d.Reason, tt.about) {
 			t.Errorf("%s: %+v", tt.name, d)
 		}
 	}
