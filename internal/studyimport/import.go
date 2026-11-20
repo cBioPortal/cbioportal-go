@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,11 +31,15 @@ type Options struct {
 	GenePanels   string
 	ReloadPanels bool
 
-	// Prepare, when set, runs just before a study is staged (e.g. to
-	// download its files); an error fails that study. Done runs after it,
+	// Prepare, when set, runs before a study is staged (e.g. to download
+	// its files), one study at a time and a few studies ahead of staging;
+	// an error fails that study. Done runs after the study is staged,
 	// whatever the outcome (e.g. to delete the files again).
 	Prepare func(dir string) error
 	Done    func(dir string)
+	// StageStudies is how many studies stage at once; 0 takes
+	// $IMPORT_STAGE_STUDIES, or DefaultStageStudies.
+	StageStudies int
 	// Progress, when set, gets each study's result as soon as it is
 	// staged (or failed to be), before the transform.
 	Progress func(StudyResult)
@@ -246,26 +251,37 @@ func Plan(o Options, dirs []string) (*ImportPlan, error) {
 	return p, nil
 }
 
-// studyWorkers is how many studies stage at once. A small study's staging
-// is mostly round trips to ClickHouse and the next study's Prepare, which
-// overlap well; the data files of all of them share the ingest's limit on
-// files loading at once.
-const studyWorkers = 3
+// DefaultStageStudies is how many studies stage at once unless
+// Options.StageStudies or $IMPORT_STAGE_STUDIES says otherwise. A small
+// study's staging is mostly round trips to ClickHouse, which overlap well;
+// the data files of all of them share the ingest's limit on files loading
+// at once.
+const DefaultStageStudies = 3
 
-// stageAll stages the study directories studyWorkers at a time and returns
-// their results in the order of dirs. Prepare runs for one study at a
-// time, and Done, Progress and Logf one call at a time, so callers need not
-// make them safe to run at once; Prepare may run while one of the others
-// does.
-func (o Options) stageAll(raw *ch.Client, dirs []string) []StudyResult {
-	var prepareMu, mu sync.Mutex
-	if prepare := o.Prepare; prepare != nil {
-		o.Prepare = func(dir string) error {
-			prepareMu.Lock()
-			defer prepareMu.Unlock()
-			return prepare(dir)
-		}
+// prepareAhead is how many prepared studies (their LFS files downloaded)
+// may wait for a staging slot: the downloads of the next studies run while
+// the current ones stage, and at most this many studies' files wait on
+// disk.
+const prepareAhead = 4
+
+// stageStudies is how many studies stage at once.
+func (o Options) stageStudies() int {
+	if o.StageStudies > 0 {
+		return o.StageStudies
 	}
+	if n, err := strconv.Atoi(os.Getenv("IMPORT_STAGE_STUDIES")); err == nil && n > 0 {
+		return n
+	}
+	return DefaultStageStudies
+}
+
+// stageAll stages the study directories stageStudies at a time and returns
+// their results in the order of dirs. Prepare runs for one study at a
+// time, in the order of dirs and ahead of staging (prepareAhead), and Done,
+// Progress and Logf one call at a time, so callers need not make them safe
+// to run at once; Prepare may run while one of the others does.
+func (o Options) stageAll(raw *ch.Client, dirs []string) []StudyResult {
+	var mu sync.Mutex
 	if done := o.Done; done != nil {
 		o.Done = func(dir string) {
 			mu.Lock()
@@ -280,29 +296,48 @@ func (o Options) stageAll(raw *ch.Client, dirs []string) []StudyResult {
 			logf(format, args...)
 		}
 	}
+	type job struct {
+		i        int
+		dir      string
+		imported time.Time
+		prepErr  error
+	}
+	// Import times follow the order of dirs, whichever study finishes
+	// first.
+	jobs := make(chan job, prepareAhead)
+	go func() {
+		defer close(jobs)
+		var last time.Time
+		for i, dir := range dirs {
+			imported := time.Now().Truncate(time.Microsecond)
+			if !imported.After(last) {
+				imported = last.Add(time.Microsecond)
+			}
+			last = imported
+			j := job{i: i, dir: dir, imported: imported}
+			if o.Prepare != nil {
+				if _, err := os.Stat(filepath.Join(dir, "meta_study.txt")); err == nil {
+					j.prepErr = o.Prepare(dir)
+				}
+			}
+			jobs <- j
+		}
+	}()
 	results := make([]StudyResult, len(dirs))
 	var wg sync.WaitGroup
-	slots := make(chan struct{}, studyWorkers)
-	var last time.Time
-	for i, dir := range dirs {
-		slots <- struct{}{}
-		// Import times follow the order of dirs, whichever study finishes
-		// first.
-		imported := time.Now().Truncate(time.Microsecond)
-		if !imported.After(last) {
-			imported = last.Add(time.Microsecond)
-		}
-		last = imported
+	for range o.stageStudies() {
 		wg.Add(1)
 		go func() {
-			defer func() { <-slots; wg.Done() }()
-			o.logf("[%d/%d] %s", i+1, len(dirs), dir)
-			r := o.stage(raw, dir, imported)
-			results[i] = r
-			if o.Progress != nil {
-				mu.Lock()
-				o.Progress(r)
-				mu.Unlock()
+			defer wg.Done()
+			for j := range jobs {
+				o.logf("[%d/%d] %s", j.i+1, len(dirs), j.dir)
+				r := o.stage(raw, j.dir, j.imported, j.prepErr)
+				results[j.i] = r
+				if o.Progress != nil {
+					mu.Lock()
+					o.Progress(r)
+					mu.Unlock()
+				}
 			}
 		}()
 	}
@@ -311,8 +346,9 @@ func (o Options) stageAll(raw *ch.Client, dirs []string) []StudyResult {
 }
 
 // stage ingests one study directory with the given import time, removing
-// it from RawDB on failure.
-func (o *Options) stage(raw *ch.Client, dir string, imported time.Time) StudyResult {
+// it from RawDB on failure. prepErr is the error of the study's Prepare,
+// which stageAll ran.
+func (o *Options) stage(raw *ch.Client, dir string, imported time.Time, prepErr error) StudyResult {
 	r := StudyResult{Dir: dir}
 	if o.Done != nil {
 		defer o.Done(dir)
@@ -325,10 +361,8 @@ func (o *Options) stage(raw *ch.Client, dir string, imported time.Time) StudyRes
 	r.StudyID, _ = StudyID(dir)
 	start := time.Now()
 	err := func() error {
-		if o.Prepare != nil {
-			if err := o.Prepare(dir); err != nil {
-				return err
-			}
+		if prepErr != nil {
+			return prepErr
 		}
 		s, err := parser.Scan(dir)
 		if err != nil {

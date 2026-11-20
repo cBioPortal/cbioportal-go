@@ -75,6 +75,9 @@ and gene panels would be loaded. It changes nothing and takes no lock.`,
 	dryRun := dryRunFlag(fs)
 	asJSON := jsonFlag(fs)
 	applyTuning := tuningFlags(cmd)
+	stageStudies := fs.Int("stage-studies", studyimport.DefaultStageStudies, "studies staged at once; the next studies' files are read ahead meanwhile")
+	cli.Env(fs, "stage-studies", "IMPORT_STAGE_STUDIES")
+	cli.Group(fs, "Tuning", "stage-studies")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if err := applyTuning(); err != nil {
 			return err
@@ -82,7 +85,7 @@ and gene panels would be loaded. It changes nothing and takes no lock.`,
 		w := cmd.OutOrStdout()
 		o := studyimport.Options{
 			URL: *url, DB: *db, RawDB: orDefault(*rawDB, *db+"_raw"), RefDB: orDefault(*refDB, *db+"_ref"),
-			Seed: *seed, GenePanels: *panels, ReloadPanels: *reloadPanels, Logf: stderrLog,
+			Seed: *seed, GenePanels: *panels, ReloadPanels: *reloadPanels, StageStudies: *stageStudies, Logf: stderrLog,
 		}
 		if *dryRun {
 			p, err := studyimport.Plan(o, args)
