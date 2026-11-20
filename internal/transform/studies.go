@@ -443,7 +443,7 @@ func prepareStudyBuild(c *client, rawDB, targetDB string, b *studyBuild) error {
 // studyFilter returns a client that reads only the given studies' rows and
 // the rows all studies share (study_id ”) of every raw table with a
 // study_id column, and only the given studies' rows of the portal tables
-// built so far (by their staged names).
+// that hold many studies.
 func (c *client) studyFilter(rawDB, targetDB string, studies []string) (*ch.Client, error) {
 	text, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT t.name FROM system.tables t INNER JOIN system.columns c ON c.database = t.database AND c.table = t.name "+
@@ -463,9 +463,18 @@ func (c *client) studyFilter(rawDB, targetDB string, studies []string) (*ch.Clie
 			filters = append(filters, fmt.Sprintf("'%s': '%s'", ch.SQLLit(rawDB+"."+name), ch.SQLLit(cond)))
 		}
 	}
+	// A study's rows are read from the staged table under its built name,
+	// under its own staged name once a snapshot is swapped in, and from
+	// the published table when the build keeps it (reuse.go).
 	for name, col := range studyColumns {
-		filters = append(filters, fmt.Sprintf("'%s': '%s'", ch.SQLLit(targetDB+"."+stagePrefix+builtName(name)),
-			ch.SQLLit(strings.Replace(cond, "study_id", "`"+col+"`", 1))))
+		names := []string{stagePrefix + builtName(name), name}
+		if builtName(name) != name {
+			names = append(names, stagePrefix+name)
+		}
+		for _, n := range names {
+			filters = append(filters, fmt.Sprintf("'%s': '%s'", ch.SQLLit(targetDB+"."+n),
+				ch.SQLLit(strings.Replace(cond, "study_id", "`"+col+"`", 1))))
+		}
 	}
 	return c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}), nil
 }

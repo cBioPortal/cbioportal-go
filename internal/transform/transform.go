@@ -8,7 +8,8 @@
 // attributes (clinical_sample_computed) and the study-view `*_derived`
 // tables. The rest of the model starts as views over staging; the views the
 // API filters per request (mutation, cna, the clinical data and others, see
-// snapshotted) are copied into tables once everything reading them is built.
+// snapshotted) are copied into tables before the derived tables, which read
+// them.
 // The `mutation` view applies cBioPortal's default MutationFilter and
 // resolves Hugo symbols to Entrez ids against the reference database.
 package transform
@@ -307,6 +308,34 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		}
 	}
 
+	// The base views the API filters per request are snapshotted into
+	// tables, which the derived tables below then read instead of computing
+	// the views again; views keep resolving them by name. Every snapshot is
+	// filled before any view is replaced, so the views the fills read stay
+	// in place.
+	var snaps []int
+	for i, m := range snapshotted {
+		if engineOf(m.name) == "View" {
+			snaps = append(snaps, i)
+		}
+	}
+	var sg errgroup.Group
+	sg.SetLimit(c.fillsAtOnce())
+	for _, i := range snaps {
+		m := snapshotted[i]
+		sg.Go(func() error { return fillSnapshot(c, targetDB, m.name, m.key, m.idFrom) })
+	}
+	if err := sg.Wait(); err != nil {
+		return nil, err
+	}
+	names := make([]string, len(snaps))
+	for j, i := range snaps {
+		names[j] = snapshotted[i].name
+	}
+	if err := swapSnapshots(c, targetDB, names); err != nil {
+		return nil, err
+	}
+
 	// Prod-aligned column-store `*_derived` tables (built from our staging
 	// with prod's exact column names and sort keys, which the API's reads
 	// lead with), created after the base views they read. Their text columns
@@ -375,34 +404,6 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	}
 
 	if err := c.createViews(targetDB, studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists), createView); err != nil {
-		return nil, err
-	}
-
-	// The base views the API filters per request are snapshotted into tables
-	// once every view and derived table reading them has been built; views
-	// keep resolving them by name.
-	// Every snapshot is filled before any view is replaced, so the views
-	// the fills read stay in place.
-	var snaps []int
-	for i, m := range snapshotted {
-		if engineOf(m.name) == "View" {
-			snaps = append(snaps, i)
-		}
-	}
-	g = errgroup.Group{}
-	g.SetLimit(c.fillsAtOnce())
-	for _, i := range snaps {
-		m := snapshotted[i]
-		g.Go(func() error { return fillSnapshot(c, targetDB, m.name, m.key, m.idFrom) })
-	}
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-	names := make([]string, len(snaps))
-	for j, i := range snaps {
-		names[j] = snapshotted[i].name
-	}
-	if err := swapSnapshots(c, targetDB, names); err != nil {
 		return nil, err
 	}
 
