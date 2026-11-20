@@ -353,6 +353,42 @@ type partialBuild struct {
 	// filtered reads only the rebuilt studies' rows of the raw staging
 	// tables and of the portal tables built so far.
 	filtered *ch.Client
+	// offsets are the highest ids of the published tables (idOffset), by
+	// "table.column".
+	offsets map[string]uint64
+}
+
+// idColumns are the ids a study build numbers after the published table's
+// highest (idOffset), as "table.column".
+var idColumns = []string{"sample.internal_id", "patient.internal_id", "sample_list.list_internal_id", "seg.seg_id"}
+
+// readOffsets reads the highest id of each of idColumns in one query.
+func readOffsets(c *client, targetDB string, published map[string]string) (map[string]uint64, error) {
+	var parts []string
+	for _, id := range idColumns {
+		table, col, _ := strings.Cut(id, ".")
+		if _, ok := published[table]; ok {
+			parts = append(parts, fmt.Sprintf("SELECT '%s' AS id, toUInt64(max(`%s`)) AS n FROM `%s`.`%s`", id, col, targetDB, table))
+		}
+	}
+	out := map[string]uint64{}
+	if len(parts) == 0 {
+		return out, nil
+	}
+	text, err := c.Client.Execute(strings.Join(parts, " UNION ALL ") + " FORMAT TabSeparated")
+	if err != nil {
+		return nil, err
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
+		id, n, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		var v uint64
+		fmt.Sscan(n, &v)
+		out[id] = v
+	}
+	return out, nil
 }
 
 // errFullBuild stops a study build that cannot be finished as one: a
@@ -391,10 +427,15 @@ func prepareStudyBuild(c *client, rawDB, targetDB string, b *studyBuild) error {
 	if err != nil {
 		return err
 	}
+	offsets, err := readOffsets(c, targetDB, published)
+	if err != nil {
+		return err
+	}
 	c.part = &partialBuild{
 		targetDB: targetDB,
 		studies:  studies,
 		filtered: filtered,
+		offsets:  offsets,
 	}
 	return nil
 }
@@ -468,6 +509,9 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 func (c *client) idOffset(name, col string) uint64 {
 	if c.part == nil {
 		return 0
+	}
+	if n, ok := c.part.offsets[name+"."+col]; ok {
+		return n
 	}
 	text, err := c.Client.Execute(fmt.Sprintf("SELECT max(`%s`) FROM `%s`.`%s` FORMAT TabSeparated",
 		col, c.part.targetDB, name))
