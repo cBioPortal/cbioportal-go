@@ -141,7 +141,8 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 
 	repo := filepath.Join(st.Workdir, "datahub")
 	defer os.RemoveAll(repo)
-	co := &datahub.Checkout{Dir: repo, Git: st.DatahubGit, Logf: job.Logf}
+	// Files the LFS store lacks are taken from GitHub's LFS of datahub.
+	co := &datahub.Checkout{Dir: repo, Git: st.DatahubGit, FallbackLFSURL: strings.TrimSuffix(st.DatahubGit, "/") + "/info/lfs", Logf: job.Logf}
 	head, err = co.Fetch(ctx, st.Branch, nil)
 	if err != nil {
 		return err

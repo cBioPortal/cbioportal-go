@@ -163,6 +163,45 @@ func TestPullLFS(t *testing.T) {
 	}
 }
 
+// A store that hands out a link for every object, like datahub's S3 one,
+// answers 403 for an object it does not hold; the fallback store has it.
+func TestPullLFSFallsBackOnRefusedDownload(t *testing.T) {
+	repo := t.TempDir()
+	study := filepath.Join(repo, "public", "s")
+	os.MkdirAll(study, 0o755)
+	oid, ptr := pointer("only on GitHub\n")
+	os.WriteFile(filepath.Join(study, "data_sv.txt"), []byte(ptr), 0o644)
+
+	var store *httptest.Server
+	store = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/objects/batch" {
+			var req struct {
+				Objects []batchObject `json:"objects"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			var out []map[string]any
+			for _, o := range req.Objects {
+				out = append(out, map[string]any{"oid": o.OID, "size": o.Size, "actions": map[string]any{
+					"download": map[string]any{"href": store.URL + "/o/" + o.OID}}})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"objects": out})
+			return
+		}
+		http.Error(w, "AccessDenied", http.StatusForbidden)
+	}))
+	t.Cleanup(store.Close)
+	var batches int
+	github := lfsServer(t, map[string]string{oid: "only on GitHub\n"}, &batches)
+
+	c := &Checkout{Dir: repo, LFSURL: store.URL, FallbackLFSURL: github.URL}
+	if n, err := c.PullLFS(context.Background(), "public/s"); err != nil || n != 1 {
+		t.Fatalf("%d, %v", n, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(study, "data_sv.txt")); string(b) != "only on GitHub\n" {
+		t.Errorf("data_sv.txt: %q", b)
+	}
+}
+
 func TestPullLFSRejectsCorruptObject(t *testing.T) {
 	repo := t.TempDir()
 	_, ptr := pointer("right content")
