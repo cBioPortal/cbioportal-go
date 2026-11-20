@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
+	"github.com/cbioportal/cbioportal-go/internal/ingest"
 )
 
 func TestStudyID(t *testing.T) {
@@ -148,5 +149,27 @@ func TestLiveRun(t *testing.T) {
 			t.Fatalf("no %q in %q", step, logged)
 		}
 		logged = logged[i+1:]
+	}
+
+	// When the raw database no longer holds the studies the published build
+	// was made from, that build could keep nothing, so the import builds
+	// once.
+	for _, q := range []string{"TRUNCATE TABLE `" + db + "`._transform_build", "INSERT INTO `" + db + "`._transform_build VALUES ('old', 'old')"} {
+		if _, err := c.Execute(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ingest.RemoveStudy(ch.New(base, raw), "golden_a"); err != nil {
+		t.Fatal(err)
+	}
+	logged = nil
+	if res, err = Run(o, dirs[1:2]); err != nil || res.Count(Imported) != 1 || res.TransformErr != nil {
+		t.Fatalf("new version, studies changed: %+v, %v", res, err)
+	}
+	if slices.ContainsFunc(logged, func(l string) bool { return strings.Contains(l, "rebuilding the portal before staging") }) {
+		t.Errorf("rebuilt before staging although the studies changed: %q", logged)
+	}
+	if !slices.ContainsFunc(logged, func(l string) bool { return strings.Contains(l, "full build") }) {
+		t.Errorf("no full build: %q", logged)
 	}
 }

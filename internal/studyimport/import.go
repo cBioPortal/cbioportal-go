@@ -116,12 +116,13 @@ func Run(o Options, dirs []string) (*Result, error) {
 
 	// A new version of the transform rebuilds the portal from the studies
 	// it holds before any study is staged again, so it keeps the tables
-	// the new version builds the same. New shared gene panels change every
-	// table, so then the one build after staging does.
+	// the new version builds the same (transform.RebuildFirst). New shared
+	// gene panels change every table, so then the one build after staging
+	// does.
 	if !res.PanelsLoaded && len(dirs) > 0 {
-		if other, err := transform.OtherVersion(raw, o.DB); err != nil {
+		if first, err := transform.RebuildFirst(raw, o.DB); err != nil {
 			o.logf("checking the transform version: %v", err)
-		} else if other {
+		} else if first {
 			o.logf("transform: new version, rebuilding the portal before staging")
 			transform.Logf = o.logf
 			start := time.Now()

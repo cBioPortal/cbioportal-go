@@ -39,23 +39,33 @@ type ViewCount struct {
 	Rows uint64
 }
 
-// OtherVersion reports whether the published build of targetDB was made by
-// another version of the transform. An import then rebuilds the portal
-// before it stages its studies: with no study changed, the build keeps
-// every table the new version builds the same (reuse.go), and the import
-// that follows is a study build.
-func OtherVersion(base *ch.Client, targetDB string) (bool, error) {
+// RebuildFirst reports whether an import should rebuild the portal of
+// targetDB before it stages its studies: the published build was made by
+// another version of the transform, and the raw database (base's) still
+// holds the studies that build was made from. With no study changed, that
+// build keeps every table the new version builds the same (reuse.go), and
+// the import that follows is a study build. When the studies differ, the
+// build cannot keep tables, so the import's own build is the only one.
+func RebuildFirst(base *ch.Client, targetDB string) (bool, error) {
 	ok, err := base.Execute(fmt.Sprintf(
-		"SELECT count() FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated",
-		ch.SQLLit(targetDB), buildTable))
-	if err != nil || strings.TrimSpace(ok) == "0" {
+		"SELECT count() FROM system.tables WHERE database = '%s' AND name IN ('%s', '%s') FORMAT TabSeparated",
+		ch.SQLLit(targetDB), buildTable, studyRanksTable))
+	if err != nil || strings.TrimSpace(ok) != "2" {
 		return false, err
 	}
 	text, err := base.Execute(fmt.Sprintf("SELECT transform_version FROM `%s`.`%s` FORMAT TabSeparated", targetDB, buildTable))
+	if err != nil || strings.TrimSpace(text) == sourceHash() {
+		return false, err
+	}
+	differ, err := base.Execute(fmt.Sprintf(
+		"SELECT count() FROM (SELECT study_id, toString(max(import_time)) AS t FROM `%s`.cancer_study GROUP BY study_id) r "+
+			"FULL OUTER JOIN (SELECT study_id, toString(import_time) AS t FROM `%s`.`%s`) p ON r.study_id = p.study_id "+
+			"WHERE r.study_id = '' OR p.study_id = '' OR r.t != p.t FORMAT TabSeparated",
+		base.Database(), targetDB, studyRanksTable))
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(text) != sourceHash(), nil
+	return strings.TrimSpace(differ) == "0", nil
 }
 
 // Apply builds every view and table the API reads in targetDB from rawDB,
