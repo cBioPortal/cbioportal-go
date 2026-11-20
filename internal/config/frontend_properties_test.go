@@ -54,3 +54,15 @@ func TestNoMskWholeSlideViewerProperties(t *testing.T) {
 		}
 	}
 }
+
+// oql_wizard.enabled reaches the frontend as oql_wizard_enabled, and the
+// query page's OQL wizard stays hidden unless the portal turns it on.
+func TestOQLWizardEnabled(t *testing.T) {
+	if cfg := FrontendConfig("/", nil, true); cfg["oql_wizard_enabled"] != false {
+		t.Errorf("default oql_wizard_enabled = %v, want false", cfg["oql_wizard_enabled"])
+	}
+	cfg := FrontendConfig("/", map[string]string{"oql_wizard.enabled": "true"}, true)
+	if cfg["oql_wizard_enabled"] != true {
+		t.Errorf("oql_wizard_enabled = %v, want true", cfg["oql_wizard_enabled"])
+	}
+}

@@ -4,8 +4,8 @@ This page lists every endpoint of cBioPortal's Java backend and says whether
 go (this project) serves it. Use it to check whether a request you need
 works on go, and which ones are left out on purpose.
 
-**Summary.** The Java backend has 192 endpoints. go serves 179 of them and
-leaves out 13. Tests cover 163. An endpoint here is one method and path,
+**Summary.** The Java backend has 195 endpoints. go serves 179 of them and
+leaves out 16. Tests cover 163. An endpoint here is one method and path,
 such as `GET /api/studies`. The list comes from the request mappings of the
 Java controllers on the `master` branch of
 [cBioPortal/cbioportal](https://github.com/cBioPortal/cbioportal) (the
@@ -46,8 +46,8 @@ take paging or sorting parameters.
 | [Resources, MutSig / GISTIC](#resources-mutsig--gistic) | 12 | 12 | — | 12 | 8 | 7 |
 | [Sessions, virtual studies](#sessions-virtual-studies) | 14 | 14 | — | 14 | — | — |
 | [Authentication, data-access tokens](#authentication-data-access-tokens) | 10 | 9 | 1 | 7 | — | — |
-| [Portal, proxies, operations](#portal-proxies-operations) | 34 | 22 | 12 | 15 | — | — |
-| **Total** | **192** | **179** | **13** | **163** | **58** | **36** |
+| [Portal, proxies, operations](#portal-proxies-operations) | 37 | 22 | 15 | 15 | — | — |
+| **Total** | **195** | **179** | **16** | **163** | **58** | **36** |
 
 ## How to read the tables
 
@@ -382,6 +382,9 @@ These long lists get no paging, on purpose:
 | ANY | `/api/proxy/{path}` | String |  | missing |  | An old proxy for Bitly and 3D Hotspots. The frontend no longer uses it. |
 | GET | `/api/proxy/bitly` |  |  | missing |  | An old Bitly proxy. The frontend no longer uses it. |
 | ANY | `/api/matchminer/api/**` | JSONObject |  | missing |  | A proxy to MatchMiner (`matchminer.url`). Only MSK's own portal uses it. |
+| ANY | `/api/chat/**` | byte[] |  | missing |  | A proxy to the chat sidebar server (`chat.sidebar.url`). Only a portal that runs one serves it, and only for the Google accounts its allowlist names. |
+| GET, POST | `/api/chat/oql/**` | byte[] |  | missing |  | A proxy to the chat sidebar server's plain-language-to-OQL endpoints (`chat.sidebar.url` and `oql_wizard.enabled`). |
+| GET, HEAD | `/chat-sidebar/**` |  |  | missing |  | A proxy to the chat sidebar's static files (`chat.sidebar.url`). |
 | GET | `/api-legacy/epic/sample/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
 | GET | `/api-legacy/cis/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
 | GET | `/api-legacy/crdb/{sampleID}` |  |  | missing |  | Translates sample ids for MSK's internal systems (`msk_entity_translation_enabled`). Only MSK uses it. |
@@ -408,6 +411,7 @@ These parts of the Java backend are left out of go:
 | Data access tokens other than `dat.method=oauth2` (the `uuid` and `jwt` methods) | They need a place to store tokens. Without `dat.method=oauth2`, the token endpoints return placeholders. |
 | SAML login pages, MSK sample id translation, MatchMiner | They depend on Spring Security or on services that only some deployments have. |
 | The URL shortener and the old `/api/proxy/*` endpoints | They pass requests on to Bitly and 3D Hotspots. The frontend no longer calls them. |
+| The chat sidebar and the OQL wizard (`/api/chat/**`, `/chat-sidebar/**`) | They pass requests on to a separate chat server that go does not run, and Java only serves them when `chat.sidebar.url` is set. go still passes `oql_wizard.enabled` to the frontend as `oql_wizard_enabled`, as Java does. |
 
 Java has one more controller, `DocRedirectController` (`/api-docs`,
 `/swagger-ui.html`). Java does not turn it on, so it is not listed.
