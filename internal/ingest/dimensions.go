@@ -8,6 +8,7 @@ import (
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/parser"
+	"golang.org/x/sync/errgroup"
 )
 
 var studyMetaFields = []string{
@@ -299,7 +300,9 @@ func IngestCaseLists(c *ch.Client, s *parser.Study) error {
 }
 
 // ingestCaseLists loads the study's case_lists/*.txt (sample lists) into a
-// sample_list staging table: one row per (list, sample).
+// sample_list staging table: one row per (list, sample). The lists are read
+// first; the study's rows are then replaced while their import order is
+// recorded, as each waits for a DELETE.
 func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 	table := "sample_list"
 	if err := c.EnsureTable(table, fmt.Sprintf(
@@ -307,52 +310,51 @@ func ingestCaseLists(c *ch.Client, s *parser.Study) error {
 		c.Database(), table)); err != nil {
 		return err
 	}
-	if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
-		return err
-	}
 
 	dir := s.Dir + "/case_lists"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return recordImportOrder(c, s.StudyID, "case_list", nil) // no case_lists dir is fine
-	}
-	seq := parser.DirOrder(dir)
 	listSeq := map[string]int{}
-	clean := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".txt") {
-			continue
-		}
-		meta, err := parser.ReadMeta(dir + "/" + e.Name())
-		if err != nil {
-			return err
-		}
-		listID := meta.Get("stable_id")
-		if listID == "" {
-			continue
-		}
-		listSeq[listID] = seq[e.Name()]
-		samples := strings.FieldsFunc(meta.Get("case_list_ids"), func(r rune) bool { return r == '\t' })
-		var b strings.Builder
-		for _, s2 := range samples {
-			s2 = parser.SampleID(strings.TrimSpace(s2))
-			if s2 == "" {
+	var rows strings.Builder
+	if entries, err := os.ReadDir(dir); err == nil { // no case_lists dir is fine
+		seq := parser.DirOrder(dir)
+		clean := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".txt") {
 				continue
 			}
-			fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				s.StudyID, listID, meta.Get("case_list_category"),
-				clean.Replace(meta.Get("case_list_name")), clean.Replace(meta.Get("case_list_description")), s2)
-		}
-		if b.Len() == 0 {
-			continue
-		}
-		if err := c.InsertStream(
-			fmt.Sprintf("INSERT INTO `%s`.`%s` FORMAT TabSeparatedRaw", c.Database(), table),
-			strings.NewReader(b.String())); err != nil {
-			return err
+			meta, err := parser.ReadMeta(dir + "/" + e.Name())
+			if err != nil {
+				return err
+			}
+			listID := meta.Get("stable_id")
+			if listID == "" {
+				continue
+			}
+			listSeq[listID] = seq[e.Name()]
+			for _, s2 := range strings.FieldsFunc(meta.Get("case_list_ids"), func(r rune) bool { return r == '\t' }) {
+				s2 = parser.SampleID(strings.TrimSpace(s2))
+				if s2 == "" {
+					continue
+				}
+				fmt.Fprintf(&rows, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					s.StudyID, listID, meta.Get("case_list_category"),
+					clean.Replace(meta.Get("case_list_name")), clean.Replace(meta.Get("case_list_description")), s2)
+			}
 		}
 	}
-	return recordImportOrder(c, s.StudyID, "case_list", listSeq)
+
+	var g errgroup.Group
+	g.Go(func() error {
+		if err := c.DeleteWhere(table, fmt.Sprintf("study_id = '%s'", ch.SQLLit(s.StudyID))); err != nil {
+			return err
+		}
+		if rows.Len() == 0 {
+			return nil
+		}
+		return c.InsertStream(fmt.Sprintf("INSERT INTO `%s`.`%s` FORMAT TabSeparatedRaw", c.Database(), table),
+			strings.NewReader(rows.String()))
+	})
+	g.Go(func() error { return recordImportOrder(c, s.StudyID, "case_list", listSeq) })
+	return g.Wait()
 }
 
 // recordImportOrder replaces a study's entries of one kind in import_order:
