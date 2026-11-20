@@ -39,6 +39,25 @@ type ViewCount struct {
 	Rows uint64
 }
 
+// OtherVersion reports whether the published build of targetDB was made by
+// another version of the transform. An import then rebuilds the portal
+// before it stages its studies: with no study changed, the build keeps
+// every table the new version builds the same (reuse.go), and the import
+// that follows is a study build.
+func OtherVersion(base *ch.Client, targetDB string) (bool, error) {
+	ok, err := base.Execute(fmt.Sprintf(
+		"SELECT count() FROM system.tables WHERE database = '%s' AND name = '%s' FORMAT TabSeparated",
+		ch.SQLLit(targetDB), buildTable))
+	if err != nil || strings.TrimSpace(ok) == "0" {
+		return false, err
+	}
+	text, err := base.Execute(fmt.Sprintf("SELECT transform_version FROM `%s`.`%s` FORMAT TabSeparated", targetDB, buildTable))
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(text) != sourceHash(), nil
+}
+
 // Apply builds every view and table the API reads in targetDB from rawDB,
 // resolving gene symbols against refDB when present. Objects whose staging
 // data is absent are built empty, with the same columns (see stagingSources).
@@ -285,9 +304,8 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	// lead with), created after the base views they read. Their text columns
 	// with few distinct values (studies, genes, profiles, types) are
 	// LowCardinality: stored as numbers into a dictionary, so filters and
-	// groupings on them compare numbers. Ordered so every table is built
-	// after the tables it reads.
-	for _, d := range []struct{ name, key, lowCardinality, sql string }{
+	// groupings on them compare numbers.
+	derived := []struct{ name, key, lowCardinality, sql string }{
 		{"gene_panel_to_gene_derived", "(gene_panel_id)", "gene_panel_id, gene", genePanelToGeneDerivedSQL(targetDB, refDB)},
 		{"sample_to_gene_panel_derived", "(gene_panel_id, alteration_type, genetic_profile_id, sample_unique_id)",
 			"gene_panel_id, alteration_type, genetic_profile_id, cancer_study_identifier",
@@ -313,7 +331,9 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 			clinicalEventDerivedSQL(rawDB, refDB)},
 		{"clinical_event_data_derived", "(cancer_study_identifier, event_type, patient_unique_id)", "cancer_study_identifier, event_type, key",
 			clinicalEventDataDerivedSQL(c, rawDB)},
-	} {
+	}
+	fillDerived := func(i int) error {
+		d := derived[i]
 		var projections []string
 		if d.name == "genetic_alteration_derived" {
 			// Co-expression and the study view's per-profile gene counts
@@ -321,9 +341,29 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 			projections = append(projections,
 				"by_profile (SELECT * ORDER BY cancer_study_identifier, profile_type, hugo_gene_symbol, sample_unique_id)")
 		}
-		if err := materialize(d.name, d.key, withLowCardinality(d.sql, d.lowCardinality), projections...); err != nil {
-			return nil, err
+		if engineOf(d.name) == "View" {
+			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, d.name)); err != nil {
+				return err
+			}
 		}
+		return c.fill(targetDB, d.name, d.key, withLowCardinality(d.sql, d.lowCardinality), projections...)
+	}
+	// genomic_event_derived reads gene_panel_to_gene_derived; the other
+	// derived tables read only the objects built above, so they are
+	// filled at once (c.fillsAtOnce).
+	if err := fillDerived(0); err != nil {
+		return nil, err
+	}
+	var g errgroup.Group
+	g.SetLimit(c.fillsAtOnce())
+	for i := range derived[1:] {
+		g.Go(func() error { return fillDerived(i + 1) })
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	for _, d := range derived {
+		created = append(created, d.name)
 	}
 
 	for _, v := range studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists) {
@@ -335,11 +375,25 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	// The base views the API filters per request are snapshotted into tables
 	// once every view and derived table reading them has been built; views
 	// keep resolving them by name.
-	for _, m := range snapshotted {
-		if engineOf(m.name) != "View" {
-			continue
+	// Every snapshot is filled before any view is replaced, so the views
+	// the fills read stay in place.
+	var snaps []int
+	for i, m := range snapshotted {
+		if engineOf(m.name) == "View" {
+			snaps = append(snaps, i)
 		}
-		if err := snapshotView(c, targetDB, m.name, m.key, m.idFrom); err != nil {
+	}
+	g = errgroup.Group{}
+	g.SetLimit(c.fillsAtOnce())
+	for _, i := range snaps {
+		m := snapshotted[i]
+		g.Go(func() error { return fillSnapshot(c, targetDB, m.name, m.key, m.idFrom) })
+	}
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	for _, i := range snaps {
+		if err := swapSnapshot(c, targetDB, snapshotted[i].name); err != nil {
 			return nil, err
 		}
 	}
@@ -389,9 +443,10 @@ var snapshotted = []struct{ name, key, idFrom string }{
 	{"seg", "(study_id, sample_id)", ""},
 }
 
-// snapshotView replaces a view with a MergeTree table holding its rows, with
-// the internal_id of idFrom ("table.id_column") added when set.
-func snapshotView(c *client, db, name, orderBy, idFrom string) error {
+// fillSnapshot fills the MergeTree table that replaces a view
+// (swapSnapshot) with the view's rows, with the internal_id of idFrom
+// ("table.id_column") added when set.
+func fillSnapshot(c *client, db, name, orderBy, idFrom string) error {
 	tmp := snapshotPrefix + name
 	src := fmt.Sprintf("SELECT * FROM `%s`.`%s`", db, name)
 	if table, col, ok := strings.Cut(idFrom, "."); ok {
@@ -402,9 +457,15 @@ func snapshotView(c *client, db, name, orderBy, idFrom string) error {
 	if err := c.fill(db, tmp, orderBy, src); err != nil {
 		return fmt.Errorf("materializing %s: %w", name, err)
 	}
+	return nil
+}
+
+// swapSnapshot replaces a view with its snapshot (fillSnapshot).
+func swapSnapshot(c *client, db, name string) error {
 	if c.stage != nil && c.stage.isKept(name) {
 		return nil
 	}
+	tmp := snapshotPrefix + name
 	stmts := []string{
 		fmt.Sprintf("DROP VIEW `%s`.`%s`", db, name),
 		fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, tmp, name),

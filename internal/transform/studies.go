@@ -479,6 +479,21 @@ func (c *client) idOffset(name, col string) uint64 {
 	return n
 }
 
+// studyFillsAtOnce is how many tables a study build fills at once: each
+// insert holds one study's rows, and most of its time is ClickHouse
+// Cloud's fixed cost of a query.
+const studyFillsAtOnce = 4
+
+// fillsAtOnce is how many independent tables the build fills at once. A
+// full build fills one at a time, so a query has the replica's memory to
+// itself.
+func (c *client) fillsAtOnce() int {
+	if c.part != nil {
+		return studyFillsAtOnce
+	}
+	return 1
+}
+
 // nextIDs numbers rows in the given order after offset.
 func nextIDs(offset uint64, order string) string {
 	return fmt.Sprintf("toUInt64(%d) + toUInt64(row_number() OVER (ORDER BY %s))", offset, order)

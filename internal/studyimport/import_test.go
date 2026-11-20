@@ -3,8 +3,10 @@ package studyimport
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -120,5 +122,31 @@ func TestLiveRun(t *testing.T) {
 	if got := count("SELECT arrayStringConcat(groupArray(study_id), ',') FROM (SELECT study_id, min(internal_id) AS i FROM `" +
 		db + "`.sample GROUP BY study_id ORDER BY i)"); got != want {
 		t.Errorf("studies by sample internal id %s, want %s", got, want)
+	}
+
+	// A portal built by another version of the transform is rebuilt
+	// before the studies are staged: that build keeps the tables, and the
+	// import is then a study build.
+	if _, err := c.Execute("TRUNCATE TABLE `" + db + "`._transform_build"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Execute("INSERT INTO `" + db + "`._transform_build VALUES ('old', 'old')"); err != nil {
+		t.Fatal(err)
+	}
+	var logged []string
+	o.Logf = func(format string, args ...any) {
+		logged = append(logged, fmt.Sprintf(format, args...))
+		t.Logf(format, args...)
+	}
+	if res, err = Run(o, dirs[1:2]); err != nil || res.Count(Imported) != 1 || res.TransformErr != nil {
+		t.Fatalf("new version: %+v, %v", res, err)
+	}
+	for _, step := range []string{"new version, rebuilding the portal before staging", "kept", "staged golden_b",
+		"rebuilding 1 changed and 0 removed of 3 studies: golden_b"} {
+		i := slices.IndexFunc(logged, func(l string) bool { return strings.Contains(l, step) })
+		if i < 0 {
+			t.Fatalf("no %q in %q", step, logged)
+		}
+		logged = logged[i+1:]
 	}
 }

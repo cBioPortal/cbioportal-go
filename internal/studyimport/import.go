@@ -114,6 +114,25 @@ func Run(o Options, dirs []string) (*Result, error) {
 		o.logf("loading the shared gene panels failed: %v", err)
 	}
 
+	// A new version of the transform rebuilds the portal from the studies
+	// it holds before any study is staged again, so it keeps the tables
+	// the new version builds the same. New shared gene panels change every
+	// table, so then the one build after staging does.
+	if !res.PanelsLoaded && len(dirs) > 0 {
+		if other, err := transform.OtherVersion(raw, o.DB); err != nil {
+			o.logf("checking the transform version: %v", err)
+		} else if other {
+			o.logf("transform: new version, rebuilding the portal before staging")
+			transform.Logf = o.logf
+			start := time.Now()
+			if _, err := transform.Apply(ch.New(o.URL, o.RawDB), o.RawDB, o.DB, o.RefDB); err != nil {
+				o.logf("rebuilding with the new version failed, the import builds every study: %v", err)
+			} else {
+				o.logf("transform: rebuilt with the new version in %.0fs", time.Since(start).Seconds())
+			}
+		}
+	}
+
 	res.Studies = o.stageAll(raw, dirs)
 	var imported []int
 	for i, r := range res.Studies {
