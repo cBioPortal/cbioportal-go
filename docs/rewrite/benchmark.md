@@ -212,7 +212,9 @@ ClickHouse's background work, such as merging newly written data.
 | 2026-11-11 | 2.75 | 1.57 | 0.38 | 6.54 | 10.9 |
 | 2026-11-12 | 2.64 | 1.24 | 0.45 | 6.15 | 9.4 |
 | 2026-11-13 | 2.73 | 1.31 | 0.84 | 6.79 | 11.4 |
-| **Average** | **2.50** | **0.94** | **0.60** | **5.85** | |
+| 2026-11-19 (from 02:00) | 3.41 | 0.77 | 5.37 | 12.08 | 15.3 |
+| 2026-11-20 (to 12:50) | 3.91 | 0.66 | 0.17 | 7.49 | 12.7 |
+| **Average, Nov 6 to 13** | **2.50** | **0.94** | **0.60** | **5.85** | |
 
 All figures are CPU cores. In this period go received a quarter of www's
 API traffic as a copy, plus go.cbioportal.org's own visitors and the
@@ -227,9 +229,29 @@ reached all 8 cores. That load had nothing to do with go or Java. A
 ClickHouse figure for a single day therefore says little about go on its
 own; the per-group split above does.
 
-The query log keeps about a week, so each day is saved as it ends. Days
-from 2026-11-14 to 2026-11-18 are missing: ClickHouse's servers were
-replaced on 2026-11-18, which cleared the log before those days were saved.
+![ClickHouse CPU per day, split into Java portals, go, everyone else and ClickHouse's own background work](images/production-clickhouse-per-day.png)
+
+The figure shows the same days as the table, stacked. The grey top of each
+bar is ClickHouse's own background work, such as merging newly written
+data. From November 19, Java's share grew to 3.4 to 3.9 cores. Since the
+switch, go answers api.cbioportal.org, so Java's queries come from
+www.cbioportal.org's website, which Java still serves. go's share includes
+a copy of a quarter of www's website traffic.
+
+The next figure puts the pods, ClickHouse and the requests on one time
+line, from October 7 to today. The dotted line marks the switch on
+November 6, when go started answering api.cbioportal.org. From then on,
+the Java API pods get no requests, and go's API pods answer between
+450,000 and 1.35 million requests a day.
+
+![API pod CPU, ClickHouse CPU by who sent the queries, and requests per day, from October 7](images/production-load-since-october.png)
+
+ClickHouse keeps its query log for only a short time, and clears it when
+its servers are replaced, so the load is saved every hour. That is why the
+ClickHouse part starts on November 6. Days from November 14 to the early
+hours of November 19 are missing: the servers were replaced on November 18
+and again early on November 19, which cleared the log before those days
+were saved.
 
 ## Why go uses less memory
 
