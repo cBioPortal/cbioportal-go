@@ -552,6 +552,10 @@ func distinctNamespaces(c *client, rawDB string) []string {
 
 // hasColumn reports whether a staging table has a column (schema evolution safe).
 func hasColumn(c *client, rawDB, table, col string) bool {
+	if c.Database() == rawDB {
+		cols, _ := c.TableColumns(table)
+		return cols[col]
+	}
 	text, _ := c.Execute(fmt.Sprintf(
 		"SELECT count() FROM system.columns WHERE database = '%s' AND table = '%s' AND name = '%s' FORMAT TabSeparated", rawDB, table, col))
 	return strings.TrimSpace(text) == "1"

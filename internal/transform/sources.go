@@ -2,6 +2,7 @@ package transform
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -83,6 +84,52 @@ type client struct {
 	// hashes identify the build's objects, to keep unchanged tables
 	// (reuse.go).
 	hashes *objectHashes
+	// rawTables are the columns of each table of the raw database, read
+	// once: a transform does not change the raw database. nil reads them
+	// from ClickHouse each time.
+	rawTables map[string]map[string]bool
+}
+
+// readRawTables reads the columns of every table of the raw database.
+func readRawTables(c *ch.Client) (map[string]map[string]bool, error) {
+	text, err := c.Execute(fmt.Sprintf(
+		"SELECT table, name FROM system.columns WHERE database = '%s' FORMAT TabSeparated", ch.SQLLit(c.Database())))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]map[string]bool{}
+	for line := range strings.SplitSeq(strings.TrimSpace(text), "\n") {
+		table, col, ok := strings.Cut(line, "\t")
+		if !ok {
+			continue
+		}
+		if out[table] == nil {
+			out[table] = map[string]bool{}
+		}
+		out[table][col] = true
+	}
+	return out, nil
+}
+
+// TableColumns returns the columns of a table of the raw database.
+func (c *client) TableColumns(table string) (map[string]bool, error) {
+	if c.rawTables == nil {
+		return c.Client.TableColumns(table)
+	}
+	cols := maps.Clone(c.rawTables[table])
+	if cols == nil {
+		cols = map[string]bool{}
+	}
+	return cols, nil
+}
+
+// TableExists reports whether the raw database has the table.
+func (c *client) TableExists(table string) (bool, error) {
+	if c.rawTables == nil {
+		return c.Client.TableExists(table)
+	}
+	_, ok := c.rawTables[table]
+	return ok, nil
 }
 
 type sourceSubst struct {
@@ -93,8 +140,11 @@ type sourceSubst struct {
 // newClient inspects the raw staging tables and prepares the stand-ins.
 func newClient(c *ch.Client, rawDB string) *client {
 	out := &client{Client: c}
+	if c.Database() == rawDB {
+		out.rawTables, _ = readRawTables(c)
+	}
 	for table, cols := range stagingSources {
-		have, _ := c.TableColumns(table)
+		have, _ := out.TableColumns(table)
 		var with string
 		if len(have) == 0 {
 			sel := make([]string, len(cols))
