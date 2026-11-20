@@ -85,6 +85,8 @@ func (s *staging) record(sql string) {
 		return
 	}
 	name := sub[1] + sub[2]
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.viewSQL[name]; ok {
 		for i, v := range s.views {
 			if v == name {

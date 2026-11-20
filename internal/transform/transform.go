@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/sync/errgroup"
 
@@ -197,11 +198,14 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 			}
 		}
 	}
+	var createdMu sync.Mutex
 	createView := func(name, sel string) error {
 		if _, err := c.Execute(fmt.Sprintf("CREATE OR REPLACE VIEW `%s`.`%s` AS %s", targetDB, name, sel)); err != nil {
 			return fmt.Errorf("creating view %s: %w", name, err)
 		}
+		createdMu.Lock()
 		created = append(created, name)
+		createdMu.Unlock()
 		return nil
 	}
 	exists := func(t string) bool { ok, _ := c.TableExists(t); return ok }
@@ -258,7 +262,8 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 			return nil, err
 		}
 	}
-	for _, v := range []view{
+	cnaMatrix, cnaLong := exists("cna_matrix"), exists("cna_discrete_long")
+	if err := c.createViews(targetDB, []view{
 		{"clinical_attribute_meta", fmt.Sprintf(
 			"SELECT study_id, attr_id AS clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM `%s`.clinical_attribute_meta", rawDB)},
 		{"molecular_profile", molecularProfileSQL(c, rawDB)},
@@ -266,25 +271,18 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		{"gene_panel", genePanelSQL(rawDB, refDB, hasRef)},
 		{"mutation", mutationSQL(c, rawDB, targetDB)},
 		{"structural_variant", structuralVariantSQL(c, rawDB, targetDB)},
-	} {
-		if err := createView(v.name, v.sql); err != nil {
-			return nil, err
-		}
-	}
-	// Discrete CNA comes from the wide matrices and the long files; with
-	// neither staged, the long-file stand-in yields the empty view.
-	cnaMatrix, cnaLong := exists("cna_matrix"), exists("cna_discrete_long")
-	if err := createView("cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong || !cnaMatrix)); err != nil {
-		return nil, err
-	}
-	// seg_id numbers the segments as the importer stores them: in file order,
-	// study by study.
-	if err := createView("seg", fmt.Sprintf(
-		"SELECT g.study_id AS study_id, g.id AS sample_id, g.chrom AS chrom, g.loc_start AS start, g.loc_end AS end, "+
-			"g.num_mark AS num_probes, g.seg_mean AS segment_mean, "+
-			nextIDs(c.idOffset("seg", "seg_id"), "r.study_rank, g.pos")+" AS seg_id "+
-			"FROM (SELECT *, %s AS pos FROM `%s`.cna_seg WHERE %s) g LEFT JOIN (%s) r ON r.study_id = g.study_id",
-		fileOrderSQL, rawDB, validSegment, studyRanksSQL(targetDB))); err != nil {
+		// Discrete CNA comes from the wide matrices and the long files;
+		// with neither staged, the long-file stand-in yields the empty view.
+		{"cna", cnaSQL(c, rawDB, targetDB, cnaMatrix, cnaLong || !cnaMatrix)},
+		// seg_id numbers the segments as the importer stores them: in file
+		// order, study by study.
+		{"seg", fmt.Sprintf(
+			"SELECT g.study_id AS study_id, g.id AS sample_id, g.chrom AS chrom, g.loc_start AS start, g.loc_end AS end, "+
+				"g.num_mark AS num_probes, g.seg_mean AS segment_mean, "+
+				nextIDs(c.idOffset("seg", "seg_id"), "r.study_rank, g.pos")+" AS seg_id "+
+				"FROM (SELECT *, %s AS pos FROM `%s`.cna_seg WHERE %s) g LEFT JOIN (%s) r ON r.study_id = g.study_id",
+			fileOrderSQL, rawDB, validSegment, studyRanksSQL(targetDB))},
+	}, createView); err != nil {
 		return nil, err
 	}
 	if err := clinicalLong(c, rawDB, targetDB, "clinical_sample", "sample_id"); err != nil {
@@ -376,10 +374,8 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		created = append(created, d.name)
 	}
 
-	for _, v := range studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists) {
-		if err := createView(v.name, v.sql); err != nil {
-			return nil, err
-		}
+	if err := c.createViews(targetDB, studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists), createView); err != nil {
+		return nil, err
 	}
 
 	// The base views the API filters per request are snapshotted into tables
@@ -418,6 +414,55 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 		counts[i] = ViewCount{Name: v}
 	}
 	return counts, nil
+}
+
+// createViews creates views with create, at once in rounds: each round
+// creates the views whose views of the list they read (staging.ref)
+// exist. Each CREATE VIEW waits for every replica.
+func (c *client) createViews(db string, views []view, create func(name, sel string) error) error {
+	if c.stage == nil {
+		for _, v := range views {
+			if err := create(v.name, v.sql); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	inList := map[string]bool{}
+	for _, v := range views {
+		inList[v.name] = true
+	}
+	reads := make([][]string, len(views))
+	for i, v := range views {
+		for _, m := range c.stage.ref.FindAllStringSubmatch(v.sql, -1) {
+			if dep := m[1] + m[2]; inList[dep] && dep != v.name {
+				reads[i] = append(reads[i], dep)
+			}
+		}
+	}
+	done := map[string]bool{}
+	for len(done) < len(views) {
+		var round []int
+		for i, v := range views {
+			if !done[v.name] && !slices.ContainsFunc(reads[i], func(d string) bool { return !done[d] }) {
+				round = append(round, i)
+			}
+		}
+		if len(round) == 0 {
+			return fmt.Errorf("views read each other in a cycle")
+		}
+		var g errgroup.Group
+		for _, i := range round {
+			g.Go(func() error { return create(views[i].name, views[i].sql) })
+		}
+		if err := g.Wait(); err != nil {
+			return err
+		}
+		for _, i := range round {
+			done[views[i].name] = true
+		}
+	}
+	return nil
 }
 
 // validSegment keeps the staged copy-number segments the importer stores:
