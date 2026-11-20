@@ -493,7 +493,7 @@ branch.
 | Stage all 496 studies (copy their files into ClickHouse), 3 at a time | 33 min |
 | Build every table for all 496 studies (a *full build*) | 54–60 min |
 | Build again after a new importer release that changes no table | 22 s |
-| Import `acc_2019` again (1,049 samples, 1.4 million matrix values) | 33 s |
+| Import `acc_2019` again (1,049 samples, 1.4 million matrix values) | 30 s |
 | Import `acc_2019` again with a new importer release that changes no table | 54 s |
 | Import `brca_tcga` again (1,108 samples, 157 million matrix values) | 88 s |
 | Import `brca_tcga_pan_can_atlas_2018` again (1,084 samples, 141 million matrix values) | 87 s |
@@ -502,7 +502,7 @@ The portal holds 388,339 samples and 5.3 billion matrix values (expression,
 copy number, methylation and protein levels).
 
 Each single-study import is the study's staging plus building its tables.
-For `acc_2019` that is 4 s and 28 s; the other two rows were timed before
+For `acc_2019` that is 2 s and 27 s; the other two rows were timed before
 the build filled a study's tables four at a time, and took 37–71 s to build. Building one study takes as long in this portal of 496
 studies as in a test portal of 10 (36 s for `acc_2019`, 64 s for
 `brca_tcga`): only the changed study's rows are built.
