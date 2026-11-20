@@ -151,6 +151,11 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 		return err
 	}
 	headStudies := datahub.StudyDirsWithMeta(files)
+	if len(headStudies) == 0 {
+		// A checkout without studies is broken, not an empty datahub:
+		// syncing it would remove every study from the hub.
+		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("%s at %s has no studies", st.Branch, short(head)))
+	}
 	var changed []string
 	if state.Imported != "" {
 		if err := co.FetchCommit(ctx, state.Imported); err != nil {
