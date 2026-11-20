@@ -101,10 +101,10 @@ func (r *run) ensureDatabases() (string, error) {
 	return job.Query(r.ch, fmt.Sprintf("SELECT argMax(mode, finished) FROM %s FORMAT TSV", r.importLog()))
 }
 
-// copyHub copies hub.cbioportal.org's staged studies and reference data
-// into the preview, while holding the hub's import lock so the copy is of
-// one state of the hub. The preview's own import then builds its portal
-// database from them.
+// copyHub copies hub.cbioportal.org's staged studies, reference data and
+// built portal into the preview, while holding the hub's import lock so
+// the copy is of one state of the hub. The preview's own import then
+// rebuilds only the pull request's studies on top of the copy.
 func (r *run) copyHub(ctx context.Context) error {
 	lock := &studyimport.Lock{C: r.ch, DB: r.Hub.Raw, Table: r.HubLockTable, Owner: r.Owner + "-copy",
 		Wait: r.LockWait, Stale: r.LockStale, Poll: r.LockPoll, Heartbeat: r.LockHeartbeat, Logf: job.Logf}
@@ -119,19 +119,23 @@ func (r *run) copyHub(ctx context.Context) error {
 	return CopyDatabases(r.ch, r.Hub, preview.Databases{DB: r.DB, Raw: r.Raw, Ref: r.Ref})
 }
 
-// CopyDatabases copies the tables and views of from's raw and reference
-// databases into to's, replacing tables of the same name. ClickHouse
+// CopyDatabases copies the tables and views of from's raw, reference and
+// portal databases into to's, replacing tables of the same name. ClickHouse
 // attaches a table's data to the copy without rewriting it (ATTACH
 // PARTITION ALL FROM): all of datahub (about 130 million rows) takes about
 // 20 seconds on ClickHouse Cloud.
 // The hub's own bookkeeping (the import lock, log and master sync state)
-// is not copied. The views are created again over to's databases.
+// and the staged tables of an unfinished build are not copied. The views
+// are created again over to's databases. The copied portal keeps the
+// fingerprint of the hub's build, so an import into it rebuilds only the
+// studies it changes.
 func CopyDatabases(c *ch.Client, from, to preview.Databases) error {
 	rename := strings.NewReplacer(from.Raw+".", to.Raw+".", from.Ref+".", to.Ref+".", from.DB+".", to.DB+".")
-	for _, pair := range [][2]string{{from.Raw, to.Raw}, {from.Ref, to.Ref}} {
+	for _, pair := range [][2]string{{from.Raw, to.Raw}, {from.Ref, to.Ref}, {from.DB, to.DB}} {
 		src, dst := pair[0], pair[1]
 		text, err := c.Execute(fmt.Sprintf("SELECT name, engine, create_table_query FROM system.tables "+
-			"WHERE database = '%s' AND NOT startsWith(name, '_hub_') AND name != '_import_lock' ORDER BY name FORMAT JSONEachRow", ch.SQLLit(src)))
+			"WHERE database = '%s' AND NOT startsWith(name, '_hub_') AND NOT startsWith(name, '__next_') AND name != '_import_lock' "+
+			"ORDER BY name FORMAT JSONEachRow", ch.SQLLit(src)))
 		if err != nil {
 			return err
 		}

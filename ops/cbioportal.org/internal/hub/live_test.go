@@ -212,10 +212,21 @@ func TestLiveSyncMaster(t *testing.T) {
 	if views != "0" {
 		t.Errorf("%s copied views still read the hub's databases", views)
 	}
-	res, err = studyimport.Run(studyimport.Options{URL: base, DB: pr.DB, RawDB: pr.Raw, RefDB: pr.Ref, Logf: t.Logf},
+	if got, want := q("SELECT count() FROM `"+pr.DB+"`.sample_derived"), q("SELECT count() FROM `"+hub.DB+"`.sample_derived"); got != want || got == "0" {
+		t.Errorf("copied portal has %s samples, the hub %s", got, want)
+	}
+	var log []string
+	logf := func(format string, args ...any) {
+		log = append(log, fmt.Sprintf(format, args...))
+		t.Logf(format, args...)
+	}
+	res, err = studyimport.Run(studyimport.Options{URL: base, DB: pr.DB, RawDB: pr.Raw, RefDB: pr.Ref, Logf: logf},
 		[]string{filepath.Join(golden, "studies", "golden_b")})
 	if err != nil || res.TransformErr != nil || res.Count(studyimport.Imported) != 1 {
 		t.Fatalf("importing on top of the copy: %v %+v", err, res)
+	}
+	if !strings.Contains(strings.Join(log, "\n"), "rebuilding 1 changed and 0 removed of 3 studies: golden_b") {
+		t.Errorf("the import on top of the copy did not rebuild only golden_b:\n%s", strings.Join(log, "\n"))
 	}
 	if got := q("SELECT arrayStringConcat(groupArray(s), ',') FROM (SELECT DISTINCT cancer_study_identifier AS s FROM `" + pr.DB + "`.sample_derived ORDER BY s)"); got != "golden_a,golden_b,golden_c" {
 		t.Errorf("the preview serves %q, want the hub's studies plus golden_b", got)

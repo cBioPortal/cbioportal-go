@@ -235,10 +235,11 @@ func publishedTables(c *client, targetDB string) (map[string]string, error) {
 // shared by all studies (an empty study_id, such as the shared gene panels). The
 // reference genes the transform adds for the phosphoproteins of RPPA files
 // (negative Entrez ids) come from the studies' own rows and are left out.
-// The second result leaves out the code.
+// The second result leaves out the code. Tables are named by their role
+// (raw or ref), not their database, so a copy of a portal under other
+// database names keeps the fingerprint of the build it was copied from.
 func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%s\n", rawDB, refDB)
 	text, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT t.database, t.name, countIf(c.name = 'study_id'), countIf(c.name = 'entrez_gene_id') FROM system.tables t "+
 			"LEFT JOIN system.columns c ON c.database = t.database AND c.table = t.name "+
@@ -253,7 +254,10 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 		if len(f) != 4 {
 			continue
 		}
-		where := ""
+		where, role := "", "ref"
+		if f[0] == rawDB {
+			role = "raw"
+		}
 		switch {
 		case f[0] == rawDB && f[2] == "0":
 			continue // a study's own rows, keyed some other way
@@ -262,8 +266,8 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 		case f[3] != "0":
 			where = " WHERE entrez_gene_id >= 0"
 		}
-		parts = append(parts, fmt.Sprintf("SELECT '%[1]s.%[2]s' AS t, count(), sum(cityHash64(*)) FROM `%[1]s`.`%[2]s`%[3]s",
-			ch.SQLLit(f[0]), ch.SQLLit(f[1]), where))
+		parts = append(parts, fmt.Sprintf("SELECT '%[4]s.%[2]s' AS t, count(), sum(cityHash64(*)) FROM `%[1]s`.`%[2]s`%[3]s",
+			ch.SQLLit(f[0]), ch.SQLLit(f[1]), where, role))
 	}
 	if len(parts) > 0 {
 		text, err := c.Client.Execute("SELECT * FROM (" + strings.Join(parts, " UNION ALL ") + ") ORDER BY t FORMAT TabSeparated")

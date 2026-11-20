@@ -377,12 +377,15 @@ preview holds:
 | none, or `hub-preview: changed` | The reference data and the studies the pull request changes. This is the default and the fastest. |
 | `hub-preview: all` | A copy of every study on hub.cbioportal.org, with the pull request's studies imported on top. Use it to see a study next to all the others, for example in a query across studies. |
 
-With `all`, the first import copies the hub's staged studies and reference
-data into the preview's databases. The copy takes about 20 seconds,
-because ClickHouse attaches the data instead of rewriting it. The preview's
-portal tables are then built from all the studies, which takes about an
-hour for all of datahub. Later commits of the pull request import only
-their studies on top, in about a minute each. The copy is of the hub as
+With `all`, the first import copies the hub's staged studies, reference
+data and built portal tables into the preview's databases. The copy takes
+about 20 seconds, because ClickHouse attaches the data instead of
+rewriting it. The import then rebuilds only the pull request's studies on
+top of the copy, as an import into the hub itself would. So an `all`
+preview is ready about as fast as the default one. If the hub was built
+by another version of the importer, the preview builds every study
+instead, which takes about half an hour for all of datahub. Later commits
+of the pull request import only their studies on top. The copy is of the hub as
 it was when the preview was first built. Changing the `hub-preview:` line
 rebuilds the preview from empty with the next commit.
 
