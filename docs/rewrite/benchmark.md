@@ -198,23 +198,35 @@ yet, so this comparison favors Java slightly.
 The pods above are only half of the cost: both backends send their queries
 to the same ClickHouse service (2 replicas of 8 cores). The table shows its
 average CPU per day, from ClickHouse's own query log, split by who sent the
-queries. "Other users" are everything else on the same service, such as
-analytics notebooks and other teams' tools. "Whole service" also counts
-ClickHouse's background work, such as merging newly written data.
+queries:
 
-| Day (UTC) | Java | go | Other users | Whole service | Whole service, busiest 5% of 5-minute periods |
-|---|---|---|---|---|---|
-| 2026-11-06 (from 10:30) | 2.91 | 0.83 | 0.59 | 6.00 | 9.0 |
-| 2026-11-07 | 2.00 | 0.46 | 0.70 | 4.56 | 8.3 |
-| 2026-11-08 | 2.01 | 0.52 | 0.44 | 4.34 | 7.6 |
-| 2026-11-09 | 2.41 | 0.70 | 0.83 | 6.52 | 14.3 |
-| 2026-11-10 | 2.54 | 0.91 | 0.53 | 5.89 | 12.5 |
-| 2026-11-11 | 2.75 | 1.57 | 0.38 | 6.54 | 10.9 |
-| 2026-11-12 | 2.64 | 1.24 | 0.45 | 6.15 | 9.4 |
-| 2026-11-13 | 2.73 | 1.31 | 0.84 | 6.79 | 11.4 |
-| 2026-11-19 (from 02:00) | 3.41 | 0.77 | 5.37 | 12.08 | 15.3 |
-| 2026-11-20 (to 12:50) | 3.91 | 0.66 | 0.17 | 7.49 | 12.7 |
-| **Average, Nov 6 to 13** | **2.50** | **0.94** | **0.60** | **5.85** | |
+- "Java portals" are the queries of Java's websites and API.
+- "Java importer" is what the Java importer writes: its inserts and table
+  changes.
+- "cBioLab" is the cBioLab chat assistant, which runs its own queries on
+  the same data.
+- "Other users" are everything else on the same service, such as GENIE,
+  monitoring and other teams' tools.
+- "Whole service" also counts ClickHouse's background work, such as
+  merging newly written data.
+
+Before November 19, the saved days have only three groups. The Java
+importer is part of "Java portals" there, and cBioLab is part of "Other
+users", so those columns show a dash.
+
+| Day (UTC) | Java portals | Java importer | go | cBioLab | Other users | Whole service | Whole service, busiest 5% of 5-minute periods |
+|---|---|---|---|---|---|---|---|
+| 2026-11-06 (from 10:30) | 2.91 | – | 0.83 | – | 0.59 | 6.00 | 9.0 |
+| 2026-11-07 | 2.00 | – | 0.46 | – | 0.70 | 4.56 | 8.3 |
+| 2026-11-08 | 2.01 | – | 0.52 | – | 0.44 | 4.34 | 7.6 |
+| 2026-11-09 | 2.41 | – | 0.70 | – | 0.83 | 6.52 | 14.3 |
+| 2026-11-10 | 2.54 | – | 0.91 | – | 0.53 | 5.89 | 12.5 |
+| 2026-11-11 | 2.75 | – | 1.57 | – | 0.38 | 6.54 | 10.9 |
+| 2026-11-12 | 2.64 | – | 1.24 | – | 0.45 | 6.15 | 9.4 |
+| 2026-11-13 | 2.73 | – | 1.31 | – | 0.84 | 6.79 | 11.4 |
+| 2026-11-19 (from 02:00) | 3.39 | 0.02 | 0.78 | 5.22 | 0.18 | 12.08 | 15.3 |
+| 2026-11-20 (to 13:00) | 3.94 | 0.01 | 0.67 | 0.02 | 0.16 | 7.58 | 12.7 |
+| **Average, Nov 6 to 13** | **2.50** | – | **0.94** | – | **0.60** | **5.85** | |
 
 All figures are CPU cores. In this period go received a quarter of www's
 API traffic as a copy, plus go.cbioportal.org's own visitors and the
@@ -223,11 +235,12 @@ column is not a like-for-like share; per request it is in the
 [ClickHouse load per request](#clickhouse-load-per-request) section.
 
 Other users can load the service far more than this, unannounced. On
-2026-11-19 from 00:00 to 01:30 UTC, an automated batch of another tool's
-queries alone used 3 to 3.6 cores on average, and one replica briefly
-reached all 8 cores. That load had nothing to do with go or Java. A
-ClickHouse figure for a single day therefore says little about go on its
-own; the per-group split above does.
+November 19, cBioLab used 5.2 cores on average over the day, more than
+Java and go together, and one replica briefly reached all 8 cores. That
+load had nothing to do with go or Java. A ClickHouse figure for a single
+day therefore says little about go on its own; the per-group split above
+does. No Java import ran in the saved days, so the Java importer's column
+shows almost nothing yet. An import will show up there when it runs.
 
 ![ClickHouse CPU per day, split into Java portals, go, everyone else and ClickHouse's own background work](images/production-clickhouse-per-day.png)
 
