@@ -26,6 +26,45 @@ func urlFlag(cmd *cobra.Command) *string {
 	return url
 }
 
+// tuningHelp explains the tuning flags in the help of the commands that
+// build a portal.
+const tuningHelp = `Tuning:
+  The tuning flags fit the build to the ClickHouse servers. The defaults
+  suit ClickHouse Cloud replicas with 8 cores and 32 GB of memory each. On
+  bigger replicas, set --insert-threads to about the number of cores per
+  replica, and raise --batch-studies as memory allows.
+
+  A full build (every study) fills each big table in batches of studies.
+  With --replicas 2 or more, it fills that many batches at once, each on
+  a replica of its own, and uses fewer when the service has fewer
+  replicas. --replicas 1 keeps a full build on one replica, for example
+  to leave the other replicas free for the website. A server that is not
+  part of a cluster always uses one.`
+
+// tuningFlags registers the tuning flags and returns the function that
+// applies them before the command builds.
+func tuningFlags(cmd *cobra.Command) func() error {
+	fs := cmd.Flags()
+	d := transform.DefaultTuning
+	batch := fs.Int("batch-studies", d.BatchStudies, "studies a full build inserts into a big table at a time; fewer need less memory per insert")
+	threads := fs.Int("insert-threads", d.InsertThreads, "threads that write each insert (ClickHouse's max_insert_threads), about one per core of a replica")
+	replicas := fs.Int("replicas", d.Replicas, "replicas a full build fills batches on at once; 1 uses one replica")
+	fills := fs.Int("study-fills", d.StudyFills, "tables an import of a few studies fills at once")
+	for name, env := range map[string]string{"batch-studies": "IMPORT_BATCH_STUDIES", "insert-threads": "IMPORT_INSERT_THREADS",
+		"replicas": "IMPORT_REPLICAS", "study-fills": "IMPORT_STUDY_FILLS"} {
+		cli.Env(fs, name, env)
+	}
+	cli.Group(fs, "Tuning", "replicas", "insert-threads", "batch-studies", "study-fills")
+	if before, ok := strings.CutSuffix(cmd.Long, "\n\n"+environmentHelp); ok {
+		cmd.Long = before + "\n\n" + tuningHelp + "\n\n" + environmentHelp
+	} else {
+		cmd.Long += "\n\n" + tuningHelp
+	}
+	return func() error {
+		return transform.SetTuning(transform.Tuning{BatchStudies: *batch, InsertThreads: *threads, Replicas: *replicas, StudyFills: *fills})
+	}
+}
+
 // jsonFlag registers --json, which prints the command's result as JSON.
 func jsonFlag(fs *pflag.FlagSet) *bool {
 	return fs.Bool("json", false, "print the result as JSON on stdout (progress stays on stderr)")
@@ -294,7 +333,11 @@ same three databases.`,
 	refDB := fs.String("ref-db", "cbioportal_ref", "gene reference `database` to read (with -from-prod: the production clone)")
 	fromProd := fs.Bool("from-prod", false, "Java migration only: build from a clone of a Java cBioPortal production database (-ref-db) instead of staged studies")
 	asJSON := jsonFlag(fs)
+	applyTuning := tuningFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
+		if err := applyTuning(); err != nil {
+			return err
+		}
 		w := cmd.OutOrStdout()
 		start := time.Now()
 		transform.Logf = stderrLog

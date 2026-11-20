@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 )
@@ -27,6 +29,7 @@ const publishingStep = "publishing"
 type resumeState struct {
 	targetDB, key string
 	resumed       bool
+	mu            sync.Mutex
 	done          map[string]bool
 }
 
@@ -34,7 +37,7 @@ type resumeState struct {
 // covers, every study with its import time, and the batch size.
 func resumeKey(b *studyBuild) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%d\n", b.fingerprint, batchStudies)
+	fmt.Fprintf(h, "%s\n%d\n", b.fingerprint, tuning.BatchStudies)
 	for _, s := range b.order {
 		fmt.Fprintf(h, "%s\t%s\n", s.StudyID, s.ImportTime)
 	}
@@ -92,24 +95,45 @@ func startStaging(c *client, targetDB string, b *studyBuild) error {
 
 // stepDone reports whether a resumed build finished step before.
 func (c *client) stepDone(step string) bool {
-	return c.resume != nil && c.resume.done[step]
+	if c.resume == nil {
+		return false
+	}
+	c.resume.mu.Lock()
+	defer c.resume.mu.Unlock()
+	return c.resume.done[step]
 }
 
-// markDone records a finished step of a full build.
+// markDone records a finished step of a full build. A step recorded twice
+// is the same as once, so a request that did not reach ClickHouse, such as
+// a new connection to a busy service that timed out, is sent again.
 func (c *client) markDone(step string) error {
 	if c.resume == nil {
 		return nil
 	}
-	if _, err := c.Client.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` (key, step) VALUES ('%s', '%s')",
-		c.resume.targetDB, resumeTable, c.resume.key, ch.SQLLit(step))); err != nil {
-		return fmt.Errorf("recording the build's progress: %w", err)
+	insert := fmt.Sprintf("INSERT INTO `%s`.`%s` (key, step) VALUES ('%s', '%s')",
+		c.resume.targetDB, resumeTable, c.resume.key, ch.SQLLit(step))
+	for wait := markRetryWait; ; wait *= 2 {
+		_, err := c.Client.Execute(insert)
+		if err == nil {
+			break
+		}
+		if !strings.Contains(err.Error(), "clickhouse transport") || wait > 8*markRetryWait {
+			return fmt.Errorf("recording the build's progress: %w", err)
+		}
+		time.Sleep(wait)
 	}
+	c.resume.mu.Lock()
 	c.resume.done[step] = true
+	c.resume.mu.Unlock()
 	if stepHook != nil {
 		return stepHook(step)
 	}
 	return nil
 }
+
+// markRetryWait is how long markDone waits before it sends a step again,
+// twice as long each time, four times in all.
+var markRetryWait = 2 * time.Second
 
 // stepHook, when set (by tests), runs after each recorded step; an error
 // stops the build there.

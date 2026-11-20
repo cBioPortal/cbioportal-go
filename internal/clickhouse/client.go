@@ -38,6 +38,9 @@ type Client struct {
 	// tables caches the database's table names for EnsureTable, shared by
 	// the clients derived from this one.
 	tables *tableCache
+	// wrap adds the authentication, log comment and observation to a
+	// transport (New), for the transports of pinned clients (Pinned).
+	wrap func(http.RoundTripper) http.RoundTripper
 }
 
 // tableCache is the set of a database's tables EnsureTable knows exist.
@@ -140,25 +143,55 @@ func (c *Client) rewrite(sql string) string {
 // CLICKHOUSE_USER / CLICKHOUSE_PASSWORD; without them requests are sent as
 // ClickHouse's default user.
 func New(baseURL, database string) *Client {
-	rt := baseTransport
-	if user := os.Getenv("CLICKHOUSE_USER"); user != "" {
-		rt = authTransport{base: baseTransport, user: user, password: os.Getenv("CLICKHOUSE_PASSWORD")}
-	}
+	user, password := os.Getenv("CLICKHOUSE_USER"), os.Getenv("CLICKHOUSE_PASSWORD")
 	comment := logComment
 	if comment == "" {
 		comment = os.Getenv("CLICKHOUSE_LOG_COMMENT")
 	}
-	if comment != "" {
-		rt = commentTransport{base: rt, comment: comment}
+	wrap := func(rt http.RoundTripper) http.RoundTripper {
+		if user != "" {
+			rt = authTransport{base: rt, user: user, password: password}
+		}
+		if comment != "" {
+			rt = commentTransport{base: rt, comment: comment}
+		}
+		return observedTransport{base: rt}
 	}
-	rt = observedTransport{base: rt}
 	return &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		database: database,
-		http:     &http.Client{Timeout: time.Hour, Transport: rt},
+		http:     &http.Client{Timeout: time.Hour, Transport: wrap(baseTransport)},
 		drv:      &driverPool{},
 		tables:   &tableCache{},
+		wrap:     wrap,
 	}
+}
+
+// Pinned returns a client like c that sends its requests over one
+// connection of its own. A ClickHouse Cloud service sends every request of
+// a connection to the same replica, so a pinned client's queries run on one
+// replica while the connection stays open (see Replica). A client whose
+// requests do not go over the network is returned as it is.
+func (c *Client) Pinned() *Client {
+	t, ok := baseTransport.(*http.Transport)
+	if !ok || c.wrap == nil {
+		return c
+	}
+	t = t.Clone()
+	t.MaxConnsPerHost = 1
+	t.MaxIdleConnsPerHost = 1
+	d := *c
+	d.http = &http.Client{Timeout: c.http.Timeout, Transport: c.wrap(t)}
+	return &d
+}
+
+// Close closes the idle connections of a pinned client.
+func (c *Client) Close() { c.http.CloseIdleConnections() }
+
+// Replica is the name of the server that answers c's next query.
+func (c *Client) Replica() (string, error) {
+	out, err := c.post(nil, strings.NewReader("SELECT hostName()"))
+	return strings.TrimSpace(out), err
 }
 
 // authTransport authenticates every request with ClickHouse's user headers.

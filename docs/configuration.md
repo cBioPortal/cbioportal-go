@@ -9,6 +9,7 @@ sessions, and monitoring.
 ## Contents
 
 - [cbioportal-import](#cbioportal-import)
+  - [Fitting a build to the ClickHouse servers](#fitting-a-build-to-the-clickhouse-servers)
 - [cbioportal-api](#cbioportal-api)
   - [Where the frontend comes from](#where-the-frontend-comes-from)
   - [Limits on bulk requests](#limits-on-bulk-requests)
@@ -108,6 +109,38 @@ The importer exits with one of three codes:
 | 0 | The command worked. |
 | 1 | The command failed. It prints `cbioportal-import: <command>: <error>` to stderr. |
 | 2 | The command line was wrong. A mistyped command or flag gets a suggestion, such as `(did you mean --raw-db?)`. |
+
+### Fitting a build to the ClickHouse servers
+
+`transform` and `import-study` take four tuning options. They control how
+much work a build gives ClickHouse at once. The defaults suit a ClickHouse
+Cloud service whose replicas (the servers of the service) have 8 cores
+and 32 GB of memory each. Each option can also be set with an environment
+variable.
+
+| Option | Environment variable | Default | What it sets |
+|---|---|---|---|
+| `--replicas` | `IMPORT_REPLICAS` | 2 | How many replicas a full build uses at once. |
+| `--insert-threads` | `IMPORT_INSERT_THREADS` | 8 | How many threads write the rows of each insert. About one per core of a replica works best. |
+| `--batch-studies` | `IMPORT_BATCH_STUDIES` | 50 | How many studies a full build adds to a big table at a time. Fewer studies need less memory. |
+| `--study-fills` | `IMPORT_STUDY_FILLS` | 4 | How many tables an import of a few changed studies fills at once. |
+
+A full build rebuilds every study. It happens the first time a portal is
+built and when the reference data or the shared gene panels change. It
+fills each big table, such as the gene expression and copy-number values,
+in batches of studies. One replica writes the rows of an insert about as
+fast as it can, so with `--replicas 2` the build sends two batches at
+once, each to a replica of its own. Each replica then needs the memory of
+one batch, as before. A ClickHouse Cloud service sends all of one
+connection's queries to the same replica, so the importer keeps one
+connection per replica it uses. With fewer replicas than `--replicas`, the
+build uses the ones there are. A ClickHouse server that is not part of a
+cluster always uses one.
+
+Set `--replicas 1` when the replicas also serve a busy website and a
+slower build is better than a busy website. On bigger replicas, set
+`--insert-threads` to about the number of cores of one replica, and raise
+`--batch-studies` as memory allows.
 
 ## cbioportal-api
 

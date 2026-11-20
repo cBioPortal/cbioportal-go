@@ -74,7 +74,11 @@ and gene panels would be loaded. It changes nothing and takes no lock.`,
 	owner := fs.String("owner", "", "`name` this import holds the lock as (default: <host>-<pid>)")
 	dryRun := dryRunFlag(fs)
 	asJSON := jsonFlag(fs)
+	applyTuning := tuningFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if err := applyTuning(); err != nil {
+			return err
+		}
 		w := cmd.OutOrStdout()
 		o := studyimport.Options{
 			URL: *url, DB: *db, RawDB: orDefault(*rawDB, *db+"_raw"), RefDB: orDefault(*refDB, *db+"_ref"),

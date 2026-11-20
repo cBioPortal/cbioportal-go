@@ -526,7 +526,7 @@ branch.
 | Step | Time |
 |---|---|
 | Stage all 496 studies (copy their files into ClickHouse), 3 at a time | 33 min |
-| Build every table for all 496 studies (a *full build*) | 55 min |
+| Build every table for all 496 studies (a *full build*), on both replicas at once | 34 min |
 | Build again after a new importer release that changes no table | 22 s |
 | Import `acc_2019` again (1,049 samples, 1.4 million matrix values) | 28 s |
 | Import `acc_2019` again with a new importer release that changes no table | 46 s |
@@ -585,6 +585,14 @@ changes fixed it:
 - **Resumable.** A full build that stops part of the way, for example
   because its server went away, is resumed by the next import: the tables
   and batches it finished are kept.
+- **Both replicas at once.** One replica writes the rows of an insert
+  about as fast as it can, so the build sends two batches at a time, each
+  to a replica of its own. A ClickHouse Cloud service sends all queries of
+  one connection to the same replica, so the importer keeps one
+  connection per replica. This took the full build from 55 to 34 minutes,
+  with the same rows, and each replica still needs the memory of one
+  batch. `--replicas 1` turns it off (see
+  [Configuration](../configuration.md#fitting-a-build-to-the-clickhouse-servers)).
 
 Half of the full build is one table: `genetic_alteration_derived`, which
 holds every value of every expression, copy-number, methylation and protein

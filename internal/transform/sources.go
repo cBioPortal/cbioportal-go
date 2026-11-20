@@ -79,6 +79,9 @@ type client struct {
 	// batchIDs are those studies.
 	batches  []*ch.Client
 	batchIDs [][]string
+	// lanes fill the batches of a table at once, each on its own
+	// replica (replicas.go).
+	lanes []*lane
 	// resume records a full build's finished steps (resume.go).
 	resume *resumeState
 	// hashes identify the build's objects, to keep unchanged tables

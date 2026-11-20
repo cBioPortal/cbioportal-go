@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -479,11 +480,6 @@ func (c *client) studyFilter(rawDB, targetDB string, studies []string) (*ch.Clie
 	return c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}), nil
 }
 
-// batchStudies is how many studies a full build fills a table with at a
-// time: a portal with more studies is filled batch by batch, so a query
-// needs the memory of one batch, not of every study.
-var batchStudies = 50
-
 // numberedAcrossStudies are the tables whose ids number the rows of every
 // study in one sequence; a full build fills them in one go.
 var numberedAcrossStudies = map[string]bool{"sample": true, "patient": true, "sample_list": true, "seg": true}
@@ -499,12 +495,14 @@ var oneInsert = map[string]bool{"sample_profile": true, "sample_derived": true, 
 // batch.
 func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 	c.batches, c.batchIDs = nil, nil
-	if len(b.order) <= batchStudies {
+	closeLanes(c.lanes)
+	c.lanes = nil
+	if len(b.order) <= tuning.BatchStudies {
 		return nil
 	}
-	for start := 0; start < len(b.order); start += batchStudies {
+	for start := 0; start < len(b.order); start += tuning.BatchStudies {
 		var ids []string
-		for _, s := range b.order[start:min(start+batchStudies, len(b.order))] {
+		for _, s := range b.order[start:min(start+tuning.BatchStudies, len(b.order))] {
 			ids = append(ids, s.StudyID)
 		}
 		filtered, err := c.studyFilter(rawDB, targetDB, ids)
@@ -514,7 +512,15 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 		c.batches = append(c.batches, filtered)
 		c.batchIDs = append(c.batchIDs, ids)
 	}
-	logf("transform: filling the tables in %d batches of up to %d studies", len(c.batches), batchStudies)
+	logf("transform: filling the tables in %d batches of up to %d studies", len(c.batches), tuning.BatchStudies)
+	c.lanes = pinReplicas(c.Client, tuning.Replicas)
+	if len(c.lanes) > 1 {
+		hosts := make([]string, len(c.lanes))
+		for i, l := range c.lanes {
+			hosts[i] = l.host
+		}
+		logf("transform: filling the batches on %d replicas at once: %s", len(c.lanes), strings.Join(hosts, ", "))
+	}
 	return nil
 }
 
@@ -538,17 +544,12 @@ func (c *client) idOffset(name, col string) uint64 {
 	return n
 }
 
-// studyFillsAtOnce is how many tables a study build fills at once: each
-// insert holds one study's rows, and most of its time is ClickHouse
-// Cloud's fixed cost of a query.
-const studyFillsAtOnce = 4
-
 // fillsAtOnce is how many independent tables the build fills at once. A
 // full build fills one at a time, so a query has the replica's memory to
 // itself.
 func (c *client) fillsAtOnce() int {
 	if c.part != nil {
-		return studyFillsAtOnce
+		return tuning.StudyFills
 	}
 	return 1
 }
@@ -648,33 +649,71 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 		}
 	}
 	if batched {
-		for i, filtered := range c.batches {
-			step := fmt.Sprintf("batch:%s:%d", name, i)
-			if created && c.stepDone(step) {
-				continue
-			}
-			if created {
-				// The batch may have been filled in part when the build
-				// stopped.
-				drops := make([]string, len(c.batchIDs[i]))
-				for j, id := range c.batchIDs[i] {
-					drops[j] = fmt.Sprintf("DROP PARTITION '%s'", ch.SQLLit(id))
-				}
-				if _, err := c.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` %s", targetDB, name, strings.Join(drops, ", "))); err != nil {
-					return fmt.Errorf("emptying a batch of table %s: %w", name, err)
-				}
-			}
-			fc := *c
-			fc.Client = filtered
-			if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
-				return fmt.Errorf("filling table %s: %w", name, err)
-			}
-			if err := c.markDone(step); err != nil {
-				return err
-			}
+		if err := c.fillBatches(targetDB, name, sel, created); err != nil {
+			return err
 		}
 	}
 	return c.markDone("table:" + name)
+}
+
+// fillBatches inserts the rows of table name batch by batch, the batches
+// not done yet when created (a resumed build). With lanes, each lane
+// inserts one batch at a time on its own replica.
+func (c *client) fillBatches(targetDB, name, sel string, created bool) error {
+	one := func(i int, cl *ch.Client) error {
+		step := fmt.Sprintf("batch:%s:%d", name, i)
+		if created {
+			// The batch may have been filled in part when the build
+			// stopped.
+			drops := make([]string, len(c.batchIDs[i]))
+			for j, id := range c.batchIDs[i] {
+				drops[j] = fmt.Sprintf("DROP PARTITION '%s'", ch.SQLLit(id))
+			}
+			if _, err := c.Execute(fmt.Sprintf("ALTER TABLE `%s`.`%s` %s", targetDB, name, strings.Join(drops, ", "))); err != nil {
+				return fmt.Errorf("emptying a batch of table %s: %w", name, err)
+			}
+		}
+		fc := *c
+		fc.Client = cl
+		if _, err := fc.Execute(fmt.Sprintf("INSERT INTO `%s`.`%s` %s", targetDB, name, sel)); err != nil {
+			return fmt.Errorf("filling table %s: %w", name, err)
+		}
+		return c.markDone(step)
+	}
+	var todo []int
+	for i := range c.batches {
+		if !created || !c.stepDone(fmt.Sprintf("batch:%s:%d", name, i)) {
+			todo = append(todo, i)
+		}
+	}
+	if len(c.lanes) < 2 {
+		for _, i := range todo {
+			if err := one(i, c.batches[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	free := make(chan *lane, len(c.lanes))
+	for _, l := range c.lanes {
+		free <- l
+	}
+	g, ctx := errgroup.WithContext(context.Background())
+	for _, i := range todo {
+		l := <-free
+		if ctx.Err() != nil {
+			break
+		}
+		g.Go(func() error {
+			defer func() { free <- l }()
+			cl, err := l.client()
+			if err != nil {
+				return err
+			}
+			return one(i, cl.WithSettings(c.batches[i].Settings()))
+		})
+	}
+	return g.Wait()
 }
 
 // sameColumns reports whether the staged table name exists and has the

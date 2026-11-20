@@ -369,13 +369,18 @@ func TestLiveBatchedBuild(t *testing.T) {
 	}
 	var logged []string
 	Logf = func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
-	defer func(n int) { batchStudies, Logf = n, nil }(batchStudies)
-	batchStudies = 1
+	defer func(t Tuning) { tuning, Logf, distinctReplicas = t, nil, true }(tuning)
+	tuning.BatchStudies = 1
+	// Two lanes on the one local server fill two batches at once.
+	distinctReplicas = false
 	if _, err := Apply(ch.New(base, rawDB), rawDB, batched, refDB); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(logged, "transform: filling the tables in 4 batches of up to 1 studies") {
-		t.Fatalf("build logged %q, want 4 batches", logged)
+	if !slices.Contains(logged, "transform: filling the tables in 4 batches of up to 1 studies") ||
+		!slices.ContainsFunc(logged, func(l string) bool {
+			return strings.HasPrefix(l, "transform: filling the batches on 2 replicas at once: ")
+		}) {
+		t.Fatalf("build logged %q, want 4 batches on 2 replicas", logged)
 	}
 	got, want := dump(t, base, batched), dump(t, base, whole)
 	delete(got, "_objects")
@@ -403,8 +408,8 @@ func TestLiveResumedBuild(t *testing.T) {
 	for _, study := range []string{"golden_a", "golden_b", "golden_c"} {
 		ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", study))
 	}
-	defer func(n int) { batchStudies, stepHook, Logf = n, nil, nil }(batchStudies)
-	batchStudies = 1
+	defer func(t Tuning) { tuning, stepHook, Logf = t, nil, nil }(tuning)
+	tuning.BatchStudies = 1
 	whole, resumed := goldenDatabase(t, base, "rb_whole"), goldenDatabase(t, base, "rb_resumed")
 	if _, err := Apply(ch.New(base, rawDB), rawDB, whole, refDB); err != nil {
 		t.Fatal(err)

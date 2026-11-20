@@ -30,12 +30,6 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/parser"
 )
 
-// insertThreads is how many threads write the rows of each INSERT ... SELECT
-// and CREATE TABLE ... AS SELECT. ClickHouse writes them on one thread
-// unless told otherwise, and the largest tables (hundreds of millions of
-// rows) take about four times as long to build that way.
-const insertThreads = 8
-
 type ViewCount struct {
 	Name string
 	Rows uint64
@@ -79,7 +73,7 @@ func RebuildFirst(base *ch.Client, targetDB string) (bool, error) {
 // was, and the API keeps serving the previous objects while a run builds.
 func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) {
 	c := newClient(base.WithSettings(map[string]string{
-		"max_insert_threads": strconv.Itoa(insertThreads),
+		"max_insert_threads": strconv.Itoa(tuning.InsertThreads),
 		// Tables have a partition per study, and an insert writes rows of
 		// every study (see studies.go).
 		"throw_on_max_partitions_per_insert_block": "0",
@@ -100,6 +94,7 @@ func Apply(base *ch.Client, rawDB, targetDB, refDB string) ([]ViewCount, error) 
 		c.stage = newStaging(targetDB)
 		counts, err = build(c, rawDB, targetDB, refDB, true)
 	}
+	closeLanes(c.lanes)
 	if err == nil && beforePublish != nil {
 		err = beforePublish()
 	}
