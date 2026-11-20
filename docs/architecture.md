@@ -140,6 +140,12 @@ table that reads it. For example, a change to how the mutation count is
 computed rebuilds the clinical tables, but not the expression and
 copy-number values, which are most of the rows.
 
+A changed study changes every table, so a full build with new or changed
+studies keeps nothing. That is why an import first checks whether the
+portal was built by another version of the transform. If so, it rebuilds
+the portal before it stages its studies, while no study has changed, and
+then imports the studies with a study build.
+
 **A large build goes 50 studies at a time.** When a portal has more than 50
 studies, a full build fills each table that holds many studies in batches
 of 50, one query per batch. Then a query needs the memory of 50 studies, not
