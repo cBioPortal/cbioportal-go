@@ -169,6 +169,26 @@ func TestLiveStudyBuild(t *testing.T) {
 	if got := strings.TrimSpace(text); got != sourceHash() {
 		t.Errorf("transform_version = %q, want %q", got, sourceHash())
 	}
+
+	// A study build adds the phosphoproteins of a changed study's RPPA
+	// lines to the reference genes.
+	ref := ch.New(base, refDB)
+	for _, q := range []string{
+		"DELETE FROM `" + refDB + "`.gene_alias WHERE entrez_gene_id < 0",
+		"DELETE FROM `" + refDB + "`.gene WHERE entrez_gene_id < 0",
+	} {
+		if _, err := ref.Execute(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_a"))
+	apply("rebuilding 1 changed and 0 removed of 4 studies: golden_a")
+	if n, err := ref.Execute("SELECT count() FROM `" + refDB + "`.gene WHERE type = 'phosphoprotein' FORMAT TabSeparated"); err != nil {
+		t.Fatal(err)
+	} else if strings.TrimSpace(n) == "0" {
+		t.Error("the study build added no phosphoproteins")
+	}
+	compareFull("golden_a staged again without its phosphoproteins")
 }
 
 // TestLiveResourceTCGABarcodes checks that resource rows naming samples and

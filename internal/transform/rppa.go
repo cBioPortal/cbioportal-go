@@ -99,10 +99,17 @@ func rppaGeneKeysSQL(rawDB, refDB string, hasEnt, hasRowNum, hasRef bool) string
 // does: type phosphoprotein, the next unused negative Entrez id (from -1
 // down) and genetic entity id, and the aliases "rppa-phospho",
 // "phosphoprotein" and "phospho<GENE>". New genes are numbered in the
-// order the lines name them.
+// order the lines name them. A study build reads only the changed
+// studies' lines: the other studies' phosphoproteins were added before.
 func addPhosphoproteins(c *client, rawDB, refDB string) error {
 	protein, _ := c.TableColumns("protein_level_matrix")
-	text, err := c.Execute(fmt.Sprintf(
+	lines := c
+	if c.part != nil {
+		fc := *c
+		fc.Client = c.part.filtered
+		lines = &fc
+	}
+	text, err := lines.Execute(fmt.Sprintf(
 		"SELECT phospho, base FROM (SELECT phospho, argMin(gene_hugo, (study_id, profile_stable_id, first_row, gpos)) AS base, "+
 			"min((study_id, profile_stable_id, first_row, gpos)) AS ord FROM (%s) WHERE phospho != '' GROUP BY phospho) "+
 			"WHERE phospho NOT IN (SELECT upper(hugo_gene_symbol) FROM `%s`.gene) ORDER BY ord FORMAT TabSeparated",
