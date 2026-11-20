@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +49,7 @@ type Settings struct {
 	HeadSHA      string // the commit this Job is for
 	DB, Raw, Ref string // the preview's databases: HUB_PR_DB_PREFIX plus the PR number
 	// Hub is hub.cbioportal.org's databases (HUB_DB, HUB_RAW_DB,
-	// HUB_REF_DB), which `hub-preview: all` copies.
+	// HUB_REF_DB), which `hub-preview: pr-studies-plus-hub` copies.
 	Hub           preview.Databases
 	HubLockTable  string
 	Base          string // the preview's address (HUB_PR_BASE)
@@ -179,15 +180,19 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	if err != nil {
 		return fmt.Errorf("cannot list the PR's files: %w", err)
 	}
-	studies, panelsChanged := Plan(files, pr.Body)
+	settings, modeErr := ParsePreviewRequest(pr.Body)
+	mode := settings.Mode
+	job.Logf("hub-preview: %s %s", mode, strings.Join(settings.Only, " "))
+	studies, unchanged, panelsChanged := Plan(files, settings.Only)
+	for _, s := range unchanged {
+		job.Logf("%s is listed under hub-preview but the PR does not change it", s)
+	}
 	r.studies = len(studies)
 	if len(studies) == 0 && !panelsChanged {
 		job.Logf("no studies to import")
 		return nil
 	}
 	job.Logf("studies: %s", strings.Join(studies, " "))
-	mode, modeErr := ParseMode(pr.Body)
-	job.Logf("hub-preview: %s", mode)
 
 	// Argo CD recreates a finished Job once its TTL removes it; a commit
 	// that was imported already in the same mode is not imported again.
@@ -211,6 +216,9 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	if modeErr != nil {
 		r.summary.Add("- :x: %v", modeErr)
 		return r.finish("failure", "Invalid hub-preview setting")
+	}
+	for _, s := range unchanged {
+		r.summary.Add("- :information_source: `%s` is listed under `hub-preview:`, but this pull request does not change it, so it is not imported", s)
 	}
 
 	// The checkout; LFS files are downloaded per study, just before its
@@ -266,9 +274,9 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 		r.summary.Add("- superseded by %s", latest.Head.SHA)
 		return r.finish("skipped", "Superseded by a newer commit")
 	}
-	// The first import in `all` mode starts from a copy of the hub; later
+	// The first import in pr-studies-plus-hub mode starts from a copy of the hub; later
 	// commits import their studies on top of it.
-	if mode == ModeAll && lastMode != ModeAll {
+	if mode == ModePRStudiesPlusHub && lastMode != ModePRStudiesPlusHub {
 		r.status.Progress(ctx, "Copying hub.cbioportal.org's studies...", r.summary.String())
 		if err := r.copyHub(ctx); err != nil {
 			job.Logf("%v", err)
@@ -472,15 +480,19 @@ func WithValidation(conclusion, title string, invalid int) (string, string) {
 }
 
 // Plan returns the study directories of a pull request's changed files,
-// narrowed by a `hub-import-only:` list in its description, and whether it
-// changes the shared gene panels.
-func Plan(files []string, body string) ([]string, bool) {
-	studies := datahub.StudyDirs(files)
-	if only := job.BodyList(body, "hub-import-only"); len(only) > 0 {
-		job.Logf("hub-import-only: %s", strings.Join(only, " "))
+// narrowed to only when it is set, the studies of only the pull request
+// does not change, and whether it changes the shared gene panels.
+func Plan(files []string, only []string) (studies, unchanged []string, panels bool) {
+	studies = datahub.StudyDirs(files)
+	if len(only) > 0 {
+		for _, s := range only {
+			if !slices.Contains(studies, s) {
+				unchanged = append(unchanged, s)
+			}
+		}
 		studies = job.Intersect(studies, only)
 	}
-	return studies, datahub.TouchesGenePanels(files)
+	return studies, unchanged, datahub.TouchesGenePanels(files)
 }
 
 // studyLine is the summary line of a study, with its validation.

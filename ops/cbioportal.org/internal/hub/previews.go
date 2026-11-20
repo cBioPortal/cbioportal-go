@@ -34,36 +34,60 @@ func HubDatabases() preview.Databases {
 // The modes of a pull request's preview, set with a `hub-preview:` line in
 // its description.
 const (
-	// ModeChanged: the reference data and the studies the pull request
+	// ModePRStudies: the reference data and the studies the pull request
 	// changes (the default).
-	ModeChanged = "changed"
-	// ModeAll: a copy of every study on hub.cbioportal.org, with the pull
-	// request's studies imported on top.
-	ModeAll = "all"
+	ModePRStudies = "pr-studies"
+	// ModePRStudiesPlusHub: a copy of every study on hub.cbioportal.org,
+	// with the pull request's studies imported on top.
+	ModePRStudiesPlusHub = "pr-studies-plus-hub"
 )
 
-// ParseMode reads the `hub-preview:` line of a pull request description.
-// Without one the mode is ModeChanged; an unknown value is an error, and
-// the mode is then ModeChanged too.
-func ParseMode(body string) (string, error) {
-	body = preview.StripComments(strings.ReplaceAll(body, "\r", ""))
-	for line := range strings.SplitSeq(body, "\n") {
+// PreviewRequest is what a pull request's description asks of its preview.
+type PreviewRequest struct {
+	Mode string
+	// Only, when set, limits the import to these of the pull request's
+	// studies (datahub paths such as public/brca_tcga).
+	Only []string
+}
+
+// ParsePreviewRequest reads the `hub-preview:` line of a pull request
+// description and the list of studies right below it:
+//
+//	hub-preview: pr-studies
+//	- public/brca_tcga
+//
+// Without the line the mode is ModePRStudies. Text inside HTML comments
+// is ignored, so a commented example in a template does nothing. An
+// unknown mode is an error, and the mode is then ModePRStudies.
+func ParsePreviewRequest(body string) (PreviewRequest, error) {
+	st := PreviewRequest{Mode: ModePRStudies}
+	lines := strings.Split(preview.StripComments(strings.ReplaceAll(body, "\r", "")), "\n")
+	for i, line := range lines {
 		v, ok := strings.CutPrefix(line, "hub-preview:")
 		if !ok {
 			continue
+		}
+		for _, item := range lines[i+1:] {
+			if len(item) < 2 || item[0] != '-' || (item[1] != ' ' && item[1] != '\t') {
+				break
+			}
+			if item = strings.Trim(strings.TrimSpace(item[1:]), "`/"); item != "" {
+				st.Only = append(st.Only, item)
+			}
 		}
 		if i := strings.IndexByte(v, '#'); i >= 0 {
 			v = v[:i]
 		}
 		switch v = strings.TrimSpace(v); v {
-		case "", ModeChanged:
-			return ModeChanged, nil
-		case ModeAll:
-			return ModeAll, nil
+		case "", ModePRStudies:
+		case ModePRStudiesPlusHub:
+			st.Mode = ModePRStudiesPlusHub
+		default:
+			return st, fmt.Errorf("unknown `hub-preview: %s` (%s or %s)", v, ModePRStudies, ModePRStudiesPlusHub)
 		}
-		return ModeChanged, fmt.Errorf("unknown `hub-preview: %s` (changed or all)", v)
+		return st, nil
 	}
-	return ModeChanged, nil
+	return st, nil
 }
 
 // PreviewEnvironment is the GitHub Deployment environment of pull request

@@ -7,24 +7,29 @@ import (
 	"time"
 )
 
-func TestParseMode(t *testing.T) {
+func TestParsePreviewRequest(t *testing.T) {
+	const plus = ModePRStudiesPlusHub
 	for _, tt := range []struct {
 		body, mode string
+		only       []string
 		err        bool
 	}{
-		{"", ModeChanged, false},
-		{"Adds a study.\n", ModeChanged, false},
-		{"hub-preview: all\n", ModeAll, false},
-		{"text\r\nhub-preview: all # every study\r\n", ModeAll, false},
-		{"hub-preview: changed\n", ModeChanged, false},
-		{"hub-preview:\n", ModeChanged, false},
-		{"<!-- hub-preview: all -->\n", ModeChanged, false},
-		{"  hub-preview: all\n", ModeChanged, false}, // only from the first column
-		{"hub-preview: everything\n", ModeChanged, true},
+		{"", ModePRStudies, nil, false},
+		{"Adds a study.\n", ModePRStudies, nil, false},
+		{"hub-preview: pr-studies-plus-hub\n", plus, nil, false},
+		{"text\r\nhub-preview: pr-studies-plus-hub # every study\r\n", plus, nil, false},
+		{"hub-preview: pr-studies\n", ModePRStudies, nil, false},
+		{"hub-preview:\n", ModePRStudies, nil, false},
+		{"  hub-preview: pr-studies-plus-hub\n", ModePRStudies, nil, false}, // only from the first column
+		{"hub-preview: all\n", ModePRStudies, nil, true},
+		{"hub-preview: pr-studies\r\n- public/b\r\n-\tpublic/a/\r\n\r\n- public/zzz\r\n", ModePRStudies, []string{"public/b", "public/a"}, false},
+		{"hub-preview: pr-studies-plus-hub\n- `public/b`\ntext\n", plus, []string{"public/b"}, false},
+		// The commented example of the pull request template does nothing.
+		{"<!--\nhub-preview: pr-studies-plus-hub\n- public/brca_tcga\n-->\nAdds b.\n", ModePRStudies, nil, false},
 	} {
-		mode, err := ParseMode(tt.body)
-		if mode != tt.mode || (err != nil) != tt.err {
-			t.Errorf("%q: %q, %v; want %q, error %v", tt.body, mode, err, tt.mode, tt.err)
+		got, err := ParsePreviewRequest(tt.body)
+		if got.Mode != tt.mode || !slices.Equal(got.Only, tt.only) || (err != nil) != tt.err {
+			t.Errorf("%q: %+v, %v; want %q %q, error %v", tt.body, got, err, tt.mode, tt.only, tt.err)
 		}
 	}
 }

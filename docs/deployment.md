@@ -370,27 +370,39 @@ databases, `dev_cbioportal_go_prdatahub<N>`, `_raw` and `_ref`, and its own
 API pod, so previews never change the hub or each other.
 
 A `hub-preview:` line in the pull request description chooses what the
-preview holds:
+preview holds. A list of studies right below it, one `- ` line each,
+limits the import to those of the pull request's studies:
 
 | Line | The preview holds |
 |---|---|
-| none, or `hub-preview: changed` | The reference data and the studies the pull request changes. This is the default and the fastest. |
-| `hub-preview: all` | A copy of every study on hub.cbioportal.org, with the pull request's studies imported on top. Use it to see a study next to all the others, for example in a query across studies. |
+| none, or `hub-preview: pr-studies` | The reference data and the studies the pull request changes. This is the default and the fastest. |
+| `hub-preview: pr-studies-plus-hub` | A copy of every study on hub.cbioportal.org, with the pull request's studies imported on top. Use it to see a study next to all the others, for example in a query across studies. |
 
-With `all`, the first import copies the hub's staged studies, reference
-data and built portal tables into the preview's databases. The copy takes
-about 20 seconds, because ClickHouse attaches the data instead of
-rewriting it. The import then rebuilds only the pull request's studies on
-top of the copy, as an import into the hub itself would. So an `all`
-preview is ready about as fast as the default one. If the hub was built
-by another version of the importer, the preview builds every study
-instead, which takes about half an hour for all of datahub. Later commits
-of the pull request import only their studies on top. The copy is of the hub as
-it was when the preview was first built. Changing the `hub-preview:` line
-rebuilds the preview from empty with the next commit.
+For example, this imports only `brca_tcga` of the pull request's studies,
+on top of a copy of the hub:
 
-A `hub-import-only:` list in the description (`- public/<study>` lines)
-limits the import to those of the pull request's studies, in both modes.
+```
+hub-preview: pr-studies-plus-hub
+- public/brca_tcga
+```
+
+A listed study that the pull request does not change is not imported,
+and the preview's summary on the pull request says so. A preview only
+ever shows the pull request's own version of a study. Text inside HTML
+comments (`<!-- -->`) is ignored, so the commented example in datahub's
+pull request template does nothing until it is copied out of the comment.
+
+With `pr-studies-plus-hub`, the first import copies the hub's staged
+studies, reference data and built portal tables into the preview's
+databases. The copy takes about 20 seconds, because ClickHouse attaches
+the data instead of rewriting it. The import then rebuilds only the pull
+request's studies on top of the copy, as an import into the hub itself
+would. So the preview is ready about as fast as a `pr-studies` one. If the
+hub was built by another version of the importer, the preview builds
+every study instead, which takes about half an hour for all of datahub.
+Later commits of the pull request import only their studies on top. The
+copy is of the hub as it was when the preview was first built. Changing
+the mode rebuilds the preview from empty with the next commit.
 
 The job:
 

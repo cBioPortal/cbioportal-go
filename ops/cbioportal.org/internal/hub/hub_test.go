@@ -12,14 +12,13 @@ import (
 
 func TestPlan(t *testing.T) {
 	files := []string{"public/a/data.txt", "public/b/meta_study.txt", "crdc/gdc/c/x.txt", "README.md"}
-	studies, panels := Plan(files, "")
-	if !slices.Equal(studies, []string{"crdc/gdc/c", "public/a", "public/b"}) || panels {
-		t.Errorf("got %q %v", studies, panels)
+	studies, unchanged, panels := Plan(files, nil)
+	if !slices.Equal(studies, []string{"crdc/gdc/c", "public/a", "public/b"}) || unchanged != nil || panels {
+		t.Errorf("got %q %q %v", studies, unchanged, panels)
 	}
-	body := "Adds b.\r\n\r\nhub-import-only:\r\n- public/b\r\n- public/zzz\r\n\r\n- public/a\r\n"
-	studies, panels = Plan(append(files, "reference_data/gene_panels/p.txt"), body)
-	if !slices.Equal(studies, []string{"public/b"}) || !panels {
-		t.Errorf("narrowed: got %q %v", studies, panels)
+	studies, unchanged, panels = Plan(append(files, "reference_data/gene_panels/p.txt"), []string{"public/b", "public/zzz"})
+	if !slices.Equal(studies, []string{"public/b"}) || !slices.Equal(unchanged, []string{"public/zzz"}) || !panels {
+		t.Errorf("narrowed: got %q %q %v", studies, unchanged, panels)
 	}
 }
 
