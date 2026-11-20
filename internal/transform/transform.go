@@ -392,10 +392,12 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	for _, i := range snaps {
-		if err := swapSnapshot(c, targetDB, snapshotted[i].name); err != nil {
-			return nil, err
-		}
+	names := make([]string, len(snaps))
+	for j, i := range snaps {
+		names[j] = snapshotted[i].name
+	}
+	if err := swapSnapshots(c, targetDB, names); err != nil {
+		return nil, err
 	}
 
 	if err := writeHashes(c, targetDB); err != nil {
@@ -460,22 +462,36 @@ func fillSnapshot(c *client, db, name, orderBy, idFrom string) error {
 	return nil
 }
 
-// swapSnapshot replaces a view with its snapshot (fillSnapshot).
-func swapSnapshot(c *client, db, name string) error {
-	if c.stage != nil && c.stage.isKept(name) {
+// swapSnapshots replaces views with their snapshots (fillSnapshot): the
+// views are dropped in one statement and the snapshots renamed at once,
+// as each DDL statement waits for every replica. ClickHouse Cloud renames
+// one table per statement.
+func swapSnapshots(c *client, db string, names []string) error {
+	var views []string
+	var swap []string
+	for _, name := range names {
+		if c.stage != nil && c.stage.isKept(name) {
+			continue
+		}
+		views = append(views, fmt.Sprintf("`%s`.`%s`", db, name))
+		swap = append(swap, name)
+	}
+	if len(views) == 0 {
 		return nil
 	}
-	tmp := snapshotPrefix + name
-	stmts := []string{
-		fmt.Sprintf("DROP VIEW `%s`.`%s`", db, name),
-		fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, tmp, name),
+	if _, err := c.Execute("DROP TABLE " + strings.Join(views, ", ")); err != nil {
+		return fmt.Errorf("replacing views with their snapshots: %w", err)
 	}
-	for _, q := range stmts {
-		if _, err := c.Execute(q); err != nil {
-			return fmt.Errorf("materializing %s: %w", name, err)
-		}
+	var g errgroup.Group
+	for _, name := range swap {
+		g.Go(func() error {
+			if _, err := c.Execute(fmt.Sprintf("RENAME TABLE `%[1]s`.`%[2]s` TO `%[1]s`.`%[3]s`", db, snapshotPrefix+name, name)); err != nil {
+				return fmt.Errorf("replacing view %s with its snapshot: %w", name, err)
+			}
+			return nil
+		})
 	}
-	return nil
+	return g.Wait()
 }
 
 // namespaceColumnsExpr builds a ClickHouse expression that assembles the nested
