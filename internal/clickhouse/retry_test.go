@@ -49,3 +49,25 @@ func TestExecuteRetriesRefusedAlter(t *testing.T) {
 		t.Errorf("other error: %v after %d calls", err, calls.Load())
 	}
 }
+
+// An ALTER that every active replica applied, while others are inactive,
+// counts as done; other errors do not.
+func TestUnfinishedOnInactiveReplicas(t *testing.T) {
+	answers := []string{
+		"Code: 341. DB::Exception: Not finished because some replicas are inactive right now: c-a-0, c-b-0. Will finish asynchronously. (UNFINISHED) (version 26.6.1.2455 (official build))",
+		"Code: 60. DB::Exception: Unknown table expression identifier 'x'. (UNKNOWN_TABLE)",
+	}
+	i := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, answers[i], http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "db")
+	if _, err := c.Execute("ALTER TABLE t DELETE WHERE study_id = 's'"); err != nil {
+		t.Errorf("UNFINISHED on inactive replicas: %v", err)
+	}
+	i = 1
+	if _, err := c.Execute("SELECT * FROM x"); err == nil {
+		t.Error("UNKNOWN_TABLE counted as done")
+	}
+}

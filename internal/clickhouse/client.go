@@ -5,6 +5,7 @@
 package clickhouse
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -323,11 +324,25 @@ func (c *Client) post(query url.Values, body io.Reader) (string, error) {
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 && unfinishedOnInactiveReplicas(out) {
+		return "", nil
+	}
 	if resp.StatusCode/100 != 2 {
 		head := insertSQLHead(query.Get("query"))
 		return "", fmt.Errorf("clickhouse HTTP %d %s: %s", resp.StatusCode, head, string(out))
 	}
 	return string(out), nil
+}
+
+// unfinishedOnInactiveReplicas reports ClickHouse's answer to an ALTER,
+// mutation or lightweight delete run with alter_sync, mutations_sync or
+// lightweight_deletes_sync 2 (ReplicaConsistentSettings) that every active
+// replica applied, while some replicas are inactive: ClickHouse Cloud adds
+// and removes replicas as it scales, and a removed one can stay listed as
+// inactive for a while. The change is committed and the inactive replicas
+// apply it when they come back, so it counts as done.
+func unfinishedOnInactiveReplicas(body []byte) bool {
+	return bytes.Contains(body, []byte("Code: 341.")) && bytes.Contains(body, []byte("some replicas are inactive"))
 }
 
 // processSettings are added to every request of this process (see

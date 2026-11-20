@@ -62,10 +62,13 @@ func MasterSettingsFromEnv() (*MasterSettings, error) {
 
 // SyncState is what the hub's sync table says about earlier syncs.
 type SyncState struct {
-	Imported string    // the last commit imported completely ("": none yet)
+	Imported string    // the last commit imported ("": none yet)
 	Last     string    // the commit of the last sync
 	Failed   bool      // the last sync failed
 	At       time.Time // when the last sync ended
+	// FailedStudies are the study directories whose import failed in the
+	// last sync of Imported, imported again by the next sync.
+	FailedStudies []string
 }
 
 // SyncDecision is what a sync does about master's head commit.
@@ -75,9 +78,16 @@ type SyncDecision struct {
 }
 
 // DecideSync says whether a sync imports head: not when it is the commit
-// imported last, nor while a failed import of it waits RetryAfter.
+// imported last, nor while a failed import of it waits RetryAfter. The
+// studies that failed in the import of head are tried again after
+// RetryAfter.
 func DecideSync(st SyncState, head string, now time.Time, retryAfter time.Duration) SyncDecision {
 	switch {
+	case head == st.Imported && len(st.FailedStudies) > 0 && now.Sub(st.At) >= retryAfter:
+		return SyncDecision{true, fmt.Sprintf("trying the %d studies that failed at %s again", len(st.FailedStudies), short(head))}
+	case head == st.Imported && len(st.FailedStudies) > 0:
+		return SyncDecision{false, fmt.Sprintf("up to date at %s but for %d failed studies, tried again after %s",
+			short(head), len(st.FailedStudies), st.At.Add(retryAfter).Format(time.DateTime))}
 	case head == st.Imported:
 		return SyncDecision{false, "up to date at " + short(head)}
 	case head == st.Last && st.Failed && now.Sub(st.At) < retryAfter:
@@ -96,10 +106,11 @@ type SyncPlan struct {
 	Panels bool     // reload the shared gene panels
 }
 
-// PlanSync plans a sync from the study directories at the new commit and
-// the files that changed since the last imported one. With no last import
-// (first), every study is imported.
-func PlanSync(headStudies, changed []string, first bool) SyncPlan {
+// PlanSync plans a sync from the study directories at the new commit, the
+// files that changed since the last imported one and the studies whose
+// import failed last time. With no last import (first), every study is
+// imported.
+func PlanSync(headStudies, changed, failed []string, first bool) SyncPlan {
 	if first {
 		return SyncPlan{Import: headStudies, Panels: true}
 	}
@@ -111,6 +122,12 @@ func PlanSync(headStudies, changed []string, first bool) SyncPlan {
 			p.Gone = append(p.Gone, d)
 		}
 	}
+	for _, d := range failed {
+		if slices.Contains(headStudies, d) && !slices.Contains(p.Import, d) {
+			p.Import = append(p.Import, d)
+		}
+	}
+	slices.Sort(p.Import)
 	p.Panels = datahub.TouchesGenePanels(changed)
 	return p
 }
@@ -158,7 +175,7 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("%s at %s has no studies", st.Branch, short(head)))
 	}
 	var changed []string
-	if state.Imported != "" {
+	if state.Imported != "" && state.Imported != head {
 		if err := co.FetchCommit(ctx, state.Imported); err != nil {
 			return fmt.Errorf("fetching the last imported commit %s: %w", short(state.Imported), err)
 		}
@@ -166,7 +183,7 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 			return err
 		}
 	}
-	plan := PlanSync(headStudies, changed, state.Imported == "")
+	plan := PlanSync(headStudies, changed, state.FailedStudies, state.Imported == "")
 	var goneIDs []string
 	for _, dir := range plan.Gone {
 		meta, err := co.Show(ctx, state.Imported, dir+"/meta_study.txt")
@@ -176,7 +193,7 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 	}
 	job.Logf("%d studies to import, %d to remove, gene panels changed: %v", len(plan.Import), len(goneIDs), plan.Panels)
 	if len(plan.Import) == 0 && len(goneIDs) == 0 && !plan.Panels {
-		return recordSync(c, st.Hub.Raw, head, "success", 0, 0, 0)
+		return recordSync(c, st.Hub.Raw, head, "success", 0, 0, nil)
 	}
 	if err := co.SetPaths(ctx, plan.Import); err != nil {
 		return err
@@ -235,14 +252,19 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 	case res.PanelsErr != nil:
 		return recordFailure(c, st.Hub.Raw, head, fmt.Errorf("loading the gene panels: %w", res.PanelsErr))
 	}
-	failed := res.Count(studyimport.Failed)
+	var failed []string
 	for _, s := range res.Studies {
 		if s.Status == studyimport.Failed {
+			failed = append(failed, rel(repo, s.Dir))
 			job.Logf("study %s failed to import and is not on the hub: %v", rel(repo, s.Dir), s.Err)
 		}
 	}
-	job.Logf("hub at %s: %d studies imported, %d removed, %d failed", short(head), res.Count(studyimport.Imported), len(goneIDs), failed)
-	return recordSync(c, st.Hub.Raw, head, "success", res.Count(studyimport.Imported), len(goneIDs), failed)
+	job.Logf("hub at %s: %d studies imported, %d removed, %d failed", short(head), res.Count(studyimport.Imported), len(goneIDs), len(failed))
+	conclusion := "success"
+	if len(failed) > 0 {
+		conclusion = "partial"
+	}
+	return recordSync(c, st.Hub.Raw, head, conclusion, res.Count(studyimport.Imported), len(goneIDs), failed)
 }
 
 // studiesNotIn lists the studies of the raw database whose ids are not
@@ -283,35 +305,54 @@ func readSyncState(c *ch.Client, rawDB string) (SyncState, error) {
 			return SyncState{}, err
 		}
 		if _, err := c.ExecuteServerwide("CREATE TABLE IF NOT EXISTS " + syncTableName(rawDB) +
-			" (sha String, conclusion String, imported UInt32, removed UInt32, failed UInt32, error String, finished DateTime)" +
-			" ENGINE = MergeTree ORDER BY finished"); err != nil {
+			" (sha String, conclusion String, imported UInt32, removed UInt32, failed UInt32, error String, finished DateTime," +
+			" failed_studies Array(String)) ENGINE = MergeTree ORDER BY finished"); err != nil {
 			return SyncState{}, err
 		}
 		return SyncState{}, nil
 	}
-	text, err := job.Query(c, fmt.Sprintf("SELECT argMaxIf(sha, finished, conclusion = 'success'), argMax(sha, finished), "+
-		"argMax(conclusion, finished), toUnixTimestamp(max(finished)) FROM %s FORMAT TSV", syncTableName(rawDB)))
+	read := func() (string, error) {
+		return job.Query(c, fmt.Sprintf("SELECT argMaxIf(sha, finished, conclusion IN ('success', 'partial')), argMax(sha, finished), "+
+			"argMax(conclusion, finished), toUnixTimestamp(max(finished)), "+
+			"arrayStringConcat(argMaxIf(failed_studies, finished, conclusion IN ('success', 'partial')), ' ') FROM %s FORMAT TSV", syncTableName(rawDB)))
+	}
+	text, err := read()
+	if err != nil && strings.Contains(err.Error(), "failed_studies") {
+		// A sync table from before failed studies were recorded.
+		if _, err := c.ExecuteServerwide("ALTER TABLE " + syncTableName(rawDB) + " ADD COLUMN IF NOT EXISTS failed_studies Array(String)"); err != nil {
+			return SyncState{}, err
+		}
+		text, err = read()
+	}
 	if err != nil {
 		return SyncState{}, err
 	}
 	f := strings.Split(text, "\t")
-	if len(f) != 4 {
+	if len(f) != 5 {
 		return SyncState{}, fmt.Errorf("reading %s: unexpected %q", syncTable, text)
 	}
 	at, _ := strconv.ParseInt(f[3], 10, 64)
-	return SyncState{Imported: f[0], Last: f[1], Failed: f[2] == "failure", At: time.Unix(at, 0).UTC()}, nil
+	return SyncState{Imported: f[0], Last: f[1], Failed: f[2] == "failure", At: time.Unix(at, 0).UTC(),
+		FailedStudies: strings.Fields(f[4])}, nil
 }
 
-func recordSync(c *ch.Client, rawDB, sha, conclusion string, imported, removed, failed int, errText ...string) error {
-	_, err := c.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s SELECT '%s', '%s', %d, %d, %d, '%s', now()",
-		syncTableName(rawDB), ch.SQLLit(sha), conclusion, imported, removed, failed, ch.SQLLit(strings.Join(errText, ""))))
+// recordSync records a sync of sha; failed lists the study directories
+// whose import failed.
+func recordSync(c *ch.Client, rawDB, sha, conclusion string, imported, removed int, failed []string, errText ...string) error {
+	quoted := make([]string, len(failed))
+	for i, d := range failed {
+		quoted[i] = "'" + ch.SQLLit(d) + "'"
+	}
+	_, err := c.ExecuteServerwide(fmt.Sprintf("INSERT INTO %s (sha, conclusion, imported, removed, failed, error, finished, failed_studies) "+
+		"SELECT '%s', '%s', %d, %d, %d, '%s', now(), [%s]",
+		syncTableName(rawDB), ch.SQLLit(sha), conclusion, imported, removed, len(failed), ch.SQLLit(strings.Join(errText, "")), strings.Join(quoted, ", ")))
 	return err
 }
 
 // recordFailure records a failed sync of sha, so the next syncs wait
 // RetryAfter before trying it again, and returns err.
 func recordFailure(c *ch.Client, rawDB, sha string, err error) error {
-	if recErr := recordSync(c, rawDB, sha, "failure", 0, 0, 0, err.Error()); recErr != nil {
+	if recErr := recordSync(c, rawDB, sha, "failure", 0, 0, nil, err.Error()); recErr != nil {
 		job.Logf("WARN: could not record the failed sync: %v", recErr)
 	}
 	return err

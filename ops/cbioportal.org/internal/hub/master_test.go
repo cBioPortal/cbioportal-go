@@ -51,6 +51,10 @@ func TestDecideSync(t *testing.T) {
 		{"failed long ago", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Failed: true, At: now.Add(-time.Hour)}, "bbbbbbb2", true, "moved"},
 		// A newer commit is imported at once, even after a failure.
 		{"failed, then a new commit", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Failed: true, At: now}, "ccccccc3", true, "moved"},
+		// Studies that failed in the import of the head are tried again
+		// after RetryAfter.
+		{"studies failed recently", SyncState{Imported: "aaaaaaa1", Last: "aaaaaaa1", At: now.Add(-10 * time.Minute), FailedStudies: []string{"public/b"}}, "aaaaaaa1", false, "but for 1 failed studies"},
+		{"studies failed long ago", SyncState{Imported: "aaaaaaa1", Last: "aaaaaaa1", At: now.Add(-time.Hour), FailedStudies: []string{"public/b"}}, "aaaaaaa1", true, "trying the 1 studies"},
 	} {
 		d := DecideSync(tt.st, tt.head, now, retry)
 		if d.Run != tt.run || !strings.Contains(d.Reason, tt.about) {
@@ -61,17 +65,23 @@ func TestDecideSync(t *testing.T) {
 
 func TestPlanSync(t *testing.T) {
 	head := []string{"public/b", "public/c", "public/d"}
-	p := PlanSync(head, nil, true)
+	p := PlanSync(head, nil, nil, true)
 	if !slices.Equal(p.Import, head) || len(p.Gone) != 0 || !p.Panels {
 		t.Errorf("first: %+v", p)
 	}
 	changed := []string{"public/a/meta_study.txt", "public/b/data_mutations.txt", "public/c/meta_study.txt", "README.md"}
-	p = PlanSync(head, changed, false)
+	p = PlanSync(head, changed, nil, false)
 	if !slices.Equal(p.Import, []string{"public/b", "public/c"}) || !slices.Equal(p.Gone, []string{"public/a"}) || p.Panels {
 		t.Errorf("changed: %+v", p)
 	}
-	p = PlanSync(head, []string{"reference_data/gene_panels/impact.txt"}, false)
+	p = PlanSync(head, []string{"reference_data/gene_panels/impact.txt"}, nil, false)
 	if len(p.Import) != 0 || len(p.Gone) != 0 || !p.Panels {
 		t.Errorf("panels: %+v", p)
+	}
+	// Studies that failed last time are imported again, unless master no
+	// longer has them.
+	p = PlanSync(head, []string{"public/c/meta_study.txt"}, []string{"public/d", "public/c", "public/x"}, false)
+	if !slices.Equal(p.Import, []string{"public/c", "public/d"}) || len(p.Gone) != 0 {
+		t.Errorf("failed: %+v", p)
 	}
 }
