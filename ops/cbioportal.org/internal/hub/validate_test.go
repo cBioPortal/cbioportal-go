@@ -80,8 +80,8 @@ func TestWithValidation(t *testing.T) {
 		want, text   string
 	}{
 		{"success", "Imported 2 of 2", 0, "success", "Imported 2 of 2"},
-		{"success", "Imported 2 of 2", 1, "failure", "Imported 2 of 2; 1 with validation errors"},
-		{"neutral", "Imported 1 of 2", 1, "failure", "Imported 1 of 2; 1 with validation errors"},
+		{"success", "Imported 2 of 2", 1, "success", "Imported 2 of 2; 1 with validation errors"},
+		{"neutral", "Imported 1 of 2", 1, "neutral", "Imported 1 of 2; 1 with validation errors"},
 		{"failure", "Imported 0 of 1", 1, "failure", "Imported 0 of 1; 1 with validation errors"},
 		{"skipped", "Superseded by a newer commit", 1, "skipped", "Superseded by a newer commit"},
 	}
@@ -138,7 +138,7 @@ func TestValidatedSummary(t *testing.T) {
 		t.Errorf("first link %q", link)
 	}
 	concl, title := Conclusion(r.ok, r.fails)
-	if concl, title = WithValidation(concl, title, r.invalid); concl != "failure" || title != "Imported 3 of 3; 1 with validation errors" {
+	if concl, title = WithValidation(concl, title, r.invalid); concl != "success" || title != "Imported 3 of 3; 1 with validation errors" {
 		t.Errorf("conclusion %s %q", concl, title)
 	}
 

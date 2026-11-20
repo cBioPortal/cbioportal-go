@@ -428,9 +428,10 @@ portal's API directly.
 A study is imported whatever the validator finds, so the preview can always
 be looked at. The Check Run shows, for each study, whether validation passed
 or how many errors and warnings it found, and lists the messages under the
-summary, up to GitHub's size limit. The job's log has the full output. When
-any study has validation errors, the Check Run fails, as datahub's own
-validation does, while the Deployment still links to the preview. A commit
+summary, up to GitHub's size limit. The job's log has the full output. The
+Check Run passes when every study was imported, even with validation
+errors: its title then says how many studies have errors, and datahub's own
+validation in CircleCI is the check that fails on them. A commit
 whose studies all imported is not imported again, even if validation failed.
 If the validator is missing or the hub's API cannot be read, the studies are
 imported without validation and the summary says so.

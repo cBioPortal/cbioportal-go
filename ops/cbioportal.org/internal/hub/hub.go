@@ -469,14 +469,15 @@ func (r *run) waitValidations() {
 	r.running = nil
 }
 
-// WithValidation turns an import's conclusion into a failure when studies
-// have validation errors, as datahub's own validation does; the studies are
-// imported all the same.
+// WithValidation adds the number of studies with validation errors to an
+// import's title. The conclusion stays the import's own: datahub's CI
+// already fails a pull request whose studies do not validate, and the
+// preview check says whether the preview could be built.
 func WithValidation(conclusion, title string, invalid int) (string, string) {
 	if invalid == 0 || conclusion == "skipped" {
 		return conclusion, title
 	}
-	return "failure", fmt.Sprintf("%s; %d with validation errors", title, invalid)
+	return conclusion, fmt.Sprintf("%s; %d with validation errors", title, invalid)
 }
 
 // Plan returns the study directories of a pull request's changed files,

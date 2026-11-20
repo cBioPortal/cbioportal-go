@@ -77,7 +77,8 @@ import succeeded.
 Each study is validated in the background, starting when it is imported.
 The import lock is released when the import is done. The job then waits for
 the validations before its final report. Studies are imported whatever the
-result. Validation errors make the Check Run fail. Its summary gives each
+result. The Check Run passes when every study was imported; validation
+errors are counted in its title (datahub's CircleCI fails on them). Its summary gives each
 study's error and warning counts, and its text lists the messages (see
 [docs/deployment.md](../../docs/deployment.md#hubcbioportalorg)).
 
