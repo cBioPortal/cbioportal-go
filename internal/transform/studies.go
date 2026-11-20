@@ -479,6 +479,12 @@ var batchStudies = 50
 // study in one sequence; a full build fills them in one go.
 var numberedAcrossStudies = map[string]bool{"sample": true, "patient": true, "sample_list": true, "seg": true}
 
+// oneInsert are tables a full build fills in one go because they are small:
+// one row per sample, or a few values each. On all of datahub (496
+// studies) each insert needs at most 3.2 GB and takes about half the time
+// of its batches.
+var oneInsert = map[string]bool{"sample_profile": true, "sample_derived": true, "clinical_sample_computed": true, "clinical_data_derived": true}
+
 // prepareBatches sets the clients a full build fills the tables holding
 // many studies with, one per batch of studies, when there is more than one
 // batch.
@@ -592,7 +598,7 @@ func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string
 	if study != "" {
 		partition = " PARTITION BY `" + study + "`"
 	}
-	batched := study != "" && len(c.batches) > 0 && !numberedAcrossStudies[strings.TrimPrefix(name, snapshotPrefix)]
+	batched := study != "" && len(c.batches) > 0 && !numberedAcrossStudies[strings.TrimPrefix(name, snapshotPrefix)] && !oneInsert[name]
 	stmts := []string{fmt.Sprintf(
 		"CREATE OR REPLACE TABLE `%s`.`%s` ENGINE = MergeTree%s ORDER BY %s AS %s", targetDB, name, partition, orderBy, sel)}
 	if batched {
