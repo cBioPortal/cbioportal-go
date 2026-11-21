@@ -74,10 +74,20 @@ It builds two kinds of tables:
   its charts can be counted quickly. Each is sorted the same way as
   production's, for example by study, then gene, then profile type. A
   request for one gene in one study then reads only those rows, not the
-  whole table. `genetic_alteration_derived` also keeps a second copy of its
-  rows sorted by study, then profile type, then gene (a ClickHouse
-  *projection*). ClickHouse reads that copy by itself for requests that
-  need one profile across all genes, such as co-expression.
+  whole table.
+
+`genetic_alteration_derived` holds every value of every expression,
+copy-number, methylation and protein matrix: billions of values on all of
+datahub. Instead of storing each value as its own row, the build stores one
+row per gene and profile, with the values of all samples in a list
+(`genetic_alteration_lines`), plus the sample list of each file
+(`genetic_alteration_samples`). `genetic_alteration_derived` is a view that
+unpacks those lists into one row per sample, so the API reads the same rows
+as before. The lists are sorted by study, then profile type, then gene, so
+a request for a few genes, or for one profile across all genes such as
+co-expression, reads only those lists. Files stored the old way, one value
+per row, and copy-number files in long format go into
+`genetic_alteration_cells`, which the view also reads.
 
 For a portal copied from Java's database, the timeline table is sorted by
 study, then event id. That is the order the API returns a study's clinical

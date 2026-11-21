@@ -1,22 +1,98 @@
 package transform
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// geneticAlterationDerivedSQL builds prod's `genetic_alteration_derived`: the
-// generic per-(sample, gene, profile) value table covering every non-mutation,
-// non-SV, non-generic-assay molecular profile (copy number, expression,
-// methylation and protein levels). Prod derives it from the
-// genetic_alteration blob keyed by gene; we source directly from the per-gene
-// long/matrix staging tables, with each line's gene resolved through
-// gene_key_map as the importers store it (unresolved and duplicate-gene lines
-// are not stored, an RPPA line is stored under each of its genes), so
-// hugo_gene_symbol is the reference symbol.
+// genetic_alteration_derived is prod's generic per-(sample, gene, profile)
+// value table covering every non-mutation, non-SV, non-generic-assay
+// molecular profile (copy number, expression, methylation and protein
+// levels). Here it is a view over three tables, so a build does not write
+// and sort one row per cell (billions on all of datahub):
 //
-// profile_type matches prod's INSERT semantics — the profile stable id with the
-// study prefix stripped (e.g. `gistic`, `log2CNA`, `mrna`), which in our staging
-// is already the bare `profile_stable_id` column. alteration_value drops NA
-// and empty just as prod does (prod maps empty to NULL then filters out NA).
-func geneticAlterationDerivedSQL(c *client, rawDB, targetDB string) string {
+//   - alterationLines holds a matrix staged as lines (ingest) one row per
+//     gene and profile, with the line's values in its file's sample order,
+//     sorted by study, profile and gene, so a read of a few genes or of one
+//     profile reads only their rows;
+//   - alterationSamples holds each such file's samples, the portal's copy
+//     of the raw matrix_samples;
+//   - alterationCells holds the rows of the other sources (long CNA files
+//     and matrices staged cell by cell) as prod's table does.
+//
+// Each line's gene is resolved through gene_key_map as the importers store
+// it (unresolved and duplicate-gene lines are not stored, an RPPA line is
+// stored under each of its genes), so hugo_gene_symbol is the reference
+// symbol. profile_type matches prod's INSERT semantics: the profile stable
+// id with the study prefix stripped (e.g. `gistic`, `log2CNA`, `mrna`),
+// which in our staging is already the bare `profile_stable_id` column.
+// alteration_value drops NA and empty just as prod does (prod maps empty to
+// NULL then filters out NA).
+const (
+	alterationLines   = "genetic_alteration_lines"
+	alterationSamples = "genetic_alteration_samples"
+	alterationCells   = "genetic_alteration_cells"
+)
+
+// alterationMatrices are the per-gene matrices of genetic_alteration_derived.
+var alterationMatrices = []string{"cna_matrix", "methylation_matrix", "mrna_expression_matrix", "protein_level_matrix"}
+
+// alterationLinesSQL selects the rows of alterationLines: each line of the
+// matrices staged as lines whose gene is stored. Only a gene's first line
+// is kept, as the importer stores it (gene_key_map's first_row).
+func alterationLinesSQL(c *client, rawDB, targetDB string) string {
+	var parts []string
+	for _, m := range alterationMatrices {
+		lines := matrixLines(c, m)
+		if lines == "" {
+			continue
+		}
+		cols, _ := c.TableColumns(lines)
+		col := func(n string) string {
+			if cols[n] {
+				return "`" + n + "`"
+			}
+			return "''"
+		}
+		key := col("hugo_symbol")
+		if cols["composite_element_ref"] {
+			// RPPA lines are keyed by their Composite.Element.REF value.
+			key = fmt.Sprintf("if(composite_element_ref != '', composite_element_ref, %s)", key)
+		}
+		parts = append(parts, fmt.Sprintf(
+			"SELECT l.study_id AS cancer_study_identifier, l.profile_stable_id AS profile_type, "+
+				"gk.resolved_hugo_gene_symbol AS hugo_gene_symbol, '%[5]s' AS stage_table, l.source_file AS source_file, l.values AS values "+
+				"FROM (SELECT study_id, source_file, profile_stable_id, %[1]s AS gene_key, %[2]s AS entrez_gene_id, `values`, row_base "+
+				"FROM `%[3]s`.`%[4]s` WHERE cells > 0) l%[6]s"+
+				" WHERE gk.first_row = 0 OR gk.first_row = l.row_base + 1",
+			key, col("entrez_gene_id"), rawDB, lines, m, geneKeyJoin(targetDB, m, "l", "gene_key", "entrez_gene_id")))
+	}
+	if len(parts) == 0 {
+		return "SELECT '' AS cancer_study_identifier, '' AS profile_type, '' AS hugo_gene_symbol, '' AS stage_table, " +
+			"'' AS source_file, CAST([] AS Array(String)) AS values WHERE 0"
+	}
+	return strings.Join(parts, " UNION ALL ")
+}
+
+// alterationSamplesSQL selects the rows of alterationSamples: the samples
+// of each file of the matrices staged as lines.
+func alterationSamplesSQL(c *client, rawDB string) string {
+	var tables []string
+	for _, m := range alterationMatrices {
+		if matrixLines(c, m) != "" {
+			tables = append(tables, "'"+m+"'")
+		}
+	}
+	if len(tables) == 0 {
+		return "SELECT '' AS study_id, '' AS stage_table, '' AS source_file, CAST([] AS Array(String)) AS samples WHERE 0"
+	}
+	return fmt.Sprintf("SELECT study_id, stage_table, source_file, samples FROM `%s`.matrix_samples WHERE stage_table IN (%s)",
+		rawDB, strings.Join(tables, ", "))
+}
+
+// alterationCellsSQL selects the rows of alterationCells: those of the long
+// CNA files and of the matrices staged cell by cell.
+func alterationCellsSQL(c *client, rawDB, targetDB string) string {
 	part := func(table, from string) string {
 		return fmt.Sprintf(
 			"SELECT concat(t.study_id, '_', t.sample_id) AS sample_unique_id, "+
@@ -31,51 +107,36 @@ func geneticAlterationDerivedSQL(c *client, rawDB, targetDB string) string {
 	table := func(name string) string {
 		return fmt.Sprintf("(SELECT *, hugo_symbol AS gene_key FROM `%s`.%s)", rawDB, name)
 	}
-	// RPPA lines are keyed by their Composite.Element.REF value.
-	protein := fmt.Sprintf("(SELECT *, if(composite_element_ref != '', composite_element_ref, hugo_symbol) AS gene_key "+
-		"FROM `%s`.protein_level_matrix)", rawDB)
-	matrix := func(name, from string) string {
-		if lines := matrixLines(c, name); lines != "" {
-			return linesPart(c, rawDB, targetDB, name, lines)
+	parts := []string{part("cna_discrete_long", table("cna_discrete_long"))}
+	for _, m := range alterationMatrices {
+		if matrixLines(c, m) != "" {
+			continue
 		}
-		return part(name, from)
+		from := table(m)
+		if m == "protein_level_matrix" {
+			// RPPA lines are keyed by their Composite.Element.REF value.
+			from = fmt.Sprintf("(SELECT *, if(composite_element_ref != '', composite_element_ref, hugo_symbol) AS gene_key "+
+				"FROM `%s`.protein_level_matrix)", rawDB)
+		}
+		parts = append(parts, part(m, from))
 	}
-	return part("cna_discrete_long", table("cna_discrete_long")) + " UNION ALL " +
-		matrix("cna_matrix", table("cna_matrix")) + " UNION ALL " +
-		matrix("methylation_matrix", table("methylation_matrix")) + " UNION ALL " +
-		matrix("mrna_expression_matrix", table("mrna_expression_matrix")) + " UNION ALL " +
-		matrix("protein_level_matrix", protein)
+	return strings.Join(parts, " UNION ALL ")
 }
 
-// linesPart is a matrix's genetic_alteration_derived rows read from its
-// lines: each line is resolved through gene_key_map once, then unpacked
-// into its samples' values, instead of resolving every cell. Only a gene's
-// first line is read, as the importer stores it (gene_key_map's first_row).
-func linesPart(c *client, rawDB, targetDB, table, lines string) string {
-	cols, _ := c.TableColumns(lines)
-	col := func(n string) string {
-		if cols[n] {
-			return "`" + n + "`"
-		}
-		return "''"
-	}
-	key := col("hugo_symbol")
-	if cols["composite_element_ref"] {
-		// RPPA lines are keyed by their Composite.Element.REF value.
-		key = fmt.Sprintf("if(composite_element_ref != '', composite_element_ref, %s)", key)
-	}
+// geneticAlterationDerivedViewSQL is the definition of the
+// genetic_alteration_derived view: alterationLines unpacked into one row per
+// sample with a value, and alterationCells.
+func geneticAlterationDerivedViewSQL(targetDB string) string {
 	return fmt.Sprintf(
-		"SELECT concat(t.study_id, '_', cell.2) AS sample_unique_id, t.study_id AS cancer_study_identifier, "+
-			"t.hugo_gene_symbol AS hugo_gene_symbol, t.profile_stable_id AS profile_type, nullIf(cell.1, '') AS alteration_value "+
-			"FROM (SELECT l.study_id AS study_id, l.profile_stable_id AS profile_stable_id, gk.resolved_hugo_gene_symbol AS hugo_gene_symbol, "+
-			"arrayZip(arrayResize(l.values, length(s.samples), ''), s.samples) AS cells "+
-			"FROM (SELECT study_id, source_file, profile_stable_id, %[1]s AS gene_key, %[2]s AS entrez_gene_id, `values`, row_base "+
-			"FROM `%[3]s`.`%[4]s` WHERE cells > 0) l "+
-			"INNER JOIN `%[3]s`.matrix_samples s ON s.study_id = l.study_id AND s.source_file = l.source_file AND s.stage_table = '%[5]s'%[6]s"+
-			" WHERE gk.first_row = 0 OR gk.first_row = l.row_base + 1"+
-			") t ARRAY JOIN t.cells AS cell "+
-			"WHERE cell.1 NOT IN ('NA', '') AND cell.2 != ''",
-		key, col("entrez_gene_id"), rawDB, lines, table, geneKeyJoin(targetDB, table, "l", "gene_key", "entrez_gene_id"))
+		"SELECT concat(t.cancer_study_identifier, '_', cell.2) AS sample_unique_id, t.cancer_study_identifier AS cancer_study_identifier, "+
+			"t.hugo_gene_symbol AS hugo_gene_symbol, t.profile_type AS profile_type, nullIf(cell.1, '') AS alteration_value "+
+			"FROM (SELECT a.cancer_study_identifier AS cancer_study_identifier, a.hugo_gene_symbol AS hugo_gene_symbol, a.profile_type AS profile_type, "+
+			"arrayZip(arrayResize(a.values, length(s.samples), ''), s.samples) AS cells "+
+			"FROM `%[1]s`.`%[2]s` a INNER JOIN `%[1]s`.`%[3]s` s "+
+			"ON s.study_id = a.cancer_study_identifier AND s.source_file = a.source_file AND s.stage_table = a.stage_table) t "+
+			"ARRAY JOIN t.cells AS cell WHERE cell.1 NOT IN ('NA', '') AND cell.2 != '' "+
+			"UNION ALL SELECT sample_unique_id, cancer_study_identifier, hugo_gene_symbol, profile_type, alteration_value FROM `%[1]s`.`%[4]s`",
+		targetDB, alterationLines, alterationSamples, alterationCells)
 }
 
 // genericAssayDataDerivedSQL builds prod's `generic_assay_data_derived` from the

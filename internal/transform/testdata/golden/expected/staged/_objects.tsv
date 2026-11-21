@@ -12,7 +12,10 @@ gene_key_map	MergeTree
 gene_panel	View
 gene_panel_to_gene_derived	MergeTree
 generic_assay_data_derived	MergeTree
-genetic_alteration_derived	MergeTree
+genetic_alteration_cells	MergeTree
+genetic_alteration_derived	View
+genetic_alteration_lines	MergeTree
+genetic_alteration_samples	MergeTree
 genomic_event_derived	MergeTree
 gistic	View
 gistic_to_gene	View

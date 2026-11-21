@@ -594,10 +594,16 @@ changes fixed it:
   batch. `--replicas 1` turns it off (see
   [Configuration](../configuration.md#fitting-a-build-to-the-clickhouse-servers)).
 
-Half of the full build is one table: `genetic_alteration_derived`, which
-holds every value of every expression, copy-number, methylation and protein
-matrix as its own row, 5.3 billion rows. Production's table of the
-same name holds the same rows.
+`genetic_alteration_derived` holds every value of every expression,
+copy-number, methylation and protein matrix, 9.6 billion values on the hub.
+Production's table of the same name holds the same rows, one per value.
+Writing and sorting one row per value took more than half of a full build:
+about 78 minutes of server time on the hub. The build now stores one row
+per gene and profile with the values in a list, and
+`genetic_alteration_derived` is a view that unpacks them (see
+[Architecture](../architecture.md)). That part of the build takes about 6
+minutes on the hub, and every study-view, filter and co-expression response
+stays the same, byte for byte.
 
 #### Why a new release builds in seconds
 
@@ -621,7 +627,7 @@ then imports the studies with a study build. Re-importing `acc_2019` with a
 new release takes 46 seconds this way: 19 for the rebuild, 27 for the
 study. A release that changes, for example, how the
 mutation count is computed rebuilds the clinical tables, which take a few
-minutes, but keeps `genetic_alteration_derived`.
+minutes, but keeps `genetic_alteration_lines`.
 
 ### On your own computer
 

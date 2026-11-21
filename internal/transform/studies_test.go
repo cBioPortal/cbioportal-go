@@ -109,7 +109,7 @@ func TestLiveStudyBuild(t *testing.T) {
 		}
 		return nil
 	}
-	for _, name := range []string{"sample", "patient", "gene_key_map", "genetic_alteration_derived", "clinical_data_derived", "mutation"} {
+	for _, name := range []string{"sample", "patient", "gene_key_map", "genetic_alteration_lines", "clinical_data_derived", "mutation"} {
 		if !slices.Contains(keptTables(), name) {
 			t.Errorf("release-1 rebuilt %s, kept %v", name, keptTables())
 		}
@@ -130,7 +130,7 @@ func TestLiveStudyBuild(t *testing.T) {
 	kept := keptTables()
 	// Mutations are matched to genes through gene_key_map, and the
 	// mutation count in clinical_data_derived counts them.
-	for _, name := range []string{"gene_key_map", "genetic_alteration_derived", "mutation", "clinical_data_derived"} {
+	for _, name := range []string{"gene_key_map", "genetic_alteration_lines", "mutation", "clinical_data_derived"} {
 		if slices.Contains(kept, name) {
 			t.Errorf("release-2 kept %s", name)
 		}
@@ -418,7 +418,7 @@ func TestLiveResumedBuild(t *testing.T) {
 
 	stop := errors.New("stopped")
 	stepHook = func(step string) error {
-		if step == "batch:genetic_alteration_derived:1" {
+		if step == "batch:genetic_alteration_lines:1" {
 			return stop
 		}
 		return nil
@@ -447,7 +447,7 @@ func TestLiveResumedBuild(t *testing.T) {
 	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_a"))
 	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_b"))
 	stepHook = func(step string) error {
-		if step == "batch:genetic_alteration_derived:1" {
+		if step == "batch:genetic_alteration_lines:1" {
 			return stop
 		}
 		return nil

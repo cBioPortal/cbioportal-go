@@ -56,7 +56,9 @@ var studyColumns = map[string]string{
 	"sample_derived":                "cancer_study_identifier",
 	"clinical_data_derived":         "cancer_study_identifier",
 	"genomic_event_derived":         "cancer_study_identifier",
-	"genetic_alteration_derived":    "cancer_study_identifier",
+	"genetic_alteration_lines":      "cancer_study_identifier",
+	"genetic_alteration_samples":    "study_id",
+	"genetic_alteration_cells":      "cancer_study_identifier",
 	"generic_assay_data_derived":    "cancer_study_identifier",
 	"clinical_event_derived":        "cancer_study_identifier",
 	"clinical_event_data_derived":   "cancer_study_identifier",
@@ -485,6 +487,16 @@ func (c *client) studyFilter(rawDB, targetDB string, studies []string) (*ch.Clie
 	return c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}), nil
 }
 
+// tableSettings are the MergeTree settings of tables that need their own.
+var tableSettings = map[string]string{
+	// A line holds the values of every sample of its file: blocks of 64
+	// lines let a read of a few genes skip the other lines' values.
+	alterationLines: "index_granularity = 64",
+	// A row lists the samples of one file: blocks of 16 rows let a read
+	// of a few studies skip the others' lists.
+	alterationSamples: "index_granularity = 16",
+}
+
 // numberedAcrossStudies are the tables whose ids number the rows of every
 // study in one sequence; a full build fills them in one go.
 var numberedAcrossStudies = map[string]bool{"sample": true, "patient": true, "sample_list": true, "seg": true}
@@ -648,6 +660,9 @@ func nextIDs(offset uint64, order string) string {
 // every study's rows in one sequence.
 func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string) error {
 	study := studyColumns[strings.TrimPrefix(name, snapshotPrefix)]
+	if set := tableSettings[strings.TrimPrefix(name, snapshotPrefix)]; set != "" {
+		orderBy += " SETTINGS " + set
+	}
 	hash := c.objectHash(targetDB, name, "table", study, orderBy, sel, strings.Join(projections, "\n"))
 	if c.part != nil && study != "" {
 		// The rows are inserted while their columns are checked: rows
