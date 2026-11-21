@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -504,11 +505,11 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 	if len(b.order) <= tuning.BatchStudies {
 		return nil
 	}
-	for start := 0; start < len(b.order); start += tuning.BatchStudies {
-		var ids []string
-		for _, s := range b.order[start:min(start+tuning.BatchStudies, len(b.order))] {
-			ids = append(ids, s.StudyID)
-		}
+	ids := make([]string, len(b.order))
+	for i, s := range b.order {
+		ids[i] = s.StudyID
+	}
+	for _, ids := range balancedBatches(ids, studyWeights(c, rawDB), tuning.BatchStudies) {
 		filtered, err := c.studyFilter(rawDB, targetDB, ids)
 		if err != nil {
 			return err
@@ -526,6 +527,79 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 		logf("transform: filling the batches on %d replicas at once: %s", len(c.lanes), strings.Join(hosts, ", "))
 	}
 	return nil
+}
+
+// studyWeights estimates how many rows each study adds to the big tables:
+// the cells of its matrices and its mutations. A study missing from the
+// map, or every study when the counts can't be read, weighs nothing.
+func studyWeights(c *client, rawDB string) map[string]uint64 {
+	var parts []string
+	for _, t := range []string{"cna_matrix_lines", "mrna_expression_matrix_lines", "methylation_matrix_lines",
+		"protein_level_matrix_lines", "generic_assay_matrix_lines"} {
+		if cols, _ := c.TableColumns(t); cols["cells"] && cols["study_id"] {
+			parts = append(parts, fmt.Sprintf("SELECT study_id, sum(cells) AS n FROM `%s`.`%s` GROUP BY study_id", rawDB, t))
+		}
+	}
+	if cols, _ := c.TableColumns("mutation_extended"); cols["study_id"] {
+		parts = append(parts, fmt.Sprintf("SELECT study_id, count() AS n FROM `%s`.mutation_extended GROUP BY study_id", rawDB))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	type row struct {
+		StudyID string `json:"study_id"`
+		N       uint64 `json:"n,string"`
+	}
+	rows, err := ch.QueryP[row](c.Client, "SELECT study_id, toString(sum(n)) AS n FROM ("+strings.Join(parts, " UNION ALL ")+") GROUP BY study_id", nil)
+	if err != nil {
+		logf("transform: weighing the studies: %v", err)
+		return nil
+	}
+	w := make(map[string]uint64, len(rows))
+	for _, r := range rows {
+		w[r.StudyID] = r.N
+	}
+	return w
+}
+
+// balancedBatches splits ids into as many batches of at most size studies
+// as cutting them every size studies would, with about the same weight
+// each: every study, heaviest first, goes into the lightest batch with
+// room. The heaviest batch comes first, so the replicas filling batches at
+// once finish about together. Each batch keeps the studies in the order of
+// ids, and the batches depend only on ids and their weights, so a resumed
+// build gets the same ones.
+func balancedBatches(ids []string, weight map[string]uint64, size int) [][]string {
+	n := (len(ids) + size - 1) / size
+	type batch struct {
+		weight uint64
+		pos    []int
+	}
+	batches := make([]batch, n)
+	order := make([]int, len(ids))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return weight[ids[order[a]]] > weight[ids[order[b]]] })
+	for _, i := range order {
+		best := -1
+		for j := range batches {
+			if len(batches[j].pos) < size && (best < 0 || batches[j].weight < batches[best].weight) {
+				best = j
+			}
+		}
+		batches[best].weight += weight[ids[i]]
+		batches[best].pos = append(batches[best].pos, i)
+	}
+	sort.SliceStable(batches, func(a, b int) bool { return batches[a].weight > batches[b].weight })
+	out := make([][]string, n)
+	for j, b := range batches {
+		sort.Ints(b.pos)
+		for _, i := range b.pos {
+			out[j] = append(out[j], ids[i])
+		}
+	}
+	return out
 }
 
 // idOffset is the highest id (column col) of the published table name,

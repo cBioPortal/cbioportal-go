@@ -37,7 +37,7 @@ type resumeState struct {
 // covers, every study with its import time, and the batch size.
 func resumeKey(b *studyBuild) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%d\n", b.fingerprint, tuning.BatchStudies)
+	fmt.Fprintf(h, "%s\n%d\nbalanced\n", b.fingerprint, tuning.BatchStudies)
 	for _, s := range b.order {
 		fmt.Fprintf(h, "%s\t%s\n", s.StudyID, s.ImportTime)
 	}
@@ -74,6 +74,7 @@ func startStaging(c *client, targetDB string, b *studyBuild) error {
 			}
 			if match && !done[publishingStep] {
 				logf("transform: resuming the previous build, which finished %d steps", len(done))
+				stopEarlierInserts(c, targetDB)
 				c.resume = &resumeState{targetDB: targetDB, key: key, resumed: true, done: done}
 				return nil
 			}
@@ -91,6 +92,32 @@ func startStaging(c *client, targetDB string, b *studyBuild) error {
 	}
 	c.resume = &resumeState{targetDB: targetDB, key: key, done: map[string]bool{}}
 	return c.markDone("started")
+}
+
+// stopEarlierInserts stops the inserts into staged tables of targetDB that
+// are still running: when a build's process is lost, its queries go on in
+// ClickHouse, and an insert that ended after the resumed build emptied its
+// batch would add its rows a second time. The build holds the import lock,
+// so no other build fills these tables. A user may stop only its own
+// queries, and only on the replica it is connected to, so it connects to
+// each replica: as many as the service has, or up to 3 when a user may
+// not count them.
+func stopEarlierInserts(c *client, targetDB string) {
+	kill := fmt.Sprintf("KILL QUERY WHERE startsWith(query, 'INSERT INTO `%s`.`%s') SYNC", ch.SQLLit(targetDB), stagePrefix)
+	lanes := pinReplicas(c.Client, max(3, replicaCount(c.Client)))
+	defer closeLanes(lanes)
+	clients := []*ch.Client{c.Client}
+	if len(lanes) > 0 {
+		clients = nil
+		for _, l := range lanes {
+			clients = append(clients, l.cl)
+		}
+	}
+	for _, cl := range clients {
+		if _, err := cl.ExecuteServerwide(kill); err != nil {
+			logf("transform: stopping the previous build's inserts: %v", err)
+		}
+	}
 }
 
 // stepDone reports whether a resumed build finished step before.

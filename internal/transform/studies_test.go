@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -532,5 +533,28 @@ func copyDir(t *testing.T, from, to string) {
 		if err := os.WriteFile(filepath.Join(to, e.Name()), body, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestBalancedBatches(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f", "g"}
+	w := map[string]uint64{"a": 1, "b": 100, "c": 2, "d": 90, "e": 3, "f": 4, "g": 5}
+	got := balancedBatches(ids, w, 3)
+	// As many batches as cutting every 3 studies, at most 3 studies each,
+	// the heavy b alone, the heaviest batch first, each in id order.
+	want := [][]string{{"b"}, {"a", "c", "d"}, {"e", "f", "g"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	// Without weights, every study still goes into a batch of at most 3.
+	n := 0
+	for _, b := range balancedBatches(ids, nil, 3) {
+		if len(b) > 3 {
+			t.Errorf("batch of %d", len(b))
+		}
+		n += len(b)
+	}
+	if n != len(ids) {
+		t.Errorf("%d studies in the batches", n)
 	}
 }
