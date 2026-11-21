@@ -401,8 +401,10 @@ func (c filterCompiler) sampleTreatments(f *andedTreatmentFilters) []string {
 }
 
 // isNASQL matches the NA spellings (and the empty string) of a stored value.
+// upper, not upperUTF8: the spellings are ASCII, and chDB's macOS engine
+// has no upperUTF8 (it is built without ICU).
 func isNASQL(col string) string {
-	return fmt.Sprintf("(%[1]s = '' OR upperUTF8(%[1]s) IN ('NA', 'NAN', 'N/A'))", col)
+	return fmt.Sprintf("(%[1]s = '' OR upper(%[1]s) IN ('NA', 'NAN', 'N/A'))", col)
 }
 
 // castFloatSQL parses a stored numeric value, honouring the range operators

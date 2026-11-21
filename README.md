@@ -120,6 +120,13 @@ bin/cbioportal-local datahub/public/acbc_mskcc_2015 --open
 - When you save a change to a study's files, the program imports that
   study again, in a few seconds. Reload the page to see the change.
 - `cbioportal-local --help` lists the options.
+- `make local-app` builds it as a macOS app with a window of its own
+  ([Wails](https://wails.io)): a Dock icon, Cmd+Q, the system's folder and
+  save dialogs, and a progress page while the first run downloads. The
+  portal is still served on its port, so a browser can open it too. It
+  needs a Mac with the Xcode command line tools (cgo); `make build` and
+  `make local` do not. See `cmd/cbioportal-local/macos/local-app.workflow.yml`
+  for signing and notarizing it on GitHub Actions.
 
 ## Development
 

@@ -1,0 +1,105 @@
+# A sketch, not enabled: copy to .github/workflows/local-app.yml to turn it
+# on. It builds the macOS app (make local-app: one universal app for Apple
+# silicon and Intel), signs it with a Developer ID, has Apple notarize it,
+# and staples the ticket, so a curator can download it and double-click it:
+# no "damaged" or "Open Anyway" in System Settings.
+#
+# Before it can run, once, by hand (only the Apple Developer account's
+# Account Holder or an Admin can do these):
+#   1. An Apple Developer Program membership for the organization ($99 a
+#      year; enrolling an organization needs its D-U-N-S number).
+#   2. A "Developer ID Application" certificate (developer.apple.com >
+#      Certificates; Xcode > Settings > Accounts can make it too). Export
+#      it with its private key from Keychain Access as a .p12.
+#   3. An App Store Connect API key for notarization (App Store Connect >
+#      Users and Access > Integrations > Team Keys, role "Developer"):
+#      the .p8 file, its key id and the issuer id.
+#
+# Secrets it needs (repository or "release" environment secrets):
+#   MACOS_CERTIFICATE_P12      the .p12 of step 2, base64-encoded
+#                              (base64 -i cert.p12)
+#   MACOS_CERTIFICATE_PASSWORD the .p12's password
+#   MACOS_SIGN_IDENTITY        e.g. "Developer ID Application: Memorial Sloan
+#                              Kettering Cancer Center (TEAMID1234)"
+#   NOTARY_KEY_P8              the .p8 of step 3, base64-encoded
+#   NOTARY_KEY_ID              that key's id
+#   NOTARY_ISSUER_ID           the App Store Connect issuer id
+# (Instead of the API key, notarytool also takes an Apple ID, an
+# app-specific password and the team id.)
+#
+# The frontend comes from the same place the other release builds take it
+# (make frontend here; a build artifact would be quicker).
+
+name: macOS app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  app:
+    name: cBioPortal Local.app
+    runs-on: macos-15
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0 # git describe for the version
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: make frontend
+
+      - name: Keychain with the Developer ID certificate
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Build and sign
+        run: make local-app-zip SIGN_IDENTITY="${{ secrets.MACOS_SIGN_IDENTITY }}"
+
+      - name: Notarize and staple
+        env:
+          KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          ISSUER: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          echo "$KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          zip=bin/cBioPortal-Local-app-universal.zip
+          xcrun notarytool submit "$zip" --key "$RUNNER_TEMP/notary.p8" --key-id "$KEY_ID" --issuer "$ISSUER" --wait --timeout 30m
+          app="bin/app-universal/cBioPortal Local.app"
+          xcrun stapler staple "$app"
+          spctl --assess --type execute --verbose "$app"
+          rm "$zip" && (cd bin/app-universal && ditto -c -k --keepParent "cBioPortal Local.app" ../cBioPortal-Local-app-universal.zip)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cBioPortal-Local-app
+          path: bin/cBioPortal-Local-app-universal.zip
+
+  # The app's code also builds without cgo (Wails's purego backend), so the
+  # Linux CI can at least vet it on every pull request.
+  # vet-app:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-go@v5
+  #       with: { go-version-file: go.mod }
+  #     - run: GOOS=darwin CGO_ENABLED=0 go vet -tags wails,production,purego ./cmd/cbioportal-local
