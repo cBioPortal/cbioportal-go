@@ -786,7 +786,7 @@ the names below, `<name>` is the value of `--login-oidc-name` (default
 
 | go setting | Java portal properties |
 |---|---|
-| `--login=off` | `authenticate=false` (or `noauthsessionservice`) |
+| `--login=off` | `authenticate=false` |
 | `--login=optional` | `authenticate=optional_oauth2` |
 | `--login=required` | `authenticate=oauth2` |
 | `--login-google-client-id` | `spring….registration.google.client-id`, and `spring….provider.google.user-name-attribute=email` |
