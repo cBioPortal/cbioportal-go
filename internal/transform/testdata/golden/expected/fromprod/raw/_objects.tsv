@@ -1,5 +1,5 @@
 cna_matrix	View
-generic_assay_entity_meta	View
+generic_assay_entity_meta	MergeTree
 generic_assay_matrix	View
 generic_assay_profile_entity	View
 genetic_profile	View

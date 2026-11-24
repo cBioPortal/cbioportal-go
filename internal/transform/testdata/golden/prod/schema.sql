@@ -405,6 +405,25 @@ CREATE TABLE {db}.generic_assay_profile_entity_derived
 ENGINE = MergeTree
 ORDER BY (profile_stable_id, entity_stable_id)
 SETTINGS index_granularity = 8192;
+CREATE TABLE {db}.genetic_entity
+(
+    `id` Int64,
+    `entity_type` String,
+    `stable_id` Nullable(String)
+)
+ENGINE = MergeTree
+ORDER BY id
+SETTINGS index_granularity = 8192;
+CREATE TABLE {db}.generic_entity_properties
+(
+    `id` Int64,
+    `genetic_entity_id` Int64,
+    `name` String,
+    `value` String
+)
+ENGINE = MergeTree
+ORDER BY id
+SETTINGS index_granularity = 8192;
 CREATE TABLE {db}.generic_assay_meta_derived
 (
     `entity_stable_id` String,
