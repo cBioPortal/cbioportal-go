@@ -125,8 +125,14 @@ bin/cbioportal-local datahub/public/acbc_mskcc_2015 --open
   save dialogs, and a progress page while the first run downloads. The
   portal is still served on its port, so a browser can open it too. It
   needs a Mac with the Xcode command line tools (cgo); `make build` and
-  `make local` do not. See `cmd/cbioportal-local/macos/local-app.workflow.yml`
-  for signing and notarizing it on GitHub Actions.
+  `make local` do not.
+- Each release has the app as `cBioPortal-Local-macOS.zip`
+  (`.github/workflows/local-app.yml`). It is not signed by Apple yet, so the
+  first time it is opened macOS says it "could not verify" it. On macOS 15
+  and later, go to System Settings › Privacy & Security and click **Open
+  Anyway**; on macOS 13 and 14, Control-click the app and choose Open. Or,
+  in Terminal: `xattr -dr com.apple.quarantine "/Applications/cBioPortal Local.app"`.
+  After that it opens like any app.
 
 ## Development
 
