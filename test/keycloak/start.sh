@@ -2,7 +2,8 @@
 # Starts the Keycloak the e2e suite logs in through, as upstream CI does:
 # Keycloak 16.1.1 (on :8084; CI uses :8081) under /auth, realm "cbio", user testuser /
 # P@ssword1, with one "cbioportal" client role per study in STUDIES; datuser /
-# P@ssword1 has only the first (test/dat_keycloak_test.go).
+# P@ssword1 has only the first (test/dat_keycloak_test.go), and restricteduser /
+# P@ssword1 only RESTRICTED_STUDY (the frontend's tests/local/auth specs).
 #
 #   test/keycloak/start.sh            # (re)start with a fresh realm
 #   test/keycloak/start.sh stop
@@ -17,6 +18,8 @@ NAME=cbioportal-go-keycloak
 PORT=${KEYCLOAK_PORT:-8084}
 # The studies upstream CI grants the test user (.circleci/config.yml).
 STUDIES=${STUDIES:-ascn_test_study study_hg38 teststudy_genepanels study_es_0 lgg_ucsf_2014_test_generic_assay}
+# The one study restricteduser may read, as in the frontend's auth specs.
+RESTRICTED_STUDY=${RESTRICTED_STUDY:-study_es_0}
 
 # Stop from inside when the daemon may not signal containers (some Docker
 # installs, e.g. snap under AppArmor).
@@ -26,10 +29,12 @@ for _ in $(seq 1 30); do docker inspect "$NAME" >/dev/null 2>&1 || break; sleep 
 [ "${1:-}" = stop ] && exit 0
 
 realm="$(cd "$(dirname "$0")" && pwd)/realm.generated.json"
-jq --arg s "$STUDIES" '($s | split(" ") | map(select(. != ""))) as $ids
+jq --arg s "$STUDIES" --arg restricted "$RESTRICTED_STUDY" '($s | split(" ") | map(select(. != ""))) as $ids
   | .roles.client.cbioportal = ($ids | map({name: .}))
   | .groups |= map(if .name == "PUBLIC_STUDIES" then .clientRoles.cbioportal = $ids else . end)
-  | .users |= map(if .username == "datuser" then .clientRoles.cbioportal = $ids[:1] else . end)' \
+  | .users |= map(if .username == "datuser" then .clientRoles.cbioportal = $ids[:1] else . end)
+  | .users |= map(if .username == "restricteduser"
+      then .clientRoles.cbioportal = ($ids | map(select(. == $restricted))) else . end)' \
   "$(dirname "$0")/realm.json" >"$realm"
 chmod 644 "$realm"
 

@@ -42,9 +42,24 @@ done
 sleep 1
 rm -rf test-results/* 2>/dev/null
 
-# E2E_SKIP: a test-title regex to leave out (e.g. a known environment gap).
-EXTRA=(); [ -n "${E2E_SKIP:-}" ] && EXTRA=(--grep-invert "$E2E_SKIP")
+# "sign out ends the portal session" expects the browser to stay on the
+# portal at /login?logout_success, which is where a sign-out lands when the
+# provider has no end-session endpoint — upstream's oauth2 job lists the
+# Keycloak endpoints one by one, so Spring never learns of that endpoint.
+# This Keycloak is reached through its issuer URI, so the portal discovers
+# the endpoint and ends the Keycloak session as well, exactly as Java's
+# OidcClientInitiatedLogoutSuccessHandler does. Both outcomes are pinned by
+# TestOAuth2LoginFlow and TestOAuth2LogoutWithoutEndSession.
+SKIP='sign out ends the portal session'
+# E2E_SKIP: a further test-title regex to leave out (e.g. an environment gap).
+[ -n "${E2E_SKIP:-}" ] && SKIP="$SKIP|$E2E_SKIP"
+EXTRA=(--grep-invert "$SKIP")
+# PW_AUTH_MODE names the backend's authenticate value, which the specs in
+# tests/local/auth run by: test/e2e_api.sh serves oauth2. Set it to saml
+# when pointing the suite at a SAML backend, so those specs skip the modes
+# it does not serve.
 CI=1 CBIOPORTAL_URL="$URL" LOCALDEV=1 PW_LOCAL=1 HEADLESS_CHROME=true \
+  PW_AUTH_MODE="${PW_AUTH_MODE:-oauth2}" \
   corepack pnpm exec playwright test "${SPECS[@]}" --update-snapshots --workers="$WORKERS" "${EXTRA[@]}"
 rc=$?
 

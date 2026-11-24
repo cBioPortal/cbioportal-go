@@ -80,6 +80,18 @@
       "realmRoles": ["offline_access"],
       "clientRoles": {"cbioportal": []},
       "groups": []
+    },
+    {
+      "username": "restricteduser",
+      "enabled": true,
+      "email": "restricteduser@example.org",
+      "emailVerified": true,
+      "firstName": "Restricted",
+      "lastName": "User",
+      "credentials": [{"type": "password", "value": "P@ssword1"}],
+      "realmRoles": ["offline_access"],
+      "clientRoles": {"cbioportal": []},
+      "groups": []
     }
   ]
 }
