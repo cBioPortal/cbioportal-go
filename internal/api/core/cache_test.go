@@ -51,3 +51,22 @@ func entryKeyBytes(c *metaCache) int {
 	}
 	return n
 }
+
+// Row types with the same name, declared in different functions, get
+// different cache keys, so one caller never reads another's rows.
+func TestRowTypeKey(t *testing.T) {
+	a := func() string {
+		type idRow struct{ ID int64 }
+		return rowTypeKey[idRow]()
+	}
+	b := func() string {
+		type idRow struct{ ID int64 }
+		return rowTypeKey[idRow]()
+	}
+	if a() == b() {
+		t.Errorf("two idRow types share the key %q", a())
+	}
+	if a() != a() || rowTypeKey[string]() != rowTypeKey[string]() {
+		t.Error("the same type got two keys")
+	}
+}
