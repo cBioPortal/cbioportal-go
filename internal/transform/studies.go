@@ -285,7 +285,7 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 }
 
 // sourceHash hashes the Go files (tests aside) of the packages that decide
-// what the transform builds.
+// what the transform builds, and the data files they embed.
 var sourceHash = sync.OnceValue(func() string {
 	h := sha256.New()
 	for _, pkg := range []struct {
@@ -293,7 +293,8 @@ var sourceHash = sync.OnceValue(func() string {
 		src  fs.FS
 	}{{"transform", Source}, {"clickhouse", ch.Source}, {"parser", parser.Source}, {"javaorder", javaorder.Source}} {
 		files, _ := fs.Glob(pkg.src, "*.go")
-		for _, f := range files {
+		data, _ := fs.Glob(pkg.src, "*.tsv")
+		for _, f := range append(files, data...) {
 			if strings.HasSuffix(f, "_test.go") {
 				continue
 			}

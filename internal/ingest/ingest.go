@@ -460,6 +460,9 @@ func IngestStudyAt(c *ch.Client, s *parser.Study, imported time.Time) ([]FileSta
 	meta.Go(func() error { return ingestClinicalMeta(c, s) })
 	meta.Go(func() error { return ingestCaseLists(c, s) })
 	meta.Go(func() error { return ingestStudyTags(c, s) })
+	if s.ProductionRules {
+		meta.Go(func() error { return recordProductionRules(c) })
+	}
 	meta.Go(func() error {
 		seq := map[string]int{}
 		for _, f := range s.Files {

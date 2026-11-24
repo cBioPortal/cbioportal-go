@@ -178,6 +178,22 @@ cbioportal-import import-study datahub/public/acbc_mskcc_2015 --db cbioportal \
   --gene-panels datahub/reference_data/gene_panels
 ```
 
+By default the studies load as cbioportal-core loads them. With
+`--production-rules` they load as www.cbioportal.org's import loads them,
+which takes two extra steps:
+
+| Step | Example |
+|---|---|
+| Every file whose name starts with `data_mutations` loads into the study's mutation profile, not only the file its meta file names. Uncalled mutations (`data_mutations_uncalled*`) and `*_normals.txt` files are left out. | datahub's `difg_glass` splits its mutations over `data_mutations.txt`, `data_mutations_1.txt` and `data_mutations_2.txt`. |
+| A study whose sample file has `ONCOTREE_CODE` but no `CANCER_TYPE` or `CANCER_TYPE_DETAILED` gets the missing attribute from OncoTree. `CANCER_TYPE` is the code's main type and `CANCER_TYPE_DETAILED` its name. | `CHOL` gives Hepatobiliary Cancer and Cholangiocarcinoma. |
+
+The extra mutation files load only for studies loaded with the setting.
+The raw database remembers the setting, so once one study is loaded with
+it, the portal's next build adds the cancer types for all of its studies. hub.cbioportal.org and
+the datahub PR previews use it. The OncoTree names come from a copy of
+OncoTree's latest stable release kept in the code; `make oncotree`
+refreshes it.
+
 [`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh)
 copies studies already loaded into a local ClickHouse to another ClickHouse,
 then builds the portal database there:

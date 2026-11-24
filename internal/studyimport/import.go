@@ -38,6 +38,11 @@ type Options struct {
 	// can include them. Result.BuildPending is then set.
 	KeepOnOverload bool
 
+	// ProductionRules stages the studies as cBioPortal's production import
+	// does (parser.Study.UseProductionRules), not only as cbioportal-core
+	// does.
+	ProductionRules bool
+
 	// Prepare, when set, runs before a study is staged (e.g. to download
 	// its files), one study at a time and a few studies ahead of staging;
 	// an error fails that study. Done runs after the study is staged,
@@ -383,6 +388,11 @@ func (o *Options) stage(raw *ch.Client, dir string, imported time.Time, prepErr 
 		s, err := parser.Scan(dir)
 		if err != nil {
 			return err
+		}
+		if o.ProductionRules {
+			if err := s.UseProductionRules(); err != nil {
+				return err
+			}
 		}
 		r.StudyID, r.Warnings = s.StudyID, s.Warnings
 		for _, w := range s.Warnings {

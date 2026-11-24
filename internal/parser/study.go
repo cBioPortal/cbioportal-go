@@ -114,6 +114,24 @@ type Study struct {
 	// Warnings are problems with the study's files that left a file out,
 	// such as a meta file naming a data file that does not exist.
 	Warnings []string
+	// ProductionRules is set by UseProductionRules.
+	ProductionRules bool
+}
+
+// UseProductionRules makes the study load as cBioPortal's production import
+// (knowledgesystems/pipelines) loads it, which takes steps cbioportal-core
+// does not: every data_mutations* file loads into the mutation profile (see
+// extraMutationFiles), and the transform adds CANCER_TYPE and
+// CANCER_TYPE_DETAILED from each sample's ONCOTREE_CODE when the study's
+// files lack them.
+func (s *Study) UseProductionRules() error {
+	entries, err := os.ReadDir(s.Dir)
+	if err != nil {
+		return err
+	}
+	s.Files = append(s.Files, extraMutationFiles(s.Dir, entries, s.Files)...)
+	s.ProductionRules = true
+	return nil
 }
 
 // missingDataFile is the warning for a meta file whose data file is
@@ -247,6 +265,39 @@ func Scan(dir string) (*Study, error) {
 		s.StudyID = filepath.Base(dir)
 	}
 	return s, nil
+}
+
+// extraMutationFiles returns the study's other mutation files, loaded into
+// the profile of its mutation meta file. cBioPortal's production import
+// loads every file whose name starts with data_mutations with the study's
+// one mutation meta file, whatever that file's data_filename says, so a
+// MAF split into data_mutations.txt, data_mutations_1.txt and so on loads
+// whole. cbioportal-core loads only the file the meta file names. Uncalled mutations (data_mutations_uncalled*) have a profile of
+// their own, and *_normals.txt files are not loaded.
+func extraMutationFiles(dir string, entries []os.DirEntry, files []DataFile) []DataFile {
+	var mutations *DataFile
+	named := map[string]bool{}
+	for i := range files {
+		named[filepath.Base(files[i].DataPath)] = true
+		if mutations == nil && files[i].StageSlug == "mutation_extended" {
+			mutations = &files[i]
+		}
+	}
+	if mutations == nil {
+		return nil
+	}
+	var out []DataFile
+	for _, e := range entries {
+		n := e.Name()
+		if e.IsDir() || named[n] || !strings.HasPrefix(n, "data_mutations") ||
+			strings.HasPrefix(n, "data_mutations_uncalled") || strings.HasSuffix(n, "_normals.txt") {
+			continue
+		}
+		f := *mutations
+		f.DataPath = filepath.Join(dir, n)
+		out = append(out, f)
+	}
+	return out
 }
 
 // DirOrder maps the entries of a directory to their position in directory

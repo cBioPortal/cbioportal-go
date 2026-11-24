@@ -291,8 +291,9 @@ func ImportPR(ctx context.Context, st *Settings, gh *github.Client) error {
 	}
 	res, err := studyimport.Run(studyimport.Options{
 		URL: job.ClickHouseURL(), DB: r.DB, RawDB: r.Raw, RefDB: r.Ref,
-		Seed:       datahub.NewestSeed(repo),
-		GenePanels: filepath.Join(repo, datahub.GenePanelsDir), ReloadPanels: panelsChanged,
+		ProductionRules: true,
+		Seed:            datahub.NewestSeed(repo),
+		GenePanels:      filepath.Join(repo, datahub.GenePanelsDir), ReloadPanels: panelsChanged,
 		Prepare: func(dir string) error {
 			if _, err := co.PullLFS(ctx, rel(repo, dir)); err != nil {
 				return err

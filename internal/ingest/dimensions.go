@@ -109,11 +109,14 @@ func ingestProfiles(c *ch.Client, s *parser.Study) error {
 		return err
 	}
 
+	// Several data files can load into one profile (a split MAF).
+	seen := map[string]bool{}
 	for i := range s.Files {
 		f := &s.Files[i]
-		if !f.IsMolecularProfile() {
+		if !f.IsMolecularProfile() || seen[f.StableID] {
 			continue
 		}
+		seen[f.StableID] = true
 		mpid := s.StudyID + "_" + f.StableID
 		values := []string{mpid, s.StudyID, f.StableID, f.AlterationType, f.Datatype, f.ProfileName, f.ProfileDescription, f.ShowInAnalysis, f.GenericAssayType, f.Namespaces,
 			f.GenePanel, f.PatientLevel, f.PivotThreshold, f.SortOrder, f.VariantClassificationFilter}

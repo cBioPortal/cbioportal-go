@@ -4,7 +4,7 @@ CBIOPORTAL_DB ?= cbioportal
 PORT ?= 8080
 API ?= http://localhost:18090
 
-.PHONY: build local local-macos macos-app test fmt vet lint contract e2e run frontend testdb clean help
+.PHONY: build local local-macos macos-app test fmt vet lint contract e2e run frontend testdb oncotree clean help
 
 build: ## build the programs into bin/
 	go build -o bin/cbioportal-import ./cmd/cbioportal-import
@@ -54,6 +54,11 @@ e2e: ## frontend Playwright suite against the API on :18090 (WORKERS=3)
 
 testdb: ## build the test databases: make testdb FIXTURES=<cbioportal-test> SEED=<seed.sql.gz>
 	test/setup_test_db.sh $(FIXTURES) $(SEED)
+
+oncotree: ## refresh the OncoTree copy the import uses for CANCER_TYPE
+	curl -fsS 'https://oncotree.mskcc.org/api/tumorTypes?version=oncotree_latest_stable' | \
+		jq -r '"# OncoTree oncotree_latest_stable, fetched \(now | strftime("%Y-%m-%d")): code, name, main type.", (sort_by(.code)[] | [.code, .name, .mainType] | @tsv)' \
+		> internal/transform/oncotree.tsv
 
 frontend: ## build the frontend submodule into frontend/dist
 	git submodule update --init

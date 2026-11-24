@@ -263,9 +263,10 @@ func SyncMaster(ctx context.Context, st *MasterSettings) error {
 			_, err := co.PullLFS(ctx, rel(repo, dir))
 			return err
 		},
-		Done:           func(dir string) { os.RemoveAll(dir) },
-		KeepOnOverload: true,
-		Logf:           job.Logf,
+		Done:            func(dir string) { os.RemoveAll(dir) },
+		KeepOnOverload:  true,
+		ProductionRules: true,
+		Logf:            job.Logf,
 	}, dirs)
 	failed := failedStudies(repo, res)
 	switch {
