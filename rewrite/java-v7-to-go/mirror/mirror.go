@@ -208,14 +208,9 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 
 	builtFrom := ""
 	if r.Cfg.TargetDB == "" && (r.Cfg.ActiveDB == r.Cfg.Prefix+"_blue" || r.Cfg.ActiveDB == r.Cfg.Prefix+"_green") && src.Status == "complete" {
-		n, err := q.query(fmt.Sprintf("SELECT count() FROM system.tables WHERE database = '%s_ref' AND name = '_go_mirror_source' FORMAT TSV", ch.SQLLit(r.Cfg.ActiveDB)))
-		if err != nil {
+		var err error
+		if builtFrom, err = r.builtFrom(q, r.Cfg.ActiveDB+"_ref"); err != nil {
 			return Plan{}, err
-		}
-		if n == "1" {
-			if builtFrom, err = q.query(fmt.Sprintf("SELECT any(snapshot) FROM `%s_ref`._go_mirror_source FORMAT TSV", r.Cfg.ActiveDB)); err != nil {
-				return Plan{}, err
-			}
 		}
 	}
 	plan := Decide(r.Cfg, src, builtFrom)
