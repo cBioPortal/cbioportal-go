@@ -30,6 +30,9 @@ input[type=search] { font: inherit; width: 100%; padding: 8px 10px; border-radiu
 .row:hover { background: var(--chip); }
 .row input { margin-top: 4px; cursor: pointer; }
 .row.added { cursor: default; } .row.added:hover { background: none; }
+.row.added input { opacity: .35; cursor: default; }
+.row.added .text > div:first-child { color: var(--muted); }
+.row .remove { margin-left: auto; align-self: center; }
 .row:last-child { border-bottom: 0; }
 .row .text { flex: 1; min-width: 0; }
 .row .meta { color: var(--muted); font-size: 13px; }
@@ -106,12 +109,13 @@ button.small { font-size: 13px; padding: 3px 10px; }
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let publicStudies = null, chosen = new Set(), have = new Set(), shownHave = '';
-let shownRows = '';
+let shownRows = '', dirOf = {};
 
 async function refresh() {
   try {
     const rows = await (await fetch('/local/status')).json();
     have = new Set(rows.map(r => r.studyId).filter(Boolean));
+    dirOf = Object.fromEntries(rows.filter(r => r.studyId).map(r => [r.studyId, r]));
     // Drawn again only when a study changed, so no click is lost to a redraw.
     const key = JSON.stringify(rows);
     if (key !== shownRows) { shownRows = key; $('studies').innerHTML = rows.length ? rows.map(r => `<tr>
@@ -119,9 +123,9 @@ async function refresh() {
       <td class="${esc(r.status)}">${esc(r.status)}</td>
       <td>${r.imported && !r.imported.startsWith('0001') ? new Date(r.imported).toLocaleTimeString() + ` (${Math.round(r.seconds)} s)` : ''}</td>
       <td><code>${esc(r.dir)}</code>${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}${(r.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('')}</td>
-      <td class="actions">${['importing', 'waiting', 'downloading'].includes(r.status) ? '' : `<button class="small" data-remove="${esc(r.dir)}" data-name="${esc(r.studyId || r.dir)}">Remove</button>`}</td>
+      <td class="actions">${removeButton(r)}</td>
     </tr>`).join('') : '<tr><td colspan="5" class="empty">No studies yet. Add one above.</td></tr>'; }
-    if (publicStudies && [...have].sort().join() !== shownHave) renderPublic();
+    if (publicStudies && addedKey() !== shownHave) renderPublic();
   } catch (e) {
     shownRows = '';
     $('studies').innerHTML = '<tr><td colspan="5" class="err">The portal is not running.</td></tr>';
@@ -129,13 +133,14 @@ async function refresh() {
 }
 
 function renderPublic() {
-  shownHave = [...have].sort().join();
+  shownHave = addedKey();
   const q = $('search').value.trim().toLowerCase();
   const shown = publicStudies.filter(s => !q || [s.name, s.studyId, s.cancerTypeId].some(v => (v || '').toLowerCase().includes(q))).slice(0, 300);
   $('publicList').innerHTML = shown.length ? shown.map(s => `<label class="row${have.has(s.studyId) ? ' added' : ''}">
     <input type="checkbox" data-id="${esc(s.studyId)}" ${chosen.has(s.studyId) ? 'checked' : ''} ${have.has(s.studyId) ? 'disabled' : ''}>
     <span class="text"><div>${esc(s.name)} ${have.has(s.studyId) ? '<span class="chip">added</span>' : ''}</div>
     <div class="meta">${esc(s.studyId)}${s.cancerTypeId ? ' · ' + esc(s.cancerTypeId) : ''}${s.allSampleCount ? ' · ' + s.allSampleCount.toLocaleString() + ' samples' : ''}</div></span>
+    ${have.has(s.studyId) ? removeButton(dirOf[s.studyId]) : ''}
   </label>`).join('') : '<div class="empty" style="padding:12px">No study matches.</div>';
   showChosen();
 }
@@ -151,8 +156,15 @@ $('publicList').addEventListener('change', e => {
   showChosen();
 });
 $('search').addEventListener('input', renderPublic);
-$('studies').addEventListener('click', async e => {
+// The added studies and their states; the public list is drawn again when they change.
+const addedKey = () => Object.values(dirOf).map(r => r.studyId + ':' + r.status).sort().join();
+function removeButton(r) {
+  if (!r || ['importing', 'waiting', 'downloading'].includes(r.status)) return '';
+  return `<button class="small remove" data-remove="${esc(r.dir)}" data-name="${esc(r.studyId || r.dir)}">Remove</button>`;
+}
+const removeStudy = async e => {
   const b = e.target.closest('button[data-remove]'); if (!b) return;
+  e.preventDefault();
   const dir = b.dataset.remove;
   const own = !dir.includes('/public-studies/');
   if (!confirm(`Remove ${b.dataset.name} from the portal?` + (own ? ' Its folder stays on this computer.' : ' Its download is deleted; you can download it again.'))) return;
@@ -160,7 +172,9 @@ $('studies').addEventListener('click', async e => {
   const r = await fetch('/local/remove', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({dir})});
   if (!r.ok) alert(await r.text());
   refresh();
-});
+};
+$('studies').addEventListener('click', removeStudy);
+$('publicList').addEventListener('click', removeStudy);
 const showPublic = open => {
   $('publicBox').hidden = !open;
   $('browse').textContent = open ? 'Hide public studies' : 'Choose public studies…';
