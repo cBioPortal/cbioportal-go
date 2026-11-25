@@ -50,7 +50,7 @@ td code { font-size: 12px; color: var(--muted); word-break: break-all; }
       <p>A cBioPortal running on this computer. Your data stays here.</p>
     </div>
     <div class="toolbar">
-      <a class="button primary" id="open" href="/">Open the portal</a>
+      <a class="button primary" id="open" href="/" target="_blank">Open the portal</a>
       <button id="quit" title="Stop the portal and this program">Stop</button>
     </div>
   </header>
@@ -93,7 +93,7 @@ td code { font-size: 12px; color: var(--muted); word-break: break-all; }
   <section class="card">
     <h2>3. Explore</h2>
     <p>When a study shows <span class="imported">imported</span>, open it in the portal. Reload the portal's page after a study is imported again.</p>
-    <a class="button primary" href="/">Open the portal</a>
+    <a class="button primary" href="/" target="_blank">Open the portal</a>
   </section>
 </main>
 <script>
@@ -106,7 +106,7 @@ async function refresh() {
     const rows = await (await fetch('/local/status')).json();
     have = new Set(rows.map(r => r.studyId).filter(Boolean));
     $('studies').innerHTML = rows.length ? rows.map(r => `<tr>
-      <td>${r.studyId && r.status === 'imported' ? `<a href="/study/summary?id=${encodeURIComponent(r.studyId)}">${esc(r.studyId)}</a>` : esc(r.studyId || '–')}</td>
+      <td>${r.studyId && r.status === 'imported' ? `<a href="/study/summary?id=${encodeURIComponent(r.studyId)}" target="_blank">${esc(r.studyId)}</a>` : esc(r.studyId || '–')}</td>
       <td class="${esc(r.status)}">${esc(r.status)}</td>
       <td>${r.imported && !r.imported.startsWith('0001') ? new Date(r.imported).toLocaleTimeString() + ` (${Math.round(r.seconds)} s)` : ''}</td>
       <td><code>${esc(r.dir)}</code>${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}${(r.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('')}</td>
