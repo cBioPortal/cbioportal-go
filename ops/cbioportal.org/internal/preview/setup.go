@@ -338,9 +338,10 @@ func (s *setup) buildStudies(cfg Config, dhPR *github.PullRequest) error {
 	}
 	res, err := studyimport.Run(studyimport.Options{
 		URL: job.ClickHouseURL(), DB: s.dbs.DB, RawDB: s.dbs.Raw, RefDB: s.dbs.Ref,
-		Prepare: func(dir string) error { _, err := co.PullLFS(s.ctx, rel(repo, dir)); return err },
-		Done:    func(dir string) { os.RemoveAll(dir) },
-		Logf:    job.Logf,
+		Prepare:         func(dir string) error { _, err := co.PullLFS(s.ctx, rel(repo, dir)); return err },
+		Done:            func(dir string) { os.RemoveAll(dir) },
+		ProductionRules: true,
+		Logf:            job.Logf,
 	}, dirs)
 	if err != nil {
 		job.Logf("%v", err)

@@ -516,8 +516,17 @@ WHERE m.molecularProfileId IN (SELECT molecular_profile_id FROM {t}.prod_profile
 		b.rawView("generic_assay_profile_entity",
 			"SELECT p.study_id AS study_id, p.profile_stable_id AS profile_stable_id, e.entity_stable_id AS entity_stable_id "+
 				"FROM {p}.generic_assay_profile_entity_derived e INNER JOIN {t}.prod_profile p ON p.molecular_profile_id = e.profile_stable_id"),
-		b.rawView("generic_assay_entity_meta",
-			"SELECT entity_stable_id, entity_type, properties FROM {p}.generic_assay_meta_derived"),
+		// Every stored property, empty values too: the enrichments return
+		// them as Java's legacy GenericAssayMapper reads them, while the
+		// generic-assay-meta endpoints drop the empty ones, as
+		// generic_assay_meta_derived does.
+		b.rawTable("generic_assay_entity_meta", "entity_stable_id",
+			"SELECT assumeNotNull(ge.stable_id) AS entity_stable_id, any(ge.entity_type) AS entity_type, "+
+				"CAST((groupArrayIf(gep.name, gep.genetic_entity_id != 0), groupArrayIf(gep.value, gep.genetic_entity_id != 0)) "+
+				"AS Map(String, String)) AS properties "+
+				"FROM {p}.genetic_entity ge LEFT JOIN (SELECT genetic_entity_id, name, value FROM {p}.generic_entity_properties ORDER BY id) gep "+
+				"ON gep.genetic_entity_id = ge.id "+
+				"WHERE ge.entity_type = 'GENERIC_ASSAY' AND ge.stable_id IS NOT NULL GROUP BY entity_stable_id"),
 	)
 	// Timeline events, one row per event with its attributes in storage order.
 	// Sorted by event id, the order the API returns them in, so a whole

@@ -132,12 +132,18 @@ transform afterwards to make the study queryable.`,
 	fs := cmd.Flags()
 	url := urlFlag(cmd)
 	db := fs.String("db", "cbioportal_raw", "raw staging `database` to load into")
+	production := fs.Bool("production-rules", false, "stage as cBioPortal's production import does: load every data_mutations* file, and add CANCER_TYPE from OncoTree")
 	asJSON := jsonFlag(fs)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		w := cmd.OutOrStdout()
 		s, err := parser.Scan(args[0])
 		if err != nil {
 			return err
+		}
+		if *production {
+			if err := s.UseProductionRules(); err != nil {
+				return err
+			}
 		}
 		if !*asJSON {
 			fmt.Fprintf(w, "ingesting study=%s files=%d\n", s.StudyID, len(s.Files))

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
@@ -142,6 +145,9 @@ func CachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Two callers may send the same query with different row types, so the
+	// key names the type too.
+	key = rowTypeKey[T]() + "\x00" + key
 	s.meta.validate(s.CH)
 	s.meta.mu.Lock()
 	if v, ok := s.meta.get(key); ok {
@@ -177,6 +183,23 @@ func CachedQueryP[T any](s *State, sql string, p ch.Params) ([]T, error) {
 
 // cacheKey identifies a statement with its parameter values: the SQL, then
 // each parameter's name, Go type and text encoding in name order.
+// rowTypes numbers each row type CachedQueryP has seen. Types declared
+// inside functions can share a name and package, so the number tells them
+// apart where the name would not.
+var rowTypes sync.Map // reflect.Type -> string
+
+// rowTypeKey is T's number, as a string.
+func rowTypeKey[T any]() string {
+	t := reflect.TypeFor[T]()
+	if v, ok := rowTypes.Load(t); ok {
+		return v.(string)
+	}
+	v, _ := rowTypes.LoadOrStore(t, strconv.FormatInt(nextRowType.Add(1), 10))
+	return v.(string)
+}
+
+var nextRowType atomic.Int64
+
 func cacheKey(sql string, p ch.Params) (string, error) {
 	if len(p) == 0 {
 		return sql, nil

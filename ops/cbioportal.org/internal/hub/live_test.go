@@ -147,6 +147,13 @@ func TestLiveSyncMaster(t *testing.T) {
 		t.Fatalf("seeding the hub: %v %+v", err, res)
 	}
 
+	// A sync table from before failed studies were recorded.
+	if _, err := ch.New(base, "default").Execute("CREATE TABLE `" + hub.Raw + "`." + syncTable +
+		" (sha String, conclusion String, imported UInt32, removed UInt32, failed UInt32, error String, finished DateTime)" +
+		" ENGINE = MergeTree ORDER BY finished"); err != nil {
+		t.Fatal(err)
+	}
+
 	repo := newTestRepo(t)
 	repo.copyDir(filepath.Join(golden, "studies", "golden_a"), "public/golden_a")
 	repo.copyDir(filepath.Join(golden, "studies", "golden_b"), "public/golden_b")
@@ -190,6 +197,55 @@ func TestLiveSyncMaster(t *testing.T) {
 		t.Errorf("recorded syncs %q, want %s then %s", got, first, head)
 	}
 
+	// A study that fails to import is recorded, and the next sync after
+	// RetryAfter imports it again, without the studies that worked.
+	repo.copyDir(filepath.Join(golden, "studies", "golden_b"), "public/golden_b")
+	// A MutSig file without its required columns fails the import.
+	for name, body := range map[string]string{
+		"meta_mutsig.txt": "cancer_study_identifier: golden_b\ngenetic_alteration_type: MUTSIG\ndatatype: Q-VALUE\ndata_filename: data_mutsig.txt\n",
+		"data_mutsig.txt": "rank\tgene\n1\tTP53\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repo.dir, "public/golden_b", name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	broken := repo.commit("golden_b with a broken meta file")
+	if err := SyncMaster(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	last := func() string {
+		return q("SELECT concat(conclusion, ' ', toString(imported), ' ', arrayStringConcat(failed_studies, ',')) FROM `" + hub.Raw + "`." + syncTable + " ORDER BY finished DESC, imported DESC LIMIT 1")
+	}
+	if got := last(); got != "partial 0 public/golden_b" {
+		t.Fatalf("sync with a broken study recorded %q", got)
+	}
+	if err := SyncMaster(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	if n := q("SELECT count() FROM `" + hub.Raw + "`." + syncTable + " WHERE sha = '" + broken + "'"); n != "1" {
+		t.Errorf("%s syncs of %s; the failed study waits RetryAfter", n, broken)
+	}
+	st.RetryAfter = 0
+	repo.copyDir(filepath.Join(golden, "studies", "golden_b"), "public/golden_b")
+	if err := SyncMaster(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	if n := q("SELECT count() FROM `" + hub.Raw + "`." + syncTable + " WHERE sha = '" + broken + "'"); n != "2" {
+		t.Errorf("%s syncs of %s, want the failed study tried again", n, broken)
+	}
+	st.RetryAfter = time.Hour
+	repo.git("rm", "-q", "public/golden_b/meta_mutsig.txt", "public/golden_b/data_mutsig.txt")
+	fixed := repo.commit("golden_b fixed")
+	if err := SyncMaster(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	if got := last(); got != "success 1" {
+		t.Errorf("after golden_b was fixed the sync recorded %q", got)
+	}
+	if got := studies(); got != "golden_a,golden_b,golden_c" {
+		t.Errorf("after golden_b was fixed (%s) the hub serves %q", short(fixed), got)
+	}
+
 	// A preview of a pull request in `all` mode starts from a copy of the
 	// hub's staged studies.
 	_, pr := liveDatabases(t, "hubcopy")
@@ -212,10 +268,21 @@ func TestLiveSyncMaster(t *testing.T) {
 	if views != "0" {
 		t.Errorf("%s copied views still read the hub's databases", views)
 	}
-	res, err = studyimport.Run(studyimport.Options{URL: base, DB: pr.DB, RawDB: pr.Raw, RefDB: pr.Ref, Logf: t.Logf},
+	if got, want := q("SELECT count() FROM `"+pr.DB+"`.sample_derived"), q("SELECT count() FROM `"+hub.DB+"`.sample_derived"); got != want || got == "0" {
+		t.Errorf("copied portal has %s samples, the hub %s", got, want)
+	}
+	var log []string
+	logf := func(format string, args ...any) {
+		log = append(log, fmt.Sprintf(format, args...))
+		t.Logf(format, args...)
+	}
+	res, err = studyimport.Run(studyimport.Options{URL: base, DB: pr.DB, RawDB: pr.Raw, RefDB: pr.Ref, Logf: logf},
 		[]string{filepath.Join(golden, "studies", "golden_b")})
 	if err != nil || res.TransformErr != nil || res.Count(studyimport.Imported) != 1 {
 		t.Fatalf("importing on top of the copy: %v %+v", err, res)
+	}
+	if !strings.Contains(strings.Join(log, "\n"), "rebuilding 1 changed and 0 removed of 3 studies: golden_b") {
+		t.Errorf("the import on top of the copy did not rebuild only golden_b:\n%s", strings.Join(log, "\n"))
 	}
 	if got := q("SELECT arrayStringConcat(groupArray(s), ',') FROM (SELECT DISTINCT cancer_study_identifier AS s FROM `" + pr.DB + "`.sample_derived ORDER BY s)"); got != "golden_a,golden_b,golden_c" {
 		t.Errorf("the preview serves %q, want the hub's studies plus golden_b", got)

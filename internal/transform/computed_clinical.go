@@ -20,6 +20,10 @@ import (
 //     Double.toString writes it ("1.0", "0.8079", "2.0E-4").
 //   - SAMPLE_COUNT (patient): the patient's number of samples
 //     (DaoPatient.createSampleCountClinicalData).
+//   - CANCER_TYPE and CANCER_TYPE_DETAILED, from each sample's
+//     ONCOTREE_CODE, for studies whose files lack them, as cBioPortal's
+//     production import adds them, when the raw database was staged with
+//     production's rules (see cancerTypesFromOncotreeSQL).
 //
 // Computed values replace any staged value of the same attribute and sample.
 func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations, hasSegments bool) error {
@@ -60,6 +64,17 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 				"FROM %s GROUP BY study_id, id HAVING sum(toFloat64OrZero(loc_end) - toFloat64OrZero(loc_start)) > 0)",
 			javaDoubleString4("fga"), segmentsSQL(rawDB)))
 	}
+	base, err := clinicalLongSQL(c, rawDB, "clinical_sample", "sample_id")
+	if err != nil {
+		return err
+	}
+	production, err := usesProductionRules(c, rawDB)
+	if err != nil {
+		return err
+	}
+	if production {
+		computed = append(computed, cancerTypesFromOncotreeSQL(rawDB, base))
+	}
 	if len(computed) == 0 {
 		return nil
 	}
@@ -70,10 +85,6 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 		return fmt.Errorf("computed clinical attributes: %w", err)
 	}
 	union := fmt.Sprintf("SELECT study_id, sample_id, attr_id, attr_value FROM `%s`.clinical_sample_computed", targetDB)
-	base, err := clinicalLongSQL(c, rawDB, "clinical_sample", "sample_id")
-	if err != nil {
-		return err
-	}
 	if _, err := c.Execute(fmt.Sprintf(
 		"CREATE OR REPLACE VIEW `%[1]s`.`clinical_sample` AS "+
 			"SELECT * FROM (%[2]s) b WHERE (b.study_id, b.sample_id, b.attr_id) NOT IN (SELECT study_id, sample_id, attr_id FROM (%[3]s)) "+
@@ -94,6 +105,9 @@ func computedClinicalAttributes(c *client, rawDB, targetDB string, hasMutations,
 		meta = append(meta, fmt.Sprintf(
 			"SELECT DISTINCT study_id, 'FRACTION_GENOME_ALTERED' AS clinical_attribute_id, 'Fraction Genome Altered' AS display_name, 'Fraction Genome Altered' AS description, 'NUMBER' AS datatype, '20' AS priority, 0 AS patient_attribute "+
 				"FROM `%s`.cna_seg", rawDB))
+	}
+	if production {
+		meta = append(meta, cancerTypesFromOncotreeMetaSQL(rawDB))
 	}
 	meta = append(meta, fmt.Sprintf(
 		"SELECT DISTINCT study_id, 'SAMPLE_COUNT' AS clinical_attribute_id, 'Number of Samples Per Patient' AS display_name, "+

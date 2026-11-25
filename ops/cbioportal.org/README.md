@@ -64,7 +64,7 @@ import succeeded.
 | `HEAD_SHA` | the PR's head | the commit this job is for; a job for an older commit stops |
 | `HUB_PR_DB_PREFIX` | `dev_cbioportal_go_prdatahub` | the preview's databases are `<prefix><N>`, `_raw` and `_ref` |
 | `HUB_PR_BASE` | `https://datahub-pr-<N>.gopreview.cbioportal.org` | the preview's address, for links; `<N>` is the pull request |
-| `HUB_DB` | `dev_cbioportal_hub_go` | the hub's databases, which `hub-preview: all` copies; `HUB_RAW_DB` and `HUB_REF_DB` default to it plus `_raw` and `_ref` |
+| `HUB_DB` | `dev_cbioportal_hub_go` | the hub's databases, which `hub-preview: pr-studies-plus-hub` copies; `HUB_RAW_DB` and `HUB_REF_DB` default to it plus `_raw` and `_ref` |
 | `HUB_BASE` | `https://hub.cbioportal.org` | the hub's address |
 | `LOCK_WAIT`, `LOCK_STALE`, `LOCK_POLL` | 7200, 600, 30 | seconds to wait for another import, without a heartbeat before a lock is taken over, between checks |
 | `WORKDIR` | `/tmp/hub-import` | scratch space for the checkout |
@@ -77,14 +77,16 @@ import succeeded.
 Each study is validated in the background, starting when it is imported.
 The import lock is released when the import is done. The job then waits for
 the validations before its final report. Studies are imported whatever the
-result. Validation errors make the Check Run fail. Its summary gives each
+result. The Check Run passes when every study was imported; validation
+errors are counted in its title (datahub's CircleCI fails on them). Its summary gives each
 study's error and warning counts, and its text lists the messages (see
 [docs/deployment.md](../../docs/deployment.md#hubcbioportalorg)).
 
-A `hub-preview: all` line in the pull request description starts the
-preview from a copy of the hub's studies; the default, `hub-preview:
-changed`, holds only the pull request's studies. A `hub-import-only:` list
-(`- public/<study>` lines) limits the import to those studies. A commit that
+A `hub-preview: pr-studies-plus-hub` line in the pull request description
+starts the preview from a copy of the hub; the default, `hub-preview:
+pr-studies`, holds only the pull request's studies. A list of
+`- public/<study>` lines right below it limits the import to those
+studies. A commit that
 was imported already in the same mode is not imported again
 (`<raw>._hub_import_log`).
 

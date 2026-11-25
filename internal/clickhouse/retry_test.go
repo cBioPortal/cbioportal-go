@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,5 +48,44 @@ func TestExecuteRetriesRefusedAlter(t *testing.T) {
 	})
 	if _, err := c.Execute("ALTER TABLE"); err == nil || !strings.Contains(err.Error(), "SYNTAX_ERROR") || calls.Load() != 1 {
 		t.Errorf("other error: %v after %d calls", err, calls.Load())
+	}
+}
+
+// An ALTER that every active replica applied, while others are inactive,
+// counts as done; other errors do not.
+func TestUnfinishedOnInactiveReplicas(t *testing.T) {
+	answers := []string{
+		"Code: 341. DB::Exception: Not finished because some replicas are inactive right now: c-a-0, c-b-0. Will finish asynchronously. (UNFINISHED) (version 26.6.1.2455 (official build))",
+		"Code: 60. DB::Exception: Unknown table expression identifier 'x'. (UNKNOWN_TABLE)",
+	}
+	i := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, answers[i], http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "db")
+	if _, err := c.Execute("ALTER TABLE t DELETE WHERE study_id = 's'"); err != nil {
+		t.Errorf("UNFINISHED on inactive replicas: %v", err)
+	}
+	i = 1
+	if _, err := c.Execute("SELECT * FROM x"); err == nil {
+		t.Error("UNKNOWN_TABLE counted as done")
+	}
+}
+
+func TestOverloaded(t *testing.T) {
+	for _, tt := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{errors.New("clickhouse HTTP 500 : Code: 241. DB::Exception: (total) memory limit exceeded: would use 28.55 GiB. (MEMORY_LIMIT_EXCEEDED)"), true},
+		{errors.New(`clickhouse transport: Post "https://x:8443/": EOF`), true},
+		{errors.New("clickhouse HTTP 503 : service unavailable"), true},
+		{errors.New("clickhouse HTTP 500 : Code: 47. DB::Exception: Unknown expression identifier `x`. (UNKNOWN_IDENTIFIER)"), false},
+	} {
+		if got := Overloaded(tt.err); got != tt.want {
+			t.Errorf("Overloaded(%v) = %v", tt.err, got)
+		}
 	}
 }

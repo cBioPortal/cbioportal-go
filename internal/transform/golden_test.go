@@ -84,9 +84,21 @@ func goldenReference(t *testing.T, base, suffix string) string {
 // the recorded import order is replaced by the order of the names.
 func ingestGolden(t *testing.T, base, rawDB, dir string) {
 	t.Helper()
+	ingestGoldenRules(t, base, rawDB, dir, false)
+}
+
+// ingestGoldenRules is ingestGolden, with cBioPortal's production import
+// rules when production is set.
+func ingestGoldenRules(t *testing.T, base, rawDB, dir string, production bool) {
+	t.Helper()
 	st, err := parser.Scan(dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if production {
+		if err := st.UseProductionRules(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	c := ch.New(base, rawDB)
 	if _, err := ingest.IngestStudy(c, st); err != nil {
@@ -440,6 +452,8 @@ var prodSliceTables = []struct{ name, where string }{
 	{"generic_assay_data_derived", "patient_unique_id IN PU AND (profile_stable_id, entity_stable_id) IN E"},
 	{"generic_assay_profile_entity_derived", "(profile_stable_id, entity_stable_id) IN E"},
 	{"generic_assay_meta_derived", "entity_stable_id IN (SELECT entity_stable_id FROM E)"},
+	{"genetic_entity", "entity_type = 'GENERIC_ASSAY' AND stable_id IN (SELECT entity_stable_id FROM E)"},
+	{"generic_entity_properties", "genetic_entity_id IN (SELECT id FROM {s}.genetic_entity WHERE entity_type = 'GENERIC_ASSAY' AND stable_id IN (SELECT entity_stable_id FROM E))"},
 	{"sample_to_gene_panel_derived", "sample_unique_id IN SU"},
 	{"gene_panel_to_gene_derived", "gene IN GS"},
 	{"clinical_event", "patient_id IN P"},

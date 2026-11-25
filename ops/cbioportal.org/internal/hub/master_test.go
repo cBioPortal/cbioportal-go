@@ -7,24 +7,29 @@ import (
 	"time"
 )
 
-func TestParseMode(t *testing.T) {
+func TestParsePreviewRequest(t *testing.T) {
+	const plus = ModePRStudiesPlusHub
 	for _, tt := range []struct {
 		body, mode string
+		only       []string
 		err        bool
 	}{
-		{"", ModeChanged, false},
-		{"Adds a study.\n", ModeChanged, false},
-		{"hub-preview: all\n", ModeAll, false},
-		{"text\r\nhub-preview: all # every study\r\n", ModeAll, false},
-		{"hub-preview: changed\n", ModeChanged, false},
-		{"hub-preview:\n", ModeChanged, false},
-		{"<!-- hub-preview: all -->\n", ModeChanged, false},
-		{"  hub-preview: all\n", ModeChanged, false}, // only from the first column
-		{"hub-preview: everything\n", ModeChanged, true},
+		{"", ModePRStudies, nil, false},
+		{"Adds a study.\n", ModePRStudies, nil, false},
+		{"hub-preview: pr-studies-plus-hub\n", plus, nil, false},
+		{"text\r\nhub-preview: pr-studies-plus-hub # every study\r\n", plus, nil, false},
+		{"hub-preview: pr-studies\n", ModePRStudies, nil, false},
+		{"hub-preview:\n", ModePRStudies, nil, false},
+		{"  hub-preview: pr-studies-plus-hub\n", ModePRStudies, nil, false}, // only from the first column
+		{"hub-preview: all\n", ModePRStudies, nil, true},
+		{"hub-preview: pr-studies\r\n- public/b\r\n-\tpublic/a/\r\n\r\n- public/zzz\r\n", ModePRStudies, []string{"public/b", "public/a"}, false},
+		{"hub-preview: pr-studies-plus-hub\n- `public/b`\ntext\n", plus, []string{"public/b"}, false},
+		// The commented example of the pull request template does nothing.
+		{"<!--\nhub-preview: pr-studies-plus-hub\n- public/brca_tcga\n-->\nAdds b.\n", ModePRStudies, nil, false},
 	} {
-		mode, err := ParseMode(tt.body)
-		if mode != tt.mode || (err != nil) != tt.err {
-			t.Errorf("%q: %q, %v; want %q, error %v", tt.body, mode, err, tt.mode, tt.err)
+		got, err := ParsePreviewRequest(tt.body)
+		if got.Mode != tt.mode || !slices.Equal(got.Only, tt.only) || (err != nil) != tt.err {
+			t.Errorf("%q: %+v, %v; want %q %q, error %v", tt.body, got, err, tt.mode, tt.only, tt.err)
 		}
 	}
 }
@@ -46,9 +51,19 @@ func TestDecideSync(t *testing.T) {
 		{"failed long ago", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Failed: true, At: now.Add(-time.Hour)}, "bbbbbbb2", true, "moved"},
 		// A newer commit is imported at once, even after a failure.
 		{"failed, then a new commit", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Failed: true, At: now}, "ccccccc3", true, "moved"},
+		// Studies that failed in the import of the head are tried again
+		// after RetryAfter.
+		{"studies failed recently", SyncState{Imported: "aaaaaaa1", Last: "aaaaaaa1", At: now.Add(-10 * time.Minute), FailedStudies: []string{"public/b"}}, "aaaaaaa1", false, "but for 1 failed studies"},
+		{"studies failed long ago", SyncState{Imported: "aaaaaaa1", Last: "aaaaaaa1", At: now.Add(-time.Hour), FailedStudies: []string{"public/b"}}, "aaaaaaa1", true, "trying the 1 studies"},
+		// A sync that staged its studies but could not build the hub
+		// builds it again after RetryAfter, or stages what changed since.
+		{"unbuilt recently", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Unbuilt: true, At: now.Add(-10 * time.Minute)}, "bbbbbbb2", false, "built again after"},
+		{"unbuilt long ago", SyncState{Imported: "aaaaaaa1", Last: "bbbbbbb2", Unbuilt: true, At: now.Add(-time.Hour)}, "bbbbbbb2", true, "again from its staged studies"},
+		{"unbuilt, then a new commit", SyncState{Last: "bbbbbbb2", Unbuilt: true, At: now}, "ccccccc3", true, "moved from bbbbbbb, staged but not built"},
 	} {
 		d := DecideSync(tt.st, tt.head, now, retry)
-		if d.Run != tt.run || !strings.Contains(d.Reason, tt.about) {
+		buildOnly := tt.st.Unbuilt && tt.head == tt.st.Last && tt.run
+		if d.Run != tt.run || d.BuildOnly != buildOnly || !strings.Contains(d.Reason, tt.about) {
 			t.Errorf("%s: %+v", tt.name, d)
 		}
 	}
@@ -56,17 +71,23 @@ func TestDecideSync(t *testing.T) {
 
 func TestPlanSync(t *testing.T) {
 	head := []string{"public/b", "public/c", "public/d"}
-	p := PlanSync(head, nil, true)
+	p := PlanSync(head, nil, nil, true)
 	if !slices.Equal(p.Import, head) || len(p.Gone) != 0 || !p.Panels {
 		t.Errorf("first: %+v", p)
 	}
 	changed := []string{"public/a/meta_study.txt", "public/b/data_mutations.txt", "public/c/meta_study.txt", "README.md"}
-	p = PlanSync(head, changed, false)
+	p = PlanSync(head, changed, nil, false)
 	if !slices.Equal(p.Import, []string{"public/b", "public/c"}) || !slices.Equal(p.Gone, []string{"public/a"}) || p.Panels {
 		t.Errorf("changed: %+v", p)
 	}
-	p = PlanSync(head, []string{"reference_data/gene_panels/impact.txt"}, false)
+	p = PlanSync(head, []string{"reference_data/gene_panels/impact.txt"}, nil, false)
 	if len(p.Import) != 0 || len(p.Gone) != 0 || !p.Panels {
 		t.Errorf("panels: %+v", p)
+	}
+	// Studies that failed last time are imported again, unless master no
+	// longer has them.
+	p = PlanSync(head, []string{"public/c/meta_study.txt"}, []string{"public/d", "public/c", "public/x"}, false)
+	if !slices.Equal(p.Import, []string{"public/c", "public/d"}) || len(p.Gone) != 0 {
+		t.Errorf("failed: %+v", p)
 	}
 }

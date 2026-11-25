@@ -100,8 +100,10 @@ func TestLiveRun(t *testing.T) {
 	}
 
 	// Studies staged at once rank in the order they were given, whichever
-	// finishes first.
-	o.Prepare = nil
+	// finishes first. Their Prepare runs ahead of staging, in that order.
+	prepared = nil
+	o.Prepare = func(dir string) error { prepared = append(prepared, filepath.Base(dir)); return nil }
+	o.StageStudies = 2
 	studies := []string{"golden_c", "golden_b", "golden_a"}
 	dirs := make([]string, len(studies))
 	for i, s := range studies {
@@ -110,6 +112,10 @@ func TestLiveRun(t *testing.T) {
 	if res, err = Run(o, dirs); err != nil || res.Count(Imported) != len(dirs) || res.TransformErr != nil {
 		t.Fatalf("three studies: %+v, %v", res, err)
 	}
+	if !slices.Equal(prepared, studies) {
+		t.Errorf("prepared %q, want %q", prepared, studies)
+	}
+	o.Prepare, o.StageStudies = nil, 0
 	for i, r := range res.Studies {
 		if r.StudyID != studies[i] {
 			t.Errorf("result %d is %s, want %s", i, r.StudyID, studies[i])

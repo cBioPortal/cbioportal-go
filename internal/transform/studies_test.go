@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -108,7 +109,7 @@ func TestLiveStudyBuild(t *testing.T) {
 		}
 		return nil
 	}
-	for _, name := range []string{"sample", "patient", "gene_key_map", "genetic_alteration_derived", "clinical_data_derived", "mutation"} {
+	for _, name := range []string{"sample", "patient", "gene_key_map", "genetic_alteration_lines", "clinical_data_derived", "mutation"} {
 		if !slices.Contains(keptTables(), name) {
 			t.Errorf("release-1 rebuilt %s, kept %v", name, keptTables())
 		}
@@ -129,7 +130,7 @@ func TestLiveStudyBuild(t *testing.T) {
 	kept := keptTables()
 	// Mutations are matched to genes through gene_key_map, and the
 	// mutation count in clinical_data_derived counts them.
-	for _, name := range []string{"gene_key_map", "genetic_alteration_derived", "mutation", "clinical_data_derived"} {
+	for _, name := range []string{"gene_key_map", "genetic_alteration_lines", "mutation", "clinical_data_derived"} {
 		if slices.Contains(kept, name) {
 			t.Errorf("release-2 kept %s", name)
 		}
@@ -331,6 +332,138 @@ func TestLiveDuplicateMatrixLines(t *testing.T) {
 	}
 }
 
+// TestLiveSplitMutationFiles checks that with production's import rules a
+// MAF split over data_mutations.txt and data_mutations_1.txt loads whole
+// into the one mutation profile, as cBioPortal's production import loads
+// every data_mutations* file.
+func TestLiveSplitMutationFiles(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "split_ref")
+	rawDB, db := goldenDatabase(t, base, "split_raw"), goldenDatabase(t, base, "split")
+	dir := t.TempDir()
+	maf := "Hugo_Symbol\tEntrez_Gene_Id\tChromosome\tStart_Position\tEnd_Position\tVariant_Classification\tVariant_Type\t" +
+		"Reference_Allele\tTumor_Seq_Allele2\tTumor_Sample_Barcode\tHGVSp_Short\n"
+	files := map[string]string{
+		"meta_study.txt": "type_of_cancer: coad\ncancer_study_identifier: split_study\nname: Split\nshort_name: S\ndescription: d\nreference_genome: hg19\n",
+		"meta_clinical_sample.txt": "cancer_study_identifier: split_study\ngenetic_alteration_type: CLINICAL\n" +
+			"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+		"data_clinical_sample.txt": "#Patient Identifier\tSample Identifier\n#p\t#s\n#STRING\tSTRING\n#1\t1\nPATIENT_ID\tSAMPLE_ID\nP1\tS1\nP2\tS2\n",
+		"meta_mutations.txt": "cancer_study_identifier: split_study\ngenetic_alteration_type: MUTATION_EXTENDED\ndatatype: MAF\n" +
+			"stable_id: mutations\nshow_profile_in_analysis_tab: true\nprofile_name: Mutations\nprofile_description: m\ndata_filename: data_mutations.txt\n",
+		"data_mutations.txt":   maf + "TP53\t7157\t17\t7577120\t7577120\tMissense_Mutation\tSNP\tC\tT\tS1\tp.R273H\n",
+		"data_mutations_1.txt": maf + "KRAS\t3845\t12\t25398284\t25398284\tMissense_Mutation\tSNP\tC\tT\tS2\tp.G12D\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingestGoldenRules(t, base, rawDB, dir, true)
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	c := ch.New(base, db)
+	for _, q := range []struct{ sql, want string }{
+		{"SELECT molecular_profile_id FROM molecular_profile", "split_study_mutations"},
+		{"SELECT sample_id, hugo_symbol, protein_change FROM mutation ORDER BY sample_id", "S1\tTP53\tR273H\nS2\tKRAS\tG12D"},
+		{"SELECT sample_id FROM sample_profile WHERE molecular_profile_id = 'split_study_mutations' ORDER BY sample_id", "S1\nS2"},
+		{"SELECT sample_id, attr_value FROM clinical_sample WHERE attr_id = 'MUTATION_COUNT' ORDER BY sample_id", "S1\t1\nS2\t1"},
+	} {
+		got, err := c.Execute(q.sql + " FORMAT TabSeparated")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(got) != q.want {
+			t.Errorf("%s:\n%s\nwant:\n%s", q.sql, got, q.want)
+		}
+	}
+}
+
+// TestLiveCancerTypesFromOncotree checks that with production's import
+// rules a study whose sample file has ONCOTREE_CODE but no CANCER_TYPE gets
+// CANCER_TYPE and CANCER_TYPE_DETAILED from OncoTree, as cBioPortal's
+// production import adds them, that a study with its own CANCER_TYPE keeps
+// it, and that without the rules nothing is added.
+func TestLiveCancerTypesFromOncotree(t *testing.T) {
+	base := goldenServer(t)
+	refDB := goldenReference(t, base, "onco_ref")
+	for _, production := range []bool{false, true} {
+		t.Run(fmt.Sprintf("production=%v", production), func(t *testing.T) {
+			testCancerTypesFromOncotree(t, base, refDB, production)
+		})
+	}
+}
+
+// testCancerTypesFromOncotree loads two studies, with or without
+// production's import rules, and checks their cancer types.
+func testCancerTypesFromOncotree(t *testing.T, base, refDB string, production bool) {
+	suffix := "plain"
+	if production {
+		suffix = "prod"
+	}
+	rawDB, db := goldenDatabase(t, base, "onco_raw_"+suffix), goldenDatabase(t, base, "onco_"+suffix)
+	for _, study := range []struct{ id, header, rows string }{
+		// S3's code is not in OncoTree and S4 has none: neither gets a value.
+		{"onco_a", "PATIENT_ID\tSAMPLE_ID\tONCOTREE_CODE", "P1\tS1\tCHOL\nP2\tS2\tLUAD\nP3\tS3\tNOPE\nP4\tS4\t\n"},
+		{"onco_b", "PATIENT_ID\tSAMPLE_ID\tONCOTREE_CODE\tCANCER_TYPE", "P1\tS1\tCHOL\tOwn Type\n"},
+	} {
+		dir := filepath.Join(t.TempDir(), study.id)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		files := map[string]string{
+			"meta_study.txt": "type_of_cancer: coad\ncancer_study_identifier: " + study.id + "\nname: O\nshort_name: O\ndescription: d\nreference_genome: hg19\n",
+			"meta_clinical_sample.txt": "cancer_study_identifier: " + study.id + "\ngenetic_alteration_type: CLINICAL\n" +
+				"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+			"data_clinical_sample.txt": study.header + "\n" + study.rows,
+			"meta_mutations.txt": "cancer_study_identifier: " + study.id + "\ngenetic_alteration_type: MUTATION_EXTENDED\ndatatype: MAF\n" +
+				"stable_id: mutations\nshow_profile_in_analysis_tab: true\nprofile_name: M\nprofile_description: m\ndata_filename: data_mutations.txt\n",
+			"data_mutations.txt": "Hugo_Symbol\tEntrez_Gene_Id\tChromosome\tStart_Position\tEnd_Position\tVariant_Classification\tVariant_Type\t" +
+				"Reference_Allele\tTumor_Seq_Allele2\tTumor_Sample_Barcode\tHGVSp_Short\n" +
+				"TP53\t7157\t17\t7577120\t7577120\tMissense_Mutation\tSNP\tC\tT\tS1\tp.R273H\n",
+		}
+		for name, body := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ingestGoldenRules(t, base, rawDB, dir, production)
+	}
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	c := ch.New(base, db)
+	if !production {
+		// cbioportal-core adds nothing: onco_b keeps its own value.
+		got, err := c.Execute("SELECT study_id, sample_id, attr_id, attr_value FROM clinical_sample WHERE attr_id LIKE 'CANCER_TYPE%' FORMAT TabSeparated")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "onco_b\tS1\tCANCER_TYPE\tOwn Type"; strings.TrimSpace(got) != want {
+			t.Errorf("without production's rules got:\n%s\nwant:\n%s", got, want)
+		}
+		return
+	}
+	for _, q := range []struct{ sql, want string }{
+		{"SELECT study_id, sample_id, attr_id, attr_value FROM clinical_sample WHERE attr_id LIKE 'CANCER_TYPE%' ORDER BY 1, 2, 3",
+			"onco_a\tS1\tCANCER_TYPE\tHepatobiliary Cancer\nonco_a\tS1\tCANCER_TYPE_DETAILED\tCholangiocarcinoma\n" +
+				"onco_a\tS2\tCANCER_TYPE\tNon-Small Cell Lung Cancer\nonco_a\tS2\tCANCER_TYPE_DETAILED\tLung Adenocarcinoma\n" +
+				"onco_b\tS1\tCANCER_TYPE\tOwn Type\nonco_b\tS1\tCANCER_TYPE_DETAILED\tCholangiocarcinoma"},
+		{"SELECT study_id, clinical_attribute_id, display_name, description, datatype, priority, patient_attribute FROM clinical_attribute_meta " +
+			"WHERE clinical_attribute_id LIKE 'CANCER_TYPE%' ORDER BY 1, 2",
+			"onco_a\tCANCER_TYPE\tCancer Type\tCancer Type\tSTRING\t1\t0\nonco_a\tCANCER_TYPE_DETAILED\tCancer Type Detailed\tCancer Type Detailed\tSTRING\t1\t0\n" +
+				"onco_b\tCANCER_TYPE\tCANCER_TYPE\t\tSTRING\t1\t0\nonco_b\tCANCER_TYPE_DETAILED\tCancer Type Detailed\tCancer Type Detailed\tSTRING\t1\t0"},
+	} {
+		got, err := c.Execute(q.sql + " FORMAT TabSeparated")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.TrimSpace(got) != q.want {
+			t.Errorf("%s:\n%s\nwant:\n%s", q.sql, got, q.want)
+		}
+	}
+}
+
 // TestSourceHash checks that the transform's version covers the Go files of
 // each package that decides what it builds, and leaves out their tests.
 func TestSourceHash(t *testing.T) {
@@ -417,7 +550,7 @@ func TestLiveResumedBuild(t *testing.T) {
 
 	stop := errors.New("stopped")
 	stepHook = func(step string) error {
-		if step == "batch:genetic_alteration_derived:1" {
+		if step == "batch:genetic_alteration_lines:1" {
 			return stop
 		}
 		return nil
@@ -446,7 +579,7 @@ func TestLiveResumedBuild(t *testing.T) {
 	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_a"))
 	ingestGolden(t, base, rawDB, filepath.Join(goldenDir, "studies", "golden_b"))
 	stepHook = func(step string) error {
-		if step == "batch:genetic_alteration_derived:1" {
+		if step == "batch:genetic_alteration_lines:1" {
 			return stop
 		}
 		return nil
@@ -532,5 +665,28 @@ func copyDir(t *testing.T, from, to string) {
 		if err := os.WriteFile(filepath.Join(to, e.Name()), body, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestBalancedBatches(t *testing.T) {
+	ids := []string{"a", "b", "c", "d", "e", "f", "g"}
+	w := map[string]uint64{"a": 1, "b": 100, "c": 2, "d": 90, "e": 3, "f": 4, "g": 5}
+	got := balancedBatches(ids, w, 3)
+	// As many batches as cutting every 3 studies, at most 3 studies each,
+	// the heavy b alone, the heaviest batch first, each in id order.
+	want := [][]string{{"b"}, {"a", "c", "d"}, {"e", "f", "g"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	// Without weights, every study still goes into a batch of at most 3.
+	n := 0
+	for _, b := range balancedBatches(ids, nil, 3) {
+		if len(b) > 3 {
+			t.Errorf("batch of %d", len(b))
+		}
+		n += len(b)
+	}
+	if n != len(ids) {
+		t.Errorf("%d studies in the batches", n)
 	}
 }

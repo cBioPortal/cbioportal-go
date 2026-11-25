@@ -73,12 +73,18 @@ func scratchDatabases(t *testing.T, base, prefix string) (rawDB, db, refDB strin
 	return rawDB, db, refDB
 }
 
-// ingestFiles writes a study's files to a directory and ingests it.
+// ingestFiles writes a study's files to a directory and ingests it. A name
+// with a slash in it, such as "case_lists/cases_all.txt", goes into that
+// subdirectory.
 func ingestFiles(t *testing.T, base, rawDB string, files map[string]string) {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -117,6 +123,42 @@ func TestLiveClinicalAttributeIDs(t *testing.T) {
 	}
 	if got, want := strings.TrimSpace(out), "1P19Q_CODELETION,AGE,BMI>25"; got != want {
 		t.Errorf("patient attribute ids %q, want %q", got, want)
+	}
+}
+
+// TestLiveGlobalCaseListKeepsStudysOwn: a study that sets
+// add_global_case_list and also ships its own "<study>_all" case list keeps
+// the list from the file, with its name and category, and gets no second
+// copy of it. cbioportal-core refuses such a study: AddCaseList throws when
+// the stable id is already taken.
+func TestLiveGlobalCaseListKeepsStudysOwn(t *testing.T) {
+	base := os.Getenv("CLICKHOUSE_TEST_URL")
+	if base == "" {
+		t.Skip("CLICKHOUSE_TEST_URL not set")
+	}
+	rawDB, db, refDB := scratchDatabases(t, base, "transform_all_list_test")
+	ingestFiles(t, base, rawDB, map[string]string{
+		"meta_study.txt": "type_of_cancer: brca\ncancer_study_identifier: all_list_study\nname: a\ndescription: d\n" +
+			"add_global_case_list: true\n",
+		"meta_clinical_sample.txt": "cancer_study_identifier: all_list_study\ngenetic_alteration_type: CLINICAL\n" +
+			"datatype: SAMPLE_ATTRIBUTES\ndata_filename: data_clinical_sample.txt\n",
+		"data_clinical_sample.txt": "#Patient Identifier\tSample Identifier\n#P\tS\n#STRING\tSTRING\n#1\t1\n" +
+			"PATIENT_ID\tSAMPLE_ID\nP1\tS1\nP2\tS2\n",
+		"case_lists/cases_all.txt": "cancer_study_identifier: all_list_study\nstable_id: all_list_study_all\n" +
+			"case_list_category: all_cases_in_study\ncase_list_name: Every sample\n" +
+			"case_list_description: Every sample\ncase_list_ids: S1\n",
+	})
+	if _, err := Apply(ch.New(base, rawDB), rawDB, db, refDB); err != nil {
+		t.Fatal(err)
+	}
+	out, err := ch.New(base, "default").Execute(fmt.Sprintf(
+		"SELECT category, name, arrayStringConcat(arraySort(groupArray(sample_id)), ',') FROM `%s`.sample_list "+
+			"WHERE list_id = 'all_list_study_all' GROUP BY category, name ORDER BY category FORMAT TabSeparated", db))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.TrimSpace(out), "all_cases_in_study\tEvery sample\tS1"; got != want {
+		t.Errorf("the study's own _all list %q, want %q", got, want)
 	}
 }
 

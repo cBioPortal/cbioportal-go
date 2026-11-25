@@ -89,8 +89,8 @@ func pointerFiles(root string) (map[string]Pointer, error) {
 }
 
 // PullLFS replaces the LFS pointer files under Dir/sub with their content
-// from the LFS store (LFSURL), and those it lacks from FallbackLFSURL when
-// set. It returns the number of files downloaded.
+// from the LFS store (LFSURL), and those it lacks or refuses to serve from
+// FallbackLFSURL when set. It returns the number of files downloaded.
 func (c *Checkout) PullLFS(ctx context.Context, sub string) (int, error) {
 	files, err := pointerFiles(filepath.Join(c.Dir, sub))
 	if err != nil {
@@ -203,6 +203,14 @@ func (c *Checkout) download(ctx context.Context, base string, files map[string]P
 			defer wg.Done()
 			defer func() { <-sem }()
 			err := fetchObject(ctx, j.obj, j.paths)
+			if errors.Is(err, errNotStored) {
+				mu.Lock()
+				for _, path := range j.paths {
+					missing[path] = files[path]
+				}
+				mu.Unlock()
+				return
+			}
 			if err != nil {
 				mu.Lock()
 				firstEr = errors.Join(firstEr, fmt.Errorf("%s: %w", c.rel(j.paths[0]), err))
@@ -259,6 +267,11 @@ func lfsBatch(ctx context.Context, base string, objs []batchObject) ([]batchObje
 	return r.Objects, nil
 }
 
+// errNotStored is a download the store refused (HTTP 403 or 404): a store
+// such as datahub's S3 one hands out a link for every object, and the link
+// of an object it does not hold answers 403.
+var errNotStored = errors.New("not in the store")
+
 // retryDelay is the wait before a download's second attempt (twice that
 // before the third).
 var retryDelay = 5 * time.Second
@@ -276,8 +289,8 @@ func fetchObject(ctx context.Context, o batchObject, paths []string) error {
 			}
 		}
 		lastErr = fetchObjectOnce(ctx, o, paths)
-		if lastErr == nil {
-			return nil
+		if lastErr == nil || errors.Is(lastErr, errNotStored) {
+			return lastErr
 		}
 	}
 	return lastErr
@@ -296,6 +309,9 @@ func fetchObjectOnce(ctx context.Context, o batchObject, paths []string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("download: HTTP %d: %w", resp.StatusCode, errNotStored)
+	}
 	if resp.StatusCode/100 != 2 {
 		return fmt.Errorf("download: HTTP %d", resp.StatusCode)
 	}

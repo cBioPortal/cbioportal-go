@@ -112,7 +112,7 @@ The importer exits with one of three codes:
 
 ### Fitting a build to the ClickHouse servers
 
-`transform` and `import-study` take four tuning options. They control how
+`transform` and `import-study` take these tuning options. They control how
 much work a build gives ClickHouse at once. The defaults suit a ClickHouse
 Cloud service whose replicas (the servers of the service) have 8 cores
 and 32 GB of memory each. Each option can also be set with an environment
@@ -124,6 +124,7 @@ variable.
 | `--insert-threads` | `IMPORT_INSERT_THREADS` | 8 | How many threads write the rows of each insert. About one per core of a replica works best. |
 | `--batch-studies` | `IMPORT_BATCH_STUDIES` | 50 | How many studies a full build adds to a big table at a time. Fewer studies need less memory. |
 | `--study-fills` | `IMPORT_STUDY_FILLS` | 4 | How many tables an import of a few changed studies fills at once. |
+| `--stage-studies` | `IMPORT_STAGE_STUDIES` | 3 | `import-study` only: how many studies are loaded into the raw database at once. The files of the next few studies are downloaded while they load. |
 
 A full build rebuilds every study. It happens the first time a portal is
 built and when the reference data or the shared gene panels change. It
@@ -785,7 +786,7 @@ the names below, `<name>` is the value of `--login-oidc-name` (default
 
 | go setting | Java portal properties |
 |---|---|
-| `--login=off` | `authenticate=false` (or `noauthsessionservice`) |
+| `--login=off` | `authenticate=false` |
 | `--login=optional` | `authenticate=optional_oauth2` |
 | `--login=required` | `authenticate=oauth2` |
 | `--login-google-client-id` | `spring….registration.google.client-id`, and `spring….provider.google.user-name-attribute=email` |

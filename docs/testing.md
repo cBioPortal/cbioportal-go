@@ -177,6 +177,13 @@ realm `cbio` and the user `testuser` / `P@ssword1`, who has access to every
 test study. It then runs the API with `authenticate=oauth2`. Docker must be
 available. With `KEYCLOAK=false` the API runs without login.
 
+The realm has two more users with the same password: `datuser`, who may read
+one study, and `restricteduser`, who may read only `study_es_0`. The
+frontend's login specs (`tests/local/auth`) sign in as `testuser` and
+`restricteduser` and check which studies each one sees. Those specs run by
+`PW_AUTH_MODE`, the backend's `authenticate` value, which
+`test/run_e2e.sh` sets to `oauth2`.
+
 Some login and export features have their own tests. Each is skipped
 unless its variable is set. Two of them use this Keycloak.
 

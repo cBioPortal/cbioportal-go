@@ -1,0 +1,74 @@
+id	genetic_entity_id	name	value
+1	1001	NAME	10p
+2	1001	DESCRIPTION	Copy number status of 10p
+3	1001	URL	
+4	1002	NAME	10q
+5	1002	DESCRIPTION	Copy number status of 10q
+6	1003	NAME	Name of 17-AAG
+7	1003	DESCRIPTION	Desc of 17-AAG
+8	1003	URL	Url of 17-AAG
+9	1004	NAME	Name of AEW541
+10	1004	DESCRIPTION	Desc of AEW541
+11	1004	URL	Url of AEW541
+12	1005	NAME	HLA-A
+13	1005	DESCRIPTION	Polysolver HLA-A
+14	1006	NAME	HLA-B
+15	1006	DESCRIPTION	Polysolver HLA-B
+16	1007	name	confidence_1
+17	1007	description	confidence_1
+18	1007	confidenceStatement	NA
+19	1008	name	confidence_10
+20	1008	description	confidence_10
+21	1008	confidenceStatement	NA
+22	1009	NAME	SBS1 (Age)
+23	1009	DESCRIPTION	Number of mutations corellated with age
+24	1009	URL	https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS1.tt
+25	1010	NAME	SBS10a (POLE)
+26	1010	DESCRIPTION	Attributed to polymerase epsilon exonuclease domain mutations
+27	1010	URL	https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS10a.tt
+28	1011	NAME	DBS1 (UV)
+29	1011	DESCRIPTION	Exposure to ultraviolet light
+30	1011	URL	https://cancer.sanger.ac.uk/signatures/dbs/dbs1
+31	1012	NAME	DBS10 (MMR)
+32	1012	DESCRIPTION	Defective DNA mismatch repair (MMR)
+33	1012	URL	https://cancer.sanger.ac.uk/signatures/dbs/dbs10
+34	1013	NAME	SBS1 (Age)
+35	1013	DESCRIPTION	Number of mutations corellated with age
+36	1013	URL	https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS1.tt
+37	1014	NAME	SBS10a (POLE)
+38	1014	DESCRIPTION	Attributed to polymerase epsilon exonuclease domain mutations
+39	1014	URL	https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS10a.tt
+40	1015	NAME	DBS1 (UV)
+41	1015	DESCRIPTION	Exposure to ultraviolet light
+42	1015	URL	https://cancer.sanger.ac.uk/signatures/dbs/dbs1
+43	1016	NAME	DBS10 (MMR)
+44	1016	DESCRIPTION	Defective DNA mismatch repair (MMR)
+45	1016	URL	https://cancer.sanger.ac.uk/signatures/dbs/dbs10
+46	1017	NAME	ID1 (Slippage)
+47	1017	DESCRIPTION	Slippage during DNA replication of the replicated DNA strand
+48	1017	URL	https://cancer.sanger.ac.uk/signatures/id/id1
+49	1018	NAME	ID10 (Unknown)
+50	1018	DESCRIPTION	Unknown
+51	1018	URL	https://cancer.sanger.ac.uk/signatures/id/id10
+52	1019	NAME	SBS1 (Age)
+53	1019	DESCRIPTION	Number of mutations corellated with age
+54	1019	URL	https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS1.tt
+55	1020	NAME	SBS10a (POLE)
+56	1020	DESCRIPTION	Attributed to polymerase epsilon exonuclease domain mutations
+57	1020	URL	https://cancer.sanger.ac.uk/cosmic/signatures/SBS/SBS10a.tt
+58	1021	NAME	1:Del:C:0
+59	1022	NAME	1:Del:C:1
+60	1023	NAME	AC>CA
+61	1024	NAME	AC>CG
+62	1025	NAME	A[C>A]A
+63	1026	NAME	A[C>A]C
+64	1027	NAME	DBS1 (UV)
+65	1027	DESCRIPTION	Exposure to ultraviolet light
+66	1027	URL	https://cancer.sanger.ac.uk/signatures/dbs/dbs1
+67	1028	NAME	DBS10 (MMR)
+68	1028	DESCRIPTION	Defective DNA mismatch repair (MMR)
+69	1028	URL	https://cancer.sanger.ac.uk/signatures/dbs/dbs10
+70	1029	name	test_patient_generic_assay_1
+71	1029	description	test_patient_generic_assay_1
+72	1030	name	test_patient_generic_assay_2
+73	1030	description	test_patient_generic_assay_2

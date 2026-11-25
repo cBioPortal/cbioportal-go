@@ -34,36 +34,60 @@ func HubDatabases() preview.Databases {
 // The modes of a pull request's preview, set with a `hub-preview:` line in
 // its description.
 const (
-	// ModeChanged: the reference data and the studies the pull request
+	// ModePRStudies: the reference data and the studies the pull request
 	// changes (the default).
-	ModeChanged = "changed"
-	// ModeAll: a copy of every study on hub.cbioportal.org, with the pull
-	// request's studies imported on top.
-	ModeAll = "all"
+	ModePRStudies = "pr-studies"
+	// ModePRStudiesPlusHub: a copy of every study on hub.cbioportal.org,
+	// with the pull request's studies imported on top.
+	ModePRStudiesPlusHub = "pr-studies-plus-hub"
 )
 
-// ParseMode reads the `hub-preview:` line of a pull request description.
-// Without one the mode is ModeChanged; an unknown value is an error, and
-// the mode is then ModeChanged too.
-func ParseMode(body string) (string, error) {
-	body = preview.StripComments(strings.ReplaceAll(body, "\r", ""))
-	for line := range strings.SplitSeq(body, "\n") {
+// PreviewRequest is what a pull request's description asks of its preview.
+type PreviewRequest struct {
+	Mode string
+	// Only, when set, limits the import to these of the pull request's
+	// studies (datahub paths such as public/brca_tcga).
+	Only []string
+}
+
+// ParsePreviewRequest reads the `hub-preview:` line of a pull request
+// description and the list of studies right below it:
+//
+//	hub-preview: pr-studies
+//	- public/brca_tcga
+//
+// Without the line the mode is ModePRStudies. Text inside HTML comments
+// is ignored, so a commented example in a template does nothing. An
+// unknown mode is an error, and the mode is then ModePRStudies.
+func ParsePreviewRequest(body string) (PreviewRequest, error) {
+	st := PreviewRequest{Mode: ModePRStudies}
+	lines := strings.Split(preview.StripComments(strings.ReplaceAll(body, "\r", "")), "\n")
+	for i, line := range lines {
 		v, ok := strings.CutPrefix(line, "hub-preview:")
 		if !ok {
 			continue
+		}
+		for _, item := range lines[i+1:] {
+			if len(item) < 2 || item[0] != '-' || (item[1] != ' ' && item[1] != '\t') {
+				break
+			}
+			if item = strings.Trim(strings.TrimSpace(item[1:]), "`/"); item != "" {
+				st.Only = append(st.Only, item)
+			}
 		}
 		if i := strings.IndexByte(v, '#'); i >= 0 {
 			v = v[:i]
 		}
 		switch v = strings.TrimSpace(v); v {
-		case "", ModeChanged:
-			return ModeChanged, nil
-		case ModeAll:
-			return ModeAll, nil
+		case "", ModePRStudies:
+		case ModePRStudiesPlusHub:
+			st.Mode = ModePRStudiesPlusHub
+		default:
+			return st, fmt.Errorf("unknown `hub-preview: %s` (%s or %s)", v, ModePRStudies, ModePRStudiesPlusHub)
 		}
-		return ModeChanged, fmt.Errorf("unknown `hub-preview: %s` (changed or all)", v)
+		return st, nil
 	}
-	return ModeChanged, nil
+	return st, nil
 }
 
 // PreviewEnvironment is the GitHub Deployment environment of pull request
@@ -101,10 +125,10 @@ func (r *run) ensureDatabases() (string, error) {
 	return job.Query(r.ch, fmt.Sprintf("SELECT argMax(mode, finished) FROM %s FORMAT TSV", r.importLog()))
 }
 
-// copyHub copies hub.cbioportal.org's staged studies and reference data
-// into the preview, while holding the hub's import lock so the copy is of
-// one state of the hub. The preview's own import then builds its portal
-// database from them.
+// copyHub copies hub.cbioportal.org's staged studies, reference data and
+// built portal into the preview, while holding the hub's import lock so
+// the copy is of one state of the hub. The preview's own import then
+// rebuilds only the pull request's studies on top of the copy.
 func (r *run) copyHub(ctx context.Context) error {
 	lock := &studyimport.Lock{C: r.ch, DB: r.Hub.Raw, Table: r.HubLockTable, Owner: r.Owner + "-copy",
 		Wait: r.LockWait, Stale: r.LockStale, Poll: r.LockPoll, Heartbeat: r.LockHeartbeat, Logf: job.Logf}
@@ -119,19 +143,23 @@ func (r *run) copyHub(ctx context.Context) error {
 	return CopyDatabases(r.ch, r.Hub, preview.Databases{DB: r.DB, Raw: r.Raw, Ref: r.Ref})
 }
 
-// CopyDatabases copies the tables and views of from's raw and reference
-// databases into to's, replacing tables of the same name. ClickHouse
+// CopyDatabases copies the tables and views of from's raw, reference and
+// portal databases into to's, replacing tables of the same name. ClickHouse
 // attaches a table's data to the copy without rewriting it (ATTACH
 // PARTITION ALL FROM): all of datahub (about 130 million rows) takes about
 // 20 seconds on ClickHouse Cloud.
 // The hub's own bookkeeping (the import lock, log and master sync state)
-// is not copied. The views are created again over to's databases.
+// and the staged tables of an unfinished build are not copied. The views
+// are created again over to's databases. The copied portal keeps the
+// fingerprint of the hub's build, so an import into it rebuilds only the
+// studies it changes.
 func CopyDatabases(c *ch.Client, from, to preview.Databases) error {
 	rename := strings.NewReplacer(from.Raw+".", to.Raw+".", from.Ref+".", to.Ref+".", from.DB+".", to.DB+".")
-	for _, pair := range [][2]string{{from.Raw, to.Raw}, {from.Ref, to.Ref}} {
+	for _, pair := range [][2]string{{from.Raw, to.Raw}, {from.Ref, to.Ref}, {from.DB, to.DB}} {
 		src, dst := pair[0], pair[1]
 		text, err := c.Execute(fmt.Sprintf("SELECT name, engine, create_table_query FROM system.tables "+
-			"WHERE database = '%s' AND NOT startsWith(name, '_hub_') AND name != '_import_lock' ORDER BY name FORMAT JSONEachRow", ch.SQLLit(src)))
+			"WHERE database = '%s' AND NOT startsWith(name, '_hub_') AND NOT startsWith(name, '__next_') AND name != '_import_lock' "+
+			"ORDER BY name FORMAT JSONEachRow", ch.SQLLit(src)))
 		if err != nil {
 			return err
 		}

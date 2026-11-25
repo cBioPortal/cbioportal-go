@@ -150,17 +150,20 @@ func relaxedName(s string) string {
 }
 
 // loadOAuth2Config reads the spring.security.oauth2.client.* properties. It
-// returns nil when authenticate asks for no login, and an error for an
-// authentication method this server does not implement, so a portal meant to
-// be private never starts open.
+// returns nil when authenticate asks for no login, and an error for every
+// other value, so a portal meant to be private never starts open and a
+// misspelled method is not quietly ignored. As in Java, the value is compared
+// as written: a method in another case selects some of Java's security
+// configurations and not others, so it is refused. A missing property means
+// no login.
 func loadOAuth2Config(props map[string]string) (*oauth2Config, error) {
-	method := strings.TrimSpace(props["authenticate"])
-	switch method {
-	case "", "false", "noauthsessionservice":
+	method, set := props["authenticate"]
+	switch {
+	case !set, method == "false":
 		return nil, nil
-	case "oauth2", "optional_oauth2":
+	case method == "oauth2", method == "optional_oauth2":
 	default:
-		return nil, fmt.Errorf("authenticate=%s is not supported (use oauth2, optional_oauth2 or false)", method)
+		return nil, fmt.Errorf("authenticate=%q is not supported (use false, oauth2 or optional_oauth2, in lower case)", method)
 	}
 	flag := func(k string, def bool) (bool, error) {
 		v := strings.TrimSpace(props[k])

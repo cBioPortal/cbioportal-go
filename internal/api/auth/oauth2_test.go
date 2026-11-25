@@ -321,9 +321,14 @@ func TestLoadOAuth2Config(t *testing.T) {
 	if c, err := loadOAuth2Config(map[string]string{"authenticate": "false"}); c != nil || err != nil {
 		t.Fatalf("authenticate=false: %v %v", c, err)
 	}
-	for _, method := range []string{"saml", "saml_plus_basic", "ad"} {
+	if c, err := loadOAuth2Config(map[string]string{}); c != nil || err != nil {
+		t.Fatalf("no authenticate property: %v %v", c, err)
+	}
+	// Java stops startup on any other value, including the retired
+	// noauthsessionservice, a method in another case and an empty value.
+	for _, method := range []string{"saml", "saml_plus_basic", "ad", "noauthsessionservice", "true", "OAUTH2", "Optional_OAuth2", "", " oauth2"} {
 		if _, err := loadOAuth2Config(map[string]string{"authenticate": method}); err == nil {
-			t.Errorf("authenticate=%s accepted; an unsupported method must not serve the portal open", method)
+			t.Errorf("authenticate=%q accepted; an unsupported method must not serve the portal open", method)
 		}
 	}
 	if _, err := loadOAuth2Config(map[string]string{"authenticate": "oauth2"}); err == nil {

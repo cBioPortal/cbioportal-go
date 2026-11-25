@@ -354,3 +354,51 @@ func TestScanWarnsOfLFSPointers(t *testing.T) {
 		t.Errorf("files %v, warnings %q, want none and %q", s.Files, s.Warnings, want)
 	}
 }
+
+// TestScanLoadsSplitMutationFiles checks that with production's rules
+// every data_mutations* file loads with the study's mutation meta file,
+// except uncalled mutations, normals and files of other meta files, and
+// that without them only the named files load.
+func TestScanLoadsSplitMutationFiles(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"meta_study.txt": "type_of_cancer: brca\ncancer_study_identifier: split_study\nname: n\ndescription: d\n",
+		"meta_mutations.txt": "cancer_study_identifier: split_study\ngenetic_alteration_type: MUTATION_EXTENDED\n" +
+			"datatype: MAF\nstable_id: mutations\ndata_filename: data_mutations.txt\n",
+		"meta_mutations_uncalled.txt": "cancer_study_identifier: split_study\ngenetic_alteration_type: MUTATION_UNCALLED\n" +
+			"datatype: MAF\nstable_id: mutations_uncalled\ndata_filename: data_mutations_uncalled.txt\n",
+		"data_mutations.txt":            "Hugo_Symbol\n",
+		"data_mutations_1.txt":          "Hugo_Symbol\n",
+		"data_mutations_germline.txt":   "Hugo_Symbol\n",
+		"data_mutations_uncalled.txt":   "Hugo_Symbol\n",
+		"data_mutations_uncalled_2.txt": "Hugo_Symbol\n",
+		"data_mutations_normals.txt":    "Hugo_Symbol\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Files) != 2 {
+		t.Fatalf("Scan found %d data files, want the 2 the meta files name", len(s.Files))
+	}
+	if err := s.UseProductionRules(); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, f := range s.Files {
+		got = append(got, filepath.Base(f.DataPath)+" "+f.StableID)
+	}
+	want := []string{
+		"data_mutations.txt mutations",
+		"data_mutations_uncalled.txt mutations_uncalled",
+		"data_mutations_1.txt mutations",
+		"data_mutations_germline.txt mutations",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("files %q, want %q", got, want)
+	}
+}

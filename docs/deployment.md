@@ -178,6 +178,22 @@ cbioportal-import import-study datahub/public/acbc_mskcc_2015 --db cbioportal \
   --gene-panels datahub/reference_data/gene_panels
 ```
 
+By default the studies load as cbioportal-core loads them. With
+`--production-rules` they load as www.cbioportal.org's import loads them,
+which takes two extra steps:
+
+| Step | Example |
+|---|---|
+| Every file whose name starts with `data_mutations` loads into the study's mutation profile, not only the file its meta file names. Uncalled mutations (`data_mutations_uncalled*`) and `*_normals.txt` files are left out. | datahub's `difg_glass` splits its mutations over `data_mutations.txt`, `data_mutations_1.txt` and `data_mutations_2.txt`. |
+| A study whose sample file has `ONCOTREE_CODE` but no `CANCER_TYPE` or `CANCER_TYPE_DETAILED` gets the missing attribute from OncoTree. `CANCER_TYPE` is the code's main type and `CANCER_TYPE_DETAILED` its name. | `CHOL` gives Hepatobiliary Cancer and Cholangiocarcinoma. |
+
+The extra mutation files load only for studies loaded with the setting.
+The raw database remembers the setting, so once one study is loaded with
+it, the portal's next build adds the cancer types for all of its studies. hub.cbioportal.org and
+the datahub PR previews use it. The OncoTree names come from a copy of
+OncoTree's latest stable release kept in the code; `make oncotree`
+refreshes it.
+
 [`deploy/publish-local-studies.sh`](../deploy/publish-local-studies.sh)
 copies studies already loaded into a local ClickHouse to another ClickHouse,
 then builds the portal database there:
@@ -211,11 +227,19 @@ the code is in [rewrite/](../rewrite/). The hourly job runs
 which calls `cbioportal-rewrite-test java-v7-to-go mirror`. It works like
 the LibreChat copy job:
 
-1. It reads which production copy (blue or green) is live and when it was
-   last imported, from `publicdb_update_management_database.update_status`.
-   It stops without changes while an import is running, or when the live go
-   copy was already built from that import. The import it was built from is
-   recorded in `<prefix>_<color>_ref._go_mirror_source`.
+1. It finds out which production copy (blue or green) www.cbioportal.org
+   serves. It reads this from `public_db.active_color` in the
+   `cbioportal-db-status` ConfigMap, which the public color swap sets when
+   it switches www to a new import. It reads when that copy was last
+   imported from `publicdb_update_management_database.update_status`.
+   It stops without changes while an import into the live copy is running,
+   or when the live go copy was already built from that import. The import
+   it was built from is recorded in `<prefix>_<color>_ref._go_mirror_source`.
+
+   An import can finish without www being switched to it. Then
+   `update_status` names the new copy, but the ConfigMap still names the old
+   one. go keeps copying the copy www serves, so it never shows data that
+   www does not show.
 2. Only one run builds at a time. The hourly run and a run started by
    production's color swap can overlap. Each run adds itself to
    `<prefix>_<color>_ref._go_mirror_lock` in the copy it would build, and the
@@ -370,24 +394,39 @@ databases, `dev_cbioportal_go_prdatahub<N>`, `_raw` and `_ref`, and its own
 API pod, so previews never change the hub or each other.
 
 A `hub-preview:` line in the pull request description chooses what the
-preview holds:
+preview holds. A list of studies right below it, one `- ` line each,
+limits the import to those of the pull request's studies:
 
 | Line | The preview holds |
 |---|---|
-| none, or `hub-preview: changed` | The reference data and the studies the pull request changes. This is the default and the fastest. |
-| `hub-preview: all` | A copy of every study on hub.cbioportal.org, with the pull request's studies imported on top. Use it to see a study next to all the others, for example in a query across studies. |
+| none, or `hub-preview: pr-studies` | The reference data and the studies the pull request changes. This is the default and the fastest. |
+| `hub-preview: pr-studies-plus-hub` | A copy of every study on hub.cbioportal.org, with the pull request's studies imported on top. Use it to see a study next to all the others, for example in a query across studies. |
 
-With `all`, the first import copies the hub's staged studies and reference
-data into the preview's databases. The copy takes about 20 seconds,
-because ClickHouse attaches the data instead of rewriting it. The preview's
-portal tables are then built from all the studies, which takes about an
-hour for all of datahub. Later commits of the pull request import only
-their studies on top, in about a minute each. The copy is of the hub as
-it was when the preview was first built. Changing the `hub-preview:` line
-rebuilds the preview from empty with the next commit.
+For example, this imports only `brca_tcga` of the pull request's studies,
+on top of a copy of the hub:
 
-A `hub-import-only:` list in the description (`- public/<study>` lines)
-limits the import to those of the pull request's studies, in both modes.
+```
+hub-preview: pr-studies-plus-hub
+- public/brca_tcga
+```
+
+A listed study that the pull request does not change is not imported,
+and the preview's summary on the pull request says so. A preview only
+ever shows the pull request's own version of a study. Text inside HTML
+comments (`<!-- -->`) is ignored, so the commented example in datahub's
+pull request template does nothing until it is copied out of the comment.
+
+With `pr-studies-plus-hub`, the first import copies the hub's staged
+studies, reference data and built portal tables into the preview's
+databases. The copy takes about 20 seconds, because ClickHouse attaches
+the data instead of rewriting it. The import then rebuilds only the pull
+request's studies on top of the copy, as an import into the hub itself
+would. So the preview is ready about as fast as a `pr-studies` one. If the
+hub was built by another version of the importer, the preview builds
+every study instead, which takes about half an hour for all of datahub.
+Later commits of the pull request import only their studies on top. The
+copy is of the hub as it was when the preview was first built. Changing
+the mode rebuilds the preview from empty with the next commit.
 
 The job:
 
@@ -413,9 +452,10 @@ portal's API directly.
 A study is imported whatever the validator finds, so the preview can always
 be looked at. The Check Run shows, for each study, whether validation passed
 or how many errors and warnings it found, and lists the messages under the
-summary, up to GitHub's size limit. The job's log has the full output. When
-any study has validation errors, the Check Run fails, as datahub's own
-validation does, while the Deployment still links to the preview. A commit
+summary, up to GitHub's size limit. The job's log has the full output. The
+Check Run passes when every study was imported, even with validation
+errors: its title then says how many studies have errors, and datahub's own
+validation in CircleCI is the check that fails on them. A commit
 whose studies all imported is not imported again, even if validation failed.
 If the validator is missing or the hub's API cannot be read, the studies are
 imported without validation and the summary says so.

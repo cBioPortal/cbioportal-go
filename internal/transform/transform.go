@@ -352,9 +352,15 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 			"genetic_profile_stable_id, cancer_study_identifier, variant_type, hugo_gene_symbol, gene_panel_stable_id, " +
 				"mutation_type, mutation_status, driver_filter, driver_tiers_filter, cna_cytoband",
 			genomicEventDerivedSQL(c, rawDB, refDB, targetDB, hasGenomeGenes)},
-		{"genetic_alteration_derived", "(cancer_study_identifier, hugo_gene_symbol, profile_type, sample_unique_id)",
+		// genetic_alteration_derived is a view over these three
+		// (derived_alteration.go).
+		{alterationLines, "(cancer_study_identifier, profile_type, hugo_gene_symbol)",
+			"cancer_study_identifier, profile_type, hugo_gene_symbol, stage_table",
+			alterationLinesSQL(c, rawDB, targetDB)},
+		{alterationSamples, "(study_id, stage_table, source_file)", "study_id, stage_table", alterationSamplesSQL(c, rawDB)},
+		{alterationCells, "(cancer_study_identifier, hugo_gene_symbol, profile_type, sample_unique_id)",
 			"cancer_study_identifier, hugo_gene_symbol, profile_type",
-			geneticAlterationDerivedSQL(c, rawDB, targetDB)},
+			alterationCellsSQL(c, rawDB, targetDB)},
 		{"generic_assay_data_derived", "(profile_type, entity_stable_id, patient_unique_id, sample_unique_id)",
 			"profile_type, profile_stable_id, generic_assay_type, datatype, cancer_study_identifier",
 			genericAssayDataDerivedSQL(rawDB, refDB, targetDB,
@@ -366,19 +372,12 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	}
 	fillDerived := func(i int) error {
 		d := derived[i]
-		var projections []string
-		if d.name == "genetic_alteration_derived" {
-			// Co-expression and the study view's per-profile gene counts
-			// read one profile of a study across all its genes.
-			projections = append(projections,
-				"by_profile (SELECT * ORDER BY cancer_study_identifier, profile_type, hugo_gene_symbol, sample_unique_id)")
-		}
 		if engineOf(d.name) == "View" {
 			if _, err := c.Execute(fmt.Sprintf("DROP VIEW `%s`.`%s`", targetDB, d.name)); err != nil {
 				return err
 			}
 		}
-		return c.fill(targetDB, d.name, d.key, withLowCardinality(d.sql, d.lowCardinality), projections...)
+		return c.fill(targetDB, d.name, d.key, withLowCardinality(d.sql, d.lowCardinality))
 	}
 	// genomic_event_derived reads gene_panel_to_gene_derived; the other
 	// derived tables read only the objects built above, so they are
@@ -396,6 +395,9 @@ func build(c *client, rawDB, targetDB, refDB string, full bool) ([]ViewCount, er
 	}
 	for _, d := range derived {
 		created = append(created, d.name)
+	}
+	if err := createView("genetic_alteration_derived", geneticAlterationDerivedViewSQL(targetDB)); err != nil {
+		return nil, err
 	}
 
 	if err := c.createViews(targetDB, studyExtraViews(c, rawDB, targetDB, refDB, hasRef, exists), createView); err != nil {

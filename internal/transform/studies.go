@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -55,7 +56,9 @@ var studyColumns = map[string]string{
 	"sample_derived":                "cancer_study_identifier",
 	"clinical_data_derived":         "cancer_study_identifier",
 	"genomic_event_derived":         "cancer_study_identifier",
-	"genetic_alteration_derived":    "cancer_study_identifier",
+	"genetic_alteration_lines":      "cancer_study_identifier",
+	"genetic_alteration_samples":    "study_id",
+	"genetic_alteration_cells":      "cancer_study_identifier",
 	"generic_assay_data_derived":    "cancer_study_identifier",
 	"clinical_event_derived":        "cancer_study_identifier",
 	"clinical_event_data_derived":   "cancer_study_identifier",
@@ -235,10 +238,11 @@ func publishedTables(c *client, targetDB string) (map[string]string, error) {
 // shared by all studies (an empty study_id, such as the shared gene panels). The
 // reference genes the transform adds for the phosphoproteins of RPPA files
 // (negative Entrez ids) come from the studies' own rows and are left out.
-// The second result leaves out the code.
+// The second result leaves out the code. Tables are named by their role
+// (raw or ref), not their database, so a copy of a portal under other
+// database names keeps the fingerprint of the build it was copied from.
 func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%s\n", rawDB, refDB)
 	text, err := c.Client.Execute(fmt.Sprintf(
 		"SELECT t.database, t.name, countIf(c.name = 'study_id'), countIf(c.name = 'entrez_gene_id') FROM system.tables t "+
 			"LEFT JOIN system.columns c ON c.database = t.database AND c.table = t.name "+
@@ -253,7 +257,10 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 		if len(f) != 4 {
 			continue
 		}
-		where := ""
+		where, role := "", "ref"
+		if f[0] == rawDB {
+			role = "raw"
+		}
 		switch {
 		case f[0] == rawDB && f[2] == "0":
 			continue // a study's own rows, keyed some other way
@@ -262,8 +269,8 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 		case f[3] != "0":
 			where = " WHERE entrez_gene_id >= 0"
 		}
-		parts = append(parts, fmt.Sprintf("SELECT '%[1]s.%[2]s' AS t, count(), sum(cityHash64(*)) FROM `%[1]s`.`%[2]s`%[3]s",
-			ch.SQLLit(f[0]), ch.SQLLit(f[1]), where))
+		parts = append(parts, fmt.Sprintf("SELECT '%[4]s.%[2]s' AS t, count(), sum(cityHash64(*)) FROM `%[1]s`.`%[2]s`%[3]s",
+			ch.SQLLit(f[0]), ch.SQLLit(f[1]), where, role))
 	}
 	if len(parts) > 0 {
 		text, err := c.Client.Execute("SELECT * FROM (" + strings.Join(parts, " UNION ALL ") + ") ORDER BY t FORMAT TabSeparated")
@@ -278,7 +285,7 @@ func buildFingerprint(c *client, rawDB, refDB string) (string, string, error) {
 }
 
 // sourceHash hashes the Go files (tests aside) of the packages that decide
-// what the transform builds.
+// what the transform builds, and the data files they embed.
 var sourceHash = sync.OnceValue(func() string {
 	h := sha256.New()
 	for _, pkg := range []struct {
@@ -286,7 +293,8 @@ var sourceHash = sync.OnceValue(func() string {
 		src  fs.FS
 	}{{"transform", Source}, {"clickhouse", ch.Source}, {"parser", parser.Source}, {"javaorder", javaorder.Source}} {
 		files, _ := fs.Glob(pkg.src, "*.go")
-		for _, f := range files {
+		data, _ := fs.Glob(pkg.src, "*.tsv")
+		for _, f := range append(files, data...) {
 			if strings.HasSuffix(f, "_test.go") {
 				continue
 			}
@@ -480,6 +488,16 @@ func (c *client) studyFilter(rawDB, targetDB string, studies []string) (*ch.Clie
 	return c.Client.WithSettings(map[string]string{"additional_table_filters": "{" + strings.Join(filters, ", ") + "}"}), nil
 }
 
+// tableSettings are the MergeTree settings of tables that need their own.
+var tableSettings = map[string]string{
+	// A line holds the values of every sample of its file: blocks of 64
+	// lines let a read of a few genes skip the other lines' values.
+	alterationLines: "index_granularity = 64",
+	// A row lists the samples of one file: blocks of 16 rows let a read
+	// of a few studies skip the others' lists.
+	alterationSamples: "index_granularity = 16",
+}
+
 // numberedAcrossStudies are the tables whose ids number the rows of every
 // study in one sequence; a full build fills them in one go.
 var numberedAcrossStudies = map[string]bool{"sample": true, "patient": true, "sample_list": true, "seg": true}
@@ -500,11 +518,11 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 	if len(b.order) <= tuning.BatchStudies {
 		return nil
 	}
-	for start := 0; start < len(b.order); start += tuning.BatchStudies {
-		var ids []string
-		for _, s := range b.order[start:min(start+tuning.BatchStudies, len(b.order))] {
-			ids = append(ids, s.StudyID)
-		}
+	ids := make([]string, len(b.order))
+	for i, s := range b.order {
+		ids[i] = s.StudyID
+	}
+	for _, ids := range balancedBatches(ids, studyWeights(c, rawDB), tuning.BatchStudies) {
 		filtered, err := c.studyFilter(rawDB, targetDB, ids)
 		if err != nil {
 			return err
@@ -522,6 +540,79 @@ func prepareBatches(c *client, rawDB, targetDB string, b *studyBuild) error {
 		logf("transform: filling the batches on %d replicas at once: %s", len(c.lanes), strings.Join(hosts, ", "))
 	}
 	return nil
+}
+
+// studyWeights estimates how many rows each study adds to the big tables:
+// the cells of its matrices and its mutations. A study missing from the
+// map, or every study when the counts can't be read, weighs nothing.
+func studyWeights(c *client, rawDB string) map[string]uint64 {
+	var parts []string
+	for _, t := range []string{"cna_matrix_lines", "mrna_expression_matrix_lines", "methylation_matrix_lines",
+		"protein_level_matrix_lines", "generic_assay_matrix_lines"} {
+		if cols, _ := c.TableColumns(t); cols["cells"] && cols["study_id"] {
+			parts = append(parts, fmt.Sprintf("SELECT study_id, sum(cells) AS n FROM `%s`.`%s` GROUP BY study_id", rawDB, t))
+		}
+	}
+	if cols, _ := c.TableColumns("mutation_extended"); cols["study_id"] {
+		parts = append(parts, fmt.Sprintf("SELECT study_id, count() AS n FROM `%s`.mutation_extended GROUP BY study_id", rawDB))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	type row struct {
+		StudyID string `json:"study_id"`
+		N       uint64 `json:"n,string"`
+	}
+	rows, err := ch.QueryP[row](c.Client, "SELECT study_id, toString(sum(n)) AS n FROM ("+strings.Join(parts, " UNION ALL ")+") GROUP BY study_id", nil)
+	if err != nil {
+		logf("transform: weighing the studies: %v", err)
+		return nil
+	}
+	w := make(map[string]uint64, len(rows))
+	for _, r := range rows {
+		w[r.StudyID] = r.N
+	}
+	return w
+}
+
+// balancedBatches splits ids into as many batches of at most size studies
+// as cutting them every size studies would, with about the same weight
+// each: every study, heaviest first, goes into the lightest batch with
+// room. The heaviest batch comes first, so the replicas filling batches at
+// once finish about together. Each batch keeps the studies in the order of
+// ids, and the batches depend only on ids and their weights, so a resumed
+// build gets the same ones.
+func balancedBatches(ids []string, weight map[string]uint64, size int) [][]string {
+	n := (len(ids) + size - 1) / size
+	type batch struct {
+		weight uint64
+		pos    []int
+	}
+	batches := make([]batch, n)
+	order := make([]int, len(ids))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return weight[ids[order[a]]] > weight[ids[order[b]]] })
+	for _, i := range order {
+		best := -1
+		for j := range batches {
+			if len(batches[j].pos) < size && (best < 0 || batches[j].weight < batches[best].weight) {
+				best = j
+			}
+		}
+		batches[best].weight += weight[ids[i]]
+		batches[best].pos = append(batches[best].pos, i)
+	}
+	sort.SliceStable(batches, func(a, b int) bool { return batches[a].weight > batches[b].weight })
+	out := make([][]string, n)
+	for j, b := range batches {
+		sort.Ints(b.pos)
+		for _, i := range b.pos {
+			out[j] = append(out[j], ids[i])
+		}
+	}
+	return out
 }
 
 // idOffset is the highest id (column col) of the published table name,
@@ -570,6 +661,9 @@ func nextIDs(offset uint64, order string) string {
 // every study's rows in one sequence.
 func (c *client) fill(targetDB, name, orderBy, sel string, projections ...string) error {
 	study := studyColumns[strings.TrimPrefix(name, snapshotPrefix)]
+	if set := tableSettings[strings.TrimPrefix(name, snapshotPrefix)]; set != "" {
+		orderBy += " SETTINGS " + set
+	}
 	hash := c.objectHash(targetDB, name, "table", study, orderBy, sel, strings.Join(projections, "\n"))
 	if c.part != nil && study != "" {
 		// The rows are inserted while their columns are checked: rows

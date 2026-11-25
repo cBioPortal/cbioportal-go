@@ -204,3 +204,24 @@ func ingestGenericAssayEntities(c *ch.Client, s *parser.Study) error {
 	}
 	return nil
 }
+
+// productionRulesTable records that a raw database stages its studies with
+// cBioPortal's production import rules (parser.Study.UseProductionRules), so
+// the transform takes production's extra steps for all of its studies. Its
+// row is shared by all studies (an empty study_id), so the transform's
+// build fingerprint covers it.
+const productionRulesTable = "import_rules"
+
+// recordProductionRules marks the raw database as staged with production's
+// rules.
+func recordProductionRules(c *ch.Client) error {
+	if err := c.EnsureTable(productionRulesTable, fmt.Sprintf(
+		"CREATE TABLE IF NOT EXISTS `%s`.`%s` (study_id String, rule String) ENGINE = ReplacingMergeTree ORDER BY (study_id, rule)",
+		c.Database(), productionRulesTable)); err != nil {
+		return err
+	}
+	_, err := c.Execute(fmt.Sprintf(
+		"INSERT INTO `%[1]s`.`%[2]s` (study_id, rule) SELECT '', 'production' WHERE 'production' NOT IN (SELECT rule FROM `%[1]s`.`%[2]s`)",
+		c.Database(), productionRulesTable))
+	return err
+}

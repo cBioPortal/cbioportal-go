@@ -374,7 +374,9 @@ func (s Server) genericAssayMetaEach(where string, args *core.SQLArgs, fn func(G
 		}
 		var m core.JavaStringMap
 		for k, key := range e.keys {
-			m.Set(key, e.vals[k])
+			if e.vals[k] != "" {
+				m.Set(key, e.vals[k])
+			}
 		}
 		if err := fn(GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: e.id, GenericEntityMetaProperties: m}); err != nil {
 			return err
@@ -391,7 +393,7 @@ func genericAssayMetaList(props map[string]core.JavaStringMap) []GenericAssayMet
 	sort.SliceStable(ids, func(i, j int) bool { return EntityLess(ids[i], ids[j]) })
 	out := make([]GenericAssayMeta, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: id, GenericEntityMetaProperties: props[id]})
+		out = append(out, GenericAssayMeta{EntityType: "GENERIC_ASSAY", StableID: id, GenericEntityMetaProperties: nonEmpty(props[id])})
 	}
 	return out
 }
@@ -442,6 +444,19 @@ func (s Server) GenericAssayMetaProperties(where string, args *core.SQLArgs) (ma
 		out[r.StableID] = m
 	}
 	return out, nil
+}
+
+// nonEmpty drops the properties with an empty value, as
+// generic_assay_meta_derived, which the generic-assay-meta endpoints read,
+// leaves them out.
+func nonEmpty(m core.JavaStringMap) core.JavaStringMap {
+	var out core.JavaStringMap
+	for _, k := range m.Keys {
+		if m.Vals[k] != "" {
+			out.Set(k, m.Vals[k])
+		}
+	}
+	return out
 }
 
 // SummaryMetaProperties keeps the properties GenericAssayServiceImpl returns
