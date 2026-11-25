@@ -1,6 +1,6 @@
 # The macOS app (make curate-app: one universal app for Apple silicon and
 # Intel), attached to each published release as cBioPortal-Curate-macOS.zip.
-# Run by hand (Actions > Curate macOS app > Run workflow), the zip is a build
+# Run by hand (Actions > cBioPortal Curate app > Run workflow), the zip is a build
 # artifact of the run instead.
 #
 # Unsigned for now: the app is ad-hoc signed, so macOS asks the person who
@@ -29,7 +29,7 @@
 #   NOTARY_KEY_ID              that key's id
 #   NOTARY_ISSUER_ID           the App Store Connect issuer id
 
-name: Curate macOS app
+name: cBioPortal Curate app
 
 on:
   release:
