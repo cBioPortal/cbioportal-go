@@ -69,13 +69,55 @@ const linksJS = `(function () {
     else return false;
     return true;
   };
-  // The page's title names its tab.
+  // The page's title names its tab. The portal's own pages are all titled
+  // "cBioPortal for Cancer Genomics" and change their address without
+  // loading again, so their tabs are named from the address: the study, the
+  // genes of a query, the patient. Wails runs this script once the page has
+  // loaded, so DOMContentLoaded has usually passed already.
+  var generic = "cBioPortal for Cancer Genomics";
+  var studyNames = {};
+  var studyName = function (ids) {
+    ids = (ids || "").split(",").filter(Boolean);
+    if (ids.length !== 1) return ids.length ? ids.length + " studies" : "";
+    var id = ids[0];
+    if (!(id in studyNames)) {
+      studyNames[id] = id;
+      fetch("/api/studies/" + encodeURIComponent(id)).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (s) { if (s && s.name) { studyNames[id] = s.name; sendTitle(); } }).catch(function () {});
+    }
+    return studyNames[id];
+  };
+  var pageTitle = function () {
+    var t = document.title.trim();
+    if (t && t !== generic) return t;
+    var q = new URLSearchParams(location.search), page = location.pathname.split("/")[1], study;
+    if (page === "study") return studyName(q.get("id") || q.get("studyId")) || "Study";
+    if (page === "results") {
+      var genes = (q.get("gene_list") || "").split(/[\s,;]+/).map(function (g) { return g.split(":")[0]; }).filter(Boolean);
+      if (genes.length > 3) genes = genes.slice(0, 3).concat("…");
+      study = studyName(q.get("cancer_study_list") || q.get("cancer_study_id"));
+      return [genes.join(" "), study].filter(Boolean).join(" · ") || "Query";
+    }
+    if (page === "patient") {
+      study = studyName(q.get("studyId"));
+      return [q.get("caseId") || q.get("sampleId") || "Patient", study].filter(Boolean).join(" · ");
+    }
+    if (page === "comparison") return "Comparison";
+    return "cBioPortal";
+  };
   var title = null;
-  var sendTitle = function () { if (document.title !== title) { title = document.title; send("title", title); } };
-  document.addEventListener("DOMContentLoaded", function () {
+  var sendTitle = function () { var t = pageTitle(); if (t !== title) { title = t; send("title", t); } };
+  ["pushState", "replaceState"].forEach(function (k) {
+    var f = history[k];
+    history[k] = function () { var r = f.apply(this, arguments); sendTitle(); return r; };
+  });
+  window.addEventListener("popstate", sendTitle);
+  var watchTitle = function () {
     sendTitle();
     new MutationObserver(sendTitle).observe(document.head, { subtree: true, childList: true, characterData: true });
-  });
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchTitle);
+  else watchTitle();
   var open = window.open;
   window.open = function (u) {
     if (u && route(String(u))) return null;
