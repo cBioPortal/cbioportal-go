@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>cBioPortal Local</title>
+<title>cBioPortal Curate</title>
 <style>
   :root { color-scheme: light dark; --fg: #1d2330; --muted: #667085; --bg: #fff; --bar: #e6e9ef; --accent: #3786c2; --bad: #b42318; }
   @media (prefers-color-scheme: dark) { :root { --fg: #e6e9ef; --muted: #98a2b3; --bg: #1b1f27; --bar: #2c323d; --accent: #5aa7e0; --bad: #f97066; } }
@@ -23,7 +23,7 @@
 </head>
 <body>
 <main id="main">
-  <h1>cBioPortal Local</h1>
+  <h1>cBioPortal Curate</h1>
   <div class="note">Runs cBioPortal on this computer. Your data stays here.</div>
   <div class="step"><span class="spin"></span><span id="step">Starting…</span></div>
   <div class="bar" id="bar" hidden><div id="fill"></div></div>
@@ -54,7 +54,7 @@
       document.getElementById("fill").style.width = pct + "%";
       detail = mb(p.done) + (p.total > 0 ? " of " + mb(p.total) : "") + " — later starts skip this.";
     }
-    if (p.failed) { document.getElementById("main").className = "failed"; step = p.failed; detail = "The log is in the data folder (cbioportal-local.log). Quit and open the app again to retry."; }
+    if (p.failed) { document.getElementById("main").className = "failed"; step = p.failed; detail = "The log is in the data folder (cbioportal-curate.log). Quit and open the app again to retry."; }
     document.getElementById("step").textContent = step;
     document.getElementById("detail").textContent = detail;
     const log = document.getElementById("log");

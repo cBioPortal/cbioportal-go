@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>cBioPortal Local</string>
+	<string>cBioPortal Curate</string>
 	<key>CFBundleDisplayName</key>
-	<string>cBioPortal Local</string>
+	<string>cBioPortal Curate</string>
 	<key>CFBundleIdentifier</key>
-	<string>org.cbioportal.local</string>
+	<string>org.cbioportal.curate</string>
 	<key>CFBundleExecutable</key>
 	<string>launch</string>
 	<key>CFBundlePackageType</key>

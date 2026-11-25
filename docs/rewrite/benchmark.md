@@ -625,7 +625,7 @@ minutes, but keeps `genetic_alteration_derived`.
 
 ### On your own computer
 
-`cbioportal-local` runs the importer and the API in one program, with
+`cbioportal-curate` runs the importer and the API in one program, with
 ClickHouse inside it (chDB), on a laptop. On a Linux server with cBioPortal's
 5 test studies:
 

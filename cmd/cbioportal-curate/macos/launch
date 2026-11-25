@@ -3,4 +3,4 @@
 # unsigned app openable: macOS calls a bundle whose signed program has no
 # bundle signature "damaged". Without a folder the program opens its import
 # page in the browser.
-exec "$(dirname "$0")/cbioportal-local"
+exec "$(dirname "$0")/cbioportal-curate"

@@ -4,15 +4,15 @@ cbioportal-import
 cbioportal-api
 cbioportal-ops
 cbioportal-rewrite-test
-cbioportal-local
+cbioportal-curate
 paritydiff
 loggedgen
 apibench
 e2ereport
 !*/
 /bin/
-# The website build make local puts into cbioportal-local.
-/cmd/cbioportal-local/frontend.tar.gz
+# The website build make curate puts into cbioportal-curate.
+/cmd/cbioportal-curate/frontend.tar.gz
 *.test
 *.out
 

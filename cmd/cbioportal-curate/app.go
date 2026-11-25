@@ -4,7 +4,7 @@
 // Dock icon, a menu and Cmd+Q, and the system's folder dialog. The portal
 // is still served on its port, so a web browser can open it too.
 //
-//	make local-app    # bin/cBioPortal Local.app
+//	make curate-app    # bin/cBioPortal Curate.app
 //
 // The window first shows a page of its own (starting.html) with what the
 // program is doing, the downloads of a first run among it, and then the
@@ -44,15 +44,15 @@ var startingPage []byte
 // makes for its tables and plots) are read here and handed to the app,
 // which asks where to save them.
 const linksJS = `(function () {
-  if (window.__cbioportalLocal) return;
-  window.__cbioportalLocal = true;
+  if (window.__cbioportalCurate) return;
+  window.__cbioportalCurate = true;
   var send = function (kind, u) { window.webkit.messageHandlers.external.postMessage(kind + " " + u); };
   var save = function (href, name) {
     fetch(href).then(function (r) { return r.blob(); }).then(function (b) {
       var fr = new FileReader();
       fr.onload = function () { send("save", JSON.stringify({ name: name || "download", data: fr.result })); };
       fr.readAsDataURL(b);
-    }).catch(function (err) { console.error("cBioPortal Local: could not save " + href, err); });
+    }).catch(function (err) { console.error("cBioPortal Curate: could not save " + href, err); });
   };
   // A download from another site (a study's archive on datahub) cannot be
   // read here; it goes to the web browser like any link away.
@@ -153,7 +153,7 @@ func main() {
 	}
 
 	app = application.New(application.Options{
-		Name:        "cBioPortal Local",
+		Name:        "cBioPortal Curate",
 		Description: "cBioPortal on this computer, from study folders",
 		Assets:      application.AssetOptions{Handler: p},
 		Mac: application.MacOptions{
@@ -198,7 +198,7 @@ func main() {
 
 	newPageWindow = func(page string) *application.WebviewWindow {
 		return app.Window.NewWithOptions(application.WebviewWindowOptions{
-			Title: "cBioPortal Local", Width: 1280, Height: 860, MinWidth: 720, MinHeight: 480,
+			Title: "cBioPortal Curate", Width: 1280, Height: 860, MinWidth: 720, MinHeight: 480,
 			URL: page, JS: linksJS, DevToolsEnabled: true,
 		})
 	}
@@ -259,13 +259,13 @@ func main() {
 			// Quitting already.
 		case exitCode != 0:
 			p.mu.Lock()
-			if p.Failed = "cBioPortal Local stopped with an error."; len(p.Lines) > 0 {
+			if p.Failed = "cBioPortal Curate stopped with an error."; len(p.Lines) > 0 {
 				p.Failed = p.Lines[len(p.Lines)-1]
 			}
 			p.mu.Unlock()
 			mainWindow.SetURL("/")
 		case !serving.Load():
-			// Another cbioportal-local already serves the portal; the
+			// Another cbioportal-curate already serves the portal; the
 			// window shows that one.
 		default:
 			// Stopped from the import page.

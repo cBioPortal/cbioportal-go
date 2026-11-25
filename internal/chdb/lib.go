@@ -1,5 +1,5 @@
 // Package chdb runs ClickHouse inside the process with chDB, the embedded
-// ClickHouse engine, so cbioportal-local needs no ClickHouse server. The
+// ClickHouse engine, so cbioportal-curate needs no ClickHouse server. The
 // engine is the shared library libchdb, loaded at run time (no cgo): Load
 // binds its C functions, Open starts the engine on a data directory, and
 // Engine.Transport answers the HTTP requests of the ClickHouse client

@@ -1,5 +1,5 @@
-# The macOS app (make local-app: one universal app for Apple silicon and
-# Intel), attached to each published release as cBioPortal-Local-macOS.zip.
+# The macOS app (make curate-app: one universal app for Apple silicon and
+# Intel), attached to each published release as cBioPortal-Curate-macOS.zip.
 # Run by hand (Actions > macOS app > Run workflow), the zip is a build
 # artifact of the run instead.
 #
@@ -37,19 +37,19 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: local-app-${{ github.ref }}
+  group: curate-app-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   app:
-    name: cBioPortal Local.app
+    name: cBioPortal Curate.app
     runs-on: macos-15
     permissions:
       contents: write # upload the zip to the release
     env:
       SIGNED: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
-      APP: bin/app-universal/cBioPortal Local.app
-      ZIP: bin/cBioPortal-Local-app-universal.zip
+      APP: bin/app-universal/cBioPortal Curate.app
+      ZIP: bin/cBioPortal-Curate-app-universal.zip
     steps:
       - uses: actions/checkout@v4
         with:
@@ -98,7 +98,7 @@ jobs:
       - name: Build
         env:
           SIGN_IDENTITY: ${{ env.SIGNED == 'true' && secrets.MACOS_SIGN_IDENTITY || '' }}
-        run: make local-app-zip SIGN_IDENTITY="$SIGN_IDENTITY"
+        run: make curate-app-zip SIGN_IDENTITY="$SIGN_IDENTITY"
 
       - name: Notarize and staple
         if: env.SIGNED == 'true'
@@ -111,23 +111,23 @@ jobs:
           xcrun notarytool submit "$ZIP" --key "$RUNNER_TEMP/notary.p8" --key-id "$KEY_ID" --issuer "$ISSUER" --wait --timeout 30m
           xcrun stapler staple "$APP"
           spctl --assess --type execute --verbose "$APP"
-          rm "$ZIP" && (cd bin/app-universal && ditto -c -k --keepParent "cBioPortal Local.app" ../cBioPortal-Local-app-universal.zip)
+          rm "$ZIP" && (cd bin/app-universal && ditto -c -k --keepParent "cBioPortal Curate.app" ../cBioPortal-Curate-app-universal.zip)
 
       - name: Check the app
         run: |
           codesign --verify --strict --verbose=2 "$APP"
-          lipo -archs "$APP/Contents/MacOS/cbioportal-local"
-          mv "$ZIP" bin/cBioPortal-Local-macOS.zip
-          ls -l bin/cBioPortal-Local-macOS.zip
+          lipo -archs "$APP/Contents/MacOS/cbioportal-curate"
+          mv "$ZIP" bin/cBioPortal-Curate-macOS.zip
+          ls -l bin/cBioPortal-Curate-macOS.zip
 
       - name: Attach to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$TAG" bin/cBioPortal-Local-macOS.zip --clobber
+        run: gh release upload "$TAG" bin/cBioPortal-Curate-macOS.zip --clobber
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'release'
         with:
-          name: cBioPortal-Local-macOS
-          path: bin/cBioPortal-Local-macOS.zip
+          name: cBioPortal-Curate-macOS
+          path: bin/cBioPortal-Curate-macOS.zip

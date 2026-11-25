@@ -97,18 +97,18 @@ uses. To add more studies, run `ingest` for each one and then run
 
 ## Run a portal on your own computer
 
-`cbioportal-local` runs a whole portal from study folders in one command,
+`cbioportal-curate` runs a whole portal from study folders in one command,
 with no database server to install. ClickHouse runs inside the program
 (with [chDB](https://github.com/chdb-io/chdb), embedded ClickHouse), and
 the data stays in a folder on your computer. It is meant for curators who
 want to see how their study looks before they submit it.
 
 ```bash
-make frontend && make local     # build bin/cbioportal-local, website included
-bin/cbioportal-local datahub/public/acbc_mskcc_2015 --open
+make frontend && make curate    # build bin/cbioportal-curate, website included
+bin/cbioportal-curate datahub/public/acbc_mskcc_2015 --open
 ```
 
-- Without a folder, as when the macOS app (`make local-macos`) is opened, it
+- Without a folder, as when the macOS app (`make curate-macos`) is opened, it
   opens an import page in the browser. There you add your own study
   folders, or pick public studies from cBioPortal to download, and see each
   study's import with its errors and warnings. Studies are remembered for
@@ -119,19 +119,23 @@ bin/cbioportal-local datahub/public/acbc_mskcc_2015 --open
   found on their own. Elsewhere, pass them with `--seed` and `--gene-panels`.
 - When you save a change to a study's files, the program imports that
   study again, in a few seconds. Reload the page to see the change.
-- `cbioportal-local --help` lists the options.
-- `make local-app` builds it as a macOS app with a window of its own
+- `cbioportal-curate --help` lists the options.
+- It used to be called `cbioportal-local`. On its first start under the new
+  name, it moves the old data and cache folders over, so studies and the
+  downloaded engine are kept. The environment variables are now
+  `CBIOPORTAL_CURATE_DATA` and `CBIOPORTAL_CURATE_CACHE`.
+- `make curate-app` builds it as a macOS app with a window of its own
   ([Wails](https://wails.io)): a Dock icon, Cmd+Q, the system's folder and
   save dialogs, and a progress page while the first run downloads. The
   portal is still served on its port, so a browser can open it too. It
   needs a Mac with the Xcode command line tools (cgo); `make build` and
-  `make local` do not.
-- Each release has the app as `cBioPortal-Local-macOS.zip`
-  (`.github/workflows/local-app.yml`). It is not signed by Apple yet, so the
+  `make curate` do not.
+- Each release has the app as `cBioPortal-Curate-macOS.zip`
+  (`.github/workflows/curate-app.yml`). It is not signed by Apple yet, so the
   first time it is opened macOS says it "could not verify" it. On macOS 15
   and later, go to System Settings › Privacy & Security and click **Open
   Anyway**; on macOS 13 and 14, Control-click the app and choose Open. Or,
-  in Terminal: `xattr -dr com.apple.quarantine "/Applications/cBioPortal Local.app"`.
+  in Terminal: `xattr -dr com.apple.quarantine "/Applications/cBioPortal Curate.app"`.
   After that it opens like any app.
 
 ## Development
