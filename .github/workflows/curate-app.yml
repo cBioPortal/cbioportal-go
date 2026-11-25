@@ -1,0 +1,133 @@
+# The macOS app (make curate-app: one universal app for Apple silicon and
+# Intel), attached to each published release as cBioPortal-Curate-macOS.zip.
+# Run by hand (Actions > macOS app > Run workflow), the zip is a build
+# artifact of the run instead.
+#
+# Unsigned for now: the app is ad-hoc signed, so macOS asks the person who
+# downloads it to allow it once (README, "The macOS app"). With the secrets
+# below set, the same job signs it with a Developer ID, has Apple notarize
+# it and staples the ticket, so it opens with a double-click.
+#
+# For signing, once, by hand (the Apple Developer account's Account Holder
+# or an Admin):
+#   1. An Apple Developer Program membership for the organization
+#      (enrolling an organization needs its D-U-N-S number).
+#   2. A "Developer ID Application" certificate (developer.apple.com >
+#      Certificates; Xcode > Settings > Accounts can make it too). Export
+#      it with its private key from Keychain Access as a .p12.
+#   3. An App Store Connect API key for notarization (App Store Connect >
+#      Users and Access > Integrations > Team Keys, role "Developer"):
+#      the .p8 file, its key id and the issuer id.
+#
+# Secrets (repository secrets):
+#   MACOS_CERTIFICATE_P12      the .p12 of step 2, base64-encoded
+#                              (base64 -i cert.p12)
+#   MACOS_CERTIFICATE_PASSWORD the .p12's password
+#   MACOS_SIGN_IDENTITY        e.g. "Developer ID Application: Memorial Sloan
+#                              Kettering Cancer Center (TEAMID1234)"
+#   NOTARY_KEY_P8              the .p8 of step 3, base64-encoded
+#   NOTARY_KEY_ID              that key's id
+#   NOTARY_ISSUER_ID           the App Store Connect issuer id
+
+name: macOS app
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: curate-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: cBioPortal Curate.app
+    runs-on: macos-15
+    permissions:
+      contents: write # upload the zip to the release
+    env:
+      SIGNED: ${{ secrets.MACOS_CERTIFICATE_P12 != '' }}
+      APP: bin/app-universal/cBioPortal Curate.app
+      ZIP: bin/cBioPortal-Curate-app-universal.zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          fetch-depth: 0 # git describe, for the app's version
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # The built frontend, cached by submodule commit as in the Docker
+      # workflow (a cache from a Linux runner is not restored on macOS).
+      - id: frontend
+        run: echo "commit=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cached frontend build
+        id: frontend-cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/dist
+          key: frontend-dist-macos-${{ steps.frontend.outputs.commit }}-node22.18.0
+      - uses: actions/setup-node@v4
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
+        with:
+          node-version: 22.18.0
+      - name: Build frontend
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
+        working-directory: frontend
+        run: corepack enable && pnpm install --frozen-lockfile && pnpm run buildAll
+
+      - name: Keychain with the Developer ID certificate
+        if: env.SIGNED == 'true'
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          pw="$(uuidgen)"
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$pw" "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Build
+        env:
+          SIGN_IDENTITY: ${{ env.SIGNED == 'true' && secrets.MACOS_SIGN_IDENTITY || '' }}
+        run: make curate-app-zip SIGN_IDENTITY="$SIGN_IDENTITY"
+
+      - name: Notarize and staple
+        if: env.SIGNED == 'true'
+        env:
+          KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          ISSUER: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          echo "$KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool submit "$ZIP" --key "$RUNNER_TEMP/notary.p8" --key-id "$KEY_ID" --issuer "$ISSUER" --wait --timeout 30m
+          xcrun stapler staple "$APP"
+          spctl --assess --type execute --verbose "$APP"
+          rm "$ZIP" && (cd bin/app-universal && ditto -c -k --keepParent "cBioPortal Curate.app" ../cBioPortal-Curate-app-universal.zip)
+
+      - name: Check the app
+        run: |
+          codesign --verify --strict --verbose=2 "$APP"
+          lipo -archs "$APP/Contents/MacOS/cbioportal-curate"
+          mv "$ZIP" bin/cBioPortal-Curate-macOS.zip
+          ls -l bin/cBioPortal-Curate-macOS.zip
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" bin/cBioPortal-Curate-macOS.zip --clobber
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'release'
+        with:
+          name: cBioPortal-Curate-macOS
+          path: bin/cBioPortal-Curate-macOS.zip

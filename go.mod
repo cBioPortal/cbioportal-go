@@ -5,9 +5,10 @@ go 1.27.4
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/KimMachineGun/automemlimit v1.0.0
-	github.com/ebitengine/purego v0.10.1
+	github.com/ebitengine/purego v0.11.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
+	github.com/wailsapp/wails/v3 v3.1.0
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sync v0.23.0
@@ -17,8 +18,11 @@ require (
 	github.com/ClickHouse/ch-go v0.74.0 // indirect
 	github.com/andybalholm/brotli v1.2.7 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/coder/websocket v1.8.14 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/klauspost/compress v1.20.2 // indirect
@@ -30,4 +34,5 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/term v0.47.0 // indirect
 )

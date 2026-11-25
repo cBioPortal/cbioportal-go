@@ -1,10 +1,10 @@
-// cbioportal-local runs a whole cBioPortal on one computer, from study
+// cbioportal-curate runs a whole cBioPortal on one computer, from study
 // folders, in one command: ClickHouse runs inside the process (chDB), the
 // studies are imported, and the portal is served with its website. When a
 // study's files change, that study is imported again.
 //
-//	cbioportal-local ~/datahub/public/acc_2019
-//	cbioportal-local ~/my-studies --port 8080 --open
+//	cbioportal-curate ~/datahub/public/acc_2019
+//	cbioportal-curate ~/my-studies --port 8080 --open
 package main
 
 import (
@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -36,7 +37,11 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
 
-const name = "cbioportal-local"
+const name = "cbioportal-curate"
+
+// oldName is what the program was called before; its data and cache
+// folders are taken over (adoptOldFolder).
+const oldName = "cbioportal-local"
 
 // The portal's databases inside the local engine.
 const (
@@ -45,9 +50,22 @@ const (
 	refDB    = "cbioportal_ref"
 )
 
-func main() {
-	os.Exit(cli.Execute(newRootCmd(), os.Args[1:], os.Stdout, os.Stderr, os.Getenv))
-}
+// The places the program meets the person using it. In a terminal they are
+// the web browser and the system's folder picker; the macOS app
+// (app.go, built with -tags wails) shows the pages in its window and opens
+// its own folder dialog.
+var (
+	// showPage shows a page of the portal.
+	showPage = openBrowser
+	// chooseFolder asks for a folder; "" when the person cancels.
+	chooseFolder = pickFolder
+	// logTo receives the log too.
+	logTo io.Writer = io.Discard
+	// baseCtx ends the run when it is cancelled.
+	baseCtx = context.Background()
+	// serving is set once the portal answers on its port.
+	serving atomic.Bool
+)
 
 type options struct {
 	dataDir, cacheDir string
@@ -66,7 +84,7 @@ func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   name + " [study-or-folder]...",
 		Short: "run cBioPortal on this computer from study folders",
-		Long: `cbioportal-local runs a whole cBioPortal on this computer, from study
+		Long: `cbioportal-curate runs a whole cBioPortal on this computer, from study
 folders, in one command. Nothing is sent anywhere: the data stays in a
 folder on this computer.
 
@@ -96,7 +114,7 @@ data folder. There is no login.`,
 	cache, _ := os.UserCacheDir()
 	fs := cmd.Flags()
 	fs.StringVar(&o.dataDir, "data", defaultDataDir(), "`folder` the portal's databases are kept in")
-	fs.StringVar(&o.cacheDir, "cache", filepath.Join(cache, "cbioportal-local"), "`folder` for the downloaded engine and website")
+	fs.StringVar(&o.cacheDir, "cache", filepath.Join(cache, "cbioportal-curate"), "`folder` for the downloaded engine and website")
 	fs.StringVar(&o.chdbLib, "chdb-lib", "", "use this libchdb `file` instead of downloading one")
 	fs.StringVar(&o.frontendDir, "frontend-dir", "", "serve this frontend build `folder` instead of the built-in one")
 	fs.StringVar(&o.seed, "seed", "", "datahub seed `file` (seed-*.sql.gz) with the reference genes; found in a datahub checkout when unset")
@@ -108,7 +126,7 @@ data folder. There is no login.`,
 	fs.BoolVar(&o.open, "open", false, "open the portal in the web browser")
 	fs.IntVar(&o.connections, "connections", 16, "ClickHouse connections the importer and the API share")
 	for _, f := range []struct{ flag, env string }{
-		{"data", "CBIOPORTAL_LOCAL_DATA"}, {"cache", "CBIOPORTAL_LOCAL_CACHE"}, {"chdb-lib", "CHDB_LIB"},
+		{"data", "CBIOPORTAL_CURATE_DATA"}, {"cache", "CBIOPORTAL_CURATE_CACHE"}, {"chdb-lib", "CHDB_LIB"},
 		{"frontend-dir", "FRONTEND_DIR"}, {"host", "HOST"}, {"port", "PORT"},
 	} {
 		cli.Env(fs, f.flag, f.env)
@@ -118,23 +136,32 @@ data folder. There is no login.`,
 }
 
 func run(o *options, args []string) error {
+	movedData := adoptOldFolder(o.dataDir)
+	movedCache := adoptOldFolder(o.cacheDir)
 	if err := os.MkdirAll(o.dataDir, 0o755); err != nil {
 		return err
 	}
 	// The log also goes to a file in the data folder: the app has no
 	// terminal.
+	logFile := io.Discard
 	if f, err := os.OpenFile(filepath.Join(o.dataDir, name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); err == nil {
 		defer f.Close()
-		log.SetOutput(io.MultiWriter(os.Stderr, f))
+		logFile = f
 	}
+	log.SetOutput(io.MultiWriter(os.Stderr, logFile, logTo))
 	logf := func(format string, args ...any) { log.Printf(format, args...) }
+	for _, d := range []string{movedData, movedCache} {
+		if d != "" {
+			logf("moved %s to %s (the program's new name)", d, filepath.Dir(d)+string(filepath.Separator)+name)
+		}
+	}
 	appMode := len(args) == 0
 
 	// Started again while it runs: show the running one.
 	page := fmt.Sprintf("http://%s/local", net.JoinHostPort(loopbackHost(o.host), fmt.Sprint(o.port)))
 	if appMode && running(page) {
 		logf("already running; opening %s", page)
-		openBrowser(page)
+		showPage(page)
 		return nil
 	}
 	given, err := studyDirs(args)
@@ -227,11 +254,11 @@ func run(o *options, args []string) error {
 		return err
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	ctx, stop := signal.NotifyContext(baseCtx, syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	status.quit = stop
 	status.addFolder = func() error {
-		dir, err := pickFolder("Choose a study folder, or a folder of studies")
+		dir, err := chooseFolder("Choose a study folder, or a folder of studies")
 		if err != nil || dir == "" {
 			return err
 		}
@@ -261,6 +288,7 @@ func run(o *options, args []string) error {
 	}
 	srv := &http.Server{Handler: status.handler(api.NewRouter(state))}
 	go srv.Serve(ln)
+	serving.Store(true)
 	url := fmt.Sprintf("http://%s", net.JoinHostPort(loopbackHost(o.host), fmt.Sprint(port)))
 	if o.host == "0.0.0.0" || o.host == "" {
 		host, _ := os.Hostname()
@@ -268,9 +296,9 @@ func run(o *options, args []string) error {
 	}
 	logf("cBioPortal is at %s, and its import page at %s/local", url, url)
 	if appMode {
-		openBrowser(url + "/local")
+		showPage(url + "/local")
 	} else if o.open {
-		openBrowser(url)
+		showPage(url)
 	}
 
 	// Folders unchanged since their last import are served as they are;
@@ -285,7 +313,7 @@ func run(o *options, args []string) error {
 	}
 	go imp.add(changed)
 	if o.watch {
-		go watch(ctx, status.dirs, o.watchInterval, func(dirs []string) {
+		go watch(ctx, imp.watched, o.watchInterval, func(dirs []string) {
 			logf("files changed in %s; importing again", strings.Join(dirs, ", "))
 			imp.run(dirs)
 		})
@@ -304,6 +332,38 @@ type importer struct {
 	opts    studyimport.Options
 	status  *importStatus
 	folders *folderStore
+
+	// downloading are the public studies being downloaded, which the
+	// watcher leaves alone: their files change until they are complete,
+	// and they are imported then.
+	downloadMu  sync.Mutex
+	downloading map[string]bool
+}
+
+// watched are the listed study folders, less those being downloaded.
+func (m *importer) watched() []string {
+	m.downloadMu.Lock()
+	defer m.downloadMu.Unlock()
+	var out []string
+	for _, d := range m.status.dirs() {
+		if !m.downloading[d] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func (m *importer) setDownloading(dir string, on bool) {
+	m.downloadMu.Lock()
+	defer m.downloadMu.Unlock()
+	if m.downloading == nil {
+		m.downloading = map[string]bool{}
+	}
+	if on {
+		m.downloading[dir] = true
+	} else {
+		delete(m.downloading, dir)
+	}
 }
 
 // add lists and remembers dirs, then imports them.
@@ -321,6 +381,8 @@ func (m *importer) addPublic(dir string, ids []string) {
 	var dirs []string
 	for _, id := range ids {
 		dest := filepath.Join(dir, id)
+		m.setDownloading(dest, true)
+		defer m.setDownloading(dest, false)
 		m.status.set(dest, id, "downloading", "")
 		got, err := downloadStudy(dir, id)
 		if err != nil {
@@ -363,7 +425,7 @@ func (m *importer) run(dirs []string) {
 	log.Printf("imported %d of %d studies in %s", res.Count(studyimport.Imported), len(dirs), time.Since(start).Round(time.Second))
 }
 
-// running reports whether a cbioportal-local answers at its page URL.
+// running reports whether a cbioportal-curate answers at its page URL.
 func running(page string) bool {
 	c := &http.Client{Timeout: 2 * time.Second}
 	resp, err := c.Get(page + "/status")
@@ -431,14 +493,38 @@ func studyDirs(args []string) ([]string, error) {
 func defaultDataDir() string {
 	if runtime.GOOS == "darwin" {
 		if d, err := os.UserConfigDir(); err == nil {
-			return filepath.Join(d, "cbioportal-local")
+			return filepath.Join(d, "cbioportal-curate")
 		}
 	}
 	if d := os.Getenv("XDG_DATA_HOME"); d != "" {
-		return filepath.Join(d, "cbioportal-local")
+		return filepath.Join(d, "cbioportal-curate")
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "cbioportal-local")
+	return filepath.Join(home, ".local", "share", "cbioportal-curate")
+}
+
+// adoptOldFolder moves a default folder of the program's old name
+// (cbioportal-local) to its new one, the studies, databases and the
+// downloaded engine with it, when only the old one exists. It returns the
+// old folder when it moved it. Folders given with --data and --cache keep
+// their names.
+func adoptOldFolder(dir string) string {
+	if filepath.Base(dir) != name {
+		return ""
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		return ""
+	}
+	old := filepath.Join(filepath.Dir(dir), oldName)
+	if st, err := os.Stat(old); err != nil || !st.IsDir() {
+		return ""
+	}
+	if err := os.Rename(old, dir); err != nil {
+		return ""
+	}
+	// The log keeps its history under the new name.
+	os.Rename(filepath.Join(dir, oldName+".log"), filepath.Join(dir, name+".log"))
+	return old
 }
 
 func isStudy(dir string) bool {

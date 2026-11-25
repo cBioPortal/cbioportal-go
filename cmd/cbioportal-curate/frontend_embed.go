@@ -17,7 +17,7 @@ import (
 )
 
 // frontendArchive is the website build (frontend/dist) as a .tar.gz, put
-// here by `make local`.
+// here by `make curate`.
 //
 //go:embed frontend.tar.gz
 var frontendArchive []byte

@@ -330,6 +330,31 @@ func TestScanWarnsOfMissingDataFiles(t *testing.T) {
 	}
 }
 
+// TestScanWarnsOfLFSPointers checks that a data file a datahub checkout
+// has not fetched from Git LFS yet is left out with a warning, not
+// imported as a two-line table.
+func TestScanWarnsOfLFSPointers(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"meta_study.txt": "type_of_cancer: brca\ncancer_study_identifier: lfs_study\nname: n\ndescription: d\n",
+		"meta_mutations.txt": "cancer_study_identifier: lfs_study\ngenetic_alteration_type: MUTATION_EXTENDED\n" +
+			"datatype: MAF\nstable_id: mutations\ndata_filename: data_mutations.txt\n",
+		"data_mutations.txt": "version https://git-lfs.github.com/spec/v1\noid sha256:8ed5bccece402fbc6a60404a755f9826829e40f1e214cfb77ea06d5df9f148f3\nsize 8470185\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"data_mutations.txt is a Git LFS pointer, not the data (run git lfs pull in the checkout); it was left out"}
+	if len(s.Files) != 0 || !reflect.DeepEqual(s.Warnings, want) {
+		t.Errorf("files %v, warnings %q, want none and %q", s.Files, s.Warnings, want)
+	}
+}
+
 // TestScanLoadsSplitMutationFiles checks that with production's rules
 // every data_mutations* file loads with the study's mutation meta file,
 // except uncalled mutations, normals and files of other meta files, and

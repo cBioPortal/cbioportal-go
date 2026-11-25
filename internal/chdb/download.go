@@ -28,6 +28,22 @@ var releases = map[string]struct{ asset, sha256 string }{
 	"darwin/amd64": {"macos-x86_64-libchdb.tar.gz", "ace512c37c673075b59b551574d3c77edf159a8bf2d1b9d829ef0721a9ececd8"},
 }
 
+// Progress, when set, is called as Library downloads the engine, with the
+// bytes so far and the whole size (-1 when the server does not say).
+var Progress func(done, total int64)
+
+type progressReader struct {
+	r           io.Reader
+	done, total int64
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	p.done += int64(n)
+	Progress(p.done, p.total)
+	return n, err
+}
+
 // Library returns the path of libchdb Version in cacheDir, downloading it
 // from chDB's GitHub releases the first time (about 120-180 MB, checked
 // against its published SHA-256). logf reports the download.
@@ -62,7 +78,11 @@ func Library(cacheDir string, logf func(format string, args ...any)) (string, er
 	defer os.Remove(archive.Name())
 	defer archive.Close()
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(archive, h), resp.Body); err != nil {
+	var body io.Reader = resp.Body
+	if Progress != nil {
+		body = &progressReader{r: resp.Body, total: resp.ContentLength}
+	}
+	if _, err := io.Copy(io.MultiWriter(archive, h), body); err != nil {
 		return "", fmt.Errorf("downloading %s: %w", url, err)
 	}
 	if got := hex.EncodeToString(h.Sum(nil)); got != rel.sha256 {

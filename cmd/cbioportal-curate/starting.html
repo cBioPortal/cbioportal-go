@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>cBioPortal Curate</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d2330; --muted: #667085; --bg: #fff; --bar: #e6e9ef; --accent: #3786c2; --bad: #b42318; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e9ef; --muted: #98a2b3; --bg: #1b1f27; --bar: #2c323d; --accent: #5aa7e0; --bad: #f97066; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+  main { max-width: 560px; margin: 14vh auto 0; padding: 0 24px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .step { font-size: 16px; margin: 24px 0 10px; display: flex; gap: 10px; align-items: center; }
+  .spin { width: 14px; height: 14px; border: 2px solid var(--bar); border-top-color: var(--accent); border-radius: 50%; animation: s 0.8s linear infinite; flex: none; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  .bar { height: 6px; background: var(--bar); border-radius: 3px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+  .note { color: var(--muted); margin: 6px 0 0; }
+  pre { color: var(--muted); font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; margin-top: 28px; max-height: 40vh; overflow: auto; }
+  .failed .spin { display: none; }
+  .failed .step { color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main id="main">
+  <h1>cBioPortal Curate</h1>
+  <div class="note">Runs cBioPortal on this computer. Your data stays here.</div>
+  <div class="step"><span class="spin"></span><span id="step">Starting…</span></div>
+  <div class="bar" id="bar" hidden><div id="fill"></div></div>
+  <div class="note" id="detail"></div>
+  <pre id="log"></pre>
+</main>
+<script>
+  // What a log line means for the person waiting, newest first.
+  const steps = [
+    [/stopping/, "Stopping…"],
+    [/cBioPortal is at/, "Opening the import page…"],
+    [/gene panels/, "Downloading the gene panels (once)…", "The shared gene panels from cBioPortal's datahub."],
+    [/reference genes/, "Downloading the reference genes (once)…", "About 14 MB."],
+    [/is running in this program/, "Starting the database…"],
+    [/ClickHouse engine/, "Downloading the database engine (once)…", "ClickHouse (chDB), about 120–180 MB. Later starts skip this."],
+  ];
+  const mb = (n) => (n / 1e6).toFixed(0) + " MB";
+  async function poll() {
+    let p;
+    try { p = await (await fetch("/progress", { cache: "no-store" })).json(); } catch { return setTimeout(poll, 500); }
+    const last = p.lines.slice().reverse();
+    let step = "Starting…", detail = "";
+    outer: for (const line of last) for (const [re, s, d] of steps) if (re.test(line)) { step = s; detail = d || ""; break outer; }
+    const downloading = step.startsWith("Downloading the database engine");
+    document.getElementById("bar").hidden = !downloading || p.done === 0;
+    if (downloading && p.done > 0) {
+      const pct = p.total > 0 ? (100 * p.done / p.total) : 0;
+      document.getElementById("fill").style.width = pct + "%";
+      detail = mb(p.done) + (p.total > 0 ? " of " + mb(p.total) : "") + " — later starts skip this.";
+    }
+    if (p.failed) { document.getElementById("main").className = "failed"; step = p.failed; detail = "The log is in the data folder (cbioportal-curate.log). Quit and open the app again to retry."; }
+    document.getElementById("step").textContent = step;
+    document.getElementById("detail").textContent = detail;
+    const log = document.getElementById("log");
+    log.textContent = p.lines.slice(-12).map((l) => l.replace(/^\d{4}\/\d\d\/\d\d /, "")).join("\n");
+    if (!p.failed) setTimeout(poll, 300);
+  }
+  poll();
+</script>
+</body>
+</html>

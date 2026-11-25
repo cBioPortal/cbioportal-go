@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>cBioPortal Local</title>
+<title>cBioPortal Curate</title>
 <style>
 :root {
   --bg: #f6f7f9; --card: #ffffff; --fg: #1d2330; --muted: #5b6475; --line: #e3e6ec;
@@ -46,7 +46,7 @@ td code { font-size: 12px; color: var(--muted); word-break: break-all; }
 <main>
   <header>
     <div>
-      <h1>cBioPortal Local</h1>
+      <h1>cBioPortal Curate</h1>
       <p>A cBioPortal running on this computer. Your data stays here.</p>
     </div>
     <div class="toolbar">
@@ -160,7 +160,7 @@ $('add').onclick = async () => {
 $('quit').onclick = async () => {
   if (!confirm('Stop the portal? Your studies stay on this computer for next time.')) return;
   await fetch('/local/quit', {method: 'POST'}).catch(() => {});
-  document.body.innerHTML = '<main><h1>cBioPortal Local has stopped.</h1><p>Open the app again to start it.</p></main>';
+  document.body.innerHTML = '<main><h1>cBioPortal Curate has stopped.</h1><p>Open the app again to start it.</p></main>';
 };
 refresh(); setInterval(refresh, 1500);
 </script>
