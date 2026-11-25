@@ -33,6 +33,7 @@ import (
 	"github.com/cbioportal/cbioportal-go/internal/cli"
 	ch "github.com/cbioportal/cbioportal-go/internal/clickhouse"
 	"github.com/cbioportal/cbioportal-go/internal/config"
+	"github.com/cbioportal/cbioportal-go/internal/ingest"
 	"github.com/cbioportal/cbioportal-go/internal/studyimport"
 	"github.com/cbioportal/cbioportal-go/internal/transform"
 )
@@ -281,6 +282,9 @@ func run(o *options, args []string) error {
 		go imp.addPublic(filepath.Join(o.dataDir, "public-studies"), ids)
 		return nil
 	}
+	status.remove = func(dir string) error {
+		return imp.remove(dir, filepath.Join(o.dataDir, "public-studies"))
+	}
 
 	ln, port, err := listen(o.host, o.port)
 	if err != nil {
@@ -307,6 +311,9 @@ func run(o *options, args []string) error {
 	for _, d := range all {
 		if folders.unchanged(d) {
 			status.add([]string{d}, "imported")
+			if last, ok := folders.last(d); ok {
+				status.setLast(d, last.At, last.Seconds)
+			}
 		} else {
 			changed = append(changed, d)
 		}
@@ -395,6 +402,41 @@ func (m *importer) addPublic(dir string, ids []string) {
 	m.add(dirs)
 }
 
+// remove takes dir's study out of the portal and forgets the folder. A
+// public study's download (in publicDir) is deleted too; a folder of the
+// user's own is left as it is.
+func (m *importer) remove(dir, publicDir string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, err := studyimport.StudyID(dir)
+	if err != nil {
+		for _, st := range m.status.list() {
+			if st.Dir == dir {
+				id = st.StudyID
+			}
+		}
+	}
+	if id != "" {
+		raw := ch.New(m.opts.URL, m.opts.RawDB)
+		if _, err := ingest.RemoveStudy(raw, id); err != nil {
+			return fmt.Errorf("removing %s: %w", id, err)
+		}
+		start := time.Now()
+		if _, err := transform.Apply(raw, m.opts.RawDB, m.opts.DB, m.opts.RefDB); err != nil {
+			return fmt.Errorf("rebuilding the portal without %s: %w", id, err)
+		}
+		log.Printf("removed %s from the portal in %s", id, time.Since(start).Round(time.Second))
+	}
+	m.status.drop(dir)
+	m.folders.remove(dir)
+	if rel, err := filepath.Rel(publicDir, dir); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		if err := os.RemoveAll(dir); err != nil {
+			log.Printf("deleting the download %s: %v", dir, err)
+		}
+	}
+	return nil
+}
+
 // run imports dirs, records the outcome and logs each study's; a study
 // that fails is reported and left out, the others are served.
 func (m *importer) run(dirs []string) {
@@ -407,14 +449,15 @@ func (m *importer) run(dirs []string) {
 	start := time.Now()
 	m.status.start(dirs)
 	res, err := studyimport.Run(m.opts, dirs)
-	m.status.done(dirs, res, err, time.Since(start))
+	took := time.Since(start)
+	m.status.done(dirs, res, err, took)
 	if err != nil {
 		log.Printf("import failed: %v", err)
 		return
 	}
 	for _, s := range res.Studies {
 		if s.Status == studyimport.Imported {
-			m.folders.imported(s.Dir, sigs[s.Dir])
+			m.folders.imported(s.Dir, sigs[s.Dir], lastImport{At: time.Now(), Seconds: took.Seconds()})
 		}
 		if s.Err != nil {
 			log.Printf("  %s: %s: %v", s.StudyID, s.Status, s.Err)

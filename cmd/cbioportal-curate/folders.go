@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 )
 
 // folderStore remembers the study folders the portal holds, across runs,
@@ -15,6 +16,13 @@ type folderStore struct {
 	path    string
 	mu      sync.Mutex
 	Folders map[string]string `json:"folders"` // folder -> signature ("" until imported)
+	// Imports is when each folder was last imported, and how long that took.
+	Imports map[string]lastImport `json:"imports,omitempty"`
+}
+
+type lastImport struct {
+	At      time.Time `json:"at"`
+	Seconds float64   `json:"seconds"`
 }
 
 func loadFolders(dataDir string) *folderStore {
@@ -24,6 +32,9 @@ func loadFolders(dataDir string) *folderStore {
 		if s.Folders == nil {
 			s.Folders = map[string]string{}
 		}
+	}
+	if s.Imports == nil {
+		s.Imports = map[string]lastImport{}
 	}
 	return s
 }
@@ -40,6 +51,14 @@ func (s *folderStore) list() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// last is when dir was last imported, if known.
+func (s *folderStore) last(dir string) (lastImport, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.Imports[dir]
+	return l, ok
 }
 
 // unchanged reports whether dir's files are as they were at its last import.
@@ -62,10 +81,20 @@ func (s *folderStore) add(dirs []string) {
 	s.save()
 }
 
-// imported records dir's signature at a successful import.
-func (s *folderStore) imported(dir, sig string) {
+// remove forgets dir.
+func (s *folderStore) remove(dir string) {
+	s.mu.Lock()
+	delete(s.Folders, dir)
+	delete(s.Imports, dir)
+	s.mu.Unlock()
+	s.save()
+}
+
+// imported records dir's signature at a successful import, and when it was.
+func (s *folderStore) imported(dir, sig string, last lastImport) {
 	s.mu.Lock()
 	s.Folders[dir] = sig
+	s.Imports[dir] = last
 	s.mu.Unlock()
 	s.save()
 }
