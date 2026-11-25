@@ -91,6 +91,15 @@ func (s *importStatus) drop(dir string) {
 	delete(s.studies, dir)
 }
 
+// setLast records when a listed folder was last imported (before this run).
+func (s *importStatus) setLast(dir string, at time.Time, seconds float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if st := s.studies[dir]; st != nil {
+		st.Imported, st.Seconds = at, seconds
+	}
+}
+
 // dirs are the study folders it lists.
 func (s *importStatus) dirs() []string {
 	s.mu.Lock()

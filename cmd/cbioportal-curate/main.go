@@ -311,6 +311,9 @@ func run(o *options, args []string) error {
 	for _, d := range all {
 		if folders.unchanged(d) {
 			status.add([]string{d}, "imported")
+			if last, ok := folders.last(d); ok {
+				status.setLast(d, last.At, last.Seconds)
+			}
 		} else {
 			changed = append(changed, d)
 		}
@@ -446,14 +449,15 @@ func (m *importer) run(dirs []string) {
 	start := time.Now()
 	m.status.start(dirs)
 	res, err := studyimport.Run(m.opts, dirs)
-	m.status.done(dirs, res, err, time.Since(start))
+	took := time.Since(start)
+	m.status.done(dirs, res, err, took)
 	if err != nil {
 		log.Printf("import failed: %v", err)
 		return
 	}
 	for _, s := range res.Studies {
 		if s.Status == studyimport.Imported {
-			m.folders.imported(s.Dir, sigs[s.Dir])
+			m.folders.imported(s.Dir, sigs[s.Dir], lastImport{At: time.Now(), Seconds: took.Seconds()})
 		}
 		if s.Err != nil {
 			log.Printf("  %s: %s: %v", s.StudyID, s.Status, s.Err)

@@ -124,7 +124,7 @@ async function refresh() {
     if (key !== shownRows) { shownRows = key; $('studies').innerHTML = rows.length ? rows.map(r => `<tr data-study="${esc(r.studyId)}"${justAdded.has(r.studyId) ? ' class="new"' : ''}>
       <td>${r.studyId && r.status === 'imported' ? `<a href="/study/summary?id=${encodeURIComponent(r.studyId)}" target="_blank">${esc(r.studyId)}</a>` : esc(r.studyId || '–')}</td>
       <td class="${esc(r.status)}">${esc(r.status)}</td>
-      <td>${r.imported && !r.imported.startsWith('0001') ? new Date(r.imported).toLocaleTimeString() + ` (${Math.round(r.seconds)} s)` : ''}</td>
+      <td>${lastImport(r)}</td>
       <td><code>${esc(r.dir)}</code>${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}${(r.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('')}</td>
       <td class="actions">${removeButton(r)}</td>
     </tr>`).join('') : '<tr><td colspan="5" class="empty">No studies yet. Add one above.</td></tr>'; }
@@ -162,6 +162,14 @@ $('publicList').addEventListener('change', e => {
 $('search').addEventListener('input', renderPublic);
 // The added studies and their states; the public list is drawn again when they change.
 const addedKey = () => Object.values(dirOf).map(r => r.studyId + ':' + r.status).sort().join();
+// lastImport is when a study was last imported: the time today, else the date too.
+function lastImport(r) {
+  if (!r.imported || r.imported.startsWith('0001')) return '';
+  const at = new Date(r.imported), today = at.toDateString() === new Date().toDateString();
+  const when = today ? at.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})
+    : at.toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+  return esc(when) + (r.seconds > 0 ? ` (${Math.round(r.seconds) || '<1'} s)` : '');
+}
 function removeButton(r) {
   if (!r || ['importing', 'waiting', 'downloading'].includes(r.status)) return '';
   return `<button class="small remove" data-remove="${esc(r.dir)}" data-name="${esc(r.studyId || r.dir)}">Remove</button>`;
