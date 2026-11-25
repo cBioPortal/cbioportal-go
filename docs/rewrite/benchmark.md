@@ -225,7 +225,12 @@ users", so those columns show a dash.
 | 2026-11-12 | 2.64 | – | 1.24 | – | 0.45 | 6.15 | 9.4 |
 | 2026-11-13 | 2.73 | – | 1.31 | – | 0.84 | 6.79 | 11.4 |
 | 2026-11-19 (from 02:00) | 3.39 | 0.02 | 0.78 | 5.22 | 0.18 | 12.08 | 15.3 |
-| 2026-11-20 (to 13:00) | 3.94 | 0.01 | 0.67 | 0.02 | 0.16 | 7.58 | 12.7 |
+| 2026-11-20 (17 hours saved) | 4.01 | 0.01 | 0.74 | 0.13 | 0.17 | 7.65 | 12.7 |
+| 2026-11-21 | 3.49 | 0.01 | 0.66 | 0.00 | 0.13 | 6.61 | 13.4 |
+| 2026-11-22 | 4.01 | 0.01 | 0.42 | 0.01 | 0.23 | 6.89 | 10.8 |
+| 2026-11-23 | 3.58 | 0.01 | 0.68 | 0.20 | 0.25 | 6.87 | 8.8 |
+| 2026-11-24 | 2.90 | 0.01 | 0.82 | 0.10 | 0.33 | 6.55 | 13.1 |
+| 2026-11-25 (to 21:00) | 3.12 | 0.01 | 1.17 | 0.19 | 0.35 | 7.48 | 14.5 |
 | **Average, Nov 6 to 13** | **2.50** | – | **0.94** | – | **0.60** | **5.85** | |
 
 All figures are CPU cores. In this period go received a quarter of www's
@@ -239,14 +244,14 @@ November 19, cBioLab used 5.2 cores on average over the day, more than
 Java and go together, and one replica briefly reached all 8 cores. That
 load had nothing to do with go or Java. A ClickHouse figure for a single
 day therefore says little about go on its own; the per-group split above
-does. No Java import ran in the saved days, so the Java importer's column
-shows almost nothing yet. An import will show up there when it runs.
+does. The Java importer's column stays near zero on every saved day,
+including November 24, when a public import ran.
 
 ![ClickHouse CPU per day, split into Java portals, go, everyone else and ClickHouse's own background work](images/production-clickhouse-per-day.png)
 
 The figure shows the same days as the table, stacked. The grey top of each
 bar is ClickHouse's own background work, such as merging newly written
-data. From November 19, Java's share grew to 3.4 to 3.9 cores. Since the
+data. From November 19, Java's share was 2.9 to 4.0 cores a day. Since the
 switch, go answers api.cbioportal.org, so Java's queries come from
 www.cbioportal.org's website, which Java still serves. go's share includes
 a copy of a quarter of www's website traffic.
@@ -255,7 +260,7 @@ The next figure puts the pods, ClickHouse and the requests on one time
 line, from October 7 to today. The dotted line marks the switch on
 November 6, when go started answering api.cbioportal.org. From then on,
 the Java API pods get no requests, and go's API pods answer between
-450,000 and 1.35 million requests a day.
+about 230,000 and 1.35 million requests a day.
 
 ![API pod CPU, ClickHouse CPU by who sent the queries, and requests per day, from October 7](images/production-load-since-october.png)
 
