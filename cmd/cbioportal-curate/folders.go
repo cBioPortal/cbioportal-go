@@ -62,6 +62,14 @@ func (s *folderStore) add(dirs []string) {
 	s.save()
 }
 
+// remove forgets dir.
+func (s *folderStore) remove(dir string) {
+	s.mu.Lock()
+	delete(s.Folders, dir)
+	s.mu.Unlock()
+	s.save()
+}
+
 // imported records dir's signature at a successful import.
 func (s *folderStore) imported(dir, sig string) {
 	s.mu.Lock()

@@ -38,6 +38,8 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-size: 13px; font-weight: 600; }
 td code { font-size: 12px; color: var(--muted); word-break: break-all; }
+td.actions { text-align: right; white-space: nowrap; }
+button.small { font-size: 13px; padding: 3px 10px; }
 .imported { color: var(--ok); } .failed, .removed { color: var(--bad); } .importing, .waiting, .downloading { color: var(--busy); }
 .err { color: var(--bad); font-size: 13px; white-space: pre-wrap; } .warn { color: var(--busy); font-size: 13px; }
 .empty { color: var(--muted); padding: 12px 0; }
@@ -89,8 +91,8 @@ td code { font-size: 12px; color: var(--muted); word-break: break-all; }
     <h2>2. Import</h2>
     <p>Each study is imported into the portal. Problems with a study's files show here.</p>
     <table>
-      <thead><tr><th>Study</th><th>Status</th><th>Last import</th><th>Folder</th></tr></thead>
-      <tbody id="studies"><tr><td colspan="4" class="empty">No studies yet. Add one above.</td></tr></tbody>
+      <thead><tr><th>Study</th><th>Status</th><th>Last import</th><th>Folder</th><th></th></tr></thead>
+      <tbody id="studies"><tr><td colspan="5" class="empty">No studies yet. Add one above.</td></tr></tbody>
     </table>
   </section>
 
@@ -104,20 +106,25 @@ td code { font-size: 12px; color: var(--muted); word-break: break-all; }
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let publicStudies = null, chosen = new Set(), have = new Set(), shownHave = '';
+let shownRows = '';
 
 async function refresh() {
   try {
     const rows = await (await fetch('/local/status')).json();
     have = new Set(rows.map(r => r.studyId).filter(Boolean));
-    $('studies').innerHTML = rows.length ? rows.map(r => `<tr>
+    // Drawn again only when a study changed, so no click is lost to a redraw.
+    const key = JSON.stringify(rows);
+    if (key !== shownRows) { shownRows = key; $('studies').innerHTML = rows.length ? rows.map(r => `<tr>
       <td>${r.studyId && r.status === 'imported' ? `<a href="/study/summary?id=${encodeURIComponent(r.studyId)}" target="_blank">${esc(r.studyId)}</a>` : esc(r.studyId || '–')}</td>
       <td class="${esc(r.status)}">${esc(r.status)}</td>
       <td>${r.imported && !r.imported.startsWith('0001') ? new Date(r.imported).toLocaleTimeString() + ` (${Math.round(r.seconds)} s)` : ''}</td>
       <td><code>${esc(r.dir)}</code>${r.error ? `<div class="err">${esc(r.error)}</div>` : ''}${(r.warnings || []).map(w => `<div class="warn">${esc(w)}</div>`).join('')}</td>
-    </tr>`).join('') : '<tr><td colspan="4" class="empty">No studies yet. Add one above.</td></tr>';
+      <td class="actions">${['importing', 'waiting', 'downloading'].includes(r.status) ? '' : `<button class="small" data-remove="${esc(r.dir)}" data-name="${esc(r.studyId || r.dir)}">Remove</button>`}</td>
+    </tr>`).join('') : '<tr><td colspan="5" class="empty">No studies yet. Add one above.</td></tr>'; }
     if (publicStudies && [...have].sort().join() !== shownHave) renderPublic();
   } catch (e) {
-    $('studies').innerHTML = '<tr><td colspan="4" class="err">The portal is not running.</td></tr>';
+    shownRows = '';
+    $('studies').innerHTML = '<tr><td colspan="5" class="err">The portal is not running.</td></tr>';
   }
 }
 
@@ -144,6 +151,16 @@ $('publicList').addEventListener('change', e => {
   showChosen();
 });
 $('search').addEventListener('input', renderPublic);
+$('studies').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-remove]'); if (!b) return;
+  const dir = b.dataset.remove;
+  const own = !dir.includes('/public-studies/');
+  if (!confirm(`Remove ${b.dataset.name} from the portal?` + (own ? ' Its folder stays on this computer.' : ' Its download is deleted; you can download it again.'))) return;
+  b.disabled = true; b.textContent = 'Removing…';
+  const r = await fetch('/local/remove', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({dir})});
+  if (!r.ok) alert(await r.text());
+  refresh();
+});
 const showPublic = open => {
   $('publicBox').hidden = !open;
   $('browse').textContent = open ? 'Hide public studies' : 'Choose public studies…';

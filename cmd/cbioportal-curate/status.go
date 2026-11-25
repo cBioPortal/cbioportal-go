@@ -26,6 +26,7 @@ type importStatus struct {
 	// quit stops the program.
 	addFolder func() error
 	addPublic func(ids []string) error
+	remove    func(dir string) error
 	quit      func()
 	catalog   *publicCatalog
 }
@@ -74,6 +75,20 @@ func (s *importStatus) set(dir, studyID, status, errText string) {
 		st.StudyID = studyID
 	}
 	st.Status, st.Error = status, errText
+}
+
+// has reports whether it lists dir.
+func (s *importStatus) has(dir string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.studies[dir] != nil
+}
+
+// drop stops listing dir.
+func (s *importStatus) drop(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.studies, dir)
 }
 
 // dirs are the study folders it lists.
@@ -190,6 +205,26 @@ func (s *importStatus) handler(next http.Handler) http.Handler {
 				return
 			}
 			w.WriteHeader(http.StatusAccepted)
+		case "/local/remove":
+			if !local(w, r) {
+				return
+			}
+			var body struct {
+				Dir string `json:"dir"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if !s.has(body.Dir) {
+				http.Error(w, "the portal does not hold "+body.Dir, http.StatusNotFound)
+				return
+			}
+			if err := s.remove(body.Dir); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case "/local/quit":
 			if !local(w, r) {
 				return
