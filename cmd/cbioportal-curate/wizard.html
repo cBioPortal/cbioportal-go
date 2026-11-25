@@ -48,6 +48,7 @@ button.small { font-size: 13px; padding: 3px 10px; }
 .empty { color: var(--muted); padding: 12px 0; }
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
 .note { font-size: 13px; color: var(--muted); }
+tr.new td { background: var(--chip); }
 </style>
 </head>
 <body>
@@ -109,7 +110,7 @@ button.small { font-size: 13px; padding: 3px 10px; }
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let publicStudies = null, chosen = new Set(), have = new Set(), shownHave = '';
-let shownRows = '', dirOf = {};
+let shownRows = '', dirOf = {}, focusIds = null, justAdded = new Set();
 
 async function refresh() {
   try {
@@ -117,8 +118,10 @@ async function refresh() {
     have = new Set(rows.map(r => r.studyId).filter(Boolean));
     dirOf = Object.fromEntries(rows.filter(r => r.studyId).map(r => [r.studyId, r]));
     // Drawn again only when a study changed, so no click is lost to a redraw.
-    const key = JSON.stringify(rows);
-    if (key !== shownRows) { shownRows = key; $('studies').innerHTML = rows.length ? rows.map(r => `<tr>
+    // Studies just asked for stay highlighted until their import is done.
+    rows.forEach(r => { if (['imported', 'failed', 'removed'].includes(r.status)) justAdded.delete(r.studyId); });
+    const key = JSON.stringify(rows) + [...justAdded];
+    if (key !== shownRows) { shownRows = key; $('studies').innerHTML = rows.length ? rows.map(r => `<tr data-study="${esc(r.studyId)}"${justAdded.has(r.studyId) ? ' class="new"' : ''}>
       <td>${r.studyId && r.status === 'imported' ? `<a href="/study/summary?id=${encodeURIComponent(r.studyId)}" target="_blank">${esc(r.studyId)}</a>` : esc(r.studyId || '–')}</td>
       <td class="${esc(r.status)}">${esc(r.status)}</td>
       <td>${r.imported && !r.imported.startsWith('0001') ? new Date(r.imported).toLocaleTimeString() + ` (${Math.round(r.seconds)} s)` : ''}</td>
@@ -126,6 +129,7 @@ async function refresh() {
       <td class="actions">${removeButton(r)}</td>
     </tr>`).join('') : '<tr><td colspan="5" class="empty">No studies yet. Add one above.</td></tr>'; }
     if (publicStudies && addedKey() !== shownHave) renderPublic();
+    if (focusIds) showNew();
   } catch (e) {
     shownRows = '';
     $('studies').innerHTML = '<tr><td colspan="5" class="err">The portal is not running.</td></tr>';
@@ -193,8 +197,19 @@ $('browse').onclick = async () => {
     renderPublic();
   } catch (e) { $('publicList').innerHTML = `<div class="err" style="padding:12px">Could not load the list of public studies: ${esc(e.message)}</div>`; }
 };
+// showNew scrolls to the studies just asked for, once the table lists them.
+function showNew() {
+  const rows = [...$('studies').querySelectorAll('tr[data-study]')].filter(tr => focusIds.ids.includes(tr.dataset.study));
+  if (!rows.length) { if (Date.now() > focusIds.until) focusIds = null; return; }
+  focusIds = null;
+  rows[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+}
 $('download').onclick = async () => {
   const ids = [...chosen]; chosen.clear(); renderPublic();
+  showPublic(false);
+  $('studies').closest('section').scrollIntoView({behavior: 'smooth', block: 'start'});
+  focusIds = {ids, until: Date.now() + 15000};
+  ids.forEach(id => justAdded.add(id));
   const r = await fetch('/local/public', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({studyIds: ids})});
   if (!r.ok) alert(await r.text());
   refresh();

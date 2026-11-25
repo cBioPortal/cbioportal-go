@@ -330,6 +330,18 @@ func main() {
 	menu.AddRole(application.EditMenu)
 	menu.AddRole(application.ViewMenu)
 	menu.AddRole(application.WindowMenu)
+	// Cmd+1 to Cmd+8 show those tabs, and Cmd+9 the last, as in Safari.
+	if window := menu.FindByRole(application.WindowMenu); window != nil && window.GetSubmenu() != nil {
+		tabs := window.GetSubmenu()
+		tabs.AddSeparator()
+		for i := 1; i <= 9; i++ {
+			label, n := fmt.Sprintf("Show Tab %d", i), i-1
+			if i == 9 {
+				label, n = "Show Last Tab", -1
+			}
+			tabs.Add(label).SetAccelerator(fmt.Sprintf("CmdOrCtrl+%d", i)).OnClick(func(*application.Context) { selectTab(n) })
+		}
+	}
 	app.Menu.Set(menu)
 
 	go func() {

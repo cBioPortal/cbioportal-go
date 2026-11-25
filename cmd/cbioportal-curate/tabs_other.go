@@ -12,3 +12,5 @@ func addTab(parent, tab *application.WebviewWindow) {
 }
 
 func makeTabbable(*application.WebviewWindow) {}
+
+func selectTab(int) {}

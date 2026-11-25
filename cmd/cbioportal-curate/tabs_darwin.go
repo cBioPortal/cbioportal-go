@@ -28,6 +28,12 @@ var (
 	selAddTabbedWindow      = objc.RegisterName("addTabbedWindow:ordered:")
 	selStringWithUTF8String = objc.RegisterName("stringWithUTF8String:")
 	selRetain               = objc.RegisterName("retain")
+	selSharedApplication    = objc.RegisterName("sharedApplication")
+	selKeyWindow            = objc.RegisterName("keyWindow")
+	selTabbedWindows        = objc.RegisterName("tabbedWindows")
+	selCount                = objc.RegisterName("count")
+	selObjectAtIndex        = objc.RegisterName("objectAtIndex:")
+	selMakeKeyAndOrderFront = objc.RegisterName("makeKeyAndOrderFront:")
 )
 
 // tabbingIdentifier is the NSString all the app's windows share, so they
@@ -66,4 +72,27 @@ func addTab(parent, tab *application.WebviewWindow) {
 // makeTabbable lets the user tab a window with Cmd+T and Merge All Windows.
 func makeTabbable(w *application.WebviewWindow) {
 	application.InvokeAsync(func() { tabbable(w) })
+}
+
+// selectTab shows the key window's tab n (from 0), or its last tab when n
+// is -1, as Cmd+1 to Cmd+9 do in Safari.
+func selectTab(n int) {
+	application.InvokeAsync(func() {
+		key := objc.ID(objc.GetClass("NSApplication")).Send(selSharedApplication).Send(selKeyWindow)
+		if key == 0 {
+			return
+		}
+		tabs := key.Send(selTabbedWindows)
+		if tabs == 0 {
+			return // a window without tabs
+		}
+		count := int(objc.Send[uint](tabs, selCount))
+		if n == -1 {
+			n = count - 1
+		}
+		if n < 0 || n >= count {
+			return
+		}
+		tabs.Send(selObjectAtIndex, uint(n)).Send(selMakeKeyAndOrderFront, objc.ID(0))
+	})
 }
