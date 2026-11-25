@@ -5,10 +5,14 @@
 //
 // A run, by default:
 //
-//  1. reads the live production color and its last import from
-//     <MGMT_DB>.update_status; it stops without changes while an import is
-//     running, or when the served color was built from that import already
-//     (so it can run hourly and follow each production switch);
+//  1. reads the production color www serves (LIVE_COLOR, from the
+//     cbioportal-db-status ConfigMap the color swap writes) and the last
+//     import from <MGMT_DB>.update_status; it stops without changes while
+//     an import into the live color is running, or when the served color
+//     was built from that import already (so it can run hourly and follow
+//     each production switch). An import that finished but was not swapped
+//     in is not copied. Without LIVE_COLOR, the color comes from
+//     update_status;
 //  2. picks the go color that is not being served (ACTIVE_DB is the served
 //     database; anything else bootstraps into blue);
 //  3. empties that color's databases and CLONEs every production table but
@@ -53,6 +57,7 @@ type Config struct {
 	MgmtDB         string // holds update_status
 	SrcPrefix      string // production's color databases: <SrcPrefix>blue, <SrcPrefix>green
 	PortalDatabase string // the update_status row
+	LiveColor      string // the production color www serves; "" reads it from update_status
 }
 
 // ConfigFromEnv reads the Config from the environment the CronJob sets.
@@ -67,6 +72,7 @@ func ConfigFromEnv() Config {
 		MgmtDB:         cli.EnvOr("MGMT_DB", "publicdb_update_management_database"),
 		SrcPrefix:      cli.EnvOr("SRC_PREFIX", "cbioportal_public_"),
 		PortalDatabase: cli.EnvOr("PORTAL_DATABASE", "public"),
+		LiveColor:      os.Getenv("LIVE_COLOR"),
 	}
 }
 
@@ -75,6 +81,28 @@ type Source struct {
 	DB       string
 	Status   string // update_process_status; "complete" when idle
 	Snapshot string // identifies the import: "<color> <completed at>", or the fixed SrcDB
+	// Color is the live color when update_status describes an import into
+	// the other color, so the live color's own import time is unknown: a
+	// copy built from any snapshot of Color is current.
+	Color string
+}
+
+// current reports whether a copy built from builtFrom holds src's data.
+func (src Source) current(builtFrom string) bool {
+	if src.Color != "" {
+		return strings.HasPrefix(builtFrom, src.Color+" ")
+	}
+	return builtFrom == src.Snapshot
+}
+
+// liveSource is the snapshot to clone, from update_status's color, status
+// and completion time and the color www serves (live, "" when unknown).
+func liveSource(srcPrefix, color, status, completed, live string) Source {
+	if live == "" || live == color {
+		return Source{DB: srcPrefix + color, Status: status, Snapshot: color + " " + completed}
+	}
+	return Source{DB: srcPrefix + live, Status: "complete", Color: live,
+		Snapshot: fmt.Sprintf("%s (live; %s import of %s not swapped in)", live, color, completed)}
 }
 
 // Plan is what a run does.
@@ -99,8 +127,8 @@ func Decide(cfg Config, src Source, builtFrom string) Plan {
 			keep.Reason = fmt.Sprintf("production import in progress (status=%s)", src.Status)
 			return keep
 		}
-		if builtFrom == src.Snapshot {
-			keep.Reason = "already built from " + src.Snapshot
+		if src.current(builtFrom) {
+			keep.Reason = "already built from " + builtFrom
 			return keep
 		}
 		if cfg.ActiveDB == blue {
@@ -202,8 +230,11 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 		if len(f) != 3 || (f[0] != "blue" && f[0] != "green") {
 			return Plan{}, fmt.Errorf("unexpected production status %q", out)
 		}
-		src = Source{DB: r.Cfg.SrcPrefix + f[0], Status: f[1], Snapshot: f[0] + " " + f[2]}
-		r.Logf("production color=%s, status=%s, last import completed %s", f[0], f[1], f[2])
+		if live := r.Cfg.LiveColor; live != "" && live != "blue" && live != "green" {
+			return Plan{}, fmt.Errorf("LIVE_COLOR is %q, want blue or green", live)
+		}
+		src = liveSource(r.Cfg.SrcPrefix, f[0], f[1], f[2], r.Cfg.LiveColor)
+		r.Logf("production color=%s, status=%s, last import completed %s; www serves %s", f[0], f[1], f[2], orUnknown(r.Cfg.LiveColor))
 	}
 
 	builtFrom := ""
@@ -237,7 +268,7 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 		// target from this import already: switch to it.
 		if built, err := r.builtFrom(q, plan.RefDB); err != nil {
 			return plan, err
-		} else if built == src.Snapshot {
+		} else if src.current(built) {
 			plan.Build, plan.Reason = false, fmt.Sprintf("%s already built from %s; switching to it", plan.DB, src.Snapshot)
 			r.Logf("%s", plan.Reason)
 			return plan, r.writeState(plan)

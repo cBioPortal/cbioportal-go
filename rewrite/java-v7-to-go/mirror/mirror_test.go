@@ -41,6 +41,36 @@ func TestDecide(t *testing.T) {
 	}
 }
 
+// TestLiveSource pins that the mirror copies the color www serves: an
+// import that finished but was not swapped in is not copied.
+func TestLiveSource(t *testing.T) {
+	notSwapped := liveSource("p_", "green", "complete", "2026-11-24 08:32:30", "blue")
+	if notSwapped.DB != "p_blue" || notSwapped.Status != "complete" {
+		t.Fatalf("import not swapped in: %+v, want p_blue", notSwapped)
+	}
+	cfg := Config{Prefix: "go", ActiveDB: "go_green"}
+	tests := []struct {
+		name      string
+		src       Source
+		builtFrom string
+		build     bool
+		db        string
+	}{
+		{"served copy is of the live color", notSwapped, "blue 2026-11-18 12:00:00", false, "go_green"},
+		{"served copy is of the unswapped import", notSwapped, "green 2026-11-24 08:32:30", true, "go_blue"},
+		{"import into the other color running", liveSource("p_", "green", "running", "2026-11-24 08:32:30", "blue"), "blue 2026-11-18 12:00:00", false, "go_green"},
+		{"swapped in", liveSource("p_", "green", "complete", "2026-11-24 08:32:30", "green"), "blue 2026-11-18 12:00:00", true, "go_blue"},
+		{"swapped in, already built", liveSource("p_", "green", "complete", "2026-11-24 08:32:30", "green"), "green 2026-11-24 08:32:30", false, "go_green"},
+		{"no live color", liveSource("p_", "green", "complete", "2026-11-24 08:32:30", ""), "blue 2026-11-18 12:00:00", true, "go_blue"},
+	}
+	for _, tt := range tests {
+		p := Decide(cfg, tt.src, tt.builtFrom)
+		if p.Build != tt.build || p.DB != tt.db {
+			t.Errorf("%s: %+v, want build=%v into %s", tt.name, p, tt.build, tt.db)
+		}
+	}
+}
+
 func TestCloned(t *testing.T) {
 	for table, want := range map[string]bool{
 		"mutation": true, "sample_derived": true, "cancer_study": true,

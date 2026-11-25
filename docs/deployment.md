@@ -227,11 +227,19 @@ the code is in [rewrite/](../rewrite/). The hourly job runs
 which calls `cbioportal-rewrite-test java-v7-to-go mirror`. It works like
 the LibreChat copy job:
 
-1. It reads which production copy (blue or green) is live and when it was
-   last imported, from `publicdb_update_management_database.update_status`.
-   It stops without changes while an import is running, or when the live go
-   copy was already built from that import. The import it was built from is
-   recorded in `<prefix>_<color>_ref._go_mirror_source`.
+1. It finds out which production copy (blue or green) www.cbioportal.org
+   serves. It reads this from `public_db.active_color` in the
+   `cbioportal-db-status` ConfigMap, which the public color swap sets when
+   it switches www to a new import. It reads when that copy was last
+   imported from `publicdb_update_management_database.update_status`.
+   It stops without changes while an import into the live copy is running,
+   or when the live go copy was already built from that import. The import
+   it was built from is recorded in `<prefix>_<color>_ref._go_mirror_source`.
+
+   An import can finish without www being switched to it. Then
+   `update_status` names the new copy, but the ConfigMap still names the old
+   one. go keeps copying the copy www serves, so it never shows data that
+   www does not show.
 2. Only one run builds at a time. The hourly run and a run started by
    production's color swap can overlap. Each run adds itself to
    `<prefix>_<color>_ref._go_mirror_lock` in the copy it would build, and the
