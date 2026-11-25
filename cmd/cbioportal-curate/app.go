@@ -39,7 +39,7 @@ var startingPage []byte
 // linksJS runs in every page of the portal's windows. A WebKit view opens
 // no new windows and saves no downloads by itself: links to other sites,
 // and window.open to them, go to the web browser; the portal's own
-// new-window links open another window of the app; and downloads (links
+// new-window links open a new tab (tabs_darwin.go); and downloads (links
 // with a download attribute, or to blob: and data: URLs, as the portal
 // makes for its tables and plots) are read here and handed to the app,
 // which asks where to save them.
@@ -69,6 +69,13 @@ const linksJS = `(function () {
     else return false;
     return true;
   };
+  // The page's title names its tab.
+  var title = null;
+  var sendTitle = function () { if (document.title !== title) { title = document.title; send("title", title); } };
+  document.addEventListener("DOMContentLoaded", function () {
+    sendTitle();
+    new MutationObserver(sendTitle).observe(document.head, { subtree: true, childList: true, characterData: true });
+  });
   var open = window.open;
   window.open = function (u) {
     if (u && route(String(u))) return null;
@@ -143,7 +150,8 @@ func main() {
 		portalMu      sync.Mutex
 		mainWindow    *application.WebviewWindow
 		app           *application.App
-		newPageWindow func(string) *application.WebviewWindow
+		newPageWindow func(page string, hidden bool) *application.WebviewWindow
+		newTab        func(parent application.Window, page string)
 	)
 	baseCtx, logTo = ctx, p
 	chdb.Progress = func(done, total int64) {
@@ -177,6 +185,13 @@ func main() {
 			portalMu.Lock()
 			base := portal
 			portalMu.Unlock()
+			if kind == "title" {
+				if target = strings.TrimSpace(target); target == "" {
+					target = "cBioPortal Curate"
+				}
+				w.SetTitle(target)
+				return
+			}
 			if kind == "save" {
 				if base != "" && origin != nil && origin.Origin == base {
 					go saveDownload(app, w, target)
@@ -191,18 +206,28 @@ func main() {
 			case kind == "open" && (u.Scheme == "http" || u.Scheme == "https" || u.Scheme == "mailto"):
 				openBrowser(u.String())
 			case kind == "window" && base != "" && strings.HasPrefix(u.String(), base+"/"):
-				newPageWindow(u.String())
+				newTab(w, u.String())
 			}
 		},
 	})
 
-	newPageWindow = func(page string) *application.WebviewWindow {
+	newPageWindow = func(page string, hidden bool) *application.WebviewWindow {
 		return app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Title: "cBioPortal Curate", Width: 1280, Height: 860, MinWidth: 720, MinHeight: 480,
-			URL: page, JS: linksJS, DevToolsEnabled: true,
+			URL: page, JS: linksJS, DevToolsEnabled: true, Hidden: hidden,
 		})
 	}
-	mainWindow = newPageWindow("/")
+	// A page opened from another opens as a tab of its window.
+	newTab = func(parent application.Window, page string) {
+		tab := newPageWindow(page, true)
+		if p, ok := parent.(*application.WebviewWindow); ok {
+			addTab(p, tab)
+		} else {
+			addTab(mainWindow, tab)
+		}
+	}
+	mainWindow = newPageWindow("/", false)
+	makeTabbable(mainWindow)
 
 	showPage = func(page string) {
 		if u, err := url.Parse(page); err == nil {
@@ -226,16 +251,30 @@ func main() {
 	menu := app.Menu.New()
 	menu.AddRole(application.AppMenu)
 	file := menu.AddSubmenu("File")
+	file.Add("New Tab").SetAccelerator("CmdOrCtrl+T").OnClick(func(*application.Context) {
+		if base := currentPortal(&portalMu, &portal); base != "" {
+			newTab(app.Window.Current(), base+"/")
+		}
+	})
+	file.AddSeparator()
 	file.Add("Import Page").SetAccelerator("CmdOrCtrl+I").OnClick(func(*application.Context) {
 		if base := currentPortal(&portalMu, &portal); base != "" {
-			mainWindow.SetURL(base + "/local")
-			mainWindow.Focus()
+			w := app.Window.Current()
+			if w == nil {
+				w = mainWindow
+			}
+			w.SetURL(base + "/local")
+			w.Focus()
 		}
 	})
 	file.Add("Portal").SetAccelerator("CmdOrCtrl+Shift+H").OnClick(func(*application.Context) {
 		if base := currentPortal(&portalMu, &portal); base != "" {
-			mainWindow.SetURL(base + "/")
-			mainWindow.Focus()
+			w := app.Window.Current()
+			if w == nil {
+				w = mainWindow
+			}
+			w.SetURL(base + "/")
+			w.Focus()
 		}
 	})
 	file.AddSeparator()
