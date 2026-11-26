@@ -58,6 +58,7 @@ type Config struct {
 	SrcPrefix      string // production's color databases: <SrcPrefix>blue, <SrcPrefix>green
 	PortalDatabase string // the update_status row
 	LiveColor      string // the production color www serves; "" reads it from update_status
+	JobName        string // the Kubernetes Job this run is a pod of; its retries keep its lock
 }
 
 // ConfigFromEnv reads the Config from the environment the CronJob sets.
@@ -73,6 +74,7 @@ func ConfigFromEnv() Config {
 		SrcPrefix:      cli.EnvOr("SRC_PREFIX", "cbioportal_public_"),
 		PortalDatabase: cli.EnvOr("PORTAL_DATABASE", "public"),
 		LiveColor:      os.Getenv("LIVE_COLOR"),
+		JobName:        os.Getenv("JOB_NAME"),
 	}
 }
 
@@ -263,7 +265,7 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 			r.Logf("%s", keep.Reason)
 			return keep, r.writeState(keep)
 		}
-		defer q.query(fmt.Sprintf("DROP TABLE IF EXISTS `%s`.%s SYNC", plan.RefDB, lockTable))
+		defer q.query(fmt.Sprintf("DROP TABLE IF EXISTS `%s`.%s", plan.RefDB, lockTable))
 		// A run that finished just before this one may have built the
 		// target from this import already: switch to it.
 		if built, err := r.builtFrom(q, plan.RefDB); err != nil {
@@ -277,6 +279,9 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 
 	// 3) Empty the target databases (tables and views; the databases stay,
 	//    since the job's user may not create or drop databases), then clone.
+	//    DROP without SYNC returns at once and frees the name; ClickHouse
+	//    removes the data in the background, so emptying takes seconds and
+	//    does not wait on a busy server.
 	for _, d := range []string{plan.DB, plan.RawDB, plan.RefDB} {
 		for _, kind := range []string{"VIEW", "TABLE"} {
 			op := "="
@@ -291,11 +296,7 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 				if name == lockTable {
 					continue
 				}
-				stmt := fmt.Sprintf("DROP %s IF EXISTS `%s`.`%s`", kind, d, name)
-				if kind == "TABLE" {
-					stmt += " SYNC"
-				}
-				if _, err := q.query(stmt); err != nil {
+				if _, err := q.query(fmt.Sprintf("DROP %s IF EXISTS `%s`.`%s`", kind, d, name)); err != nil {
 					return plan, err
 				}
 			}
@@ -360,13 +361,16 @@ func (r *Runner) Run(ctx context.Context) (Plan, error) {
 
 // lockTable, in the target color's _ref database, holds one row per run
 // that wants to build that color. The earliest row of the last 2 hours (a
-// run's deadline) holds the lock; older rows are runs that died.
+// run's deadline) holds the lock; older rows are runs that died. A row
+// names the Job the run is a pod of (JOB_NAME), so when Kubernetes retries
+// a pod that died, the new pod of the same Job takes the lock over instead
+// of waiting for its own dead pod's row to expire.
 const lockTable = "_go_mirror_lock"
 
 // lock records this run in refDB's lock table and reports whether it holds
 // the lock.
 func (r *Runner) lock(q retrying, refDB string) (bool, error) {
-	id := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	id := fmt.Sprintf("%s/%d-%d", r.Cfg.JobName, os.Getpid(), time.Now().UnixNano())
 	if _, err := q.query(fmt.Sprintf("CREATE TABLE IF NOT EXISTS `%s`.%s (id String, started DateTime64(3) DEFAULT now64(3)) ENGINE = MergeTree ORDER BY tuple()", refDB, lockTable)); err != nil {
 		return false, err
 	}
@@ -376,6 +380,10 @@ func (r *Runner) lock(q retrying, refDB string) (bool, error) {
 	holder, err := q.query(fmt.Sprintf("SELECT id FROM `%s`.%s WHERE started > now64(3) - INTERVAL 2 HOUR ORDER BY started, id LIMIT 1 FORMAT TSV", refDB, lockTable))
 	if err != nil || holder == id {
 		return holder == id, err
+	}
+	if r.Cfg.JobName != "" && strings.HasPrefix(holder, r.Cfg.JobName+"/") {
+		r.Logf("taking over the lock from an earlier pod of job %s", r.Cfg.JobName)
+		return true, nil
 	}
 	// Not the holder: take the row out again, so it does not hold the lock
 	// for the runs after the holder.
@@ -406,7 +414,7 @@ func (r *Runner) clone(q retrying, src, dst, table string) error {
 			r.Logf("retrying after: %v", err)
 			time.Sleep(q.delay)
 		}
-		if _, err = c.Execute(fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s` SYNC", dst, table)); err != nil {
+		if _, err = c.Execute(fmt.Sprintf("DROP TABLE IF EXISTS `%s`.`%s`", dst, table)); err != nil {
 			continue
 		}
 		if _, err = c.Execute(fmt.Sprintf("CREATE TABLE `%s`.`%s` CLONE AS `%s`.`%s`", dst, table, src, table)); err == nil {

@@ -212,3 +212,44 @@ func TestLiveMirror(t *testing.T) {
 		t.Errorf("stale lock: %+v, %d builds", plan, builds)
 	}
 }
+
+// lockExec answers the lock's statements: holder is the id the SELECT of
+// the earliest row returns, and deleted collects the ids taken out again.
+type lockExec struct {
+	holder  string
+	deleted []string
+}
+
+func (e *lockExec) ExecuteServerwide(sql string) (string, error) {
+	switch {
+	case strings.HasPrefix(sql, "SELECT id FROM"):
+		return e.holder + "\n", nil
+	case strings.HasPrefix(sql, "ALTER TABLE"):
+		e.deleted = append(e.deleted, sql)
+	}
+	return "", nil
+}
+
+func TestLockJobRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name, job, holder string
+		want              bool
+	}{
+		{"earlier pod of the same job", "cbioportal-go-mirror-29927527", "cbioportal-go-mirror-29927527/1-100", true},
+		{"another job", "cbioportal-go-mirror-29927587", "cbioportal-go-mirror-29927527/1-100", false},
+		{"job name that only shares a prefix", "cbioportal-go-mirror-2992752", "cbioportal-go-mirror-29927527/1-100", false},
+		{"no job name", "", "/1-100", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := &lockExec{holder: tc.holder}
+			r := &Runner{Cfg: Config{JobName: tc.job}, C: e, Logf: func(string, ...any) {}}
+			got, err := r.lock(retrying{c: e, tries: 1, logf: r.Logf}, "db_ref")
+			if err != nil || got != tc.want {
+				t.Fatalf("lock = %v, %v; want %v", got, err, tc.want)
+			}
+			if wantDeleted := !tc.want; (len(e.deleted) == 1) != wantDeleted {
+				t.Errorf("deleted its own row: %v, want %v", e.deleted, wantDeleted)
+			}
+		})
+	}
+}

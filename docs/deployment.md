@@ -1,7 +1,7 @@
 # Deployment
 
 This page explains how cbioportal-go is packaged and where it runs. It covers
-the container image, the public preview at go.cbioportal.org, the hub that
+the container image, www.cbioportal.org and go.cbioportal.org, the hub that
 follows datahub and previews its pull requests, and the per-pull-request
 previews of cbioportal-go.
 
@@ -9,7 +9,7 @@ previews of cbioportal-go.
 
 - [Container image](#container-image)
   - [Releases](#releases)
-- [go.cbioportal.org](#gocbioportalorg)
+- [www.cbioportal.org and go.cbioportal.org](#wwwcbioportalorg-and-gocbioportalorg)
   - [Sign-in](#sign-in)
   - [Loading studies](#loading-studies)
   - [Mirroring production](#mirroring-production)
@@ -97,8 +97,11 @@ The health check is `GET /health`.
 ### Releases
 
 A release is a git tag `vX.Y.Z` on `main`. Tagging builds an image with the
-tags `X.Y.Z` and `X.Y`. A deployment that should change only when we choose,
-such as api.cbioportal.org, uses a release tag instead of `latest`.
+tags `X.Y.Z` and `X.Y`. A deployment that should change only when we choose
+uses a release tag instead of `latest`. www.cbioportal.org's two deployments
+(`cbioportal-go` and `cbioportal-go-api`) and the mirror job all run the same
+release, so the databases the mirror builds are the ones both deployments
+read.
 
 To make a release:
 
@@ -113,14 +116,18 @@ To make a release:
 
 3. Write the release notes on GitHub:
    `gh release create v0.1.1 --generate-notes`.
-4. When the image is built, change the deployment's image to the new tag.
+4. When the image is built, set the new tag in `cbioportal-go-deployment.yaml`,
+   `cbioportal-go-api-deployment.yaml` and `cbioportal-go-mirror.yaml`, in one
+   pull request to the k8s repo.
 
-## go.cbioportal.org
+## www.cbioportal.org and go.cbioportal.org
 
-go.cbioportal.org is the public preview of cbioportal-go. It runs in the
-cBioPortal production Kubernetes cluster. Its setup files (manifests) are in
+The deployment `cbioportal-go` serves www.cbioportal.org's browsers and
+go.cbioportal.org. www's scripts and agents, and api.cbioportal.org, go to
+`cbioportal-go-api`. Both run in the cBioPortal production Kubernetes cluster.
+Their setup files (manifests) are in
 [knowledgesystems-k8s-deployment](https://github.com/knowledgesystems/knowledgesystems-k8s-deployment)
-under `apps/cbioportal-go/`. Its passwords and keys are in
+under `apps/cbioportal-go/`. Their passwords and keys are in
 portal-configuration under `secrets/cbioportal-go/`.
 
 It reads ClickHouse Cloud databases in two copies, blue and green:
@@ -129,10 +136,17 @@ with `_raw` and `_ref` companion databases. One copy serves the site while
 the other is rebuilt. The ConfigMap `cbioportal-go-active` says which copy is
 live.
 
+It runs with www's settings: the portal properties in
+[`ops/cbioportal.org/public-portal.properties`](../ops/cbioportal.org/public-portal.properties),
+generated from www's `/config_service`, plus arguments for what is set only
+on www. These are indexing by search engines, analytics, and www's frontend
+config and llms.txt. go.cbioportal.org sends an `X-Robots-Tag: noindex`
+header, so search engines index www only.
+
 ### Sign-in
 
-Like www, the preview is open to everyone and also offers Google sign-in
-(`authenticate=optional_oauth2`). The secrets come from the Kubernetes Secret
+Like www, the site is open to everyone and also offers Google and Microsoft
+sign-in (`authenticate=optional_oauth2`), with www's login clients. The secrets come from the Kubernetes Secret
 `cbioportal-public-green` as environment variables:
 `GOOGLE_PLUS_CONSUMER_KEY`, `GOOGLE_PLUS_CONSUMER_SECRET`,
 `REDIS_SESSION_HOST`, `REDIS_SESSION_PORT` and `REDIS_SESSION_PASSWORD`. The
@@ -154,9 +168,8 @@ args:
   - --spring.data.redis.password=${REDIS_SESSION_PASSWORD}
 ```
 
-The Google login client must list
-`https://go.cbioportal.org/login/oauth2/code/google` as an allowed redirect
-address. The ingress (the entry point into the cluster) sends
+Each login client must list the site's redirect address, such as
+`https://www.cbioportal.org/login/oauth2/code/google`. The ingress (the entry point into the cluster) sends
 `X-Forwarded-Proto: https`, so the server knows the site uses HTTPS.
 
 ### Loading studies
@@ -244,9 +257,12 @@ the LibreChat copy job:
    production's color swap can overlap. Each run adds itself to
    `<prefix>_<color>_ref._go_mirror_lock` in the copy it would build, and the
    earliest run of the last 2 hours goes ahead. A later run leaves go as it
-   is. A run that finds that copy already built from the same import switches
-   to it without building again.
-3. It empties go's inactive copy. Then it clones every table of
+   is. When a run's pod dies, Kubernetes starts a new pod for the same Job.
+   That pod takes the lock over, because its row names the same Job
+   (`JOB_NAME`). A run that finds that copy already built from the same
+   import switches to it without building again.
+3. It empties go's inactive copy. It drops tables without waiting for
+   ClickHouse to delete their data, so this takes seconds. Then it clones every table of
    `cbioportal_public_<color>` into `<prefix>_<color>_ref`, except the login
    and password tables. ClickHouse's `CREATE TABLE … CLONE AS` makes this
    copy without duplicating the data on disk, in about 20 s.
