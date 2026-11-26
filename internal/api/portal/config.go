@@ -102,11 +102,11 @@ const (
 	// javaPortalVersion is the cBioPortal release whose API go matches,
 	// reported as portalVersion. The daily upstream sync raises it when it
 	// ports a new cBioPortal release.
-	javaPortalVersion = "v7.2.3"
+	javaPortalVersion = "v7.2.8"
 	// javaParityCommit is the latest cBioPortal/cbioportal commit on master
 	// whose changes go has taken in, reported as goRewriteJavaParityCommit.
 	// The daily upstream sync sets it to the commit it went through.
-	javaParityCommit = "6cfd715bd3706f4c273087f144d889c2b097bfdc"
+	javaParityCommit = "14af1bbba951f1ea5700f7227afe9fec0e00d2c8"
 	dbSchemaVersion  = "3.1.0"
 	seedGeneTable    = "hgnc_v7_2025.10.7"
 	gitNotSet        = "not set"
